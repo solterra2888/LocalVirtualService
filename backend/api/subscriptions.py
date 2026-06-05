@@ -1091,7 +1091,7 @@ async def get_subscription_contents(
         # 详见 docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md §7 及
         #      database/migrations/create_subscription_content_user_summaries.sql §读取规则)
         query = f"""
-            SELECT 
+            SELECT
                 sc.id,
                 sc.channel_type,
                 sc.content_id,
@@ -1099,6 +1099,7 @@ async def get_subscription_contents(
                 sc.content,
                 sc.author_name,
                 sc.author_identifier,
+                sc.author_avatar,
                 sc.url,
                 sc.media_urls,
                 sc.published_at,
@@ -1158,41 +1159,41 @@ async def get_subscription_contents(
         # 格式化结果
         contents = []
         for row in rows:
-            user_read_status = row[14].get(str(user_id), {}) if row[14] else {}
-            
+            user_read_status = row[15].get(str(user_id), {}) if row[15] else {}
+
             # AI 标签 (LEFT JOIN 结果, 未打标 → None)
-            # 列序: [29]sector [30]sector_en [31]industry [32]industry_en
-            #       [33]ticker [34]concepts [35]summary [36]confidence [37]tagged_at
-            #       [38]people [39]countries [40]tag_schema_version
-            #       [41]personalized_summary [42]personalized_reasoning [43]summary_source
-            #       [44]categories
+            # 列序: [30]sector [31]sector_en [32]industry [32]industry_en
+            #       [34]ticker [35]concepts [36]summary [37]confidence [38]tagged_at
+            #       [39]people [40]countries [41]tag_schema_version
+            #       [42]personalized_summary [43]personalized_reasoning [44]summary_source
+            #       [45]categories
             tags_payload = None
-            if row[29] is not None or row[40] == 'tweet_signal_v1':
-                tickers_raw = row[33]
+            if row[30] is not None or row[41] == 'tweet_signal_v1':
+                tickers_raw = row[34]
                 tickers = tickers_raw if isinstance(tickers_raw, list) else (tickers_raw or [])
-                concepts_raw = row[34]
+                concepts_raw = row[35]
                 concepts = concepts_raw if isinstance(concepts_raw, list) else (concepts_raw or [])
-                people_raw = row[38]
+                people_raw = row[39]
                 people = people_raw if isinstance(people_raw, list) else (people_raw or [])
-                countries_raw = row[39]
+                countries_raw = row[40]
                 countries = (
                     countries_raw if isinstance(countries_raw, list) else (countries_raw or [])
                 )
                 tags_payload = {
-                    'sector': row[29] or '',
-                    'sector_en': row[30] or '',
-                    'industry': row[31] or '',
-                    'industry_en': row[32] or '',
+                    'sector': row[30] or '',
+                    'sector_en': row[31] or '',
+                    'industry': row[32] or '',
+                    'industry_en': row[33] or '',
                     'tickers': tickers,
                     'concepts': concepts,
                     'people': people,
                     'countries': countries,
-                    'tag_schema_version': row[40] or 'feeds_v1',
-                    'summary': row[35],
-                    'confidence': row[36],
-                    'tagged_at': ensure_utc(row[37]).isoformat() if row[37] else None,
+                    'tag_schema_version': row[41] or 'feeds_v1',
+                    'summary': row[36],
+                    'confidence': row[37],
+                    'tagged_at': ensure_utc(row[38]).isoformat() if row[38] else None,
                 }
-            
+
             contents.append({
                 'id': row[0],
                 'channel_type': row[1],
@@ -1201,41 +1202,42 @@ async def get_subscription_contents(
                 'content': row[4],
                 'author_name': row[5],
                 'author_identifier': row[6],
-                'url': row[7],
-                'media_urls': row[8],
-                'published_at': ensure_utc(row[9]).isoformat() if row[9] else None,
-                'fetched_at': ensure_utc(row[10]).isoformat() if row[10] else None,
-                'engagement_count': row[11],
-                'view_count': row[12],
-                'metadata': row[13],
+                'author_avatar': row[7],
+                'url': row[8],
+                'media_urls': row[9],
+                'published_at': ensure_utc(row[10]).isoformat() if row[10] else None,
+                'fetched_at': ensure_utc(row[11]).isoformat() if row[11] else None,
+                'engagement_count': row[12],
+                'view_count': row[13],
+                'metadata': row[14],
                 'is_read': user_read_status.get('is_read', False),
                 'read_at': user_read_status.get('read_at'),
                 # Twitter 特定字段
-                'is_retweet': row[15],
-                'retweeted_author': row[16],
-                'retweeted_content': row[17],
-                'retweeted_url': row[18],
-                'is_quote': row[19],
-                'quoted_author': row[20],
-                'quoted_content': row[21],
-                'quoted_url': row[22],
+                'is_retweet': row[16],
+                'retweeted_author': row[17],
+                'retweeted_content': row[18],
+                'retweeted_url': row[19],
+                'is_quote': row[20],
+                'quoted_author': row[21],
+                'quoted_content': row[22],
+                'quoted_url': row[23],
                 # Reply 特定字段
-                'is_reply': row[23],
-                'in_reply_to_id': row[24],
-                'in_reply_to_username': row[25],
-                'in_reply_to_user_id': row[26],
+                'is_reply': row[24],
+                'in_reply_to_id': row[25],
+                'in_reply_to_username': row[26],
+                'in_reply_to_user_id': row[27],
                 # 热度等级
-                'heat_level': row[27],
+                'heat_level': row[28],
                 # YouTube: 仅返回是否有 transcript（不返回正文，减轻加载）
-                'has_transcript': bool(row[28]) if row[28] is not None else False,
+                'has_transcript': bool(row[29]) if row[29] is not None else False,
                 # Phase 3 新增: Feeds 自动打标 + 摘要 (LEFT JOIN 结果, 未打标为 null)
                 'tags': tags_payload,
                 # PR-7: per-user 个性化摘要 (LEFT JOIN subscription_content_user_summaries)
-                'personalized_summary': row[41] or None,
-                'personalized_reasoning': row[42] or None,
-                'summary_source': row[43],
+                'personalized_summary': row[42] or None,
+                'personalized_reasoning': row[43] or None,
+                'summary_source': row[44],
                 # News: EODHD 原始分类标签 (TEXT[])，供前端 NewsOriginalView 展示
-                'categories': list(row[44]) if row[44] else [],
+                'categories': list(row[45]) if row[45] else [],
             })
         
         cursor.close()
@@ -1535,7 +1537,7 @@ async def get_tweet_by_id(
         
         # 查询推文详情
         query = """
-            SELECT 
+            SELECT
                 id,
                 url,
                 fetched_at,
@@ -1545,6 +1547,7 @@ async def get_tweet_by_id(
                 content,
                 author_identifier,
                 author_name,
+                author_avatar,
                 media_urls,
                 engagement_count,
                 view_count,
@@ -1590,24 +1593,25 @@ async def get_tweet_by_id(
             'content': row[6],
             'author_identifier': row[7],
             'author_name': row[8],
-            'media_urls': row[9] or [],
-            'engagement_count': row[10] or 0,
-            'view_count': row[11] or 0,
-            'metadata': row[12] or {},
-            'published_at': ensure_utc(row[13]).isoformat() if row[13] else None,
-            'is_retweet': row[14] or False,
-            'retweeted_author': row[15],
-            'retweeted_content': row[16],
-            'retweeted_url': row[17],
-            'is_quote': row[18] or False,
-            'quoted_author': row[19],
-            'quoted_content': row[20],
-            'quoted_url': row[21],
-            'is_reply': row[22] or False,
-            'in_reply_to_id': row[23],
-            'in_reply_to_username': row[24],
-            'in_reply_to_user_id': row[25],
-            'heat_level': row[26] or 2,
+            'author_avatar': row[9],
+            'media_urls': row[10] or [],
+            'engagement_count': row[11] or 0,
+            'view_count': row[12] or 0,
+            'metadata': row[13] or {},
+            'published_at': ensure_utc(row[14]).isoformat() if row[14] else None,
+            'is_retweet': row[15] or False,
+            'retweeted_author': row[16],
+            'retweeted_content': row[17],
+            'retweeted_url': row[18],
+            'is_quote': row[19] or False,
+            'quoted_author': row[20],
+            'quoted_content': row[21],
+            'quoted_url': row[22],
+            'is_reply': row[23] or False,
+            'in_reply_to_id': row[24],
+            'in_reply_to_username': row[25],
+            'in_reply_to_user_id': row[26],
+            'heat_level': row[27] or 2,
         }
         
         logger.info(f"Retrieved tweet {tweet_id} for user {user_id}")

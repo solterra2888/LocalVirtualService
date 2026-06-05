@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-color-mode="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Twitter Daily Report - {{ report_date }}</title>
+<script>
+/* Theme: manual Light/Dark toggle (localStorage), default light. */
+(function() {
+  var STORAGE_KEY = 'twitter-report-color-mode';
+  function readStored() {
+    try {
+      var s = localStorage.getItem(STORAGE_KEY);
+      if (s === 'light' || s === 'dark') return s;
+    } catch (e) {}
+    return 'light';
+  }
+  window.__updateThemeToggleUI = function() {
+    var mode = document.documentElement.getAttribute('data-color-mode') || 'light';
+    document.querySelectorAll('[data-theme-toggle]').forEach(function(btn) {
+      var on = btn.getAttribute('data-theme-toggle') === mode;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  };
+  window.__setReportColorMode = function(mode) {
+    if (mode !== 'light' && mode !== 'dark') return;
+    document.documentElement.setAttribute('data-color-mode', mode);
+    try { localStorage.setItem(STORAGE_KEY, mode); } catch (e) {}
+    if (typeof window.__updateThemeToggleUI === 'function') window.__updateThemeToggleUI();
+  };
+  document.documentElement.setAttribute('data-color-mode', readStored());
+})();
+</script>
+<style>
+  /* ── Reset & base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* Twitter brand colors - 参考风格配色但保持蓝色品牌 */
+  html {
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --primary: #1DA1F2;
+    --primary-light: #4FC3F7;
+    --primary-dark: #0D8BD9;
+    color-scheme: light;
+    --bg: #F5F7FA;
+    --surface: #FFFFFF;
+    --surface2: #F8F9FA;
+    --border: #E1E4E8;
+    --border-light: #EAECF0;
+    --text: #1F2937;
+    --text-secondary: #4B5563;
+    --text-muted: #6B7280;
+    --card-bg: #FFFFFF;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --card-shadow-hover: 0 4px 12px rgba(0,0,0,0.08);
+    scroll-behavior: smooth;
+  }
+  html[data-color-mode="dark"] {
+    color-scheme: dark;
+    --bg: #15202B;
+    --surface: #192734;
+    --surface2: #22303C;
+    --border: #38444D;
+    --border-light: #4B5563;
+    --text: #FFFFFF;
+    --text-secondary: #D1D5DB;
+    --text-muted: #8899A6;
+    --card-bg: #192734;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.15);
+    --card-shadow-hover: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Container - 居中布局 ── */
+  .container {
+    max-width: 800px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+
+  /* ── Header Card - 渐变背景 ── */
+  .header-card {
+    background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 50%, var(--primary-light) 100%);
+    color: #FFFFFF;
+    padding: 28px 32px;
+    border-radius: 12px;
+    margin-bottom: 24px;
+    position: relative;
+    box-shadow: 0 4px 20px rgba(29,161,242,0.25);
+  }
+  .header-card h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0 0 12px 0;
+    letter-spacing: -0.5px;
+  }
+  .header-card .meta {
+    font-size: 13px;
+    opacity: 0.95;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .header-card .meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .header-card .theme-toggle {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 16px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.1);
+  }
+  .header-card .theme-toggle button {
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.75);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .header-card .theme-toggle button:hover { color: #fff; }
+  .header-card .theme-toggle button.active {
+    background: rgba(255,255,255,0.2);
+    color: #fff;
+  }
+
+  /* ── Content Card ── */
+  .content-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 16px;
+    box-shadow: var(--card-shadow);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  .content-card:hover {
+    box-shadow: var(--card-shadow-hover);
+    border-color: var(--border-light);
+  }
+  .section-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .section-title .icon {
+    font-size: 18px;
+    line-height: 1;
+  }
+  .content-body {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  .content-body p {
+    margin-bottom: 12px;
+  }
+  .content-body p:last-child {
+    margin-bottom: 0;
+  }
+  .content-body ul, .content-body ol {
+    margin: 12px 0;
+    padding-left: 20px;
+  }
+  .content-body li {
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+  }
+  .content-body strong {
+    font-weight: 600;
+    color: var(--text);
+  }
+  .content-body em {
+    font-style: italic;
+    color: var(--text-muted);
+  }
+  .content-body blockquote {
+    margin: 16px 0;
+    padding: 12px 16px;
+    border-left: 3px solid var(--primary);
+    background: var(--surface2);
+    border-radius: 0 6px 6px 0;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+  .content-body h2, .content-body h3, .content-body h4 {
+    font-weight: 600;
+    margin-top: 20px;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .content-body h2 { font-size: 15px; }
+  .content-body h3 { font-size: 14px; }
+  .content-body h4 { font-size: 13px; }
+
+  /* ── Tweet Reference Links ── */
+  .tweet-ref {
+    color: var(--primary);
+    font-weight: 500;
+    text-decoration: none;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Menlo', monospace;
+    padding: 2px 6px;
+    background: var(--surface2);
+    border-radius: 4px;
+    margin: 0 2px;
+    transition: all 0.15s ease;
+    border: 1px solid var(--border-light);
+    cursor: pointer;
+  }
+  .tweet-ref:hover {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+    text-decoration: none;
+  }
+
+  /* ── Author Card ── */
+  .author-section {
+    margin-top: 0;
+  }
+  .author-card {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border-light);
+    transition: border-color 0.2s ease;
+  }
+  .author-card:last-child {
+    margin-bottom: 0;
+  }
+  .author-card:hover {
+    border-color: var(--primary);
+  }
+  .author-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .author-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: #fff;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(29,161,242,0.2);
+  }
+  .author-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .author-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .author-handle {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 400;
+  }
+  .author-content {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+  }
+  .author-content p {
+    margin-bottom: 8px;
+  }
+  .author-content p:last-child {
+    margin-bottom: 0;
+  }
+
+  /* ── Footer ── */
+  .page-footer {
+    margin-top: 32px;
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .page-footer .brand {
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 640px) {
+    .container {
+      padding: 20px 16px;
+    }
+    .header-card {
+      padding: 20px 20px;
+      border-radius: 10px;
+    }
+    .header-card h1 {
+      font-size: 20px;
+    }
+    .header-card .meta {
+      font-size: 12px;
+      gap: 12px;
+    }
+    .header-card .theme-toggle {
+      top: 16px;
+      right: 16px;
+    }
+    .content-card {
+      padding: 20px 16px;
+      border-radius: 8px;
+    }
+    .section-title {
+      font-size: 15px;
+      padding-bottom: 10px;
+    }
+    .author-card {
+      padding: 14px;
+    }
+    .author-avatar {
+      width: 32px;
+      height: 32px;
+      font-size: 12px;
+    }
+    .author-name {
+      font-size: 13px;
+    }
+  }
+
+  /* ── Loading State ── */
+  .loading-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="header-card">
+    <div class="theme-toggle" role="group" aria-label="Color theme">
+      <button type="button" data-theme-toggle="light" aria-pressed="false">Light</button>
+      <button type="button" data-theme-toggle="dark" aria-pressed="false">Dark</button>
+    </div>
+    <h1>Twitter Daily Report</h1>
+    <div class="meta">
+      <span class="meta-item">📅 {{ report_date }}</span>
+      <span class="meta-item">👥 {{ author_count }} authors</span>
+      <span class="meta-item">💬 {{ tweet_count }} tweets</span>
+    </div>
+  </div>
+
+  <!-- Executive Summary -->
+  {% if executive_summary %}
+  <div class="content-card">
+    <div class="section-title">
+      <span class="icon">📊</span>
+      Executive Summary
+    </div>
+    <div class="content-body">
+      {{ executive_summary | safe }}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Key Highlights -->
+  {% if key_highlights %}
+  <div class="content-card">
+    <div class="section-title">
+      <span class="icon">💡</span>
+      Key Highlights
+    </div>
+    <div class="content-body">
+      {{ key_highlights | safe }}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Thematic Deep Dives -->
+  {% if author_summaries %}
+  <div class="content-card author-section">
+    <div class="section-title">
+      <span class="icon">📝</span>
+      Thematic Deep Dives
+    </div>
+    {% for author in author_summaries %}
+    <div class="author-card" id="author-{{ loop.index }}">
+      <div class="author-header">
+        <div class="author-avatar">@</div>
+        <div class="author-info">
+          <div class="author-name">{{ author.author_name }}</div>
+          <div class="author-handle">{{ author.author_handle }}</div>
+        </div>
+      </div>
+      <div class="author-content">
+        {{ author.content | safe }}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Footer -->
+  <div class="page-footer">
+    Generated at {{ generated_at }} &nbsp;·&nbsp;
+    <span class="brand">GuanHe Capital</span>
+  </div>
+
+</div>
+
+<script>
+function initThemeToggle() {
+  document.querySelectorAll('[data-theme-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (typeof window.__setReportColorMode === 'function') {
+        window.__setReportColorMode(btn.getAttribute('data-theme-toggle'));
+      }
+    });
+  });
+  if (typeof window.__updateThemeToggleUI === 'function') window.__updateThemeToggleUI();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  initThemeToggle();
+});
+</script>
+
+</body>
+</html>

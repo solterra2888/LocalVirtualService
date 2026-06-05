@@ -24,6 +24,10 @@ export interface YouTubeDailyReport {
     }>;
     [key: string]: any;
   };
+  // 新增字段: HTML 存储 + 分享
+  oss_object_name?: string | null;
+  html_content?: string | null;
+  share_token?: string | null;
   created_at?: string;
   updated_at?: string;
 }

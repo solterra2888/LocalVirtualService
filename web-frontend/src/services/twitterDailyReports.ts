@@ -25,6 +25,9 @@ export interface TwitterDailyReport {
     }>;
     [key: string]: any;
   };
+  oss_object_name?: string;
+  html_content?: string;
+  share_token?: string;
   created_at?: string;
   updated_at?: string;
 }

@@ -217,6 +217,20 @@ class TwitterDailyReportService:
             self._update_report(report_id, status='completed',
                                 content=report_content, metadata=metadata)
 
+            # 7) HTML 渲染 + OSS 上传 + share_token
+            html_result = self.render_and_upload_html(
+                report_id=report_id,
+                report_content=report_content,
+                metadata=metadata,
+                user_id=user_id,
+                report_date=report_date,
+            )
+            if html_result.get('success'):
+                share_token = html_result.get('share_token')
+            else:
+                share_token = None
+                logger.warning(f"HTML 渲染/上传失败，share_token 未生成: {html_result.get('error')}")
+
             logger.info(f"[Step 6/6] Twitter Daily Report 生成完成: "
                         f"{total_tweet_count} 条推文, {len(renumbered_summaries)} 位作者, "
                         f"Phase2={phase2_elapsed}s, 总计={elapsed}s",
@@ -225,6 +239,7 @@ class TwitterDailyReportService:
             return {
                 'success': True,
                 'report_id': report_id,
+                'share_token': share_token,
                 'message': f'报告生成成功（{total_tweet_count} 条推文，'
                            f'{len(renumbered_summaries)} 位作者，{elapsed}s）',
                 'tweet_count': total_tweet_count,
@@ -566,7 +581,8 @@ class TwitterDailyReportService:
         try:
             cursor.execute("""
                 SELECT id, report_date, report_content, status,
-                       error_message, metadata, created_at, updated_at
+                       error_message, metadata, created_at, updated_at,
+                       oss_object_name, html_content, share_token
                 FROM twitter_daily_reports
                 WHERE user_id = %s AND report_date = %s
             """, (user_id, report_date))
@@ -574,7 +590,8 @@ class TwitterDailyReportService:
             if not row:
                 return None
             columns = ['id', 'report_date', 'report_content', 'status',
-                        'error_message', 'metadata', 'created_at', 'updated_at']
+                        'error_message', 'metadata', 'created_at', 'updated_at',
+                        'oss_object_name', 'html_content', 'share_token']
             report = dict(zip(columns, row))
             if report.get('report_date'):
                 report['report_date'] = str(report['report_date'])
@@ -592,7 +609,8 @@ class TwitterDailyReportService:
         try:
             cursor.execute("""
                 SELECT id, report_date, report_content, status,
-                       error_message, metadata, created_at, updated_at
+                       error_message, metadata, created_at, updated_at,
+                       oss_object_name, html_content, share_token
                 FROM twitter_daily_reports
                 WHERE user_id = %s AND status = 'completed'
                 ORDER BY report_date DESC
@@ -602,7 +620,8 @@ class TwitterDailyReportService:
             if not row:
                 return None
             columns = ['id', 'report_date', 'report_content', 'status',
-                        'error_message', 'metadata', 'created_at', 'updated_at']
+                        'error_message', 'metadata', 'created_at', 'updated_at',
+                        'oss_object_name', 'html_content', 'share_token']
             report = dict(zip(columns, row))
             if report.get('report_date'):
                 report['report_date'] = str(report['report_date'])
@@ -610,5 +629,347 @@ class TwitterDailyReportService:
                 if report.get(ts_field):
                     report[ts_field] = report[ts_field].isoformat()
             return report
+        finally:
+            cursor.close()
+
+    # ── HTML Rendering & OSS Upload ───────────────────────────────────────
+
+    def _parse_markdown_structure(self, markdown_content: str, metadata: Dict) -> Dict:
+        """
+        解析 Markdown 报告结构，提取各部分内容。
+
+        Returns:
+            {
+                'executive_summary': str,
+                'key_highlights': str,
+                'author_summaries': [
+                    {'author_name': str, 'author_handle': str, 'content': str, 'tweet_count': int}
+                ],
+                'tweet_references': dict,
+            }
+        """
+        import re
+        sections = {}
+        current_section = None
+        current_content = []
+
+        # 按标题分割
+        lines = markdown_content.split('\n')
+        for line in lines:
+            # 主标题 - 通常是报告标题
+            if line.startswith('# ') and not line.startswith('# Twitter'):
+                if current_section:
+                    sections[current_section] = '\n'.join(current_content).strip()
+                current_section = 'executive_summary'
+                current_content = []
+            elif line.startswith('## '):
+                if current_section:
+                    sections[current_section] = '\n'.join(current_content).strip()
+                section_title = line[3:].lower().replace(' ', '_')
+                # 识别 key_highlights 或附录
+                if 'highlight' in section_title or 'key' in section_title:
+                    current_section = 'key_highlights'
+                elif 'appendix' in section_title or '附录' in section_title or 'author' in section_title:
+                    current_section = 'appendix_header'
+                else:
+                    current_section = section_title
+                current_content = []
+            elif line.startswith('### '):
+                if current_section:
+                    sections[current_section] = '\n'.join(current_content).strip()
+                # 作者摘要 S1, S2, ... 格式: ### S1 — @author_name
+                author_title = line[4:]
+                current_section = f'author_{author_title}'
+                current_content = []
+            else:
+                current_content.append(line)
+
+        # 保存最后一个 section
+        if current_section:
+            sections[current_section] = '\n'.join(current_content).strip()
+
+        # 提取作者摘要信息
+        author_summaries = []
+        tweet_references = metadata.get('tweet_references', {})
+
+        # 从 tweet_references 反查作者信息
+        author_info_map = {}
+        for ref in tweet_references:
+            author = ref.get('author', '')
+            if author and author not in author_info_map:
+                author_info_map[author] = {
+                    'name': author,
+                    'handle': f'@{author}',
+                    'tweet_count': 0,
+                }
+            if author:
+                author_info_map[author]['tweet_count'] += 1
+
+        # 解析作者摘要 sections
+        for key, content in sections.items():
+            if key.startswith('author_'):
+                # 解析作者名称: "S1 — @author_name" 或 "S1: author_name"
+                title_part = key.replace('author_', '')
+                author_name = title_part
+
+                # 尝试从标题提取作者名
+                match = re.search(r'S\d+\s*[\—:–-]\s*@?([^\s]+)', title_part)
+                if match:
+                    author_name = match.group(1)
+
+                # 从 tweet_references 获取作者信息
+                author_info = author_info_map.get(author_name, {
+                    'name': author_name,
+                    'handle': f'@{author_name}',
+                    'tweet_count': 0,
+                })
+
+                author_summaries.append({
+                    'author_name': author_info.get('name', author_name),
+                    'author_handle': author_info.get('handle', f'@{author_name}'),
+                    'content': self._markdown_to_html(content),
+                    'tweet_count': author_info.get('tweet_count', 0),
+                })
+
+        # 如果没有解析到作者摘要，尝试从 sections 中提取所有 author_ 开头的
+        if not author_summaries:
+            for key, content in sections.items():
+                if key.startswith('author_') and content:
+                    author_summaries.append({
+                        'author_name': key.replace('author_', ''),
+                        'author_handle': f'@{key.replace("author_", "")}',
+                        'content': self._markdown_to_html(content),
+                        'tweet_count': 0,
+                    })
+
+        return {
+            'executive_summary': self._markdown_to_html(sections.get('executive_summary', '')),
+            'key_highlights': self._markdown_to_html(sections.get('key_highlights', '')),
+            'author_summaries': author_summaries,
+            'tweet_references': tweet_references,
+        }
+
+    def _markdown_to_html(self, markdown_text: str) -> str:
+        """简单 Markdown 转 HTML（处理列表、段落、加粗等）。"""
+        import re
+        if not markdown_text:
+            return ''
+
+        # 处理加粗
+        text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', markdown_text)
+        # 处理斜体
+        text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+        # 处理列表项
+        text = re.sub(r'^\s*[-*]\s+(.+)$', r'<li>\1</li>', text, flags=re.MULTILINE)
+        # 包裹连续的 li 为 ul
+        text = re.sub(r'(<li>.+?</li>\n)+', r'<ul>\g<0></ul>\n', text)
+        # 处理段落（非空行包裹为 p）
+        lines = text.split('\n')
+        html_lines = []
+        in_list = False
+        for line in lines:
+            if line.startswith('<ul>') or line.startswith('<li'):
+                in_list = True
+                html_lines.append(line)
+            elif line.startswith('</ul>'):
+                in_list = False
+                html_lines.append(line)
+            elif line.strip() and not in_list:
+                html_lines.append(f'<p>{line}</p>')
+            else:
+                html_lines.append(line)
+        return '\n'.join(html_lines)
+
+    def _inject_tweet_links(self, content: str, tweet_refs: List[Dict]) -> str:
+        """将 [T-xxx] 引用替换为可点击的链接。"""
+        import re
+        if not content or not tweet_refs:
+            return content
+
+        # 构建 ref_id -> url 映射
+        ref_map = {}
+        for ref in tweet_refs:
+            ref_id = ref.get('ref_id', '')
+            url = ref.get('url', '')
+            if ref_id and url:
+                ref_map[ref_id] = url
+
+        pattern = r'\[T-(\d+)\]'
+
+        def replace_ref(match):
+            ref_num = match.group(1)
+            ref_key = f"T-{ref_num}"
+            if ref_key in ref_map:
+                url = ref_map[ref_key]
+                return f'<a href="{url}" target="_blank" class="tweet-ref">[T-{ref_num}]</a>'
+            return match.group(0)
+
+        return re.sub(pattern, replace_ref, content)
+
+    def _render_html(self, parsed_data: Dict, metadata: Dict) -> str:
+        """使用 Jinja2 模板渲染结构化 HTML。"""
+        from jinja2 import Environment, FileSystemLoader, select_autoescape
+        import os
+
+        template_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
+        env = Environment(
+            loader=FileSystemLoader(os.path.abspath(template_dir)),
+            autoescape=select_autoescape(["html"]),
+        )
+        template = env.get_template("twitter_report.html.j2")
+
+        report_date = metadata.get('report_date', '')
+        if isinstance(report_date, date):
+            report_date = report_date.strftime("%B %d, %Y")
+        elif isinstance(report_date, str):
+            # 尝试格式化日期
+            try:
+                report_date = datetime.fromisoformat(report_date).strftime("%B %d, %Y")
+            except:
+                pass
+
+        # 处理推文引用链接替换
+        executive_summary = self._inject_tweet_links(
+            parsed_data.get('executive_summary', ''),
+            parsed_data.get('tweet_references', [])
+        )
+        key_highlights = self._inject_tweet_links(
+            parsed_data.get('key_highlights', ''),
+            parsed_data.get('tweet_references', [])
+        )
+
+        # 处理作者摘要中的引用链接
+        author_summaries = []
+        for author in parsed_data.get('author_summaries', []):
+            author_summaries.append({
+                'author_name': author.get('author_name', ''),
+                'author_handle': author.get('author_handle', ''),
+                'content': self._inject_tweet_links(
+                    author.get('content', ''),
+                    parsed_data.get('tweet_references', [])
+                ),
+                'tweet_count': author.get('tweet_count', 0),
+            })
+
+        html = template.render(
+            report_date=report_date,
+            author_count=metadata.get('author_count', 0),
+            tweet_count=metadata.get('tweet_count', 0),
+            executive_summary=executive_summary,
+            key_highlights=key_highlights,
+            author_summaries=author_summaries,
+            generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        )
+        return html
+
+    def render_and_upload_html(
+        self,
+        report_id: int,
+        report_content: str,
+        metadata: Dict,
+        user_id: int,
+        report_date: date,
+    ) -> Dict[str, Any]:
+        """
+        渲染 HTML 报告并上传到 OSS，生成 share_token。
+
+        Returns:
+            {'success': bool, 'oss_object_name': str, 'share_token': str, 'html_content': str}
+        """
+        from uuid import uuid4
+        from backend.services.oss_service import OSSService
+
+        try:
+            # 1. 解析 Markdown 结构
+            parsed_data = self._parse_markdown_structure(report_content, metadata)
+
+            # 2. 渲染 HTML
+            html_content = self._render_html(parsed_data, metadata)
+
+            # 3. 上传到 OSS
+            oss_service = OSSService()
+            date_str = report_date.strftime("%Y%m%d")
+            oss_object_name = f"reports/Twitter/{user_id}/report_{date_str}.html"
+
+            upload_result = oss_service.upload_bytes(
+                object_name=oss_object_name,
+                data=html_content.encode("utf-8"),
+                content_type="text/html; charset=utf-8",
+            )
+
+            if not upload_result.get('success'):
+                logger.error(f"OSS 上传失败: {upload_result.get('error')}")
+                return {'success': False, 'error': upload_result.get('error')}
+
+            # 4. 生成 share_token
+            share_token = uuid4().hex
+
+            # 5. 更新数据库
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            try:
+                cursor.execute("""
+                    UPDATE twitter_daily_reports
+                    SET oss_object_name = %s,
+                        html_content = %s,
+                        share_token = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (oss_object_name, html_content, share_token, report_id))
+                conn.commit()
+            finally:
+                cursor.close()
+
+            logger.info(f"HTML 报告渲染并上传成功: report_id={report_id}, "
+                        f"oss_path={oss_object_name}, share_token={share_token[:8]}…")
+
+            return {
+                'success': True,
+                'oss_object_name': oss_object_name,
+                'share_token': share_token,
+                'html_content': html_content,
+            }
+
+        except Exception as e:
+            logger.error(f"HTML 渲染/上传失败: {str(e)}")
+            return {'success': False, 'error': str(e)}
+
+    def get_report_html_by_token(self, token: str) -> Optional[bytes]:
+        """
+        通过 share_token 获取 HTML 报告内容。
+
+        优先从数据库 html_content 字段读取，fallback 到 OSS。
+        """
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT oss_object_name, html_content
+                FROM twitter_daily_reports
+                WHERE share_token = %s AND status = 'completed'
+                LIMIT 1
+            """, (token,))
+            row = cursor.fetchone()
+            if not row:
+                logger.warning(f"[get_report_html_by_token] token not found: {token[:8]}…")
+                return None
+            obj_name, html_content = row
+
+            # Primary: 直接从数据库读取（无需 OSS 调用）
+            if html_content:
+                return html_content.encode("utf-8")
+
+            # Fallback: 从 OSS 获取
+            if obj_name:
+                from backend.services.oss_service import OSSService
+                oss_service = OSSService()
+                logger.info(f"[get_report_html_by_token] 从 OSS 获取: {obj_name}")
+                html_bytes = oss_service.get_object_bytes(obj_name)
+                if html_bytes is None:
+                    logger.error(f"[get_report_html_by_token] OSS 获取失败: {obj_name}")
+                return html_bytes
+
+            logger.error(f"[get_report_html_by_token] 无 html_content 和 oss_object_name: {token[:8]}…")
+            return None
         finally:
             cursor.close()

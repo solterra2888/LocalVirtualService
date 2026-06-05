@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layout, Typography, Spin, Empty, Space,
-  List, App, Tooltip, ConfigProvider, theme as antdTheme, Switch, DatePicker,
+  List, App, Tooltip, ConfigProvider, theme as antdTheme, Switch, DatePicker, Button,
 } from 'antd';
 import {
   FileTextOutlined,
@@ -9,9 +9,10 @@ import {
   LoadingOutlined,
   PlayCircleOutlined,
   RobotOutlined,
+  ShareAltOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import MarkdownRenderer from '../components/MarkdownRenderer';
 import { DailyReportStatusTag } from '../components/reports/DailyReportStatusTag';
 import { FEED_THEME_COLORS } from '../components/feed/feedTheme';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -157,6 +158,24 @@ const TwitterDailyReportPageInner: React.FC = () => {
   const borderColor = themeColors.cardBorder;
   const sidebarBg = themeColors.cardBg;
 
+  // ── Share Handler ───────────────────────────────────────────────────────
+  const handleShare = useCallback(async () => {
+    if (!selectedReport?.share_token) {
+      message.warning('This report does not have a share link yet. Please wait for generation to complete.');
+      return;
+    }
+    const shareUrl = `${window.location.origin}/api/reports/twitter-daily/shared/${selectedReport.share_token}`;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      message.success('Share link copied to clipboard');
+    } catch {
+      message.error('Failed to copy share link');
+    }
+  }, [selectedReport, message]);
+
+  // ── iframe key for force refresh ───────────────────────────────────────
+  const [iframeKey, setIframeKey] = useState(0);
+
   return (
     <Layout style={{ height: '100%', background: 'transparent' }}>
       {/* Sidebar */}
@@ -179,7 +198,7 @@ const TwitterDailyReportPageInner: React.FC = () => {
               <button
                 type="button"
                 className="feed-toolbar-icon-btn"
-                onClick={() => handleGenerate(false)}
+                onClick={() => handleGenerate(true)}
                 disabled={generating}
                 aria-label="Generate yesterday's report"
               >
@@ -275,14 +294,22 @@ const TwitterDailyReportPageInner: React.FC = () => {
       </Layout.Sider>
 
       {/* Main content */}
-      <Content style={{ overflow: 'auto', padding: 24, background: panelBg }}>
+      <Content style={{ overflow: 'hidden', padding: 0, background: panelBg }}>
         {detailLoading ? (
           <div style={{ textAlign: 'center', paddingTop: 120 }}>
             <Spin size="large" tip="Loading report..." />
           </div>
-        ) : selectedReport?.report_content ? (
-          <div style={{ maxWidth: 900, margin: '0 auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        ) : selectedReport?.share_token ? (
+          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+            {/* Header with status and share button */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '12px 16px',
+              background: themeColors.cardBg,
+              borderBottom: `1px solid ${borderColor}`,
+            }}>
               <Space align="center" size="middle">
                 <Text strong style={{ fontSize: 13 }}>{selectedReport.report_date}</Text>
                 <DailyReportStatusTag status={selectedReport.status} dark={isDark} />
@@ -293,11 +320,37 @@ const TwitterDailyReportPageInner: React.FC = () => {
                   </Text>
                 )}
               </Space>
+              <Space>
+                <Tooltip title="Refresh report">
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={() => setIframeKey(prev => prev + 1)}
+                  />
+                </Tooltip>
+                <Tooltip title="Copy share link">
+                  <Button
+                    size="small"
+                    icon={<ShareAltOutlined />}
+                    onClick={handleShare}
+                  />
+                </Tooltip>
+              </Space>
             </div>
-            <MarkdownRenderer
-              content={selectedReport.report_content}
-              variant={isDark ? 'dark' : 'light'}
-            />
+            {/* iframe for HTML report */}
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <iframe
+                key={iframeKey}
+                src={`/api/reports/twitter-daily/shared/${selectedReport.share_token}`}
+                title="Twitter Daily Report"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  border: 'none',
+                  display: 'block',
+                }}
+              />
+            </div>
           </div>
         ) : selectedReport?.status === 'failed' ? (
           <div style={{ textAlign: 'center', paddingTop: 120 }}>

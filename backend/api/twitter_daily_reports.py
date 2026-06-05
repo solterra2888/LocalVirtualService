@@ -9,12 +9,14 @@ Twitter Daily Report API
   PUT   /reports/twitter-daily/settings/auto — 更新自动生成开关
   POST  /reports/twitter-daily/generate     — 手动触发生成（异步 Celery）
   GET   /reports/twitter-daily/{date}       — 指定日期报告
+  GET   /reports/twitter-daily/shared/{token} — 公开分享链接（无需认证）
 """
 
 from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from backend.auth.jwt_utils import get_current_user
@@ -180,4 +182,32 @@ async def get_report_by_date(
         raise
     except Exception as e:
         logger.error(f"获取报告失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Public Share Endpoint (no authentication) ───────────────────────────────
+
+@router.get("/shared/{token}", summary="公开分享报告（无需认证）", response_class=HTMLResponse)
+async def get_shared_report(token: str):
+    """
+    公开访问端点，无需认证。
+    通过 share_token 获取 HTML 格式的 Twitter Daily Report。
+    """
+    try:
+        service = _get_service()
+        html_bytes = service.get_report_html_by_token(token)
+        if not html_bytes:
+            raise HTTPException(status_code=404, detail="报告不存在或已过期")
+        return HTMLResponse(
+            content=html_bytes.decode("utf-8"),
+            status_code=200,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Content-Type": "text/html; charset=utf-8",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取分享报告失败: token={token[:8]}…, error={str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

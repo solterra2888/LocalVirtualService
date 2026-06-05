@@ -61,6 +61,7 @@ class TwitterAdapter(BaseContentAdapter):
         author = raw_data.get('author', {})
         author_name = author.get('name', '')
         author_identifier = author.get('username', author.get('screen_name', ''))
+        author_avatar = author.get('profilePicture', '')
         
         # 提取URL
         url = raw_data.get('url', '')
@@ -184,6 +185,7 @@ class TwitterAdapter(BaseContentAdapter):
             'content': text,
             'author_name': author_name,
             'author_identifier': author_identifier,
+            'author_avatar': author_avatar,
             'url': url,
             'media_urls': media_urls,
             'published_at': published_at,

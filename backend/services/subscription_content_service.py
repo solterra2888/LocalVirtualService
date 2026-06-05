@@ -130,6 +130,7 @@ class SubscriptionContentService:
                     content,
                     author_name,
                     author_identifier,
+                    author_avatar,
                     url,
                     media_urls,
                     published_at,
@@ -156,7 +157,7 @@ class SubscriptionContentService:
                     in_reply_to_user_id,
                     heat_level
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (channel_type, content_id) DO UPDATE SET
@@ -174,6 +175,7 @@ class SubscriptionContentService:
                     quoted_url = EXCLUDED.quoted_url,
                     duration_seconds = EXCLUDED.duration_seconds,
                     channel_id = EXCLUDED.channel_id,
+                    author_avatar = EXCLUDED.author_avatar,
                     heat_level = EXCLUDED.heat_level,
                     fetched_at = EXCLUDED.fetched_at,
                     -- 允许 Snowflake 校正在重新抓取时修复曾错存的 published_at（twitterapi.io +0000 误标 bug）。
@@ -190,6 +192,7 @@ class SubscriptionContentService:
                 normalized_data['content'],
                 normalized_data.get('author_name'),
                 normalized_data['author_identifier'],
+                normalized_data.get('author_avatar'),
                 normalized_data.get('url'),
                 normalized_data.get('media_urls', []),
                 normalized_data['published_at'],
@@ -284,7 +287,7 @@ class SubscriptionContentService:
             params.extend([limit, offset])
             
             query = f"""
-                SELECT 
+                SELECT
                     id,
                     channel_type,
                     content_id,
@@ -292,6 +295,7 @@ class SubscriptionContentService:
                     content,
                     author_name,
                     author_identifier,
+                    author_avatar,
                     url,
                     media_urls,
                     published_at,
@@ -338,39 +342,40 @@ class SubscriptionContentService:
                     'content': row[4],
                     'author_name': row[5],
                     'author_identifier': row[6],
-                    'url': row[7],
-                    'media_urls': row[8],
-                    'published_at': row[9],
-                    'fetched_at': row[10],
-                    'engagement_count': row[11],
-                    'view_count': row[12],
-                    'metadata': row[13],
-                    'user_ids': row[14],
-                    'read_status': row[15],
+                    'author_avatar': row[7],
+                    'url': row[8],
+                    'media_urls': row[9],
+                    'published_at': row[10],
+                    'fetched_at': row[11],
+                    'engagement_count': row[12],
+                    'view_count': row[13],
+                    'metadata': row[14],
+                    'user_ids': row[15],
+                    'read_status': row[16],
                     # Twitter 特定字段
-                    'is_retweet': row[16],
-                    'retweeted_author': row[17],
-                    'retweeted_content': row[18],
-                    'retweeted_url': row[19],
-                    'is_quote': row[20],
-                    'quoted_author': row[21],
-                    'quoted_content': row[22],
-                    'quoted_url': row[23],
+                    'is_retweet': row[17],
+                    'retweeted_author': row[18],
+                    'retweeted_content': row[19],
+                    'retweeted_url': row[20],
+                    'is_quote': row[21],
+                    'quoted_author': row[22],
+                    'quoted_content': row[23],
+                    'quoted_url': row[24],
                     # YouTube 特定字段
-                    'duration_seconds': row[24],
-                    'channel_id': row[25],
+                    'duration_seconds': row[25],
+                    'channel_id': row[26],
                     # RSS 特定字段
-                    'feed_url': row[26],
-                    'categories': row[27],
+                    'feed_url': row[27],
+                    'categories': row[28],
                     # Reply 特定字段
-                    'is_reply': row[28],
-                    'in_reply_to_id': row[29],
-                    'in_reply_to_username': row[30],
-                    'in_reply_to_user_id': row[31],
+                    'is_reply': row[29],
+                    'in_reply_to_id': row[30],
+                    'in_reply_to_username': row[31],
+                    'in_reply_to_user_id': row[32],
                     # 热度等级
-                    'heat_level': row[32],
+                    'heat_level': row[33],
                     # YouTube: 仅返回是否有 transcript（不返回正文）
-                    'has_transcript': bool(row[33]) if row[33] is not None else False,
+                    'has_transcript': bool(row[34]) if row[34] is not None else False,
                 })
 
             # PR-7: 叠加 per-user 个性化 summary 覆盖
