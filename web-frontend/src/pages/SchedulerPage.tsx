@@ -208,17 +208,17 @@ const SchedulerPage: React.FC = () => {
     },
     {
       id: 'twitter_author_summary',
-      name: 'Twitter Author Summary',
+      name: 'Twitter Daily Report',
       type: 'twitter_author_summary',
       category: 'report_generation',
-      description: 'Pre-generate per-author daily summaries (Phase 1). Shared across all users, auto-chains to Daily Report.',
+      description: 'Schedule automatic Twitter Daily Report generation. Runs the full pipeline: pre-generates per-author summaries (shared across users), then synthesizes personalized daily reports for each subscriber.',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
           id: 'configure_twitter_author_summary_schedule',
-          name: 'Configure Summary Schedule',
-          description: 'Set up periodic Twitter Author Summary generation (default: daily at 5 AM CST, auto-chains Daily Report)',
+          name: 'Configure Report Schedule',
+          description: 'Set the schedule for Twitter Daily Report generation (default: daily at 5 AM CST). Runs Phase A (author summaries) → Phase B (user reports) automatically.',
           endpoint: '/scheduler/tasks/twitter-author-summary',
           params: {},
           icon: <ScheduleOutlined />
@@ -227,17 +227,17 @@ const SchedulerPage: React.FC = () => {
     },
     {
       id: 'youtube_author_summary',
-      name: 'YouTube Author Summary',
+      name: 'YouTube Daily Report',
       type: 'youtube_author_summary',
       category: 'report_generation',
-      description: 'Pre-generate per-channel video summaries (Phase 1). Shared across all users, auto-chains to Daily Report.',
+      description: 'Schedule automatic YouTube Daily Report generation. Runs the full pipeline: pre-generates per-channel summaries (shared across users), then synthesizes personalized daily reports for each subscriber.',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
           id: 'configure_youtube_author_summary_schedule',
-          name: 'Configure Summary Schedule',
-          description: 'Set up periodic YouTube Channel Summary generation (default: daily at 6 AM CST, auto-chains Daily Report)',
+          name: 'Configure Report Schedule',
+          description: 'Set the schedule for YouTube Daily Report generation (default: daily at 6 AM CST). Runs Phase A (channel summaries) → Phase B (user reports) automatically.',
           endpoint: '/scheduler/tasks/youtube-author-summary',
           params: {},
           icon: <ScheduleOutlined />

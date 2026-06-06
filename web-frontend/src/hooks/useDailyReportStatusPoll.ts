@@ -3,12 +3,20 @@ import { useEffect, useRef, useCallback } from 'react';
 /** Celery 异步生成完成后前端需继续拉取，否则列表/详情会卡在 generating */
 export const DAILY_REPORT_POLL_INTERVAL_MS = 2500;
 export const DAILY_REPORT_POLL_MAX_TICKS = 360; // ~15 min
+/** Scheduler / 后台生成完成时，页面静默轮询最新报告 */
+export const DAILY_REPORT_BACKGROUND_POLL_INTERVAL_MS = 10000;
 
-type ReportRow = { status: string; report_date: string };
+type ReportRow = { status: string; report_date: string; updated_at?: string };
+
+function reportSnapshot(r: ReportRow): string {
+  return `${r.report_date}|${r.status}|${r.updated_at ?? ''}`;
+}
 
 export function useDailyReportStatusPoll() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const backgroundIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastStatusRef = useRef<string | null>(null);
+  const backgroundSnapshotRef = useRef<string | null>(null);
 
   const clearPoll = useCallback(() => {
     if (intervalRef.current !== null) {
@@ -18,7 +26,18 @@ export function useDailyReportStatusPoll() {
     lastStatusRef.current = null;
   }, []);
 
-  useEffect(() => () => clearPoll(), [clearPoll]);
+  const clearLatestWatch = useCallback(() => {
+    if (backgroundIntervalRef.current !== null) {
+      clearInterval(backgroundIntervalRef.current);
+      backgroundIntervalRef.current = null;
+    }
+    backgroundSnapshotRef.current = null;
+  }, []);
+
+  useEffect(() => () => {
+    clearPoll();
+    clearLatestWatch();
+  }, [clearPoll, clearLatestWatch]);
 
   const startPoll = useCallback(
     (
@@ -54,6 +73,7 @@ export function useDailyReportStatusPoll() {
               opts.setDetail(r.data);
             }
             lastStatusRef.current = st;
+            backgroundSnapshotRef.current = reportSnapshot(r.data);
           }
 
           if (st === 'completed' || st === 'failed') {
@@ -73,5 +93,50 @@ export function useDailyReportStatusPoll() {
     [clearPoll]
   );
 
-  return { startPoll, clearPoll };
+  /** 页面打开时监听最新报告（Scheduler 后台生成完成后自动刷新） */
+  const startLatestWatch = useCallback(
+    (opts: {
+      fetchLatest: () => Promise<{ success: boolean; data?: ReportRow | null }>;
+      onUpdate: (r: ReportRow) => void;
+      getInitialSnapshot?: () => string | null;
+    }) => {
+      clearLatestWatch();
+      backgroundSnapshotRef.current = opts.getInitialSnapshot?.() ?? null;
+
+      const tick = async () => {
+        if (intervalRef.current !== null) return;
+        if (document.hidden) return;
+
+        try {
+          const res = await opts.fetchLatest();
+          if (!res.success || !res.data) return;
+
+          const key = reportSnapshot(res.data);
+          if (backgroundSnapshotRef.current === null) {
+            backgroundSnapshotRef.current = key;
+            return;
+          }
+          if (key !== backgroundSnapshotRef.current) {
+            backgroundSnapshotRef.current = key;
+            opts.onUpdate(res.data);
+          }
+        } catch {
+          /* 单次轮询失败忽略 */
+        }
+      };
+
+      void tick();
+      backgroundIntervalRef.current = setInterval(
+        () => void tick(),
+        DAILY_REPORT_BACKGROUND_POLL_INTERVAL_MS
+      );
+    },
+    [clearLatestWatch]
+  );
+
+  const syncLatestSnapshot = useCallback((r: ReportRow | null) => {
+    backgroundSnapshotRef.current = r ? reportSnapshot(r) : null;
+  }, []);
+
+  return { startPoll, clearPoll, startLatestWatch, clearLatestWatch, syncLatestSnapshot };
 }

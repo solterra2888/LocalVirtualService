@@ -1057,98 +1057,113 @@ class SchedulerService:
 
     async def _execute_twitter_author_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行 Twitter 作者摘要预生成任务（阶段 A）。
-        为所有启用的 Twitter 作者批量生成当日摘要，完成后自动链式触发 Daily Report 生成。
-
-        Args:
-            params: 任务参数
-                - report_date: 摘要日期 (YYYY-MM-DD)，默认昨天
-                - chain_daily_reports: 完成后是否自动触发 Daily Report（默认 True）
+        执行 Twitter 每日报告定时任务（Phase A → chain → Phase B）。
+        Phase A 为所有作者预生成摘要（全局共享），完成后自动链式触发 Phase B 生成用户报告。
         """
         try:
-            logger.info("分发 Twitter 作者摘要 Celery 任务", params=params)
+            logger.info("分发 Twitter 每日报告 Celery 任务", params=params)
 
             from datetime import datetime
             from backend.tasks.report_tasks import generate_all_author_summaries_task
-            from backend.utils.datetime_utils import yesterday_in_tz
-
-            report_date_str = params.get('report_date')
-            if report_date_str:
-                report_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
-            else:
-                # 服务器在 HK (UTC+8); 用 UTC 算昨天保持全局确定性,
-                # 调度器若需"按某用户时区生成", 应在 task params 里显式传 report_date.
-                report_date = yesterday_in_tz(params.get('tz'))
-
-            chain_daily_reports = params.get('chain_daily_reports', True)
+            from backend.utils.datetime_utils import (
+                utcnow,
+                parse_iso_utc,
+                window_label_date,
+            )
 
             force = params.get('force', False)
+            chain_daily_reports = params.get('chain_daily_reports', True)
+            window_hours = int(params.get('window_hours', 24))
+
+            report_date_str = params.get('report_date')
+            window_end = parse_iso_utc(params.get('window_end'))
+            if window_end is None:
+                window_end = utcnow()
+
+            if report_date_str:
+                label_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
+            else:
+                label_date = window_label_date(window_end, params.get('scheduler_timezone'))
 
             task = generate_all_author_summaries_task.delay(
-                summary_date=str(report_date),
+                summary_date=str(label_date),
                 force=force,
                 chain_daily_reports=chain_daily_reports,
+                window_end=window_end.isoformat(),
+                window_hours=window_hours,
             )
 
             chain_info = "，完成后自动触发 Daily Report" if chain_daily_reports else ""
             force_info = "（强制重新生成）" if force else ""
-            logger.info(f"分发 Twitter 作者摘要 Celery 任务 | params={{'chain_daily_reports': {chain_daily_reports}, 'force': {force}}}")
+            logger.info(
+                f"分发 Twitter 每日报告 Celery 任务 | params="
+                f"{{'chain_daily_reports': {chain_daily_reports}, 'force': {force}, "
+                f"'label_date': '{label_date}', 'window_end': '{window_end.isoformat()}'}}"
+            )
             message = (
-                f"✅ Twitter 作者摘要 ({report_date}): "
+                f"✅ Twitter 每日报告 ({label_date}, 过去{window_hours}h): "
                 f"已提交 Celery 异步任务 {task.id}{chain_info}{force_info}"
             )
             return {'success': True, 'message': message, 'celery_task_id': task.id}
 
         except Exception as e:
-            error_msg = f"Twitter 作者摘要任务分发异常: {str(e)}"
+            error_msg = f"Twitter 每日报告任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 
     async def _execute_youtube_author_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行 YouTube 频道摘要预生成任务（阶段 A）。
-        为所有启用的 YouTube 频道批量生成当日摘要，完成后自动链式触发 Daily Report 生成。
-
-        Args:
-            params: 任务参数
-                - report_date: 摘要日期 (YYYY-MM-DD)，默认昨天
-                - chain_daily_reports: 完成后是否自动触发 Daily Report（默认 True）
+        执行 YouTube 每日报告定时任务（Phase A → chain → Phase B）。
+        Phase A 为所有频道预生成摘要（全局共享），完成后自动链式触发 Phase B 生成用户报告。
         """
         try:
-            logger.info("分发 YouTube 频道摘要 Celery 任务", params=params)
+            logger.info("分发 YouTube 每日报告 Celery 任务", params=params)
 
             from datetime import datetime
             from backend.tasks.report_tasks import generate_all_yt_author_summaries_task
-            from backend.utils.datetime_utils import yesterday_in_tz
-
-            report_date_str = params.get('report_date')
-            if report_date_str:
-                report_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
-            else:
-                # 服务器在 HK (UTC+8); 用 UTC 算昨天保持全局确定性.
-                report_date = yesterday_in_tz(params.get('tz'))
-
-            chain_daily_reports = params.get('chain_daily_reports', True)
+            from backend.utils.datetime_utils import (
+                utcnow,
+                parse_iso_utc,
+                window_label_date,
+            )
 
             force = params.get('force', False)
+            chain_daily_reports = params.get('chain_daily_reports', True)
+            window_hours = int(params.get('window_hours', 24))
+
+            report_date_str = params.get('report_date')
+            window_end = parse_iso_utc(params.get('window_end'))
+            if window_end is None:
+                window_end = utcnow()
+
+            if report_date_str:
+                label_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
+            else:
+                label_date = window_label_date(window_end, params.get('scheduler_timezone'))
 
             task = generate_all_yt_author_summaries_task.delay(
-                summary_date=str(report_date),
+                summary_date=str(label_date),
                 force=force,
                 chain_daily_reports=chain_daily_reports,
+                window_end=window_end.isoformat(),
+                window_hours=window_hours,
             )
 
             chain_info = "，完成后自动触发 Daily Report" if chain_daily_reports else ""
             force_info = "（强制重新生成）" if force else ""
-            logger.info(f"分发 YouTube 频道摘要 Celery 任务 | params={{'chain_daily_reports': {chain_daily_reports}, 'force': {force}}}")
+            logger.info(
+                f"分发 YouTube 每日报告 Celery 任务 | params="
+                f"{{'chain_daily_reports': {chain_daily_reports}, 'force': {force}, "
+                f"'label_date': '{label_date}', 'window_end': '{window_end.isoformat()}'}}"
+            )
             message = (
-                f"✅ YouTube 频道摘要 ({report_date}): "
+                f"✅ YouTube Daily Report ({label_date}, 过去{window_hours}h): "
                 f"已提交 Celery 异步任务 {task.id}{chain_info}{force_info}"
             )
             return {'success': True, 'message': message, 'celery_task_id': task.id}
 
         except Exception as e:
-            error_msg = f"YouTube 频道摘要任务分发异常: {str(e)}"
+            error_msg = f"YouTube 每日报告任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

@@ -56,7 +56,8 @@ const MobileReportsPageInner: React.FC = () => {
 
   const selectedReportDateRef = useRef<string | null>(null);
   selectedReportDateRef.current = selectedReport?.report_date ?? null;
-  const { startPoll, clearPoll } = useDailyReportStatusPoll();
+  const { startPoll, clearPoll, startLatestWatch, clearLatestWatch, syncLatestSnapshot } =
+    useDailyReportStatusPoll();
 
   const loadAutoSettings = useCallback(async () => {
     try {
@@ -112,17 +113,17 @@ const MobileReportsPageInner: React.FC = () => {
   }, [message]);
 
   const handleGenerate = useCallback(async () => {
-    const dateStr = dayjs().subtract(1, 'day').format('YYYY-MM-DD');
     clearPoll();
     setGenerating(true);
     try {
-      const res = await twitterDailyReportsAPI.generateReport(dateStr, false);
+      const res = await twitterDailyReportsAPI.generateReport(false);
       if (!res.success) {
         message.error(res.error || 'Failed to trigger report generation');
         setGenerating(false);
         return;
       }
-      message.success(`Report generation started for ${dateStr}. It may take a few minutes.`);
+      const dateStr = res.data?.report_date ?? dayjs().format('YYYY-MM-DD');
+      message.success(`Report generation started (past 24h). It may take a few minutes.`);
       setSelectedDate(dayjs(dateStr));
       await loadReports();
       await loadReportDetail(dateStr);
@@ -153,7 +154,9 @@ const MobileReportsPageInner: React.FC = () => {
           setSelectedDate(dayjs(latest.report_date));
           const detail = await twitterDailyReportsAPI.getReportByDate(latest.report_date);
           if (!cancelled && detail.success) {
-            setSelectedReport(detail.data ?? null);
+            const data = detail.data ?? null;
+            setSelectedReport(data);
+            if (data) syncLatestSnapshot(data);
           }
         } else {
           setSelectedReport(null);
@@ -170,11 +173,24 @@ const MobileReportsPageInner: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [message]);
+  }, [message, syncLatestSnapshot]);
 
   useEffect(() => {
     loadAutoSettings();
   }, [loadAutoSettings]);
+
+  useEffect(() => {
+    startLatestWatch({
+      fetchLatest: twitterDailyReportsAPI.getLatestReport,
+      onUpdate: (r) => {
+        void loadReports({ quiet: true });
+        if (selectedReportDateRef.current === r.report_date) {
+          setSelectedReport(r as TwitterDailyReport);
+        }
+      },
+    });
+    return () => clearLatestWatch();
+  }, [startLatestWatch, clearLatestWatch, loadReports]);
 
   const handleDateChange = (date: dayjs.Dayjs | null) => {
     if (!date) return;

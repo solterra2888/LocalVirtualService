@@ -40,7 +40,8 @@ const YouTubeDailyReportPageInner: React.FC = () => {
 
   const reportDateRef = useRef<string | null>(null);
   reportDateRef.current = latest?.report_date ?? null;
-  const { startPoll, clearPoll } = useDailyReportStatusPoll();
+  const { startPoll, clearPoll, startLatestWatch, clearLatestWatch, syncLatestSnapshot } =
+    useDailyReportStatusPoll();
 
   // ── Auto settings ──────────────────────────────────────────────────────
   const loadAutoSettings = useCallback(async () => {
@@ -68,43 +69,58 @@ const YouTubeDailyReportPageInner: React.FC = () => {
   }, [message]);
 
   // ── Load latest report ───────────────────────────────────────────────────
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (options?: { quiet?: boolean }) => {
+    const quiet = options?.quiet === true;
+    if (!quiet) setLoading(true);
     try {
       const res = await youtubeDailyReportsAPI.getLatestReport();
       if (res.success && res.data) {
         setLatest(res.data);
+        syncLatestSnapshot(res.data);
       } else {
         setLatest(null);
+        syncLatestSnapshot(null);
       }
     } catch (err) {
       console.error('Failed to load YouTube Daily Report:', err);
-      message.error('Failed to load report');
+      if (!quiet) message.error('Failed to load report');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
-  }, [message]);
+  }, [message, syncLatestSnapshot]);
 
   useEffect(() => {
     loadData();
     loadAutoSettings();
   }, [loadData, loadAutoSettings]);
 
+  useEffect(() => {
+    startLatestWatch({
+      fetchLatest: youtubeDailyReportsAPI.getLatestReport,
+      onUpdate: (r) => {
+        setLatest(r as YouTubeDailyReport);
+        if (r.status === 'completed') {
+          setIframeKey((k) => k + 1);
+        }
+      },
+    });
+    return () => clearLatestWatch();
+  }, [startLatestWatch, clearLatestWatch]);
+
   // ── Generate ───────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
-    const dateStr = dayjs().subtract(1, 'day').format('YYYY-MM-DD');
     clearPoll();
     setGenerating(true);
     try {
-      const res = await youtubeDailyReportsAPI.generateReport(dateStr, true);
+      const res = await youtubeDailyReportsAPI.generateReport(true);
       if (!res.success) {
-        // Show detailed error message
         const errorMsg = res.error || 'Failed to trigger report generation';
         message.error(errorMsg);
         setGenerating(false);
         return;
       }
-      message.success(`Report generation started for ${dateStr}. It may take a few minutes.`);
+      const dateStr = res.data?.report_date ?? dayjs().format('YYYY-MM-DD');
+      message.success(`Report generation started (past 24h). It may take a few minutes.`);
       startPoll(dateStr, {
         fetchReport: youtubeDailyReportsAPI.getReportByDate,
         refreshList: loadData,
@@ -125,7 +141,8 @@ const YouTubeDailyReportPageInner: React.FC = () => {
   }, [loadData, message, clearPoll, startPoll]);
 
   const handleRefresh = async () => {
-    setIframeKey(k => k + 1);
+    await loadData({ quiet: true });
+    setIframeKey((k) => k + 1);
     message.success('Refreshed');
   };
 
@@ -147,7 +164,6 @@ const YouTubeDailyReportPageInner: React.FC = () => {
   const bgColor = themeColors.pageBg;
   const cardBg = themeColors.cardBg;
   const borderColor = themeColors.cardBorder;
-
   return (
     <div style={{ padding: '24px 32px', background: bgColor, minHeight: 'calc(100vh - 64px)' }}>
       <div style={{
@@ -188,7 +204,7 @@ const YouTubeDailyReportPageInner: React.FC = () => {
             </div>
           </Tooltip>
 
-          <Tooltip title="Generate yesterday's report">
+          <Tooltip title="Generate report for the past 24 hours">
             <Button
               type="primary"
               size="small"
@@ -300,7 +316,7 @@ const YouTubeDailyReportPageInner: React.FC = () => {
             description={
               latest
                 ? `Report status: ${latest.status}${latest.error_message ? ` — ${latest.error_message}` : ''}`
-                : 'No report yet. Click Generate to create yesterday\'s report.'
+                : 'No report yet. Click Generate to create a report for the past 24 hours.'
             }
           />
         )}

@@ -105,17 +105,18 @@
     margin: 0 0 12px 0;
     letter-spacing: -0.5px;
   }
-  .header-card .meta {
-    font-size: 13px;
-    opacity: 0.95;
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
+  .header-card .header-note,
+  .header-card .header-generated {
+    color: #FFFFFF;
+    font-size: 14px;
+    line-height: 1.5;
   }
-  .header-card .meta-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+  .header-card .header-generated {
+    margin-top: 8px;
+    font-weight: 500;
+  }
+  .header-card .header-note {
+    margin-top: 6px;
   }
   .header-card .theme-toggle {
     position: absolute;
@@ -347,21 +348,14 @@
       <button type="button" data-theme-toggle="dark" aria-pressed="false">Dark</button>
     </div>
     <h1>Twitter Daily Report</h1>
-    <div class="meta">
-      <span class="meta-item" style="color: #fff;">{{ report_date }}</span>
-      <span class="meta-item">👥 {{ author_count }} authors</span>
-      <span class="meta-item">💬 {{ tweet_count }} tweets</span>
-    </div>
-    {% if generated_at_new_york or generated_at_beijing %}
-    <div class="meta" style="margin-top: 8px; font-size: 12px;">
-      {% if generated_at_new_york %}
-      <span class="meta-item" style="color: var(--text-muted);">{{ generated_at_new_york }}</span>
-      {% endif %}
-      {% if generated_at_beijing %}
-      <span class="meta-item" style="color: var(--text-muted);">{{ generated_at_beijing }}</span>
-      {% endif %}
-    </div>
+    {% if generated_at_beijing %}
+    <div class="header-generated">Generated {{ generated_at_beijing }}</div>
+    {% elif generated_at_new_york %}
+    <div class="header-generated">Generated {{ generated_at_new_york }}</div>
+    {% elif generated_at %}
+    <div class="header-generated">Generated {{ generated_at }}</div>
     {% endif %}
+    <div class="header-note">Past 24 hours · tweets from your subscriptions</div>
   </div>
 
   <!-- Executive Summary -->

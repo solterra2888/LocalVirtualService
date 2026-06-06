@@ -139,6 +139,48 @@ def yesterday_in_tz(tz_str: Optional[str]) -> date:
     return today_in_tz(tz_str) - timedelta(days=1)
 
 
+def rolling_window_utc(
+    window_end: datetime,
+    hours: int = 24,
+) -> tuple[datetime, datetime]:
+    """滚动时间窗口 [window_end - hours, window_end)，均为 aware UTC."""
+    end = ensure_utc(window_end)
+    start = end - timedelta(hours=hours)
+    return start, end
+
+
+def window_label_date(window_end: datetime, tz_str: Optional[str]) -> date:
+    """报告/摘要 DATE 标签：window_end 在指定时区下的自然日."""
+    end = ensure_utc(window_end)
+    tz = parse_user_tz(tz_str)
+    return end.astimezone(tz).date()
+
+
+def parse_iso_utc(dt_str: Optional[str]) -> Optional[datetime]:
+    """解析 ISO 8601 字符串为 aware UTC."""
+    if not dt_str:
+        return None
+    dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+    return ensure_utc(dt)
+
+
+def resolve_report_content_window(
+    label_date: date,
+    window_end: Optional[datetime] = None,
+    window_hours: int = 24,
+) -> tuple[datetime, datetime]:
+    """解析报告内容抓取窗口.
+
+    - 若提供 window_end：返回 [window_end - window_hours, window_end)（aware UTC）
+    - 否则回退为 label_date 自然日 [00:00, +1day)（naive，兼容旧行为）
+    """
+    if window_end is not None:
+        return rolling_window_utc(window_end, window_hours)
+    start_dt = datetime.combine(label_date, datetime.min.time())
+    end_dt = start_dt + timedelta(days=1)
+    return start_dt, end_dt
+
+
 def day_window_utc(target_date: date, tz_str: Optional[str]) -> tuple[datetime, datetime]:
     """把"指定时区的某一自然日"换算为 UTC 起止区间 [start, end), **aware UTC**.
 
@@ -173,6 +215,10 @@ __all__ = [
     "parse_user_tz",
     "today_in_tz",
     "yesterday_in_tz",
+    "rolling_window_utc",
+    "window_label_date",
+    "parse_iso_utc",
+    "resolve_report_content_window",
     "day_window_utc",
     "install_psycopg2_utc_adapter",
     "UtcDateTime",

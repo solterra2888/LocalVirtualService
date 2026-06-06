@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from backend.auth.jwt_utils import get_current_user
 from backend.schemas.user import TokenData
-from backend.utils.datetime_utils import yesterday_in_tz
+from backend.utils.datetime_utils import yesterday_in_tz, utcnow, window_label_date
 from backend.utils.logger import get_logger
 
 logger = get_logger("youtube_daily_reports_api")
@@ -130,7 +130,10 @@ async def update_auto_settings(
 
 
 class GenerateReportRequest(BaseModel):
-    report_date: Optional[str] = Field(None, description="日期 YYYY-MM-DD，默认按 tz 算昨天")
+    report_date: Optional[str] = Field(
+        None,
+        description="日期 YYYY-MM-DD；不传则按 tz 取当前时刻并生成过去 24h 滚动窗口报告",
+    )
     tz: Optional[str] = Field(None, description="IANA 时区名（如 'America/Los_Angeles'），用于计算默认日期；不传则用 UTC")
     force: bool = Field(False, description="强制重新生成（覆盖已有报告）")
 
@@ -142,21 +145,33 @@ async def generate_report(
 ):
     """触发 Celery 异步任务为当前用户生成 YouTube Daily Report。"""
     try:
-        parsed_date = _parse_date(body.report_date, body.tz)
+        window_end_iso = None
+        if body.report_date:
+            parsed_date = _parse_date(body.report_date, body.tz)
+        else:
+            window_end = utcnow()
+            parsed_date = window_label_date(window_end, body.tz)
+            window_end_iso = window_end.isoformat()
+
         from backend.tasks.report_tasks import generate_youtube_daily_report_task
         task = generate_youtube_daily_report_task.delay(
             user_id=current_user.user_id,
             report_date=str(parsed_date),
             force=body.force,
             skip_auto_check=True,
+            window_end=window_end_iso,
         )
         logger.info(
             f"用户 {current_user.username} 触发 YouTube Daily Report 生成: "
-            f"date={parsed_date}, force={body.force}, task_id={task.id}"
+            f"date={parsed_date}, force={body.force}, window_end={window_end_iso}, task_id={task.id}"
         )
         return {
             "success": True,
-            "data": {"task_id": task.id, "report_date": str(parsed_date)},
+            "data": {
+                "task_id": task.id,
+                "report_date": str(parsed_date),
+                "window_end": window_end_iso,
+            },
             "message": "报告生成任务已提交",
         }
     except Exception as e:

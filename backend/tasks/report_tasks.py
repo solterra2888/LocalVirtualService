@@ -50,6 +50,8 @@ def generate_author_summary_task(
     author_name: str,
     summary_date: str,
     force: bool = False,
+    window_end: str = None,
+    window_hours: int = 24,
 ):
     """
     为单个 Twitter 作者生成指定日期的摘要（Phase 1）。
@@ -63,6 +65,7 @@ def generate_author_summary_task(
     try:
         from datetime import datetime
         from backend.services.twitter_author_summary_service import TwitterAuthorSummaryService
+        from backend.utils.datetime_utils import parse_iso_utc
 
         dt = datetime.strptime(summary_date, '%Y-%m-%d').date()
         service = TwitterAuthorSummaryService()
@@ -71,6 +74,8 @@ def generate_author_summary_task(
             author_name=author_name,
             summary_date=dt,
             force=force,
+            window_end=parse_iso_utc(window_end),
+            window_hours=window_hours,
         ))
 
         elapsed = round(time.time() - start, 2)
@@ -97,6 +102,8 @@ def generate_all_author_summaries_task(
     summary_date: str,
     force: bool = False,
     chain_daily_reports: bool = True,
+    window_end: str = None,
+    window_hours: int = 24,
 ):
     """
     为所有启用的 Twitter 作者批量生成当日摘要（同步执行，逐作者串行）。
@@ -114,10 +121,17 @@ def generate_all_author_summaries_task(
     try:
         from datetime import datetime
         from backend.services.twitter_author_summary_service import TwitterAuthorSummaryService
+        from backend.utils.datetime_utils import parse_iso_utc
 
         dt = datetime.strptime(summary_date, '%Y-%m-%d').date()
+        parsed_window_end = parse_iso_utc(window_end)
         service = TwitterAuthorSummaryService()
-        result = _run_async(service.generate_all_author_summaries(dt, force=force))
+        result = _run_async(service.generate_all_author_summaries(
+            dt,
+            force=force,
+            window_end=parsed_window_end,
+            window_hours=window_hours,
+        ))
 
         logger.info(f"[Celery Task {task_id}] 作者摘要批量完成: {result.get('message')}")
 
@@ -125,6 +139,8 @@ def generate_all_author_summaries_task(
             report_task = generate_all_twitter_daily_reports_task.delay(
                 report_date=summary_date,
                 force=force,
+                window_end=window_end,
+                window_hours=window_hours,
             )
             logger.info(f"[Celery Task {task_id}] 已链式触发 Daily Report: task_id={report_task.id}, force={force}")
 
@@ -158,6 +174,8 @@ def generate_twitter_daily_report_task(
     report_date: str,
     force: bool = False,
     skip_auto_check: bool = False,
+    window_end: str = None,
+    window_hours: int = 24,
 ):
     """
     为单个用户生成 Twitter Daily Report。
@@ -189,10 +207,17 @@ def generate_twitter_daily_report_task(
     try:
         from datetime import datetime
         from backend.services.twitter_daily_report_service import TwitterDailyReportService
+        from backend.utils.datetime_utils import parse_iso_utc
 
         dt = datetime.strptime(report_date, '%Y-%m-%d').date()
         service = TwitterDailyReportService()
-        result = _run_async(service.generate_report(user_id=user_id, report_date=dt, force=force))
+        result = _run_async(service.generate_report(
+            user_id=user_id,
+            report_date=dt,
+            force=force,
+            window_end=parse_iso_utc(window_end),
+            window_hours=window_hours,
+        ))
 
         elapsed = round(time.time() - start, 2)
         logger.info(f"[Celery Task {task_id}] Twitter Daily Report 生成完成: "
@@ -214,7 +239,13 @@ def generate_twitter_daily_report_task(
     soft_time_limit=3600,
     time_limit=4200,
 )
-def generate_all_twitter_daily_reports_task(self, report_date: str, force: bool = False):
+def generate_all_twitter_daily_reports_task(
+    self,
+    report_date: str,
+    force: bool = False,
+    window_end: str = None,
+    window_hours: int = 24,
+):
     """
     为所有启用的用户分发 Twitter Daily Report 生成任务。
     每个用户作为独立的子任务提交，实现并行生成。
@@ -240,6 +271,8 @@ def generate_all_twitter_daily_reports_task(self, report_date: str, force: bool 
                 user_id=uid,
                 report_date=report_date,
                 force=force,
+                window_end=window_end,
+                window_hours=window_hours,
             )
             dispatched += 1
             logger.info(f"[Celery Task {task_id}] 已分发子任务: user_id={uid}, sub_task_id={sub_task.id}")
@@ -274,6 +307,8 @@ def generate_yt_author_summary_task(
     author_name: str,
     summary_date: str,
     force: bool = False,
+    window_end: str = None,
+    window_hours: int = 24,
 ):
     """
     为单个 YouTube 频道生成指定日期的摘要（Phase 1）。
@@ -287,6 +322,7 @@ def generate_yt_author_summary_task(
     try:
         from datetime import datetime
         from backend.services.youtube_author_summary_service import YouTubeAuthorSummaryService
+        from backend.utils.datetime_utils import parse_iso_utc
 
         dt = datetime.strptime(summary_date, '%Y-%m-%d').date()
         service = YouTubeAuthorSummaryService()
@@ -295,6 +331,8 @@ def generate_yt_author_summary_task(
             author_name=author_name,
             summary_date=dt,
             force=force,
+            window_end=parse_iso_utc(window_end),
+            window_hours=window_hours,
         ))
 
         elapsed = round(time.time() - start, 2)
@@ -321,6 +359,8 @@ def generate_all_yt_author_summaries_task(
     summary_date: str,
     force: bool = False,
     chain_daily_reports: bool = True,
+    window_end: str = None,
+    window_hours: int = 24,
 ):
     """
     为所有启用的 YouTube 频道批量生成当日摘要（同步执行，逐频道串行）。
@@ -333,10 +373,16 @@ def generate_all_yt_author_summaries_task(
     try:
         from datetime import datetime
         from backend.services.youtube_author_summary_service import YouTubeAuthorSummaryService
+        from backend.utils.datetime_utils import parse_iso_utc
 
         dt = datetime.strptime(summary_date, '%Y-%m-%d').date()
         service = YouTubeAuthorSummaryService()
-        result = _run_async(service.generate_all_author_summaries(dt, force=force))
+        result = _run_async(service.generate_all_author_summaries(
+            dt,
+            force=force,
+            window_end=parse_iso_utc(window_end),
+            window_hours=window_hours,
+        ))
 
         logger.info(f"[Celery Task {task_id}] YouTube 频道摘要批量完成: {result.get('message')}")
 
@@ -344,6 +390,8 @@ def generate_all_yt_author_summaries_task(
             report_task = generate_all_youtube_daily_reports_task.delay(
                 report_date=summary_date,
                 force=force,
+                window_end=window_end,
+                window_hours=window_hours,
             )
             logger.info(f"[Celery Task {task_id}] 已链式触发 YouTube Daily Report: task_id={report_task.id}, force={force}")
 
@@ -377,6 +425,8 @@ def generate_youtube_daily_report_task(
     report_date: str,
     force: bool = False,
     skip_auto_check: bool = False,
+    window_end: str = None,
+    window_hours: int = 24,
 ):
     """
     为单个用户生成 YouTube Daily Report。
@@ -408,10 +458,17 @@ def generate_youtube_daily_report_task(
     try:
         from datetime import datetime
         from backend.services.youtube_daily_report_service import YouTubeDailyReportService
+        from backend.utils.datetime_utils import parse_iso_utc
 
         dt = datetime.strptime(report_date, '%Y-%m-%d').date()
         service = YouTubeDailyReportService()
-        result = _run_async(service.generate_report(user_id=user_id, report_date=dt, force=force))
+        result = _run_async(service.generate_report(
+            user_id=user_id,
+            report_date=dt,
+            force=force,
+            window_end=parse_iso_utc(window_end),
+            window_hours=window_hours,
+        ))
 
         elapsed = round(time.time() - start, 2)
         logger.info(f"[Celery Task {task_id}] YouTube Daily Report 生成完成: "
@@ -433,7 +490,13 @@ def generate_youtube_daily_report_task(
     soft_time_limit=3600,
     time_limit=4200,
 )
-def generate_all_youtube_daily_reports_task(self, report_date: str, force: bool = False):
+def generate_all_youtube_daily_reports_task(
+    self,
+    report_date: str,
+    force: bool = False,
+    window_end: str = None,
+    window_hours: int = 24,
+):
     """
     为所有启用的用户分发 YouTube Daily Report 生成任务。
     每个用户作为独立的子任务提交，实现并行生成。
@@ -459,6 +522,8 @@ def generate_all_youtube_daily_reports_task(self, report_date: str, force: bool 
                 user_id=uid,
                 report_date=report_date,
                 force=force,
+                window_end=window_end,
+                window_hours=window_hours,
             )
             dispatched += 1
             logger.info(f"[Celery Task {task_id}] 已分发子任务: user_id={uid}, sub_task_id={sub_task.id}")

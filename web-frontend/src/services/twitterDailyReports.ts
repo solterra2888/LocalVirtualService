@@ -18,6 +18,8 @@ export interface TwitterDailyReport {
     top_authors?: string[];
     key_topics?: string[];
     generation_time_seconds?: number;
+    window_start?: string;
+    window_end?: string;
     tweet_references?: Array<{
       ref_id: string;
       url: string;
@@ -94,13 +96,15 @@ export const twitterDailyReportsAPI = {
   },
 
   async generateReport(
-    reportDate: string,
-    force: boolean = false
-  ): Promise<ApiResponse<{ task_id: string; report_date: string }>> {
+    force: boolean = false,
+    reportDate?: string
+  ): Promise<ApiResponse<{ task_id: string; report_date: string; window_end?: string | null }>> {
     try {
-      const data = await api.post<ApiResponse<{ task_id: string; report_date: string }>>(
+      const body: { force: boolean; report_date?: string } = { force };
+      if (reportDate) body.report_date = reportDate;
+      const data = await api.post<ApiResponse<{ task_id: string; report_date: string; window_end?: string | null }>>(
         '/reports/twitter-daily/generate',
-        { report_date: reportDate, force }
+        body
       );
       return data;
     } catch (error: any) {

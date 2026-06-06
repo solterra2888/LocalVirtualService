@@ -218,15 +218,15 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       icon: <TwitterOutlined style={{ color: '#1DA1F2' }} />,
       params: ['force'],
       defaultSchedule: '0 5 * * *',
-      defaultName: 'Twitter Author Summary',
-      description: 'Pre-generate per-author daily summaries (Phase 1). Auto-chains to Daily Report generation (daily at 5 AM CST)'
+      defaultName: 'Twitter Daily Report',
+      description: 'Full report pipeline: generates per-author summaries (Phase A, shared across users), then synthesizes personalized Twitter Daily Reports (Phase B). Default: daily at 5 AM CST.'
     },
     youtube_author_summary: {
       icon: <YoutubeOutlined style={{ color: '#FF0000' }} />,
       params: ['force'],
       defaultSchedule: '0 6 * * *',
-      defaultName: 'YouTube Author Summary',
-      description: 'Pre-generate per-channel video summaries (Phase 1). Auto-chains to Daily Report generation (daily at 6 AM CST)'
+      defaultName: 'YouTube Daily Report',
+      description: 'Full report pipeline: generates per-channel summaries (Phase A, shared across users), then synthesizes personalized YouTube Daily Reports (Phase B). Default: daily at 6 AM CST.'
     },
     theme_report: {
       icon: <BarChartOutlined style={{ color: '#52c41a' }} />,

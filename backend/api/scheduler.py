@@ -1580,28 +1580,28 @@ async def create_default_news_feed_task(
 
 
 class CreateTwitterAuthorSummaryTaskRequest(BaseModel):
-    """创建 Twitter 作者摘要定时任务请求模型"""
-    name: str = Field(default="Twitter Author Summary", description="任务名称")
+    """创建 Twitter 每日报告定时任务请求模型"""
+    name: str = Field(default="Twitter Daily Report", description="任务名称")
     cron_expression: str = Field(default="0 5 * * *", description="Cron表达式（默认每天早上5点）")
     timezone: str = Field(default="Asia/Shanghai", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
-    chain_daily_reports: bool = Field(default=True, description="完成后是否自动触发 Daily Report 生成")
     force: bool = Field(default=False, description="强制重新生成（忽略已缓存的摘要和报告）")
 
 
-@router.post("/tasks/twitter-author-summary", summary="创建 Twitter 作者摘要定时任务")
+@router.post("/tasks/twitter-author-summary", summary="创建 Twitter 每日报告定时任务")
 async def create_twitter_author_summary_task(
     request: CreateTwitterAuthorSummaryTaskRequest,
     current_user=Depends(get_current_user)
 ):
     """
-    创建 Twitter 作者摘要定时任务（阶段 A）。
+    创建 Twitter 每日报告定时任务。
 
-    每天定时为所有启用的 Twitter 作者预生成摘要，
-    完成后可自动链式触发 Daily Report 生成。
+    定时触发完整报告流水线：
+      Phase A — 为所有启用的 Twitter 作者预生成摘要（全局共享）
+      Phase B — 为每个用户生成个性化 Twitter Daily Report
     """
     try:
-        logger.info("创建 Twitter 作者摘要定时任务请求",
+        logger.info("创建 Twitter 每日报告定时任务请求",
                      user=current_user.username,
                      task_name=request.name,
                      cron_expression=request.cron_expression)
@@ -1615,7 +1615,7 @@ async def create_twitter_author_summary_task(
             timezone=request.timezone,
             enabled=request.enabled,
             task_params={
-                'chain_daily_reports': request.chain_daily_reports,
+                'chain_daily_reports': True,
                 'force': request.force,
             },
             created_by=current_user.username
@@ -1636,24 +1636,24 @@ async def create_twitter_author_summary_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("创建 Twitter 作者摘要定时任务失败",
+        logger.error("创建 Twitter 每日报告定时任务失败",
                      exception=str(e),
                      user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
-@router.post("/tasks/twitter-author-summary/default", summary="创建默认 Twitter 作者摘要定时任务")
+@router.post("/tasks/twitter-author-summary/default", summary="创建默认 Twitter 每日报告定时任务")
 async def create_default_twitter_author_summary_task(
     current_user=Depends(get_current_user)
 ):
-    """创建默认的 Twitter 作者摘要定时任务（每天早上5点CST，完成后自动触发 Daily Report）"""
+    """创建默认的 Twitter 每日报告定时任务（每天早上5点CST，自动执行完整 Phase A → Phase B 流水线）"""
     try:
-        logger.info("创建默认 Twitter 作者摘要定时任务请求", user=current_user.username)
+        logger.info("创建默认 Twitter 每日报告定时任务请求", user=current_user.username)
 
         scheduler_service = await get_scheduler_service()
 
         result = await scheduler_service.create_cron_task(
-            task_name="Twitter Author Summary",
+            task_name="Twitter Daily Report",
             task_type="twitter_author_summary",
             cron_expression="0 5 * * *",
             timezone="Asia/Shanghai",
@@ -1677,7 +1677,7 @@ async def create_default_twitter_author_summary_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("创建默认 Twitter 作者摘要定时任务失败",
+        logger.error("创建默认 Twitter 每日报告定时任务失败",
                      exception=str(e),
                      user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
@@ -1687,28 +1687,28 @@ async def create_default_twitter_author_summary_task(
 
 
 class CreateYouTubeAuthorSummaryTaskRequest(BaseModel):
-    """创建 YouTube 频道摘要定时任务请求模型"""
-    name: str = Field(default="YouTube Author Summary", description="任务名称")
+    """创建 YouTube 每日报告定时任务请求模型"""
+    name: str = Field(default="YouTube Daily Report", description="任务名称")
     cron_expression: str = Field(default="0 6 * * *", description="Cron表达式（默认每天早上6点）")
     timezone: str = Field(default="Asia/Shanghai", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
-    chain_daily_reports: bool = Field(default=True, description="完成后是否自动触发 Daily Report 生成")
     force: bool = Field(default=False, description="强制重新生成（忽略已缓存的摘要和报告）")
 
 
-@router.post("/tasks/youtube-author-summary", summary="创建 YouTube 频道摘要定时任务")
+@router.post("/tasks/youtube-author-summary", summary="创建 YouTube 每日报告定时任务")
 async def create_youtube_author_summary_task(
     request: CreateYouTubeAuthorSummaryTaskRequest,
     current_user=Depends(get_current_user)
 ):
     """
-    创建 YouTube 频道摘要定时任务（阶段 A）。
+    创建 YouTube 每日报告定时任务。
 
-    每天定时为所有启用的 YouTube 频道预生成摘要，
-    完成后可自动链式触发 Daily Report 生成。
+    定时触发完整报告流水线：
+      Phase A — 为所有启用的 YouTube 频道预生成摘要（全局共享）
+      Phase B — 为每个用户生成个性化 YouTube Daily Report
     """
     try:
-        logger.info("创建 YouTube 频道摘要定时任务请求",
+        logger.info("创建 YouTube 每日报告定时任务请求",
                      user=current_user.username,
                      task_name=request.name,
                      cron_expression=request.cron_expression)
@@ -1722,7 +1722,7 @@ async def create_youtube_author_summary_task(
             timezone=request.timezone,
             enabled=request.enabled,
             task_params={
-                'chain_daily_reports': request.chain_daily_reports,
+                'chain_daily_reports': True,
                 'force': request.force,
             },
             created_by=current_user.username
@@ -1743,24 +1743,24 @@ async def create_youtube_author_summary_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("创建 YouTube 频道摘要定时任务失败",
+        logger.error("创建 YouTube 每日报告定时任务失败",
                      exception=str(e),
                      user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
-@router.post("/tasks/youtube-author-summary/default", summary="创建默认 YouTube 频道摘要定时任务")
+@router.post("/tasks/youtube-author-summary/default", summary="创建默认 YouTube 每日报告定时任务")
 async def create_default_youtube_author_summary_task(
     current_user=Depends(get_current_user)
 ):
-    """创建默认的 YouTube 频道摘要定时任务（每天早上6点CST，完成后自动触发 Daily Report）"""
+    """创建默认的 YouTube 每日报告定时任务（每天早上6点CST，自动执行完整 Phase A → Phase B 流水线）"""
     try:
-        logger.info("创建默认 YouTube 频道摘要定时任务请求", user=current_user.username)
+        logger.info("创建默认 YouTube 每日报告定时任务请求", user=current_user.username)
 
         scheduler_service = await get_scheduler_service()
 
         result = await scheduler_service.create_cron_task(
-            task_name="YouTube Author Summary",
+            task_name="YouTube Daily Report",
             task_type="youtube_author_summary",
             cron_expression="0 6 * * *",
             timezone="Asia/Shanghai",
@@ -1784,7 +1784,7 @@ async def create_default_youtube_author_summary_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("创建默认 YouTube 频道摘要定时任务失败",
+        logger.error("创建默认 YouTube 每日报告定时任务失败",
                      exception=str(e),
                      user=current_user.username)
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")

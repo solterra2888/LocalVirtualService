@@ -19,6 +19,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
 from backend.core.llm_framework import llm_service
+from backend.utils.datetime_utils import ensure_utc, resolve_report_content_window
 
 logger = get_logger("youtube_daily_report_service")
 
@@ -73,6 +74,8 @@ class YouTubeDailyReportService:
         user_id: int,
         report_date: date,
         force: bool = False,
+        window_end: Optional[datetime] = None,
+        window_hours: int = 24,
     ) -> Dict[str, Any]:
         """
         为指定用户生成指定日期的 YouTube Daily Report。
@@ -80,8 +83,20 @@ class YouTubeDailyReportService:
         缺失时自动 fallback 到即时生成。
         """
         start_time = time.time()
-        logger.info("开始生成 YouTube Daily Report",
-                     user_id=user_id, report_date=str(report_date))
+        window_start, resolved_end = resolve_report_content_window(
+            report_date, window_end, window_hours
+        )
+        window_metadata = {
+            'window_start': ensure_utc(window_start).isoformat(),
+            'window_end': ensure_utc(resolved_end).isoformat(),
+        }
+        logger.info(
+            "开始生成 YouTube Daily Report",
+            user_id=user_id,
+            report_date=str(report_date),
+            window_start=window_metadata['window_start'],
+            window_end=window_metadata['window_end'],
+        )
 
         # 解析用户 Phase 2 模板偏好
         from backend.services.template_preference_service import TemplatePreferenceService
@@ -130,7 +145,7 @@ class YouTubeDailyReportService:
             if not user_authors:
                 self._update_report(report_id, status='completed',
                                     content='当前没有启用的 YouTube 订阅。',
-                                    metadata={'video_count': 0, 'channel_count': 0})
+                                    metadata={'video_count': 0, 'channel_count': 0, **window_metadata})
                 return {
                     'success': True,
                     'report_id': report_id,
@@ -159,7 +174,9 @@ class YouTubeDailyReportService:
                             user_id=user_id)
                 for aid, aname in missing_authors:
                     result = await author_summary_service.generate_author_summary(
-                        aid, aname, report_date
+                        aid, aname, report_date,
+                        window_end=window_end,
+                        window_hours=window_hours,
                     )
                     if result.get('success'):
                         fresh = author_summary_service.get_author_summaries_for_date(
@@ -179,7 +196,7 @@ class YouTubeDailyReportService:
             if not active_summaries:
                 self._update_report(report_id, status='completed',
                                     content='当天无视频数据。',
-                                    metadata={'video_count': 0, 'channel_count': 0})
+                                    metadata={'video_count': 0, 'channel_count': 0, **window_metadata})
                 return {
                     'success': True,
                     'report_id': report_id,
@@ -230,6 +247,7 @@ class YouTubeDailyReportService:
                 ],
                 'used_cached_summaries': len(cached_summaries) - len(missing_authors),
                 'fallback_generated': len(missing_authors),
+                **window_metadata,
             }
             self._update_report(report_id, status='completed',
                                 content=report_content, metadata=metadata)

@@ -15,6 +15,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
 from backend.core.llm_framework import llm_service
+from backend.utils.datetime_utils import ensure_utc, resolve_report_content_window
 
 logger = get_logger("youtube_author_summary_service")
 
@@ -60,7 +61,11 @@ class YouTubeAuthorSummaryService:
     # ── Public API ─────────────────────────────────────────────────────────
 
     async def generate_all_author_summaries(
-        self, summary_date: date, force: bool = False
+        self,
+        summary_date: date,
+        force: bool = False,
+        window_end: Optional[datetime] = None,
+        window_hours: int = 24,
     ) -> Dict[str, Any]:
         """
         为所有启用的 YouTube 订阅频道批量生成当日摘要。
@@ -73,20 +78,46 @@ class YouTubeAuthorSummaryService:
         if not authors:
             return {'success': True, 'message': '没有启用的 YouTube 订阅频道', 'results': []}
 
-        logger.info(f"开始批量生成频道摘要: {len(authors)} 个频道, date={summary_date}")
+        window_start, resolved_end = resolve_report_content_window(
+            summary_date, window_end, window_hours
+        )
+        logger.info(
+            f"开始批量生成频道摘要: {len(authors)} 个频道, date={summary_date}, "
+            f"window=[{window_start.isoformat()}, {resolved_end.isoformat()})"
+        )
 
         results = []
         succeeded = 0
         skipped = 0
-        for author_id, author_name in authors:
+        total = len(authors)
+        for idx, (author_id, author_name) in enumerate(authors, 1):
+            author_start = time.time()
             result = await self.generate_author_summary(
-                author_id, author_name, summary_date, force=force
+                author_id,
+                author_name,
+                summary_date,
+                force=force,
+                window_end=window_end,
+                window_hours=window_hours,
             )
+            author_elapsed = round(time.time() - author_start, 2)
             results.append({'author': author_id, **result})
+
             if result.get('skipped'):
                 skipped += 1
+                logger.info(
+                    f"[{idx}/{total}] {author_name or author_id} — skipped (already completed), {author_elapsed}s"
+                )
             elif result.get('success'):
                 succeeded += 1
+                video_count = result.get('video_count', 0)
+                logger.info(
+                    f"[{idx}/{total}] {author_name or author_id} — OK, {video_count} videos, {author_elapsed}s"
+                )
+            else:
+                logger.warning(
+                    f"[{idx}/{total}] {author_name or author_id} — FAILED: {result.get('message', '')}, {author_elapsed}s"
+                )
 
         elapsed = round(time.time() - start_time, 2)
         logger.info(f"批量频道摘要完成: {succeeded} 成功, {skipped} 跳过, "
@@ -108,6 +139,8 @@ class YouTubeAuthorSummaryService:
         author_name: Optional[str],
         summary_date: date,
         force: bool = False,
+        window_end: Optional[datetime] = None,
+        window_hours: int = 24,
     ) -> Dict[str, Any]:
         """
         为单个 YouTube 频道生成指定日期的摘要。
@@ -117,14 +150,21 @@ class YouTubeAuthorSummaryService:
         """
         start_time = time.time()
         display_name = author_name or author_identifier
-        logger.info(f"开始生成频道摘要: {display_name} ({author_identifier}), date={summary_date}")
+        window_start, resolved_end = resolve_report_content_window(
+            summary_date, window_end, window_hours
+        )
+        logger.info(
+            f"开始生成频道摘要: {display_name} ({author_identifier}), date={summary_date}, "
+            f"window=[{window_start.isoformat()}, {resolved_end.isoformat()})"
+        )
 
         if not force:
             existing = self._get_existing_summary(author_identifier, summary_date)
             if existing and existing['status'] == 'completed':
                 tpl_updated = self._get_template_updated_at(DEFAULT_PHASE1_TEMPLATE)
                 summary_updated = existing.get('updated_at')
-                if tpl_updated and summary_updated and tpl_updated > summary_updated:
+                from datetime import timedelta
+                if tpl_updated and summary_updated and tpl_updated > (summary_updated + timedelta(hours=1)):
                     logger.info(
                         f"模板已更新 (模板={tpl_updated}, 摘要={summary_updated}), "
                         f"自动重新生成: {display_name}"
@@ -143,7 +183,9 @@ class YouTubeAuthorSummaryService:
         )
 
         try:
-            videos = self._fetch_author_videos(author_identifier, summary_date)
+            videos = self._fetch_author_videos(
+                author_identifier, window_start, resolved_end
+            )
             logger.info(f"{display_name}: 拉取到 {len(videos)} 个视频")
 
             if not videos:
@@ -180,6 +222,8 @@ class YouTubeAuthorSummaryService:
                 'template_code': DEFAULT_PHASE1_TEMPLATE,
                 'recommended_provider': tpl_model_info.get('recommended_provider'),
                 'recommended_model': tpl_model_info.get('recommended_model'),
+                'window_start': ensure_utc(window_start).isoformat(),
+                'window_end': ensure_utc(resolved_end).isoformat(),
             }
 
             self._update_summary(
@@ -230,13 +274,18 @@ class YouTubeAuthorSummaryService:
         finally:
             cursor.close()
 
-    def _fetch_author_videos(self, author_identifier: str, summary_date: date) -> List[Dict[str, Any]]:
-        """查询指定频道在指定日期的所有视频（不按用户过滤）。"""
+    def _fetch_author_videos(
+        self,
+        author_identifier: str,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> List[Dict[str, Any]]:
+        """查询指定频道在时间窗口内的所有视频（不按用户过滤）。"""
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
         try:
-            start_dt = datetime.combine(summary_date, datetime.min.time())
-            end_dt = start_dt + timedelta(days=1)
+            start_dt = window_start
+            end_dt = window_end
             cursor.execute("""
                 SELECT id, content_id, title, content, author_name, author_identifier,
                        url, media_urls, published_at, engagement_count, view_count,
