@@ -62,7 +62,7 @@ export const youtubeDailyReportsAPI = {
     try {
       const data = await api.get<ApiResponse<YouTubeReportListResponse>>(
         '/reports/youtube-daily',
-        { limit, offset }
+        { limit, offset, _t: Date.now() }
       );
       return data;
     } catch (error: any) {
@@ -74,7 +74,8 @@ export const youtubeDailyReportsAPI = {
   async getLatestReport(): Promise<ApiResponse<YouTubeDailyReport | null>> {
     try {
       const data = await api.get<ApiResponse<YouTubeDailyReport | null>>(
-        '/reports/youtube-daily/latest'
+        '/reports/youtube-daily/latest',
+        { _t: Date.now() }
       );
       return data;
     } catch (error: any) {
@@ -86,7 +87,8 @@ export const youtubeDailyReportsAPI = {
   async getReportByDate(reportDate: string): Promise<ApiResponse<YouTubeDailyReport | null>> {
     try {
       const data = await api.get<ApiResponse<YouTubeDailyReport | null>>(
-        `/reports/youtube-daily/${reportDate}`
+        `/reports/youtube-daily/${reportDate}`,
+        { _t: Date.now() }
       );
       return data;
     } catch (error: any) {

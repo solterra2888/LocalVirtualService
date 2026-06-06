@@ -62,7 +62,7 @@ export const twitterDailyReportsAPI = {
     try {
       const data = await api.get<ApiResponse<TwitterReportListResponse>>(
         '/reports/twitter-daily',
-        { limit, offset }
+        { limit, offset, _t: Date.now() }
       );
       return data;
     } catch (error: any) {
@@ -74,7 +74,8 @@ export const twitterDailyReportsAPI = {
   async getLatestReport(): Promise<ApiResponse<TwitterDailyReport | null>> {
     try {
       const data = await api.get<ApiResponse<TwitterDailyReport | null>>(
-        '/reports/twitter-daily/latest'
+        '/reports/twitter-daily/latest',
+        { _t: Date.now() }
       );
       return data;
     } catch (error: any) {
@@ -86,7 +87,8 @@ export const twitterDailyReportsAPI = {
   async getReportByDate(reportDate: string): Promise<ApiResponse<TwitterDailyReport | null>> {
     try {
       const data = await api.get<ApiResponse<TwitterDailyReport | null>>(
-        `/reports/twitter-daily/${reportDate}`
+        `/reports/twitter-daily/${reportDate}`,
+        { _t: Date.now() }
       );
       return data;
     } catch (error: any) {

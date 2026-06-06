@@ -676,8 +676,7 @@ class YouTubeDailyReportService:
         使用 mistune 库将 Markdown 转换为 HTML。
         相比手写正则更稳定，支持完整 Markdown 语法。
         """
-        import mistune
-        import mistune.plugins.table as table_plugin
+        import html
 
         if not markdown_content:
             return ''
@@ -691,12 +690,51 @@ class YouTubeDailyReportService:
                 lines = lines[1:]
         markdown_content = '\n'.join(lines)
 
-        # 创建 mistune 解析器，启用表格插件
-        renderer = mistune.HTMLRenderer()
-        markdown_parser = mistune.Markdown(renderer, plugins=[table_plugin.table])
+        try:
+            import mistune
+            import mistune.plugins.table as table_plugin
 
-        html = markdown_parser(markdown_content)
-        return html
+            # 创建 mistune 解析器，启用表格插件
+            renderer = mistune.HTMLRenderer()
+            markdown_parser = mistune.Markdown(renderer, plugins=[table_plugin.table])
+            rendered = markdown_parser(markdown_content)
+            return self._ensure_links_open_in_new_tab(rendered)
+        except ModuleNotFoundError:
+            # 兜底：当运行环境缺少 mistune 时，退化为安全渲染，同时保留 Markdown 链接可点击能力。
+            logger.warning("mistune 未安装，使用降级 HTML 渲染")
+            escaped = html.escape(markdown_content)
+            # 先处理 Markdown 链接 [text](url)
+            escaped = re.sub(
+                r'\[([^\]]+)\]\((https?://[^\s)]+)\)',
+                r'<a href="\2">\1</a>',
+                escaped
+            )
+            # 再处理裸 URL（避免重复替换已在 href 中的 URL）
+            escaped = re.sub(
+                r'(?<!href=")(https?://[^\s<]+)',
+                r'<a href="\1">\1</a>',
+                escaped
+            )
+            paragraphs = [f"<p>{p.replace(chr(10), '<br/>')}</p>" for p in escaped.split("\n\n") if p.strip()]
+            fallback_html = "".join(paragraphs) if paragraphs else "<p></p>"
+            return self._ensure_links_open_in_new_tab(fallback_html)
+
+    def _ensure_links_open_in_new_tab(self, html_content: str) -> str:
+        """确保所有链接默认新开标签页并带安全 rel。"""
+        if not html_content:
+            return html_content
+
+        def _patch_anchor(match: re.Match) -> str:
+            attrs = match.group(1)
+            if re.search(r'\btarget\s*=', attrs, flags=re.IGNORECASE):
+                attrs = re.sub(r'target\s*=\s*["\'][^"\']*["\']', 'target="_blank"', attrs, flags=re.IGNORECASE)
+            else:
+                attrs = f'{attrs} target="_blank"'
+            if not re.search(r'\brel\s*=', attrs, flags=re.IGNORECASE):
+                attrs = f'{attrs} rel="noopener noreferrer"'
+            return f'<a {attrs}>'
+
+        return re.sub(r'<a\s+([^>]*?)>', _patch_anchor, html_content, flags=re.IGNORECASE)
 
     def _inject_video_links(self, content: str, video_refs: List[Dict]) -> str:
         """将 [V-xxx] 引用替换为可点击的链接。"""
@@ -793,46 +831,64 @@ class YouTubeDailyReportService:
             # 1. 渲染 HTML（直接 Markdown → HTML）
             html_content = self._render_html(report_content, metadata)
 
-            # 2. 上传到 OSS
-            oss_service = OSSService()
-            date_str = report_date.strftime("%Y%m%d")
-            oss_object_name = f"reports/YouTube/{user_id}/report_{date_str}.html"
-
-            upload_result = oss_service.upload_bytes(
-                object_name=oss_object_name,
-                data=html_content.encode("utf-8"),
-                content_type="text/html; charset=utf-8",
-            )
-
-            if not upload_result.get('success'):
-                logger.error(f"OSS 上传失败: {upload_result.get('error')}")
-                return {'success': False, 'error': upload_result.get('error')}
-
-            # 3. 生成 share_token
+            # 2. 生成新的 share_token，并先落库 html_content/share_token
+            # 这样即使 OSS 临时失败，前端仍可通过 shared 接口读到数据库中的最新 HTML。
             share_token = uuid4().hex
 
-            # 4. 更新数据库
+            # 3. 更新数据库（先写 html_content + share_token）
+            date_str = report_date.strftime("%Y%m%d")
+            oss_object_name = f"reports/YouTube/{user_id}/report_{date_str}.html"
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
             try:
                 cursor.execute("""
                     UPDATE youtube_daily_reports
-                    SET oss_object_name = %s,
-                        html_content = %s,
+                    SET html_content = %s,
                         share_token = %s,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
-                """, (oss_object_name, html_content, share_token, report_id))
+                """, (html_content, share_token, report_id))
                 conn.commit()
             finally:
                 cursor.close()
 
-            logger.info(f"HTML 报告渲染并上传成功: report_id={report_id}, "
-                        f"oss_path={oss_object_name}, share_token={share_token[:8]}…")
+            # 4. 尝试上传 OSS（失败不阻断主流程）
+            oss_uploaded = False
+            try:
+                oss_service = OSSService()
+                upload_result = oss_service.upload_bytes(
+                    object_name=oss_object_name,
+                    data=html_content.encode("utf-8"),
+                    content_type="text/html; charset=utf-8",
+                )
+                if upload_result.get('success'):
+                    oss_uploaded = True
+                    conn = self.db_manager.get_connection()
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("""
+                            UPDATE youtube_daily_reports
+                            SET oss_object_name = %s,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = %s
+                        """, (oss_object_name, report_id))
+                        conn.commit()
+                    finally:
+                        cursor.close()
+                else:
+                    logger.warning(f"OSS 上传失败（已保留数据库 HTML 版本）: {upload_result.get('error')}")
+            except Exception as upload_exc:
+                logger.warning(f"OSS 上传异常（已保留数据库 HTML 版本）: {str(upload_exc)}")
+
+            logger.info(
+                f"HTML 报告渲染完成: report_id={report_id}, "
+                f"oss_uploaded={oss_uploaded}, share_token={share_token[:8]}…"
+            )
 
             return {
                 'success': True,
-                'oss_object_name': oss_object_name,
+                'oss_object_name': oss_object_name if oss_uploaded else None,
+                'oss_uploaded': oss_uploaded,
                 'share_token': share_token,
                 'html_content': html_content,
             }
