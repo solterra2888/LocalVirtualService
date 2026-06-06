@@ -53,6 +53,9 @@ flower==2.0.1
 # HTML 模板渲染（Theme Report 静态 HTML 生成）
 Jinja2>=3.1.0
 
+# Markdown 转 HTML（用于 Daily Report 渲染）
+mistune>=3.0.2
+
 # 阿里云 OSS SDK
 oss2==2.18.4
 

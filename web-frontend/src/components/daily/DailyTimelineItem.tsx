@@ -10,9 +10,9 @@ import { formatClockTime } from '../../utils/datetime';
 import { DAILY_THEME_COLORS } from './dailyTheme';
 
 /** 左侧：右对齐时刻 + 竖线/圆点 */
-const TIME_LABEL_W = 52;
+const TIME_LABEL_W = 44;
 const LINE_W = 2;
-const LINE_LEFT = TIME_LABEL_W + 6;
+const LINE_LEFT = TIME_LABEL_W + 4;
 const TIMELINE_COL_W = LINE_LEFT + LINE_W + 6;
 const DOT_TOP = 18;
 const DOT_SIZE = 8;

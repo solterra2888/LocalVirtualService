@@ -72,7 +72,7 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
             margin: 0,
             flex: 1,
             minWidth: 0,
-            fontSize: 15,
+            fontSize: 13,
             fontWeight: 600,
             lineHeight: 1.45,
             color: colors.text,

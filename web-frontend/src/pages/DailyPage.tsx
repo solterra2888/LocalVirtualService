@@ -389,7 +389,7 @@ const DailyPageInner: React.FC = () => {
           主内容左缘对齐：paddingLeft + 220(sidebar) + gap = 常数（原 32+220+16），避免列表区整体漂移 */}
       <div
         style={{
-          maxWidth: 1180,
+          maxWidth: 1280,
           margin: '0 auto',
           display: 'flex',
           gap: 50,

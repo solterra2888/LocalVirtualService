@@ -217,7 +217,10 @@ async def get_shared_report(token: str):
             content=html_bytes.decode("utf-8"),
             status_code=200,
             headers={
-                "Cache-Control": "public, max-age=3600",
+                # 禁止缓存，确保用户每次都能看到最新内容
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
                 "Content-Type": "text/html; charset=utf-8",
             },
         )

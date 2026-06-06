@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-color-mode="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Twitter Daily Report - {{ report_date }}</title>
+<script>
+/* Theme: manual Light/Dark toggle (localStorage), default light. */
+(function() {
+  var STORAGE_KEY = 'twitter-report-color-mode';
+  function readStored() {
+    try {
+      var s = localStorage.getItem(STORAGE_KEY);
+      if (s === 'light' || s === 'dark') return s;
+    } catch (e) {}
+    return 'light';
+  }
+  window.__updateThemeToggleUI = function() {
+    var mode = document.documentElement.getAttribute('data-color-mode') || 'light';
+    document.querySelectorAll('[data-theme-toggle]').forEach(function(btn) {
+      var on = btn.getAttribute('data-theme-toggle') === mode;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  };
+  window.__setReportColorMode = function(mode) {
+    if (mode !== 'light' && mode !== 'dark') return;
+    document.documentElement.setAttribute('data-color-mode', mode);
+    try { localStorage.setItem(STORAGE_KEY, mode); } catch (e) {}
+    if (typeof window.__updateThemeToggleUI === 'function') window.__updateThemeToggleUI();
+  };
+  document.documentElement.setAttribute('data-color-mode', readStored());
+})();
+</script>
+<style>
+  /* ── Reset & base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* Twitter brand colors */
+  html {
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --primary: #1DA1F2;
+    --primary-light: #4FC3F7;
+    --primary-dark: #0D8BD9;
+    color-scheme: light;
+    --bg: #F5F7FA;
+    --surface: #FFFFFF;
+    --surface2: #F8F9FA;
+    --border: #E1E4E8;
+    --border-light: #EAECF0;
+    --text: #1F2937;
+    --text-secondary: #4B5563;
+    --text-muted: #6B7280;
+    --card-bg: #FFFFFF;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --card-shadow-hover: 0 4px 12px rgba(0,0,0,0.08);
+    scroll-behavior: smooth;
+  }
+  html[data-color-mode="dark"] {
+    color-scheme: dark;
+    --bg: #15202B;
+    --surface: #192734;
+    --surface2: #22303C;
+    --border: #38444D;
+    --border-light: #4B5563;
+    --text: #FFFFFF;
+    --text-secondary: #D1D5DB;
+    --text-muted: #8899A6;
+    --card-bg: #192734;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.15);
+    --card-shadow-hover: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Container ── */
+  .container {
+    max-width: 800px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+
+  /* ── Header Card ── */
+  .header-card {
+    background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 50%, var(--primary-light) 100%);
+    color: #FFFFFF;
+    padding: 28px 32px;
+    border-radius: 12px;
+    margin-bottom: 24px;
+    position: relative;
+    box-shadow: 0 4px 20px rgba(29,161,242,0.25);
+  }
+  .header-card h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0 0 12px 0;
+    letter-spacing: -0.5px;
+  }
+  .header-card .header-note,
+  .header-card .header-generated {
+    color: #FFFFFF;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .header-card .header-generated {
+    margin-top: 8px;
+    font-weight: 500;
+  }
+  .header-card .header-note {
+    margin-top: 6px;
+  }
+  .header-card .theme-toggle {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 16px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.1);
+  }
+  .header-card .theme-toggle button {
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.75);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .header-card .theme-toggle button:hover { color: #fff; }
+  .header-card .theme-toggle button.active {
+    background: rgba(255,255,255,0.2);
+    color: #fff;
+  }
+
+  /* ── Content Card ── */
+  .content-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px 32px;
+    margin-bottom: 16px;
+    box-shadow: var(--card-shadow);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  .content-card:hover {
+    box-shadow: var(--card-shadow-hover);
+    border-color: var(--border-light);
+  }
+
+  /* ── Markdown Content Styles ── */
+  .markdown-content {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  /* Headings */
+  .markdown-content h1 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 24px 0 16px 0;
+    color: var(--primary);
+    border-bottom: 1px solid var(--border-light);
+    padding-bottom: 8px;
+  }
+  .markdown-content h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 20px 0 12px 0;
+    color: var(--text);
+  }
+  .markdown-content h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 16px 0 10px 0;
+    color: var(--text-secondary);
+  }
+  .markdown-content h4 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 14px 0 8px 0;
+    color: var(--text-muted);
+  }
+
+  /* Paragraphs */
+  .markdown-content p {
+    margin-bottom: 12px;
+  }
+  .markdown-content p:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Lists */
+  .markdown-content ul,
+  .markdown-content ol {
+    margin: 12px 0;
+    padding-left: 24px;
+  }
+  .markdown-content li {
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+  }
+  .markdown-content ul li::marker {
+    color: var(--primary);
+  }
+  .markdown-content ol li::marker {
+    color: var(--primary);
+    font-weight: 500;
+  }
+
+  /* Strong & Emphasis */
+  .markdown-content strong {
+    font-weight: 600;
+    color: var(--text);
+  }
+  .markdown-content em {
+    font-style: italic;
+    color: var(--text-muted);
+  }
+
+  /* Blockquotes */
+  .markdown-content blockquote {
+    margin: 16px 0;
+    padding: 12px 16px;
+    border-left: 3px solid var(--primary);
+    background: var(--surface2);
+    border-radius: 0 6px 6px 0;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+  .markdown-content blockquote p {
+    margin-bottom: 0;
+  }
+
+  /* Code */
+  .markdown-content code {
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 13px;
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+  }
+  .markdown-content pre {
+    margin: 16px 0;
+    padding: 16px;
+    background: var(--surface2);
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+  .markdown-content pre code {
+    background: transparent;
+    padding: 0;
+  }
+
+  /* Tables */
+  .markdown-content table {
+    width: 100%;
+    margin: 16px 0;
+    border-collapse: collapse;
+  }
+  .markdown-content th,
+  .markdown-content td {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    text-align: left;
+  }
+  .markdown-content th {
+    background: var(--surface2);
+    font-weight: 600;
+    color: var(--text);
+  }
+  .markdown-content td {
+    color: var(--text-secondary);
+  }
+
+  /* Horizontal Rule */
+  .markdown-content hr {
+    margin: 24px 0;
+    border: none;
+    border-top: 1px solid var(--border-light);
+  }
+
+  /* ── Tweet Reference Links ── */
+  .tweet-ref {
+    color: var(--primary);
+    font-weight: 500;
+    text-decoration: none;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Menlo', monospace;
+    padding: 2px 6px;
+    background: var(--surface2);
+    border-radius: 4px;
+    margin: 0 2px;
+    transition: all 0.15s ease;
+    border: 1px solid var(--border-light);
+    cursor: pointer;
+  }
+  .tweet-ref:hover {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+    text-decoration: none;
+  }
+
+  /* ── Footer ── */
+  .page-footer {
+    margin-top: 32px;
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .page-footer .brand {
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 640px) {
+    .container {
+      padding: 20px 16px;
+    }
+    .header-card {
+      padding: 20px 20px;
+      border-radius: 10px;
+    }
+    .header-card h1 {
+      font-size: 20px;
+    }
+    .header-card .theme-toggle {
+      top: 16px;
+      right: 16px;
+    }
+    .content-card {
+      padding: 20px 20px;
+      border-radius: 8px;
+    }
+    .markdown-content h1 { font-size: 18px; }
+    .markdown-content h2 { font-size: 15px; }
+    .markdown-content h3 { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="header-card">
+    <div class="theme-toggle" role="group" aria-label="Color theme">
+      <button type="button" data-theme-toggle="light" aria-pressed="false">Light</button>
+      <button type="button" data-theme-toggle="dark" aria-pressed="false">Dark</button>
+    </div>
+    <h1>Twitter Daily Report</h1>
+    {% if generated_at_beijing %}
+    <div class="header-generated">{{ generated_at_beijing }}</div>
+    {% elif generated_at_new_york %}
+    <div class="header-generated">{{ generated_at_new_york }}</div>
+    {% elif generated_at %}
+    <div class="header-generated">{{ generated_at }}</div>
+    {% endif %}
+    <div class="header-note">{{ report_date }} · {{ tweet_count }} tweets from {{ author_count }} authors</div>
+  </div>
+
+  <!-- Markdown Content -->
+  <div class="content-card">
+    <div class="markdown-content">
+      {{ content_html | safe }}
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="page-footer">
+    Generated by <span class="brand">GuanHe Capital</span>
+  </div>
+
+</div>
+
+<script>
+function initThemeToggle() {
+  document.querySelectorAll('[data-theme-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (typeof window.__setReportColorMode === 'function') {
+        window.__setReportColorMode(btn.getAttribute('data-theme-toggle'));
+      }
+    });
+  });
+  if (typeof window.__updateThemeToggleUI === 'function') window.__updateThemeToggleUI();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  initThemeToggle();
+});
+</script>
+
+</body>
+</html>

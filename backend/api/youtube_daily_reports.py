@@ -215,7 +215,13 @@ async def get_shared_youtube_report(token: str):
             raise HTTPException(status_code=404, detail="报告不存在或未生成")
         return HTMLResponse(
             content=html_bytes.decode("utf-8"),
-            headers={"Cache-Control": "public, max-age=3600"},
+            headers={
+                # 禁止缓存，确保用户每次都能看到最新内容
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "Content-Type": "text/html; charset=utf-8",
+            },
         )
     except HTTPException:
         raise

@@ -681,177 +681,32 @@ class TwitterDailyReportService:
 
     # ── HTML Rendering & OSS Upload ───────────────────────────────────────
 
-    def _parse_markdown_structure(self, markdown_content: str, metadata: Dict) -> Dict:
+    def _markdown_to_html(self, markdown_content: str) -> str:
         """
-        解析 Markdown 报告结构，提取各部分内容。
-
-        Returns:
-            {
-                'executive_summary': str,
-                'key_highlights': str,
-                'author_summaries': [
-                    {'author_name': str, 'author_handle': str, 'content': str, 'tweet_count': int}
-                ],
-                'tweet_references': dict,
-            }
+        使用 mistune 库将 Markdown 转换为 HTML。
+        相比手写正则更稳定，支持完整 Markdown 语法。
         """
-        import re
-        sections = {}
-        current_section = None
-        current_content = []
+        import mistune
+        import mistune.plugins.table as table_plugin
 
-        # 按标题分割
-        lines = markdown_content.split('\n')
-        for line in lines:
-            # 主标题 - 通常是报告标题（跳过）
-            if line.startswith('# ') and 'Twitter' in line:
-                continue
-            elif line.startswith('# '):
-                if current_section:
-                    sections[current_section] = '\n'.join(current_content).strip()
-                current_section = 'executive_summary'
-                current_content = []
-            elif line.startswith('## '):
-                # 保存之前的内容
-                if current_section:
-                    existing = sections.get(current_section, '')
-                    new_content = '\n'.join(current_content).strip()
-                    if existing and new_content:
-                        sections[current_section] = existing + '\n\n' + new_content
-                    elif new_content:
-                        sections[current_section] = new_content
-                elif current_content:
-                    sections['executive_summary'] = '\n'.join(current_content).strip()
-
-                section_title = line[3:].lower()
-                # 识别附录
-                if 'appendix' in section_title or '附录' in section_title:
-                    current_section = 'appendix_header'
-                # 识别 Thematic Deep Dives
-                elif 'deep' in section_title or 'dives' in section_title or '深度' in section_title or '分析' in section_title:
-                    current_section = 'thematic_deep_dives'
-                else:
-                    # 其他 ## 标题当作 key_highlights（合并内容）
-                    current_section = 'key_highlights'
-                current_content = []
-            elif line.startswith('### '):
-                # 在 thematic_deep_dives 中，### 标题作为子标题保留
-                if current_section and current_section != 'thematic_deep_dives':
-                    existing = sections.get(current_section, '')
-                    new_content = '\n'.join(current_content).strip()
-                    if existing and new_content:
-                        sections[current_section] = existing + '\n\n' + new_content
-                    elif new_content:
-                        sections[current_section] = new_content
-                    author_title = line[4:]
-                    current_section = f'author_{author_title}'
-                    current_content = []
-                else:
-                    # 在 thematic_deep_dives 中，保留 ### 标题作为内容
-                    current_content.append(line)
-            else:
-                current_content.append(line)
-
-        # 保存最后一个 section
-        if current_section:
-            sections[current_section] = '\n'.join(current_content).strip()
-
-        # 提取作者摘要信息
-        author_summaries = []
-        tweet_references = metadata.get('tweet_references', {})
-
-        # 从 tweet_references 反查作者信息
-        author_info_map = {}
-        for ref in tweet_references:
-            author = ref.get('author', '')
-            if author and author not in author_info_map:
-                author_info_map[author] = {
-                    'name': author,
-                    'handle': f'@{author}',
-                    'tweet_count': 0,
-                }
-            if author:
-                author_info_map[author]['tweet_count'] += 1
-
-        # 解析作者摘要 sections
-        for key, content in sections.items():
-            if key.startswith('author_'):
-                # 解析作者名称: "S1 — @author_name" 或 "S1: author_name"
-                title_part = key.replace('author_', '')
-                author_name = title_part
-
-                # 尝试从标题提取作者名
-                match = re.search(r'S\d+\s*[\—:–-]\s*@?([^\s]+)', title_part)
-                if match:
-                    author_name = match.group(1)
-
-                # 从 tweet_references 获取作者信息
-                author_info = author_info_map.get(author_name, {
-                    'name': author_name,
-                    'handle': f'@{author_name}',
-                    'tweet_count': 0,
-                })
-
-                author_summaries.append({
-                    'author_name': author_info.get('name', author_name),
-                    'author_handle': author_info.get('handle', f'@{author_name}'),
-                    'content': self._markdown_to_html(content),
-                    'tweet_count': author_info.get('tweet_count', 0),
-                })
-
-        # 如果没有解析到作者摘要，尝试从 sections 中提取所有 author_ 开头的
-        if not author_summaries:
-            for key, content in sections.items():
-                if key.startswith('author_') and content:
-                    author_summaries.append({
-                        'author_name': key.replace('author_', ''),
-                        'author_handle': f'@{key.replace("author_", "")}',
-                        'content': self._markdown_to_html(content),
-                        'tweet_count': 0,
-                    })
-
-        return {
-            'executive_summary': self._markdown_to_html(sections.get('executive_summary', '')),
-            'key_highlights': self._markdown_to_html(sections.get('key_highlights', '')),
-            'thematic_deep_dives': self._markdown_to_html(sections.get('thematic_deep_dives', '')),
-            'author_summaries': author_summaries,
-            'tweet_references': tweet_references,
-        }
-
-    def _markdown_to_html(self, markdown_text: str) -> str:
-        """简单 Markdown 转 HTML（处理列表、段落、加粗、标题等）。"""
-        import re
-        if not markdown_text:
+        if not markdown_content:
             return ''
 
-        # 处理 ### 标题
-        text = re.sub(r'^### (.+)$', r'<h4>\1</h4>', markdown_text, flags=re.MULTILINE)
-        # 处理加粗
-        text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
-        # 处理斜体
-        text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
-        # 处理列表项
-        text = re.sub(r'^\s*[-*]\s+(.+)$', r'<li>\1</li>', text, flags=re.MULTILINE)
-        # 包裹连续的 li 为 ul
-        text = re.sub(r'(<li>.+?</li>\n)+', r'<ul>\g<0></ul>\n', text)
-        # 处理段落（非空行、非标题、非列表）
-        lines = text.split('\n')
-        html_lines = []
-        in_list = False
-        for line in lines:
-            if line.startswith('<ul>') or line.startswith('<li'):
-                in_list = True
-                html_lines.append(line)
-            elif line.startswith('</ul>'):
-                in_list = False
-                html_lines.append(line)
-            elif line.startswith('<h4>'):
-                html_lines.append(line)
-            elif line.strip() and not in_list:
-                html_lines.append(f'<p>{line}</p>')
-            else:
-                html_lines.append(line)
-        return '\n'.join(html_lines)
+        # 预处理：删除首行主标题（避免与 Header 日期重复）
+        lines = markdown_content.split('\n')
+        if lines and lines[0].startswith('# ') and ('Twitter' in lines[0] or 'Daily Report' in lines[0]):
+            lines = lines[1:]  # 删除第一行标题
+            # 同时删除标题后的空行（如果有）
+            if lines and lines[0].strip() == '':
+                lines = lines[1:]
+        markdown_content = '\n'.join(lines)
+
+        # 创建 mistune 解析器，启用表格插件
+        renderer = mistune.HTMLRenderer()
+        markdown_parser = mistune.Markdown(renderer, plugins=[table_plugin.table])
+
+        html = markdown_parser(markdown_content)
+        return html
 
     def _inject_tweet_links(self, content: str, tweet_refs: List[Dict]) -> str:
         """将 [T-xxx] 引用替换为可点击的链接。"""
@@ -879,8 +734,8 @@ class TwitterDailyReportService:
 
         return re.sub(pattern, replace_ref, content)
 
-    def _render_html(self, parsed_data: Dict, metadata: Dict) -> str:
-        """使用 Jinja2 模板渲染结构化 HTML。"""
+    def _render_html(self, report_content: str, metadata: Dict) -> str:
+        """使用 Jinja2 模板渲染 HTML。简化版：直接渲染 Markdown 内容，不做结构解析。"""
         from jinja2 import Environment, FileSystemLoader, select_autoescape
         import os
 
@@ -889,57 +744,34 @@ class TwitterDailyReportService:
             loader=FileSystemLoader(os.path.abspath(template_dir)),
             autoescape=select_autoescape(["html"]),
         )
-        template = env.get_template("twitter_report.html.j2")
+        # 使用简化模板
+        template = env.get_template("twitter_report_simple.html.j2")
 
         report_date = metadata.get('report_date', '')
         if isinstance(report_date, date):
             report_date = report_date.strftime("%B %d, %Y")
         elif isinstance(report_date, str):
-            # 尝试格式化日期
             try:
                 report_date = datetime.fromisoformat(report_date).strftime("%B %d, %Y")
             except:
                 pass
 
-        # Calculate generation time in different timezones
+        # 计算生成时间（不同时区）
         gen_time_utc = datetime.now(timezone.utc)
         time_display = _build_generation_time_display(gen_time_utc)
 
-        # 处理推文引用链接替换
-        executive_summary = self._inject_tweet_links(
-            parsed_data.get('executive_summary', ''),
-            parsed_data.get('tweet_references', [])
-        )
-        key_highlights = self._inject_tweet_links(
-            parsed_data.get('key_highlights', ''),
-            parsed_data.get('tweet_references', [])
-        )
-        thematic_deep_dives = self._inject_tweet_links(
-            parsed_data.get('thematic_deep_dives', ''),
-            parsed_data.get('tweet_references', [])
-        )
+        # 1. 先替换引用链接 [T-xxx]（在 mistune 渲染之前）
+        tweet_refs = metadata.get('tweet_references', [])
+        report_content = self._inject_tweet_links(report_content, tweet_refs)
 
-        # 处理作者摘要中的引用链接（不显示）
-        author_summaries = []
-        for author in parsed_data.get('author_summaries', []):
-            author_summaries.append({
-                'author_name': author.get('author_name', ''),
-                'author_handle': author.get('author_handle', ''),
-                'content': self._inject_tweet_links(
-                    author.get('content', ''),
-                    parsed_data.get('tweet_references', [])
-                ),
-                'tweet_count': author.get('tweet_count', 0),
-            })
+        # 2. 然后 Markdown 转 HTML（使用 mistune）
+        content_html = self._markdown_to_html(report_content)
 
         html = template.render(
             report_date=report_date,
             author_count=metadata.get('author_count', 0),
             tweet_count=metadata.get('tweet_count', 0),
-            executive_summary=executive_summary,
-            key_highlights=key_highlights,
-            thematic_deep_dives=thematic_deep_dives,
-            author_summaries=author_summaries,
+            content_html=content_html,
             generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
             generated_at_new_york=time_display['generated_at_new_york'],
             generated_at_beijing=time_display['generated_at_beijing'],
@@ -956,6 +788,7 @@ class TwitterDailyReportService:
     ) -> Dict[str, Any]:
         """
         渲染 HTML 报告并上传到 OSS，生成 share_token。
+        简化版：直接渲染 Markdown，不做复杂解析。
 
         Returns:
             {'success': bool, 'oss_object_name': str, 'share_token': str, 'html_content': str}
@@ -964,16 +797,13 @@ class TwitterDailyReportService:
         from backend.services.oss_service import OSSService
 
         try:
-            # 1. 解析 Markdown 结构
-            parsed_data = self._parse_markdown_structure(report_content, metadata)
-
-            # Ensure report_date is in metadata
+            # 确保 report_date 在 metadata 中
             metadata['report_date'] = report_date
 
-            # 2. 渲染 HTML
-            html_content = self._render_html(parsed_data, metadata)
+            # 1. 渲染 HTML（直接 Markdown → HTML）
+            html_content = self._render_html(report_content, metadata)
 
-            # 3. 上传到 OSS
+            # 2. 上传到 OSS
             oss_service = OSSService()
             date_str = report_date.strftime("%Y%m%d")
             oss_object_name = f"reports/Twitter/{user_id}/report_{date_str}.html"
@@ -988,10 +818,10 @@ class TwitterDailyReportService:
                 logger.error(f"OSS 上传失败: {upload_result.get('error')}")
                 return {'success': False, 'error': upload_result.get('error')}
 
-            # 4. 生成 share_token
+            # 3. 生成 share_token
             share_token = uuid4().hex
 
-            # 5. 更新数据库
+            # 4. 更新数据库
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
             try:

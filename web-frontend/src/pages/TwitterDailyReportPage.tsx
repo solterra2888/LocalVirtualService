@@ -261,7 +261,7 @@ const TwitterDailyReportPageInner: React.FC = () => {
         ) : latest?.share_token ? (
           <iframe
             key={iframeKey}
-            src={`/api/reports/twitter-daily/shared/${latest.share_token}`}
+            src={`/api/reports/twitter-daily/shared/${latest.share_token}?t=${iframeKey}`}
             title="Twitter Daily Report"
             style={{
               width: '100%',
