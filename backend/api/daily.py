@@ -271,6 +271,7 @@ _UPLOAD_SQL = """
              400)          AS content_snippet,
         NULL::text                                    AS author_name,
         NULL::text                                    AS author_identifier,
+        NULL::text                                    AS author_avatar,
         CASE
             WHEN lower(fpd.file_type::text) IN ('youtube', 'web')
                  AND fpd.original_file_path LIKE 'http%%'
@@ -365,6 +366,7 @@ _FEED_SQL = """
         LEFT(COALESCE(sc.content, sc.transcript, ''), 400) AS content_snippet,
         sc.author_name                                AS author_name,
         sc.author_identifier                          AS author_identifier,
+        sc.author_avatar                              AS author_avatar,
         sc.url                                        AS external_url,
         sct.sector                                    AS sector,
         sct.industry                                  AS industry,
@@ -637,6 +639,7 @@ def _row_to_item(
         content_snippet,
         author_name,
         author_identifier,
+        author_avatar,
         external_url,
         sector,
         industry,
@@ -699,6 +702,7 @@ def _row_to_item(
         snippet=snippet_text,
         author_name=author_name,
         author_identifier=author_identifier,
+        author_avatar=author_avatar,
         sector=sector,
         industry=industry,
         tickers=_ensure_list(ticker_raw),
@@ -1408,7 +1412,7 @@ def _fetch_feed_detail(
         SELECT
             sc.id, sc.channel_type, sc.content_id,
             sc.title, sc.content,
-            sc.author_name, sc.author_identifier,
+            sc.author_name, sc.author_identifier, sc.author_avatar,
             sc.url, sc.media_urls, sc.published_at,
             sc.engagement_count, sc.view_count,
             sc.metadata, sc.heat_level,
@@ -1448,7 +1452,7 @@ def _fetch_feed_detail(
     (
         item_id, channel_type, content_id_raw,
         title, content,
-        author_name, author_identifier,
+        author_name, author_identifier, author_avatar,
         url, media_urls, published_at,
         _engagement_count, _view_count,
         metadata, heat_level,
@@ -1537,6 +1541,7 @@ def _fetch_feed_detail(
         content=content,
         author_name=author_name,
         author_identifier=author_identifier,
+        author_avatar=author_avatar,
         url=url,
         media_urls=list(media_urls) if media_urls else None,
         metadata=metadata if isinstance(metadata, dict) else None,

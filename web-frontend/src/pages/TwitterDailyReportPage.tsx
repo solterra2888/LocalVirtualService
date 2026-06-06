@@ -1,19 +1,22 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Layout, Typography, Spin, Empty, Space,
-  List, App, Tooltip, ConfigProvider, theme as antdTheme, DatePicker, Button, Switch,
+  Button,
+  Tooltip,
+  Empty,
+  Spin,
+  ConfigProvider,
+  theme as antdTheme,
+  App,
+  Switch,
 } from 'antd';
 import {
-  FileTextOutlined,
-  CalendarOutlined,
-  ThunderboltOutlined,
-  RobotOutlined,
-  ShareAltOutlined,
   ReloadOutlined,
   LinkOutlined,
+  ThunderboltOutlined,
+  ShareAltOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { DailyReportStatusTag } from '../components/reports/DailyReportStatusTag';
 import { FEED_THEME_COLORS } from '../components/feed/feedTheme';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import {
@@ -22,26 +25,21 @@ import {
 } from '../services/twitterDailyReports';
 import { useDailyReportStatusPoll } from '../hooks/useDailyReportStatusPoll';
 
-const { Content } = Layout;
-const { Title, Text } = Typography;
-
 const TwitterDailyReportPageInner: React.FC = () => {
   const { message } = App.useApp();
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const themeColors = FEED_THEME_COLORS[themeMode];
 
-  const [reports, setReports] = useState<TwitterDailyReport[]>([]);
-  const [selectedReport, setSelectedReport] = useState<TwitterDailyReport | null>(null);
+  const [latest, setLatest] = useState<TwitterDailyReport | null>(null);
   const [loading, setLoading] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [iframeKey, setIframeKey] = useState(0);
   const [autoEnabled, setAutoEnabled] = useState<boolean>(false);
   const [autoToggling, setAutoToggling] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<dayjs.Dayjs>(() => dayjs().subtract(1, 'day'));
 
-  const selectedReportDateRef = useRef<string | null>(null);
-  selectedReportDateRef.current = selectedReport?.report_date ?? null;
+  const reportDateRef = useRef<string | null>(null);
+  reportDateRef.current = latest?.report_date ?? null;
   const { startPoll, clearPoll } = useDailyReportStatusPoll();
 
   // ── Auto settings ──────────────────────────────────────────────────────
@@ -69,46 +67,28 @@ const TwitterDailyReportPageInner: React.FC = () => {
     }
   }, [message]);
 
-  // ── Reports list ───────────────────────────────────────────────────────
-  const loadReportDetail = useCallback(async (dateStr: string) => {
-    setDetailLoading(true);
+  // ── Load latest report ───────────────────────────────────────────────────
+  const loadData = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await twitterDailyReportsAPI.getReportByDate(dateStr);
-      if (res.success) {
-        setSelectedReport(res.data ?? null);
-        if (res.data?.report_date) {
-          setSelectedDate(dayjs(res.data.report_date));
-        }
+      const res = await twitterDailyReportsAPI.getLatestReport();
+      if (res.success && res.data) {
+        setLatest(res.data);
+      } else {
+        setLatest(null);
       }
-    } catch {
+    } catch (err) {
+      console.error('Failed to load Twitter Daily Report:', err);
       message.error('Failed to load report');
     } finally {
-      setDetailLoading(false);
+      setLoading(false);
     }
   }, [message]);
 
-  const loadReports = useCallback(async (options?: { quiet?: boolean }) => {
-    const quiet = options?.quiet === true;
-    if (!quiet) setLoading(true);
-    try {
-      const res = await twitterDailyReportsAPI.listReports(60, 0);
-      if (res.success && res.data) {
-        setReports(res.data.reports);
-        if (res.data.reports.length > 0 && !selectedReport) {
-          loadReportDetail(res.data.reports[0].report_date);
-        }
-      }
-    } catch {
-      if (!quiet) message.error('Failed to load report list');
-    } finally {
-      if (!quiet) setLoading(false);
-    }
-  }, [selectedReport, loadReportDetail, message]);
-
   useEffect(() => {
-    loadReports();
+    loadData();
     loadAutoSettings();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadData, loadAutoSettings]);
 
   // ── Generate ───────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
@@ -118,271 +98,213 @@ const TwitterDailyReportPageInner: React.FC = () => {
     try {
       const res = await twitterDailyReportsAPI.generateReport(dateStr, true);
       if (!res.success) {
-        message.error(res.error || 'Failed to trigger report generation');
+        // Show detailed error message
+        const errorMsg = res.error || 'Failed to trigger report generation';
+        message.error(errorMsg);
         setGenerating(false);
         return;
       }
       message.success(`Report generation started for ${dateStr}. It may take a few minutes.`);
-      await loadReports();
-      await loadReportDetail(dateStr);
       startPoll(dateStr, {
         fetchReport: twitterDailyReportsAPI.getReportByDate,
-        refreshList: () => loadReports({ quiet: true }),
-        syncDetailIfViewing: () => selectedReportDateRef.current === dateStr,
-        setDetail: (r) => setSelectedReport(r as TwitterDailyReport),
+        refreshList: loadData,
+        syncDetailIfViewing: () => reportDateRef.current === dateStr,
+        setDetail: (r) => {
+          setLatest(r as TwitterDailyReport);
+          // Auto refresh iframe when report is completed
+          if (r.status === 'completed') {
+            setIframeKey(k => k + 1);
+          }
+        },
         onDone: () => setGenerating(false),
       });
     } catch {
       message.error('Failed to trigger report generation');
       setGenerating(false);
     }
-  }, [loadReports, loadReportDetail, message, clearPoll, startPoll]);
+  }, [loadData, message, clearPoll, startPoll]);
 
-  const handleSelectReport = (report: TwitterDailyReport) => {
-    setSelectedDate(dayjs(report.report_date));
-    if (report.report_content || report.share_token) {
-      setSelectedReport(report);
-    } else {
-      loadReportDetail(report.report_date);
-    }
+  const handleRefresh = async () => {
+    setIframeKey(k => k + 1);
+    message.success('Refreshed');
   };
 
-  const handleDateChange = (date: dayjs.Dayjs | null) => {
-    if (!date) return;
-    setSelectedDate(date);
-    loadReportDetail(date.format('YYYY-MM-DD'));
-  };
-
-  // ── Styling ────────────────────────────────────────────────────────────
-  const panelBg = themeColors.pageBg;
-  const borderColor = themeColors.cardBorder;
-  const sidebarBg = themeColors.cardBg;
-  const cardBg = themeColors.cardBg;
-
-  // ── Share Handler ───────────────────────────────────────────────────────
-  const handleShare = useCallback(async () => {
-    if (!selectedReport?.share_token) {
-      message.warning('This report does not have a share link yet. Please wait for generation to complete.');
+  const handleShare = async () => {
+    if (!latest?.share_token) {
+      message.warning('This report does not have a share link yet.');
       return;
     }
-    const shareUrl = `${window.location.origin}/api/reports/twitter-daily/shared/${selectedReport.share_token}`;
+    const url = `${window.location.origin}/api/reports/twitter-daily/shared/${latest.share_token}`;
     try {
-      await navigator.clipboard.writeText(shareUrl);
+      await navigator.clipboard.writeText(url);
       message.success('Share link copied to clipboard');
     } catch {
-      message.info(`Share link: ${shareUrl}`);
+      message.info(`Share link: ${url}`);
     }
-  }, [selectedReport, message]);
+  };
 
-  // ── iframe key for force refresh ───────────────────────────────────────
-  const [iframeKey, setIframeKey] = useState(0);
+  // ── Styles ────────────────────────────────────────────────────────────
+  const bgColor = themeColors.pageBg;
+  const cardBg = themeColors.cardBg;
+  const borderColor = themeColors.cardBorder;
 
   return (
-    <Layout style={{ height: '100%', background: 'transparent' }}>
-      {/* Sidebar - 报告列表选择器 */}
-      <Layout.Sider
-        width={240}
-        style={{
-          background: sidebarBg,
-          borderRight: `1px solid ${borderColor}`,
-          overflow: 'auto',
-          height: '100%',
-        }}
-      >
-        <div style={{ padding: '16px 12px 8px' }}>
-          <Title level={5} style={{ margin: 0, marginBottom: 10 }}>
-            <FileTextOutlined style={{ marginRight: 6 }} />Reports
-          </Title>
-
-          <Text strong style={{ display: 'block', marginBottom: 6, fontSize: 12, color: themeColors.text }}>
-            <CalendarOutlined style={{ marginRight: 6 }} />
-            Select date
-          </Text>
-          <DatePicker
-            value={selectedDate}
-            onChange={handleDateChange}
-            style={{ width: '100%', marginBottom: 12 }}
-            allowClear={false}
-          />
-        </div>
-
-        <List
-          loading={loading}
-          dataSource={reports}
-          locale={{ emptyText: <Empty description="No reports yet" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-          renderItem={(item) => {
-            const isSelected = selectedReport?.id === item.id;
-            const meta = item.metadata;
-            return (
-              <List.Item
-                onClick={() => handleSelectReport(item)}
-                style={{
-                  padding: '10px 12px',
-                  cursor: 'pointer',
-                  background: isSelected ? themeColors.selectedItemBg : 'transparent',
-                  borderBottom: `1px solid ${borderColor}`,
-                  transition: 'background 0.2s',
-                }}
-              >
-                <div style={{ width: '100%' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text strong style={{ fontSize: 13 }}>
-                      <CalendarOutlined style={{ marginRight: 4 }} />
-                      {item.report_date}
-                    </Text>
-                    <DailyReportStatusTag status={item.status} dark={isDark} compact />
-                  </div>
-                  {meta && item.status === 'completed' && (
-                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 2 }}>
-                      {meta.tweet_count} tweets &middot; {meta.author_count} authors
-                      {meta.generation_time_seconds != null && ` · ${meta.generation_time_seconds}s`}
-                    </Text>
-                  )}
-                  {item.status === 'failed' && item.error_message && (
-                    <Text type="danger" style={{ fontSize: 11, display: 'block', marginTop: 2 }} ellipsis>
-                      {item.error_message}
-                    </Text>
-                  )}
-                </div>
-              </List.Item>
-            );
-          }}
-        />
-      </Layout.Sider>
-
-      {/* Main content - 参考 Theme Report 布局 */}
-      <Content style={{ overflow: 'hidden', padding: 24, background: panelBg }}>
+    <div style={{ padding: '24px 32px', background: bgColor, minHeight: 'calc(100vh - 64px)' }}>
+      <div style={{
+        background: cardBg,
+        border: `1px solid ${borderColor}`,
+        borderRadius: 8,
+        overflow: 'hidden',
+        position: 'relative',
+      }}>
+        {/* Floating toolbar - right top corner */}
         <div style={{
-          background: cardBg,
-          border: `1px solid ${borderColor}`,
-          borderRadius: 8,
-          overflow: 'hidden',
-          height: '100%',
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          zIndex: 10,
           display: 'flex',
-          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 8,
+          background: isDark ? 'rgba(26,29,39,0.9)' : 'rgba(255,255,255,0.9)',
+          padding: '8px 12px',
+          borderRadius: 6,
+          boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.1)',
         }}>
-          {/* Toolbar - 参考 Theme Report */}
-          <div style={{
-            padding: '14px 16px',
-            borderBottom: `1px solid ${borderColor}`,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Text strong style={{ fontSize: 14 }}>
-                  {selectedReport?.report_date || 'Twitter Daily Report'}
-                </Text>
-                {selectedReport && (
-                  <DailyReportStatusTag status={selectedReport.status} dark={isDark} />
-                )}
-                {selectedReport?.metadata?.tweet_count != null && (
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {selectedReport.metadata.tweet_count} tweets &middot; {selectedReport.metadata.author_count} authors
-                  </Text>
-                )}
-              </div>
-            </div>
-            <Space size="small">
-              {/* Auto-generate Switch */}
-              <Tooltip title={autoEnabled ? 'Auto-generation ON — click to disable' : 'Auto-generation OFF — click to enable'}>
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  background: autoEnabled
-                    ? (isDark ? 'rgba(33,150,243,0.12)' : 'rgba(33,150,243,0.08)')
-                    : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
-                }}>
-                  <RobotOutlined style={{ color: autoEnabled ? '#2196F3' : themeColors.textSecondary, fontSize: 12 }} />
-                  <Switch
-                    size="small"
-                    checked={autoEnabled}
-                    loading={autoToggling}
-                    onChange={handleAutoToggle}
-                  />
-                </div>
-              </Tooltip>
-
-              {/* Generate */}
-              <Tooltip title="Generate yesterday's report">
-                <Button
-                  type="primary"
-                  size="small"
-                  icon={<ThunderboltOutlined />}
-                  loading={generating}
-                  onClick={handleGenerate}
-                />
-              </Tooltip>
-
-              {/* Refresh */}
-              <Tooltip title="Refresh report">
-                <Button
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  onClick={() => setIframeKey(prev => prev + 1)}
-                />
-              </Tooltip>
-
-              {/* Open in new tab */}
-              {selectedReport?.share_token && (
-                <Tooltip title="Open in new tab">
-                  <Button
-                    size="small"
-                    icon={<LinkOutlined />}
-                    href={`/api/reports/twitter-daily/shared/${selectedReport.share_token}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  />
-                </Tooltip>
-              )}
-
-              {/* Share */}
-              <Tooltip title={selectedReport?.share_token ? 'Copy share link' : 'No report to share'}>
-                <Button
-                  size="small"
-                  icon={<ShareAltOutlined />}
-                  disabled={!selectedReport?.share_token}
-                  onClick={handleShare}
-                />
-              </Tooltip>
-            </Space>
-          </div>
-
-          {/* Content */}
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            {detailLoading ? (
-              <div style={{ textAlign: 'center', paddingTop: 120 }}>
-                <Spin size="large" tip="Loading report..." />
-              </div>
-            ) : selectedReport?.share_token ? (
-              <iframe
-                key={iframeKey}
-                src={`/api/reports/twitter-daily/shared/${selectedReport.share_token}`}
-                title="Twitter Daily Report"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  border: 'none',
-                  display: 'block',
-                }}
+          {/* Auto-generate Switch */}
+          <Tooltip title={autoEnabled ? 'Auto-generation ON — click to disable' : 'Auto-generation OFF — click to enable'}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}>
+              <RobotOutlined style={{ color: autoEnabled ? '#2196F3' : themeColors.textSecondary, fontSize: 12 }} />
+              <Switch
+                size="small"
+                checked={autoEnabled}
+                loading={autoToggling}
+                onChange={handleAutoToggle}
               />
-            ) : selectedReport?.status === 'failed' ? (
-              <div style={{ textAlign: 'center', paddingTop: 120 }}>
-                <Empty description={selectedReport.error_message || 'Report generation failed'} />
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', paddingTop: 120 }}>
-                <Empty description="Select a report from the list, or click Generate to create yesterday's report." />
-              </div>
-            )}
-          </div>
+            </div>
+          </Tooltip>
+
+          <Tooltip title="Generate yesterday's report">
+            <Button
+              type="primary"
+              size="small"
+              icon={<ThunderboltOutlined />}
+              loading={generating}
+              onClick={handleGenerate}
+            />
+          </Tooltip>
+
+          <Tooltip title="Refresh">
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={handleRefresh}
+              loading={loading}
+            />
+          </Tooltip>
+
+          {latest?.share_token && (
+            <Tooltip title="Open in new tab">
+              <Button
+                size="small"
+                icon={<LinkOutlined />}
+                href={`/api/reports/twitter-daily/shared/${latest.share_token}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              />
+            </Tooltip>
+          )}
+
+          <Tooltip title={latest?.share_token ? 'Copy share link' : 'No report to share'}>
+            <Button
+              size="small"
+              icon={<ShareAltOutlined />}
+              disabled={!latest?.share_token}
+              onClick={handleShare}
+            />
+          </Tooltip>
         </div>
-      </Content>
-    </Layout>
+
+        {/* Content */}
+        {loading ? (
+          <div style={{ padding: 48, textAlign: 'center' }}>
+            <Spin tip="Loading…" />
+          </div>
+        ) : generating || latest?.status === 'generating' || latest?.status === 'pending' ? (
+          <div style={{ padding: 48, textAlign: 'center' }}>
+            <Spin size="large" tip="Report is being generated. Please wait…" />
+            <div style={{ marginTop: 16, color: themeColors.textSecondary }}>
+              This usually takes 1-2 minutes.
+            </div>
+          </div>
+        ) : latest?.share_token ? (
+          <iframe
+            key={iframeKey}
+            src={`/api/reports/twitter-daily/shared/${latest.share_token}`}
+            title="Twitter Daily Report"
+            style={{
+              width: '100%',
+              height: 'calc(100vh - 100px)',
+              minHeight: 500,
+              border: 'none',
+              display: 'block',
+            }}
+          />
+        ) : latest?.html_content ? (
+          <div
+            style={{
+              width: '100%',
+              height: 'calc(100vh - 112px)',
+              minHeight: 500,
+              overflow: 'auto',
+              padding: 24,
+            }}
+            dangerouslySetInnerHTML={{ __html: latest.html_content }}
+          />
+        ) : latest?.status === 'failed' ? (
+          <Empty
+            style={{ padding: 48 }}
+            description={
+              <>
+                <div>Report generation failed</div>
+                {latest.error_message && (
+                  <div style={{ marginTop: 8, color: themeColors.textSecondary, fontSize: 12 }}>
+                    Reason: {latest.error_message}
+                  </div>
+                )}
+              </>
+            }
+          />
+        ) : latest?.metadata?.tweet_count === 0 || latest?.metadata?.author_count === 0 ? (
+          <Empty
+            style={{ padding: 48 }}
+            description={
+              <>
+                <div>No tweets available for this date</div>
+                <div style={{ marginTop: 8, color: themeColors.textSecondary, fontSize: 12 }}>
+                  There were no tweets from your subscribed authors on {latest?.report_date}.
+                  <br />
+                  Please check your <a href="/settings/subscriptions">Twitter subscriptions</a> or try a different date.
+                </div>
+              </>
+            }
+          />
+        ) : (
+          <Empty
+            style={{ padding: 48 }}
+            description={
+              latest
+                ? `Report status: ${latest.status}${latest.error_message ? ` — ${latest.error_message}` : ''}`
+                : 'No report yet. Click Generate to create yesterday\'s report.'
+            }
+          />
+        )}
+      </div>
+    </div>
   );
 };
 

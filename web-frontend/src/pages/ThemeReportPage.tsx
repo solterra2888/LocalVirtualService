@@ -102,7 +102,7 @@ const ThemeReportPage: React.FC = () => {
   const borderColor = isDark ? '#2e3347' : '#e8ecf2';
 
   return (
-    <div style={{ padding: '24px 32px', background: bgColor, minHeight: '100%' }}>
+    <div style={{ padding: '24px 32px', background: bgColor, minHeight: 'calc(100vh - 64px)' }}>
 
       {/* Latest report */}
       <div style={{
@@ -179,7 +179,7 @@ const ThemeReportPage: React.FC = () => {
             title="Theme Performance Report"
             style={{
               width: '100%',
-              height: 'calc(100vh - 280px)',
+              height: 'calc(100vh - 150px)',
               minHeight: 500,
               border: 'none',
               display: 'block',

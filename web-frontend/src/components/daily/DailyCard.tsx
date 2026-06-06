@@ -143,7 +143,7 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
         </div>
       )}
 
-      {/* 底部 meta 行: 作者(Feed) + 时间 + 阅读时长 + 共享 Avatar 对(Upload 共享时) */}
+      {/* 底部 meta 行: 作者头像(Feed/Twitter) + 作者名 + 时间 + 阅读时长 + 共享 Avatar 对(Upload 共享时) */}
       <div
         style={{
           display: 'flex',
@@ -155,6 +155,14 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
       >
         {item.author_name && (
           <>
+            {/* Twitter 作者头像 - 16px 小头像 */}
+            {item.source_subtype === 'twitter' && item.author_avatar && (
+              <Avatar
+                size={16}
+                src={item.author_avatar}
+                style={{ flexShrink: 0 }}
+              />
+            )}
             <span
               style={{
                 maxWidth: 180,

@@ -51,6 +51,8 @@ export interface DailyFeedItem {
   snippet: string | null;
   author_name: string | null;
   author_identifier: string | null;
+  /** 作者头像 URL (Twitter profilePicture) */
+  author_avatar?: string | null;
   sector: string | null;
   industry: string | null;
   tickers: string[];
@@ -243,6 +245,8 @@ export interface DailyItemDetailFeed {
   content: string | null;           // 正文 (twitter 推文 / youtube 描述 / news 全文)
   author_name: string | null;
   author_identifier: string | null;
+  /** 作者头像 URL (Twitter profilePicture) */
+  author_avatar?: string | null;
   url: string | null;
   media_urls: string[] | null;
   metadata: Record<string, any> | null;

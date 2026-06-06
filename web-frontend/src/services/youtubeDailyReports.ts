@@ -22,6 +22,8 @@ export interface YouTubeDailyReport {
       url: string;
       author: string;
     }>;
+    generated_at_new_york?: string;
+    generated_at_beijing?: string;
     [key: string]: any;
   };
   // 新增字段: HTML 存储 + 分享
@@ -30,6 +32,8 @@ export interface YouTubeDailyReport {
   share_token?: string | null;
   created_at?: string;
   updated_at?: string;
+  generated_at_new_york?: string;
+  generated_at_beijing?: string;
 }
 
 export interface YouTubeReportListResponse {

@@ -8,12 +8,14 @@ type ReportRow = { status: string; report_date: string };
 
 export function useDailyReportStatusPoll() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastStatusRef = useRef<string | null>(null);
 
   const clearPoll = useCallback(() => {
     if (intervalRef.current !== null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+    lastStatusRef.current = null;
   }, []);
 
   useEffect(() => () => clearPoll(), [clearPoll]);
@@ -42,12 +44,21 @@ export function useDailyReportStatusPoll() {
         try {
           const r = await opts.fetchReport(dateStr);
           if (!r.success || !r.data) return;
-          await opts.refreshList();
-          if (opts.syncDetailIfViewing()) {
-            opts.setDetail(r.data);
-          }
+
           const st = r.data.status;
+          const statusChanged = lastStatusRef.current !== st;
+
+          // Only update detail if status changed or report completed/failed
+          if (statusChanged || st === 'completed' || st === 'failed') {
+            if (opts.syncDetailIfViewing()) {
+              opts.setDetail(r.data);
+            }
+            lastStatusRef.current = st;
+          }
+
           if (st === 'completed' || st === 'failed') {
+            // Final refresh when done
+            await opts.refreshList();
             clearPoll();
             opts.onDone();
           }

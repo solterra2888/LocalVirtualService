@@ -11,8 +11,9 @@ Twitter Daily Report 服务 — AI Agent 定期为每个用户生成 Twitter 数
 
 import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
@@ -25,6 +26,25 @@ DEFAULT_PHASE2_TEMPLATE = "twitter_daily_phase2_default"
 MAX_TOKENS_OUTPUT_PHASE2 = 4000
 
 _REF_PATTERN = re.compile(r'\[T-(\d{3,})\]')
+
+
+def _build_generation_time_display(generated_at_utc: datetime) -> Dict[str, str]:
+    """Format report generation instant in NY and Beijing time."""
+    if generated_at_utc.tzinfo is None:
+        generated_at_utc = generated_at_utc.replace(tzinfo=timezone.utc)
+
+    def _fmt_in_zone(dt: datetime, tz_name: str, place_label: str) -> str:
+        local = dt.astimezone(ZoneInfo(tz_name))
+        return f"{local.strftime('%b %d, %Y %H:%M')} ({place_label})"
+
+    return {
+        "generated_at_new_york": _fmt_in_zone(
+            generated_at_utc, "America/New_York", "New York"
+        ),
+        "generated_at_beijing": _fmt_in_zone(
+            generated_at_utc, "Asia/Shanghai", "Beijing"
+        ),
+    }
 
 
 class TwitterDailyReportService:
@@ -626,6 +646,17 @@ class TwitterDailyReportService:
             for ts_field in ('created_at', 'updated_at'):
                 if report.get(ts_field):
                     report[ts_field] = report[ts_field].isoformat()
+
+            # Add generation time display (New York and Beijing)
+            if report.get('updated_at'):
+                try:
+                    gen_time = datetime.fromisoformat(report['updated_at'])
+                    time_display = _build_generation_time_display(gen_time)
+                    report['generated_at_new_york'] = time_display['generated_at_new_york']
+                    report['generated_at_beijing'] = time_display['generated_at_beijing']
+                except Exception as e:
+                    logger.warning(f"Failed to format generation time: {e}")
+
             return report
         finally:
             cursor.close()
@@ -852,6 +883,10 @@ class TwitterDailyReportService:
             except:
                 pass
 
+        # Calculate generation time in different timezones
+        gen_time_utc = datetime.now(timezone.utc)
+        time_display = _build_generation_time_display(gen_time_utc)
+
         # 处理推文引用链接替换
         executive_summary = self._inject_tweet_links(
             parsed_data.get('executive_summary', ''),
@@ -888,6 +923,8 @@ class TwitterDailyReportService:
             thematic_deep_dives=thematic_deep_dives,
             author_summaries=author_summaries,
             generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            generated_at_new_york=time_display['generated_at_new_york'],
+            generated_at_beijing=time_display['generated_at_beijing'],
         )
         return html
 
@@ -911,6 +948,9 @@ class TwitterDailyReportService:
         try:
             # 1. 解析 Markdown 结构
             parsed_data = self._parse_markdown_structure(report_content, metadata)
+
+            # Ensure report_date is in metadata
+            metadata['report_date'] = report_date
 
             # 2. 渲染 HTML
             html_content = self._render_html(parsed_data, metadata)

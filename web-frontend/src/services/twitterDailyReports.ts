@@ -23,6 +23,8 @@ export interface TwitterDailyReport {
       url: string;
       author: string;
     }>;
+    generated_at_new_york?: string;
+    generated_at_beijing?: string;
     [key: string]: any;
   };
   oss_object_name?: string;
@@ -30,6 +32,8 @@ export interface TwitterDailyReport {
   share_token?: string;
   created_at?: string;
   updated_at?: string;
+  generated_at_new_york?: string;
+  generated_at_beijing?: string;
 }
 
 export interface TwitterReportListResponse {

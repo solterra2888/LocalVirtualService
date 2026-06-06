@@ -84,6 +84,7 @@ class DailyFeedItem(BaseModel):
 
     author_name: Optional[str] = Field(None, description="作者展示名 (Feed 用)")
     author_identifier: Optional[str] = Field(None, description="作者标识 (Feed 用)")
+    author_avatar: Optional[str] = Field(None, description="作者头像 URL (Twitter profilePicture)")
 
     sector: Optional[str] = Field(None, description="GICS 一级行业 (中文)")
     industry: Optional[str] = Field(None, description="GICS 子行业 (中文)")
@@ -252,6 +253,7 @@ class DailyItemDetailFeed(BaseModel):
     )
     author_name: Optional[str] = None
     author_identifier: Optional[str] = None
+    author_avatar: Optional[str] = Field(None, description="作者头像 URL (Twitter profilePicture)")
     url: Optional[str] = Field(None, description="原始外链 (View on Twitter / Read original)")
     media_urls: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = Field(

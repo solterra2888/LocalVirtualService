@@ -348,10 +348,20 @@
     </div>
     <h1>YouTube Daily Report</h1>
     <div class="meta">
-      <span class="meta-item">📅 {{ report_date }}</span>
+      <span class="meta-item" style="color: #fff;">{{ report_date }}</span>
       <span class="meta-item">📺 {{ channel_count }} channels</span>
       <span class="meta-item">🎬 {{ video_count }} videos</span>
     </div>
+    {% if generated_at_new_york or generated_at_beijing %}
+    <div class="meta" style="margin-top: 8px; font-size: 12px;">
+      {% if generated_at_new_york %}
+      <span class="meta-item" style="color: var(--text-muted);">{{ generated_at_new_york }}</span>
+      {% endif %}
+      {% if generated_at_beijing %}
+      <span class="meta-item" style="color: var(--text-muted);">{{ generated_at_beijing }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
 
   <!-- Executive Summary -->
