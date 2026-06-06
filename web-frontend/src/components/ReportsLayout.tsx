@@ -21,7 +21,7 @@ const ReportsLayout: React.FC = () => {
   const isDark = themeMode === 'dark';
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div className="reports-page-layout" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Tabs
         activeKey={activeKey}
         onChange={(key) => navigate(key)}
@@ -46,7 +46,7 @@ const ReportsLayout: React.FC = () => {
           marginBottom: 0,
         }}
       />
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <Outlet />
       </div>
     </div>

@@ -558,12 +558,13 @@
   min-height: calc(100vh - 2 * var(--layout-sidebar-inset));
 }
 
-/* 与侧栏同高同顶：Sources / Feeds / Watchlist / Daily */
+/* 与侧栏同高同顶：Sources / Feeds / Watchlist / Daily / Reports */
 /* 锁定外层 wrapper 高度为 100vh，防止页面整体滚动 */
 .main-layout-with-sider:has(.files-page-layout) > .ant-layout:not(.layout-sidebar),
 .main-layout-with-sider:has(.feed-page-layout) > .ant-layout:not(.layout-sidebar),
 .main-layout-with-sider:has(.watchlist-page-layout) > .ant-layout:not(.layout-sidebar),
-.main-layout-with-sider:has(.daily-page-scroll-root) > .ant-layout:not(.layout-sidebar) {
+.main-layout-with-sider:has(.daily-page-scroll-root) > .ant-layout:not(.layout-sidebar),
+.main-layout-with-sider:has(.reports-page-layout) > .ant-layout:not(.layout-sidebar) {
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -575,7 +576,8 @@
 .main-layout-with-sider:has(.files-page-layout) > .ant-layout:not(.layout-sidebar) > .layout-content,
 .main-layout-with-sider:has(.feed-page-layout) > .ant-layout:not(.layout-sidebar) > .layout-content,
 .main-layout-with-sider:has(.watchlist-page-layout) > .ant-layout:not(.layout-sidebar) > .layout-content,
-.main-layout-with-sider:has(.daily-page-scroll-root) > .ant-layout:not(.layout-sidebar) > .layout-content {
+.main-layout-with-sider:has(.daily-page-scroll-root) > .ant-layout:not(.layout-sidebar) > .layout-content,
+.main-layout-with-sider:has(.reports-page-layout) > .ant-layout:not(.layout-sidebar) > .layout-content {
   flex: 1;
   min-height: 0;
 }
@@ -583,7 +585,8 @@
 .main-layout-with-sider .layout-content:has(.files-page-layout),
 .main-layout-with-sider .layout-content:has(.feed-page-layout),
 .main-layout-with-sider .layout-content:has(.watchlist-page-layout),
-.main-layout-with-sider .layout-content:has(.daily-page-scroll-root) {
+.main-layout-with-sider .layout-content:has(.daily-page-scroll-root),
+.main-layout-with-sider .layout-content:has(.reports-page-layout) {
   display: flex;
   flex-direction: column;
   margin: var(--layout-content-gap) var(--layout-content-gap) var(--layout-content-gap) 0;
@@ -602,10 +605,32 @@
 .main-layout-with-sider .layout-content:has(.feed-page-layout) > .ant-app,
 .main-layout-with-sider .layout-content:has(.watchlist-page-layout) > .ant-app,
 .main-layout-with-sider .layout-content:has(.daily-page-scroll-root) > .ant-app,
+.main-layout-with-sider .layout-content:has(.reports-page-layout) > .ant-app,
 .main-layout-with-sider .layout-content:has(.files-page-layout) > .files-page-layout,
 .main-layout-with-sider .layout-content:has(.feed-page-layout) > .feed-page-layout,
 .main-layout-with-sider .layout-content:has(.watchlist-page-layout) > .watchlist-page-layout,
-.main-layout-with-sider .layout-content:has(.daily-page-scroll-root) > .daily-page-scroll-root {
+.main-layout-with-sider .layout-content:has(.daily-page-scroll-root) > .daily-page-scroll-root,
+.main-layout-with-sider .layout-content:has(.reports-page-layout) > .reports-page-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ReportsLayout 内部子页面的 ant-app 高度链 */
+.main-layout-with-sider .layout-content:has(.reports-page-layout) .reports-page-layout > div:last-child > .ant-app {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ReportsLayout 内部子页面的实际内容层高度链 */
+.main-layout-with-sider .layout-content:has(.reports-page-layout) .reports-page-layout > div:last-child > .ant-app > div {
   display: flex;
   flex-direction: column;
   flex: 1 1 0;
@@ -617,7 +642,8 @@
 .main-layout-with-sider .layout-content:has(.files-page-layout) .files-page-layout,
 .main-layout-with-sider .layout-content:has(.feed-page-layout) .feed-page-layout,
 .main-layout-with-sider .layout-content:has(.watchlist-page-layout) .watchlist-page-layout,
-.main-layout-with-sider .layout-content:has(.daily-page-scroll-root) .daily-page-scroll-root {
+.main-layout-with-sider .layout-content:has(.daily-page-scroll-root) .daily-page-scroll-root,
+.main-layout-with-sider .layout-content:has(.reports-page-layout) .reports-page-layout {
   flex: 1 1 0;
   min-height: 0;
   width: 100%;
@@ -648,7 +674,8 @@
   .main-layout-with-sider:has(.files-page-layout) > .ant-layout:not(.layout-sidebar),
   .main-layout-with-sider:has(.feed-page-layout) > .ant-layout:not(.layout-sidebar),
   .main-layout-with-sider:has(.watchlist-page-layout) > .ant-layout:not(.layout-sidebar),
-  .main-layout-with-sider:has(.daily-page-scroll-root) > .ant-layout:not(.layout-sidebar) {
+  .main-layout-with-sider:has(.daily-page-scroll-root) > .ant-layout:not(.layout-sidebar),
+  .main-layout-with-sider:has(.reports-page-layout) > .ant-layout:not(.layout-sidebar) {
     height: 100vh;
     min-height: 100vh;
     max-height: 100vh;
@@ -659,7 +686,8 @@
   .main-layout-with-sider .layout-content:has(.files-page-layout),
   .main-layout-with-sider .layout-content:has(.feed-page-layout),
   .main-layout-with-sider .layout-content:has(.watchlist-page-layout),
-  .main-layout-with-sider .layout-content:has(.daily-page-scroll-root) {
+  .main-layout-with-sider .layout-content:has(.daily-page-scroll-root),
+  .main-layout-with-sider .layout-content:has(.reports-page-layout) {
     display: flex;
     flex-direction: column;
     margin: var(--layout-content-gap) var(--layout-content-gap) var(--layout-content-gap) 0;

@@ -102,7 +102,7 @@ const ThemeReportPage: React.FC = () => {
   const borderColor = isDark ? '#2e3347' : '#e8ecf2';
 
   return (
-    <div style={{ padding: '24px 32px', background: bgColor, minHeight: 'calc(100vh - 64px)' }}>
+    <div style={{ padding: '12px 16px', background: bgColor, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
 
       {/* Latest report */}
       <div style={{
@@ -110,6 +110,10 @@ const ThemeReportPage: React.FC = () => {
         border: `1px solid ${borderColor}`,
         borderRadius: 8,
         overflow: 'hidden',
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
       }}>
         <div style={{
           padding: '14px 16px',
@@ -169,7 +173,7 @@ const ThemeReportPage: React.FC = () => {
         </div>
 
         {loading ? (
-          <div style={{ padding: 48, textAlign: 'center' }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Spin tip="Loading…" />
           </div>
         ) : latest?.share_token ? (
@@ -179,27 +183,28 @@ const ThemeReportPage: React.FC = () => {
             title="Theme Performance Report"
             style={{
               width: '100%',
-              height: 'calc(100vh - 150px)',
+              height: '100%',
               minHeight: 500,
               border: 'none',
               display: 'block',
             }}
           />
         ) : (
-          <Empty
-            style={{ padding: 48 }}
-            description={
-              latest
-                ? `Report status: ${latest.status}${latest.error_message ? ` — ${latest.error_message}` : ''}`
-                : <>
-                    <div>No completed reports yet.</div>
-                    <div style={{ marginTop: 8, fontSize: 13 }}>
-                      Go to <a href="/settings/themes">Investment Theme Settings</a> to configure your themes,
-                      then tag them with <Text code>Theme Report</Text> to include in the report.
-                    </div>
-                  </>
-            }
-          />
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Empty
+              description={
+                latest
+                  ? `Report status: ${latest.status}${latest.error_message ? ` — ${latest.error_message}` : ''}`
+                  : <>
+                      <div>No completed reports yet.</div>
+                      <div style={{ marginTop: 8, fontSize: 13 }}>
+                        Go to <a href="/settings/themes">Investment Theme Settings</a> to configure your themes,
+                        then tag them with <Text code>Theme Report</Text> to include in the report.
+                      </div>
+                    </>
+              }
+            />
+          </div>
         )}
       </div>
     </div>

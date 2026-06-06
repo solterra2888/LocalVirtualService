@@ -470,7 +470,7 @@ const DailyPageInner: React.FC = () => {
               <Input
                 allowClear
                 size="large"
-                prefix={<SearchOutlined style={{ color: colors.textMuted }} />}
+                prefix={<SearchOutlined style={{ color: colors.textMuted, fontSize: 14 }} />}
                 suffix={
                   <Tooltip
                     title={
@@ -501,6 +501,7 @@ const DailyPageInner: React.FC = () => {
                   borderColor: colors.cardBorder,
                   color: colors.text,
                   marginBottom: 10,
+                  fontSize: 13,
                 }}
               />
 

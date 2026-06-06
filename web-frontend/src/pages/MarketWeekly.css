@@ -1,7 +1,9 @@
 .market-weekly-container {
-  min-height: 100vh;
+  flex: 1;
+  min-height: 0;
   background: #ffffff;
   position: relative;
+  overflow: auto;
 }
 
 .market-weekly-content {

@@ -165,13 +165,17 @@ const YouTubeDailyReportPageInner: React.FC = () => {
   const cardBg = themeColors.cardBg;
   const borderColor = themeColors.cardBorder;
   return (
-    <div style={{ padding: '24px 32px', background: bgColor, minHeight: 'calc(100vh - 64px)' }}>
+    <div style={{ padding: '12px 16px', background: bgColor, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{
         background: cardBg,
         border: `1px solid ${borderColor}`,
         borderRadius: 8,
         overflow: 'hidden',
         position: 'relative',
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
       }}>
         {/* Floating toolbar - right top corner */}
         <div style={{
@@ -248,11 +252,11 @@ const YouTubeDailyReportPageInner: React.FC = () => {
 
         {/* Content */}
         {loading ? (
-          <div style={{ padding: 48, textAlign: 'center' }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Spin tip="Loading…" />
           </div>
         ) : generating || latest?.status === 'generating' || latest?.status === 'pending' ? (
-          <div style={{ padding: 48, textAlign: 'center' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <Spin size="large" tip="Report is being generated. Please wait…" />
             <div style={{ marginTop: 16, color: themeColors.textSecondary }}>
               This usually takes 1-2 minutes.
@@ -265,7 +269,7 @@ const YouTubeDailyReportPageInner: React.FC = () => {
             title="YouTube Daily Report"
             style={{
               width: '100%',
-              height: 'calc(100vh - 100px)',
+              height: '100%',
               minHeight: 500,
               border: 'none',
               display: 'block',
@@ -275,7 +279,7 @@ const YouTubeDailyReportPageInner: React.FC = () => {
           <div
             style={{
               width: '100%',
-              height: 'calc(100vh - 112px)',
+              height: '100%',
               minHeight: 500,
               overflow: 'auto',
               padding: 24,
@@ -283,42 +287,45 @@ const YouTubeDailyReportPageInner: React.FC = () => {
             dangerouslySetInnerHTML={{ __html: latest.html_content }}
           />
         ) : latest?.status === 'failed' ? (
-          <Empty
-            style={{ padding: 48 }}
-            description={
-              <>
-                <div>Report generation failed</div>
-                {latest.error_message && (
-                  <div style={{ marginTop: 8, color: themeColors.textSecondary, fontSize: 12 }}>
-                    Reason: {latest.error_message}
-                  </div>
-                )}
-              </>
-            }
-          />
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Empty
+              description={
+                <>
+                  <div>Report generation failed</div>
+                  {latest.error_message && (
+                    <div style={{ marginTop: 8, color: themeColors.textSecondary, fontSize: 12 }}>
+                      Reason: {latest.error_message}
+                    </div>
+                  )}
+                </>
+              }
+            />
+          </div>
         ) : latest?.metadata?.video_count === 0 || latest?.metadata?.channel_count === 0 ? (
-          <Empty
-            style={{ padding: 48 }}
-            description={
-              <>
-                <div>No videos available for this date</div>
-                <div style={{ marginTop: 8, color: themeColors.textSecondary, fontSize: 12 }}>
-                  There were no videos from your subscribed channels on {latest?.report_date}.
-                  <br />
-                  Please check your <a href="/settings/subscriptions">YouTube subscriptions</a> or try a different date.
-                </div>
-              </>
-            }
-          />
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Empty
+              description={
+                <>
+                  <div>No videos available for this date</div>
+                  <div style={{ marginTop: 8, color: themeColors.textSecondary, fontSize: 12 }}>
+                    There were no videos from your subscribed channels on {latest?.report_date}.
+                    <br />
+                    Please check your <a href="/settings/subscriptions">YouTube subscriptions</a> or try a different date.
+                  </div>
+                </>
+              }
+            />
+          </div>
         ) : (
-          <Empty
-            style={{ padding: 48 }}
-            description={
-              latest
-                ? `Report status: ${latest.status}${latest.error_message ? ` — ${latest.error_message}` : ''}`
-                : 'No report yet. Click Generate to create a report for the past 24 hours.'
-            }
-          />
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Empty
+              description={
+                latest
+                  ? `Report status: ${latest.status}${latest.error_message ? ` — ${latest.error_message}` : ''}`
+                  : 'No report yet. Click Generate to create a report for the past 24 hours.'
+              }
+            />
+          </div>
         )}
       </div>
     </div>
@@ -350,7 +357,7 @@ const YouTubeDailyReportPage: React.FC = () => {
         }),
       }}
     >
-      <App>
+      <App style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, height: '100%' }}>
         <YouTubeDailyReportPageInner />
       </App>
     </ConfigProvider>
