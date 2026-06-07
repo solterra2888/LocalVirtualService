@@ -264,6 +264,25 @@ const SchedulerPage: React.FC = () => {
       ]
     },
     {
+      id: 'market_weekly_report',
+      name: 'Market Weekly Report',
+      type: 'market_weekly_report',
+      category: 'report_generation',
+      description: 'Pre-generate Market Weekly Report static HTML (indices, sectors, forex, commodities, bonds WoW performance, AI themes, economic calendar).',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_market_weekly_report_schedule',
+          name: 'Configure Market Weekly Report Schedule',
+          description: 'Set up periodic Market Weekly Report generation (default: weekly Friday 5 PM ET)',
+          endpoint: '/scheduler/tasks/market-weekly-report',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
       id: 'eodhd_stock_prices',
       name: 'EODHD Stock Prices',
       type: 'eodhd_stock_prices',
@@ -520,6 +539,8 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
           (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
           (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
+          (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
+          (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -586,6 +607,7 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
         (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
         (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
+        (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -794,6 +816,8 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
           (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
           (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
+          (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
+          (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
@@ -910,7 +934,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1362,7 +1386,7 @@ const SchedulerPage: React.FC = () => {
             setSelectedDataSource(null);
           }}
           onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report'}
+          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report'}
           dataSourceName={selectedDataSource.name}
         />
       )}

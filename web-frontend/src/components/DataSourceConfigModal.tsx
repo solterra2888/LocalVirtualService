@@ -59,7 +59,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
 }
 
@@ -234,6 +234,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 14 * * 1',
       defaultName: 'Theme Report',
       description: 'Pre-generate Theme Report static HTML for all users with Theme Report tagged themes (weekly Monday 2 PM CST)'
+    },
+    market_weekly_report: {
+      icon: <LineChartOutlined style={{ color: '#fa8c16' }} />,
+      params: ['user_id'],
+      defaultSchedule: '0 17 * * 5',
+      defaultName: 'Market Weekly Report',
+      description: 'Pre-generate Market Weekly Report static HTML with indices, sectors, forex, commodities, bonds WoW performance (weekly Friday 5 PM ET)'
     },
   };
 
@@ -473,6 +480,15 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             enabled: true,
           };
           result = await schedulerAPI.createThemeReportTask(themeReportParams);
+        } else if (dataSourceType === 'market_weekly_report') {
+          const marketWeeklyReportParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            user_id: data.taskParams?.user_id,
+          };
+          result = await schedulerAPI.createMarketWeeklyReportTask(marketWeeklyReportParams);
         } else if (dataSourceType === 'watchlist_fundamentals') {
           // Watchlist Fundamentals 任务的专用创建逻辑
           const watchlistFundamentalsParams = {
@@ -2455,7 +2471,29 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               )}
             </>
           );
-          
+
+        case 'market_weekly_report':
+          return (
+            <>
+              <Alert
+                message="Market Weekly Report Scheduler"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                description="Pre-generate Market Weekly Report static HTML. The report includes indices, sectors, forex, commodities, bonds WoW performance, AI-related themes, and next week's calendar."
+              />
+
+              <Form.Item
+                label="User ID"
+                name={['taskParams', 'user_id']}
+                rules={[{ required: true, message: 'Please enter the user ID' }]}
+                extra="User ID is required. This determines which user's Market Weekly tagged themes will be included."
+              >
+                <Input placeholder="Enter user ID" />
+              </Form.Item>
+            </>
+          );
+
         default:
           return null;
       }
