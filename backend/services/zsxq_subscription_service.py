@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # ---------- 常量（对齐 scripts/zsxq/my_zsxq.py） ----------
 COUNT = 15
-BACKFILL_DAYS = 15
+BACKFILL_DAYS = 3
 INCREMENT_MAX_PAGES = 5
 PAGE_INTERVAL = 5.0
 PAGES_PER_BATCH = 15
@@ -75,6 +75,25 @@ def _parse_zsxq_time(value: str) -> Optional[datetime]:
         return datetime.fromisoformat(value.replace("+0800", "+08:00"))
     except (ValueError, TypeError):
         return None
+
+
+def _dt_to_zsxq_time(value: Any) -> str:
+    """将 DB timestamptz / datetime 转为知识星球 API 的 create_time 字符串。"""
+    if isinstance(value, str):
+        return value
+    dt = value
+    if not isinstance(dt, datetime):
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+
+        dt = dt.astimezone(ZoneInfo("Asia/Shanghai"))
+    except Exception:
+        pass
+    ms = int(dt.microsecond / 1000)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S") + f".{ms:03d}+0800"
 
 
 def _calc_next_end_time(create_time: str) -> str:
@@ -236,20 +255,29 @@ def _extract_content(topic: Dict[str, Any]) -> Dict[str, Any]:
 
 # ---------- 翻页逻辑 ----------
 
-def _crawl_backfill(
+def _iter_backfill_pages(
     client: ZsxqClient,
     backfill_days: int = BACKFILL_DAYS,
-) -> List[Dict[str, Any]]:
-    """历史补全：从今天往前拉 backfill_days 天的话题。"""
-    today = datetime.now().date()
-    start_str = (today - timedelta(days=backfill_days - 1)).isoformat() + "T00:00:00.000+0800"
-    end_str = today.isoformat() + "T23:59:59.999+0800"
-    start_bound = start_str
-    end_bound = end_str
+    resume_from_min_time: Optional[str] = None,
+):
+    """
+    历史补全分页迭代器：从今天往前拉 backfill_days 天的话题。
 
-    page_end_time: Optional[str] = quote(end_bound)
-    all_topics: List[Dict[str, Any]] = []
+    每页 yield (page_num, batch_topics, first_page_ids_or_none)。
+    resume_from_min_time 用于断点续抓（从已入库最早时间继续往前翻页）。
+    """
+    today = datetime.now().date()
+    start_bound = (today - timedelta(days=backfill_days - 1)).isoformat() + "T00:00:00.000+0800"
+    end_bound = today.isoformat() + "T23:59:59.999+0800"
+
+    if resume_from_min_time:
+        page_end_time: Optional[str] = _calc_next_end_time(resume_from_min_time)
+        logger.info("ZSXQ backfill 断点续抓，end_time 锚点 %s", resume_from_min_time[:19])
+    else:
+        page_end_time = quote(end_bound)
+
     page = 0
+    running_total = 0
 
     while True:
         page += 1
@@ -258,23 +286,36 @@ def _crawl_backfill(
         if not topics:
             break
 
+        first_page_ids: Optional[List[int]] = None
+        if page == 1 and not resume_from_min_time:
+            first_page_ids = [
+                raw["topic_id"] for raw in topics if raw.get("topic_id") is not None
+            ]
+
         stopped = False
+        batch: List[Dict[str, Any]] = []
         for raw in topics:
             ct = raw.get("create_time", "")
             if ct and ct < start_bound:
                 stopped = True
                 continue
             if ct <= end_bound:
-                all_topics.append(_extract_content(raw))
+                batch.append(_extract_content(raw))
 
-        logger.info("ZSXQ backfill 第 %d 页 +%d 条，累计 %d 条", page, len(topics), len(all_topics))
+        running_total += len(batch)
+        logger.info(
+            "ZSXQ backfill 第 %d 页 +%d 条，累计 %d 条",
+            page,
+            len(batch),
+            running_total,
+        )
+        yield page, batch, first_page_ids
+
         if stopped or len(topics) < COUNT:
             break
 
         page_end_time = _calc_next_end_time(topics[-1].get("create_time", ""))
         _page_sleep(page)
-
-    return all_topics
 
 
 def _crawl_incremental(
@@ -344,6 +385,7 @@ def _save_group_state(
     topics: List[Dict[str, Any]],
     mode: str,
     head_ids: Optional[List[int]] = None,
+    backfill_complete: Optional[bool] = None,
 ) -> None:
     times = [t["create_time"] for t in topics if t.get("create_time")]
     updates: Dict[str, Any] = {
@@ -358,8 +400,9 @@ def _save_group_state(
 
     if head_ids:
         updates["recent_topic_ids"] = head_ids
-    if mode == "backfill":
-        updates["backfill_complete"] = True
+    if backfill_complete is None:
+        backfill_complete = mode == "backfill"
+    updates["backfill_complete"] = backfill_complete
 
     with conn.cursor() as cur:
         if "new_min" in updates:
@@ -383,7 +426,7 @@ def _save_group_state(
                     updates["new_max"],
                     updates["new_max"],
                     updates.get("recent_topic_ids"),
-                    updates.get("backfill_complete", False),
+                    updates["backfill_complete"],
                     group_id,
                 ),
             )
@@ -402,11 +445,48 @@ def _save_group_state(
                     updates["last_sync_at"],
                     mode,
                     updates.get("recent_topic_ids"),
-                    updates.get("backfill_complete", False),
+                    updates["backfill_complete"],
                     group_id,
                 ),
             )
     conn.commit()
+
+
+def _store_topic_batch(
+    content_service: SubscriptionContentService,
+    batch: List[Dict[str, Any]],
+    gid: str,
+    gname: str,
+    user_ids: List[int],
+) -> Tuple[int, int, List[int]]:
+    """入库一页话题，返回 (new_count, updated_count, new_content_ids)。"""
+    new_count = 0
+    updated_count = 0
+    new_ids: List[int] = []
+    for t in batch:
+        t["group_id"] = gid
+        t["group_name"] = gname
+        try:
+            content_db_id, is_new = content_service.save_content(
+                channel_type="zhishixingqiu",
+                raw_data=t,
+                user_ids=user_ids,
+            )
+            if is_new:
+                new_count += 1
+                new_ids.append(content_db_id)
+            else:
+                updated_count += 1
+        except Exception:
+            logger.exception("ZSXQ 话题 %s 入库失败", t.get("topic_id"))
+    return new_count, updated_count, new_ids
+
+
+def _fetch_head_topic_ids(client: ZsxqClient) -> List[int]:
+    """拉取最新一页 topic_id，供增量锚点使用。"""
+    data = client.fetch_topics_page(count=COUNT)
+    topics = data.get("resp_data", {}).get("topics") or []
+    return [raw["topic_id"] for raw in topics if raw.get("topic_id") is not None]
 
 
 # ---------- 主服务 ----------
@@ -541,32 +621,69 @@ class ZsxqSubscriptionService:
 
                 if not backfill_done or force_fetch:
                     mode = "backfill"
-                    logger.info("[%d/%d] 知识星球 %s (%s) 开始 backfill", idx + 1, len(groups), gname, gid)
-                    topics = _crawl_backfill(client)
-                    head_ids = None
+                    resume_from: Optional[str] = None
+                    if not backfill_done and meta.get("min_create_time"):
+                        resume_from = _dt_to_zsxq_time(meta["min_create_time"])
+                    logger.info(
+                        "[%d/%d] 知识星球 %s (%s) 开始 backfill%s",
+                        idx + 1,
+                        len(groups),
+                        gname,
+                        gid,
+                        "（断点续抓）" if resume_from else "",
+                    )
+                    head_ids: Optional[List[int]] = None
+                    group_new = 0
+                    for _page, batch, page_head_ids in _iter_backfill_pages(
+                        client, resume_from_min_time=resume_from
+                    ):
+                        if page_head_ids:
+                            head_ids = page_head_ids
+                        batch_new, batch_updated, new_ids = _store_topic_batch(
+                            self.content_service, batch, gid, gname, user_ids
+                        )
+                        group_new += batch_new
+                        total_new += batch_new
+                        total_updated += batch_updated
+                        if new_ids:
+                            try:
+                                from backend.tasks.file_tasks import trigger_auto_feed_tagging
+                                trigger_auto_feed_tagging(new_ids)
+                            except Exception:
+                                logger.warning("ZSXQ 触发打标失败，将在下次 task 中补全")
+                        if batch:
+                            with _get_conn() as conn:
+                                _save_group_state(
+                                    conn,
+                                    gid,
+                                    batch,
+                                    mode,
+                                    head_ids=page_head_ids,
+                                    backfill_complete=False,
+                                )
+                    if not head_ids:
+                        head_ids = _fetch_head_topic_ids(client)
+                    with _get_conn() as conn:
+                        _save_group_state(
+                            conn,
+                            gid,
+                            [],
+                            mode,
+                            head_ids=head_ids,
+                            backfill_complete=True,
+                        )
+                    logger.info("知识星球 %s 完成 [%s] 新 %d 条", gname, mode, group_new)
+                    continue
                 else:
                     mode = "incremental"
                     logger.info("[%d/%d] 知识星球 %s (%s) 增量, 锚点 %d 个", idx + 1, len(groups), gname, gid, len(known_ids))
                     topics, head_ids = _crawl_incremental(client, known_ids)
 
-                # 注入 group_id / group_name 后通过 Adapter 入库
-                new_ids: List[int] = []
-                for t in topics:
-                    t["group_id"] = gid
-                    t["group_name"] = gname
-                    try:
-                        content_db_id, is_new = self.content_service.save_content(
-                            channel_type="zhishixingqiu",
-                            raw_data=t,
-                            user_ids=user_ids,
-                        )
-                        if is_new:
-                            total_new += 1
-                            new_ids.append(content_db_id)
-                        else:
-                            total_updated += 1
-                    except Exception:
-                        logger.exception("ZSXQ 话题 %s 入库失败", t.get("topic_id"))
+                batch_new, batch_updated, new_ids = _store_topic_batch(
+                    self.content_service, topics, gid, gname, user_ids
+                )
+                total_new += batch_new
+                total_updated += batch_updated
 
                 # 自动打标
                 if new_ids:
@@ -580,7 +697,7 @@ class ZsxqSubscriptionService:
                 with _get_conn() as conn:
                     _save_group_state(conn, gid, topics, mode, head_ids)
 
-                logger.info("知识星球 %s 完成 [%s] 新 %d 条", gname, mode, len([t for t in topics]))
+                logger.info("知识星球 %s 完成 [%s] 新 %d 条", gname, mode, batch_new)
 
             except CookieExpiredError as e:
                 logger.error("知识星球凭证过期: %s", e)

@@ -30,7 +30,8 @@ import {
   GlobalOutlined,
   TwitterOutlined,
   YoutubeOutlined,
-  FileTextOutlined
+  FileTextOutlined,
+  StarOutlined,
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -57,7 +58,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
@@ -215,6 +216,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '*/30 * * * *',
       defaultName: 'News Feed Auto Fetch',
       description: 'Fetch EODHD news and distribute to My Feeds subscriptions (Yahoo Finance, CNBC, Seeking Alpha, etc.) every 30 minutes'
+    },
+    zhishixingqiu_subscription: {
+      icon: <StarOutlined style={{ color: '#FF6B00' }} />,
+      params: [],
+      defaultSchedule: '*/30 * * * *',
+      defaultName: 'Zhishixingqiu Subscription Feed',
+      description: 'Automatically fetch topics from all subscribed Knowledge Planet (知识星球) groups every 30 minutes'
     },
     twitter_author_summary: {
       icon: <TwitterOutlined style={{ color: '#1DA1F2' }} />,
@@ -488,6 +496,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                           dataSourceType === 'eodhd_macro' ? 'macro_indicators' :
                           dataSourceType === 'twitter_subscription' ? 'twitter_subscription' :
                           dataSourceType === 'youtube_subscription' ? 'youtube_subscription' :
+                          dataSourceType === 'zhishixingqiu_subscription' ? 'zhishixingqiu_subscription' :
                           dataSourceType;
           
           result = await schedulerAPI.createCronTask({
@@ -938,6 +947,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           );
 
         case 'youtube_subscription':
+          return null;
+
+        case 'zhishixingqiu_subscription':
           return null;
 
         case 'news_feed':
