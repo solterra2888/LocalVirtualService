@@ -5,11 +5,13 @@ import {
   YoutubeOutlined,
   GlobalOutlined,
   ReadOutlined,
+  StarOutlined,
 } from '@ant-design/icons';
 
 export const CHANNEL_TYPES = [
   { value: 'twitter', label: 'Twitter', icon: <TwitterOutlined />, color: '#1DA1F2' },
   { value: 'youtube', label: 'YouTube', icon: <YoutubeOutlined />, color: '#FF0000', disabled: false },
+  { value: 'zhishixingqiu', label: '知识星球', icon: <StarOutlined />, color: '#FF6B00', disabled: false },
   { value: 'rss', label: 'RSS Feed', icon: <GlobalOutlined />, color: '#orange', disabled: true },
 ];
 
@@ -66,7 +68,7 @@ export function getNewsSourceFaviconUrl(identifier: string): string | undefined 
 }
 
 /** My Feeds 侧栏：与 Sources 文件类型栏一致的频道类型筛选 */
-export type FeedChannelTypeFilterKey = 'all' | 'twitter' | 'youtube' | 'news';
+export type FeedChannelTypeFilterKey = 'all' | 'twitter' | 'youtube' | 'news' | 'zhishixingqiu';
 
 export const FEED_CHANNEL_TYPE_FILTER_TABS: {
   key: FeedChannelTypeFilterKey;
@@ -77,6 +79,7 @@ export const FEED_CHANNEL_TYPE_FILTER_TABS: {
   { key: 'twitter', label: 'Twitter', icon: <TwitterOutlined /> },
   { key: 'youtube', label: 'YouTube', icon: <YoutubeOutlined /> },
   { key: 'news', label: 'News', icon: <ReadOutlined /> },
+  { key: 'zhishixingqiu', label: '知识星球', icon: <StarOutlined /> },
 ];
 
 export function matchesFeedChannelTypeFilter(
@@ -91,6 +94,7 @@ export function getChannelIcon(channelType: string) {
   const config = CHANNEL_TYPES.find((c) => c.value === channelType);
   if (config) return config.icon;
   if (channelType === 'news') return <ReadOutlined />;
+  if (channelType === 'zhishixingqiu') return <StarOutlined />;
   return <GlobalOutlined />;
 }
 

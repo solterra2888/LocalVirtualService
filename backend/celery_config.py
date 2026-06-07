@@ -72,6 +72,7 @@ task_routes = {
     'batch_tag_feed_content': {'queue': 'file_processing'},      # Feeds 批量打标派发器
     'personalize_feed_summary': {'queue': 'file_processing'},    # PR-6: Feeds per-user 个性化 summary
     'fan_out_personalize_summary': {'queue': 'file_processing'}, # PR-N2: tag 完成后扇出 per-user 个性化派发器
+    'fetch_zhishixingqiu_subscription': {'queue': 'data_fetching'},  # 知识星球订阅抓取
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
     'smart_wait_and_add_user': {'queue': 'data_fetching'},
     'generate_author_summary': {'queue': 'ai_processing'},

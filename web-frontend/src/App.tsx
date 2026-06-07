@@ -46,6 +46,7 @@ import MobileReportsLayout from './components/MobileReportsLayout';
 import ReportsDetailLayout from './components/ReportsDetailLayout';
 import ReportsOverviewPage from './pages/ReportsOverviewPage';
 import DailyMarketReportPage from './pages/DailyMarketReportPage';
+import ZsxqAdminPage from './pages/ZsxqAdminPage';
 import { DashboardSettingsProvider } from './contexts/DashboardSettingsContext';
 import { FileProcessingProvider } from './contexts/FileProcessingContext';
 import './App.css';
@@ -246,6 +247,14 @@ const AppContent: React.FC = () => {
             element={
               <AdminRoute>
                 <MonitoringPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="zsxq-admin"
+            element={
+              <AdminRoute>
+                <ZsxqAdminPage />
               </AdminRoute>
             }
           />

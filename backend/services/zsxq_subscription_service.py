@@ -1,0 +1,604 @@
+# -*- coding: utf-8 -*-
+"""
+知识星球订阅抓取服务
+
+核心职责：
+  1. 从 zsxq_credentials 读取有效 Cookie（Fernet 解密）
+  2. 按 group_id 聚合所有 enabled zhishixingqiu 订阅及 user_ids 并集
+  3. 调用知识星球 API 拉取话题（首次 backfill + 后续 incremental）
+  4. 通过 ZsxqAdapter → SubscriptionContentService.save_content 写入 subscription_content
+  5. 更新 zsxq_groups 表中的同步锚点
+  6. 401 时抛 CookieExpiredError 并标记凭证过期，不让调用方崩溃
+
+架构对齐：twitter_subscription_service.py（聚合 author/user_ids，逐 group 顺序抓取）
+"""
+
+import logging
+import random
+import re
+import time
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
+
+import psycopg2
+import psycopg2.extras
+import requests
+
+from backend.utils.database_config import get_database_config
+from backend.utils.env_loader import load_project_env
+from backend.utils.datetime_utils import utcnow
+from backend.services.subscription_content_service import SubscriptionContentService
+
+load_project_env()
+
+logger = logging.getLogger(__name__)
+
+# ---------- 常量（对齐 scripts/zsxq/my_zsxq.py） ----------
+COUNT = 15
+BACKFILL_DAYS = 15
+INCREMENT_MAX_PAGES = 5
+PAGE_INTERVAL = 5.0
+PAGES_PER_BATCH = 15
+LONG_SLEEP_MIN = 180.0
+LONG_SLEEP_MAX = 300.0
+GROUP_INTERVAL = 15
+API_VERSION = "2.89.0"
+
+
+# ---------- 异常 ----------
+
+class CookieExpiredError(Exception):
+    """凭证 Cookie 已失效（HTTP 401）。"""
+
+
+# ---------- DB helpers ----------
+
+def _get_conn():
+    cfg = get_database_config()
+    return psycopg2.connect(
+        host=cfg["db_host"],
+        port=cfg["db_port"],
+        dbname=cfg["db_name"],
+        user=cfg["db_user"],
+        password=cfg["db_password"],
+    )
+
+
+# ---------- 时间工具 ----------
+
+def _parse_zsxq_time(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("+0800", "+08:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+def _calc_next_end_time(create_time: str) -> str:
+    """计算翻页 end_time（与 scripts/zsxq/my_zsxq.py 保持一致，避免 API 报错）。"""
+    if not create_time or len(create_time) < 23:
+        return create_time
+    if create_time[20:23] == "000":
+        end_time = create_time[:20] + "999" + create_time[23:]
+        dt = datetime.strptime(end_time[:19], "%Y-%m-%dT%H:%M:%S") - timedelta(seconds=1)
+        end_time = dt.strftime("%Y-%m-%dT%H:%M:%S") + end_time[19:]
+    else:
+        ms = int(create_time[20:23]) - 1
+        end_time = create_time[:20] + str(ms).zfill(3) + create_time[23:]
+    end_time = quote(end_time)
+    if len(end_time) == 33:
+        end_time = end_time[:24] + "0" + end_time[24:]
+    return end_time
+
+
+def _strip_html_tags(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r"<e[^>]*>", "", text)
+    text = re.sub(r"</e>", "", text)
+    return text.strip()
+
+
+# ---------- ZsxqClient ----------
+
+class ZsxqClient:
+    """知识星球 API 客户端（从凭证服务获取 Cookie）。"""
+
+    def __init__(self, cookie: str, group_id: str, api_version: str = API_VERSION):
+        self.cookie = cookie
+        self.group_id = group_id
+        self.api_version = api_version
+        self.session = requests.Session()
+        self.base_url = "https://api.zsxq.com"
+        self._topics_api: Optional[str] = None
+
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "Cache-Control": "no-cache",
+            "Cookie": self.cookie,
+            "Origin": "https://wx.zsxq.com",
+            "Pragma": "no-cache",
+            "Referer": f"https://wx.zsxq.com/dweb2/index/group/{self.group_id}",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "X-Request-Id": str(uuid.uuid4()),
+            "X-Timestamp": str(int(time.time())),
+            "X-Version": self.api_version,
+        }
+
+    def fetch_topics_page(
+        self,
+        count: int = COUNT,
+        end_time: Optional[str] = None,
+        max_retries: int = 6,
+    ) -> Dict[str, Any]:
+        """拉取话题列表一页，遇 401 抛 CookieExpiredError。"""
+        count = min(max(1, count), 30)
+
+        def make_endpoints(et: Optional[str]):
+            v1q = f"count={count}"
+            v2q = f"scope=all&count={count}"
+            if et:
+                v1q += f"&end_time={et}"
+                v2q += f"&end_time={et}"
+            eps = [
+                (f"{self.base_url}/v2/groups/{self.group_id}/topics", v2q, "v2"),
+                (f"{self.base_url}/v1.10/groups/{self.group_id}/topics", v1q, "v1.10"),
+            ]
+            if self._topics_api:
+                eps = [e for e in eps if e[2] == self._topics_api]
+            return eps
+
+        last_err = ""
+        retry_end_time = end_time
+
+        for attempt in range(max_retries):
+            need_retry = False
+            for path, query, label in make_endpoints(retry_end_time):
+                try:
+                    resp = self.session.get(f"{path}?{query}", headers=self._headers(), timeout=30)
+                    if resp.status_code == 401:
+                        raise CookieExpiredError("Cookie 无效或已过期 (HTTP 401)")
+                    if resp.status_code != 200:
+                        last_err = f"[{label}] HTTP {resp.status_code}"
+                        continue
+                    data = resp.json()
+                    if data.get("succeeded"):
+                        self._topics_api = label
+                        return data
+                    code = data.get("code")
+                    last_err = data.get("info") or data.get("resp_err") or str(data)
+                    if code == 2:
+                        continue
+                    if code == 1059 or "内部" in str(last_err):
+                        need_retry = True
+                        last_err = f"[{label}] {last_err}"
+                        break
+                    last_err = f"[{label}] {last_err}"
+                except CookieExpiredError:
+                    raise
+                except requests.RequestException as e:
+                    last_err = f"[{label}] {e}"
+
+            if not need_retry:
+                break
+            wait = min(2 + attempt * 2, 15)
+            logger.warning("ZSXQ API 重试 (%ds): %s", wait, last_err)
+            time.sleep(wait)
+
+        raise RuntimeError(f"获取话题失败: {last_err}")
+
+
+# ---------- 话题解析 ----------
+
+def _extract_content(topic: Dict[str, Any]) -> Dict[str, Any]:
+    """从 API 原始 topic 提取有效字段（对齐 scripts/zsxq/my_zsxq.py extract_content）。"""
+    content = (
+        topic.get("talk")
+        or topic.get("question")
+        or topic.get("task")
+        or topic.get("solution")
+        or {}
+    )
+    owner = content.get("owner") or {}
+    author = "匿名" if content.get("anonymous") else owner.get("name", "")
+
+    images = []
+    for img in content.get("images") or []:
+        large = img.get("large") or img.get("original") or {}
+        url = large.get("url") or img.get("url")
+        if url:
+            images.append(url)
+
+    talk = topic.get("talk") or {}
+    files_raw = talk.get("files") or content.get("files") or []
+    files = [f.get("name", "") for f in files_raw if f.get("name")]
+
+    return {
+        "topic_id": topic.get("topic_id"),
+        "create_time": topic.get("create_time", ""),
+        "type": topic.get("type", "talk"),
+        "title": _strip_html_tags(topic.get("title") or ""),
+        "author": author,
+        "text": _strip_html_tags(content.get("text", "")),
+        "images": images,
+        "files": files,
+    }
+
+
+# ---------- 翻页逻辑 ----------
+
+def _crawl_backfill(
+    client: ZsxqClient,
+    backfill_days: int = BACKFILL_DAYS,
+) -> List[Dict[str, Any]]:
+    """历史补全：从今天往前拉 backfill_days 天的话题。"""
+    today = datetime.now().date()
+    start_str = (today - timedelta(days=backfill_days - 1)).isoformat() + "T00:00:00.000+0800"
+    end_str = today.isoformat() + "T23:59:59.999+0800"
+    start_bound = start_str
+    end_bound = end_str
+
+    page_end_time: Optional[str] = quote(end_bound)
+    all_topics: List[Dict[str, Any]] = []
+    page = 0
+
+    while True:
+        page += 1
+        data = client.fetch_topics_page(count=COUNT, end_time=page_end_time)
+        topics = data.get("resp_data", {}).get("topics") or []
+        if not topics:
+            break
+
+        stopped = False
+        for raw in topics:
+            ct = raw.get("create_time", "")
+            if ct and ct < start_bound:
+                stopped = True
+                continue
+            if ct <= end_bound:
+                all_topics.append(_extract_content(raw))
+
+        logger.info("ZSXQ backfill 第 %d 页 +%d 条，累计 %d 条", page, len(topics), len(all_topics))
+        if stopped or len(topics) < COUNT:
+            break
+
+        page_end_time = _calc_next_end_time(topics[-1].get("create_time", ""))
+        _page_sleep(page)
+
+    return all_topics
+
+
+def _crawl_incremental(
+    client: ZsxqClient,
+    known_ids: List[int],
+) -> Tuple[List[Dict[str, Any]], List[int]]:
+    """增量：从最新一页起拉，遇到全部已知则停。返回 (话题列表, 首页 id 列表)。"""
+    known = set(known_ids)
+    all_topics: List[Dict[str, Any]] = []
+    head_ids: List[int] = []
+    page_end_time: Optional[str] = None
+    max_pages = 1 if not known else INCREMENT_MAX_PAGES
+    page = 0
+
+    while page < max_pages:
+        page += 1
+        data = client.fetch_topics_page(count=COUNT, end_time=page_end_time)
+        topics = data.get("resp_data", {}).get("topics") or []
+        if not topics:
+            break
+
+        page_ids = [raw["topic_id"] for raw in topics if raw.get("topic_id") is not None]
+        if page == 1:
+            head_ids = page_ids
+
+        for raw in topics:
+            all_topics.append(_extract_content(raw))
+
+        new_count = sum(1 for tid in page_ids if tid not in known)
+        logger.info("ZSXQ 增量第 %d 页 %d 条（新 %d）", page, len(topics), new_count)
+
+        if known and all(tid in known for tid in page_ids):
+            logger.debug("ZSXQ 增量第 %d 页全部已知，停止", page)
+            break
+        if len(topics) < COUNT:
+            break
+
+        page_end_time = _calc_next_end_time(topics[-1].get("create_time", ""))
+        _page_sleep(page)
+
+    return all_topics, head_ids
+
+
+def _page_sleep(page: int) -> None:
+    time.sleep(PAGE_INTERVAL)
+    if page > 0 and page % PAGES_PER_BATCH == 0:
+        long = random.uniform(LONG_SLEEP_MIN, LONG_SLEEP_MAX)
+        logger.info("ZSXQ 长休眠 %.0fs", long)
+        time.sleep(long)
+
+
+# ---------- 同步状态 ----------
+
+def _load_group_state(conn, group_id: str) -> Dict[str, Any]:
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT * FROM zsxq_groups WHERE group_id = %s",
+            (group_id,),
+        )
+        row = cur.fetchone()
+    return dict(row) if row else {}
+
+
+def _save_group_state(
+    conn,
+    group_id: str,
+    topics: List[Dict[str, Any]],
+    mode: str,
+    head_ids: Optional[List[int]] = None,
+) -> None:
+    times = [t["create_time"] for t in topics if t.get("create_time")]
+    updates: Dict[str, Any] = {
+        "last_sync_at": utcnow().isoformat(),
+        "last_sync_mode": mode,
+    }
+    if times:
+        batch_min, batch_max = min(times), max(times)
+        # 使用 SQL 来 MIN/MAX 合并，避免覆盖旧值
+        updates["new_min"] = batch_min
+        updates["new_max"] = batch_max
+
+    if head_ids:
+        updates["recent_topic_ids"] = head_ids
+    if mode == "backfill":
+        updates["backfill_complete"] = True
+
+    with conn.cursor() as cur:
+        if "new_min" in updates:
+            cur.execute(
+                """
+                UPDATE zsxq_groups SET
+                    last_sync_at     = %s,
+                    last_sync_mode   = %s,
+                    min_create_time  = LEAST(COALESCE(min_create_time, %s::timestamptz), %s::timestamptz),
+                    max_create_time  = GREATEST(COALESCE(max_create_time, %s::timestamptz), %s::timestamptz),
+                    recent_topic_ids = COALESCE(%s, recent_topic_ids),
+                    backfill_complete = CASE WHEN %s THEN true ELSE backfill_complete END,
+                    updated_at       = now()
+                WHERE group_id = %s
+                """,
+                (
+                    updates["last_sync_at"],
+                    mode,
+                    updates["new_min"],
+                    updates["new_min"],
+                    updates["new_max"],
+                    updates["new_max"],
+                    updates.get("recent_topic_ids"),
+                    updates.get("backfill_complete", False),
+                    group_id,
+                ),
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE zsxq_groups SET
+                    last_sync_at     = %s,
+                    last_sync_mode   = %s,
+                    recent_topic_ids = COALESCE(%s, recent_topic_ids),
+                    backfill_complete = CASE WHEN %s THEN true ELSE backfill_complete END,
+                    updated_at       = now()
+                WHERE group_id = %s
+                """,
+                (
+                    updates["last_sync_at"],
+                    mode,
+                    updates.get("recent_topic_ids"),
+                    updates.get("backfill_complete", False),
+                    group_id,
+                ),
+            )
+    conn.commit()
+
+
+# ---------- 主服务 ----------
+
+class ZsxqSubscriptionService:
+    """
+    知识星球订阅抓取服务。
+
+    调用入口：fetch_and_store_topics(subscription_id?, user_id?, force_fetch?)
+    """
+
+    def __init__(self):
+        self.content_service = SubscriptionContentService()
+
+    def _get_active_credential(self) -> Tuple[int, str]:
+        """获取首个有效凭证的 (id, cookie)，无则抛 RuntimeError。"""
+        from backend.services.zsxq_credential_service import ZsxqCredentialService
+        result = ZsxqCredentialService().get_first_valid_cookie()
+        if not result:
+            raise RuntimeError(
+                "无可用的知识星球凭证，请在管理员后台录入有效 Cookie"
+            )
+        return result
+
+    def _mark_credential_expired(self, cred_id: int, error: str) -> None:
+        from backend.services.zsxq_credential_service import ZsxqCredentialService
+        ZsxqCredentialService().mark_expired(cred_id, error)
+
+    def _aggregate_groups(
+        self,
+        subscription_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        查询 subscription_list 中所有 enabled zhishixingqiu 订阅，
+        按 group_id（channel_identifier）聚合 user_ids 并集。
+
+        返回：[{group_id, group_name, user_ids: [...]}, ...]
+        """
+        with _get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                sql = """
+                    SELECT
+                        sl.channel_identifier AS group_id,
+                        sl.channel_name AS group_name,
+                        ARRAY_AGG(DISTINCT sl.user_id) AS user_ids
+                    FROM subscription_list sl
+                    WHERE sl.channel_type = 'zhishixingqiu'
+                      AND sl.enabled = true
+                """
+                params: List[Any] = []
+                if subscription_id:
+                    sql += " AND sl.id = %s"
+                    params.append(subscription_id)
+                if user_id:
+                    sql += " AND sl.user_id = %s"
+                    params.append(user_id)
+                sql += " GROUP BY sl.channel_identifier, sl.channel_name ORDER BY sl.channel_identifier"
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+
+        result = []
+        for row in rows:
+            gid = row["group_id"]
+            gname = row["group_name"] or gid
+            # 从 zsxq_groups 补全星球名（可能比 subscription_list 更准确）
+            result.append({
+                "group_id": gid,
+                "group_name": gname,
+                "user_ids": list(row["user_ids"] or []),
+            })
+        return result
+
+    def _get_group_meta(self, group_id: str) -> Dict[str, Any]:
+        """从 zsxq_groups 读取星球名及同步锚点。"""
+        with _get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT * FROM zsxq_groups WHERE group_id = %s",
+                    (group_id,),
+                )
+                row = cur.fetchone()
+        return dict(row) if row else {}
+
+    def fetch_and_store_topics(
+        self,
+        subscription_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        force_fetch: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        主入口：抓取所有（或指定）知识星球订阅的最新话题，写入 subscription_content。
+
+        Returns:
+            {
+                "success": bool,
+                "groups_processed": int,
+                "topics_new": int,
+                "topics_updated": int,
+                "failed_groups": [...],
+            }
+        """
+        try:
+            cred_id, cookie = self._get_active_credential()
+        except RuntimeError as e:
+            logger.error("知识星球凭证不可用: %s", e)
+            return {"success": False, "error": str(e)}
+
+        groups = self._aggregate_groups(subscription_id=subscription_id, user_id=user_id)
+        if not groups:
+            logger.info("无 enabled 知识星球订阅，跳过")
+            return {"success": True, "groups_processed": 0, "topics_new": 0, "topics_updated": 0, "failed_groups": []}
+
+        total_new = 0
+        total_updated = 0
+        failed_groups: List[str] = []
+
+        for idx, grp in enumerate(groups):
+            gid = grp["group_id"]
+            gname = grp["group_name"]
+            user_ids = grp["user_ids"]
+
+            # 从 zsxq_groups 补全 group_name
+            meta = self._get_group_meta(gid)
+            if meta.get("group_name"):
+                gname = meta["group_name"]
+
+            try:
+                client = ZsxqClient(cookie, gid)
+                backfill_done = meta.get("backfill_complete", False)
+                known_ids: List[int] = list(meta.get("recent_topic_ids") or [])
+
+                if not backfill_done or force_fetch:
+                    mode = "backfill"
+                    logger.info("[%d/%d] 知识星球 %s (%s) 开始 backfill", idx + 1, len(groups), gname, gid)
+                    topics = _crawl_backfill(client)
+                    head_ids = None
+                else:
+                    mode = "incremental"
+                    logger.info("[%d/%d] 知识星球 %s (%s) 增量, 锚点 %d 个", idx + 1, len(groups), gname, gid, len(known_ids))
+                    topics, head_ids = _crawl_incremental(client, known_ids)
+
+                # 注入 group_id / group_name 后通过 Adapter 入库
+                new_ids: List[int] = []
+                for t in topics:
+                    t["group_id"] = gid
+                    t["group_name"] = gname
+                    try:
+                        content_db_id, is_new = self.content_service.save_content(
+                            channel_type="zhishixingqiu",
+                            raw_data=t,
+                            user_ids=user_ids,
+                        )
+                        if is_new:
+                            total_new += 1
+                            new_ids.append(content_db_id)
+                        else:
+                            total_updated += 1
+                    except Exception:
+                        logger.exception("ZSXQ 话题 %s 入库失败", t.get("topic_id"))
+
+                # 自动打标
+                if new_ids:
+                    try:
+                        from backend.tasks.file_tasks import trigger_auto_feed_tagging
+                        trigger_auto_feed_tagging(new_ids)
+                    except Exception:
+                        logger.warning("ZSXQ 触发打标失败，将在下次 task 中补全")
+
+                # 保存同步锚点
+                with _get_conn() as conn:
+                    _save_group_state(conn, gid, topics, mode, head_ids)
+
+                logger.info("知识星球 %s 完成 [%s] 新 %d 条", gname, mode, len([t for t in topics]))
+
+            except CookieExpiredError as e:
+                logger.error("知识星球凭证过期: %s", e)
+                self._mark_credential_expired(cred_id, str(e))
+                failed_groups.append(gname or gid)
+                break  # Cookie 过期则停止所有 group，避免无效请求
+
+            except Exception:
+                logger.exception("知识星球 %s 抓取失败", gid)
+                failed_groups.append(gname or gid)
+
+            if idx < len(groups) - 1:
+                time.sleep(GROUP_INTERVAL)
+
+        return {
+            "success": True,
+            "groups_processed": len(groups) - len(failed_groups),
+            "topics_new": total_new,
+            "topics_updated": total_updated,
+            "failed_groups": failed_groups,
+        }

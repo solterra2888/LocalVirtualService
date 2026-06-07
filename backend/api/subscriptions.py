@@ -108,6 +108,22 @@ async def get_news_sources(
     return EODHDNewsFeedService.get_available_sources()
 
 
+@router.get("/zsxq-groups")
+async def get_zsxq_groups(
+    current_user: TokenData = Depends(get_current_user)
+):
+    """返回可供用户订阅的知识星球列表（管理员已开启 enabled=true 的星球）。"""
+    from backend.services.zsxq_credential_service import ZsxqCredentialService
+    groups = ZsxqCredentialService().list_groups(enabled_only=True)
+    return [
+        {
+            "group_id": g["group_id"],
+            "group_name": g["group_name"],
+        }
+        for g in groups
+    ]
+
+
 @router.get("", response_model=List[SubscriptionResponse])
 @router.get("/", response_model=List[SubscriptionResponse])
 async def get_user_subscriptions(
@@ -374,6 +390,25 @@ async def create_subscription(
 
             logger.info(f"YouTube频道验证成功 | identifier={clean_identifier} | name={request.channel_name} | channel_id={channel_id}")
 
+        # 🔥 如果是知识星球订阅，校验 group_id 是否在 zsxq_groups 中
+        elif request.channel_type == 'zhishixingqiu':
+            from backend.services.zsxq_credential_service import ZsxqCredentialService
+            zsxq_svc = ZsxqCredentialService()
+            groups = zsxq_svc.list_groups(enabled_only=True)
+            group_map = {g["group_id"]: g["group_name"] for g in groups}
+
+            group_id = request.channel_identifier.strip()
+            if group_id not in group_map:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"知识星球 group_id '{group_id}' 不在可订阅列表中，请联系管理员添加",
+                )
+            # 自动填充星球名
+            if not request.channel_name:
+                request.channel_name = group_map[group_id]
+
+            logger.info(f"知识星球验证成功 | group_id={group_id} | name={request.channel_name}")
+
         conn = db_manager.get_connection()
         cursor = conn.cursor()
         
@@ -588,6 +623,36 @@ async def create_subscription(
                         f"(task_id={task.id})"
                     )
         
+        # 🌟 知识星球：已有内容时把新用户并入 user_ids；否则触发首抓 backfill
+        elif request.enabled and request.channel_type == 'zhishixingqiu':
+            from backend.tasks.subscription_tasks import (
+                fetch_zhishixingqiu_subscription_task,
+                add_user_to_existing_content_task,
+            )
+
+            if has_existing_content:
+                logger.info(
+                    f"Reusing existing ZSXQ content for group {request.channel_identifier}: "
+                    f"{existing_content_count} topics found. Adding user {user_id} to user_ids."
+                )
+                task = add_user_to_existing_content_task.apply_async(
+                    args=[user_id, request.channel_type, request.channel_identifier, subscription_id],
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(f"Celery task scheduled: add_user_to_existing_content (zsxq) (task_id={task.id})")
+            else:
+                logger.info(
+                    f"No existing ZSXQ content for group {request.channel_identifier}. "
+                    f"Triggering backfill (subscription_id={subscription_id})."
+                )
+                task = fetch_zhishixingqiu_subscription_task.apply_async(
+                    args=[subscription_id, None, True],  # force_fetch=True (backfill)
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(f"Celery task scheduled: fetch_zhishixingqiu_subscription (task_id={task.id})")
+
         # News：已有文章时把新用户并入 user_ids（与 Twitter/YouTube 复用逻辑一致）
         elif request.enabled and request.channel_type == 'news':
             from backend.tasks.subscription_tasks import add_user_to_existing_content_task

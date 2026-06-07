@@ -29,7 +29,7 @@ from backend.utils.logger import get_logger
 logger = get_logger("feed_content_tagging_service")
 
 # LLM 打标支持的渠道 (rss 暂不做)
-_SUPPORTED_CHANNELS = {"twitter", "youtube", "news"}
+_SUPPORTED_CHANNELS = {"twitter", "youtube", "news", "zhishixingqiu"}
 
 FEEDS_TEMPLATE_CODE = "content_tag_feeds_v1"
 TWEET_SIGNAL_TEMPLATE_CODE = "tweet_signal_v1"
@@ -149,7 +149,7 @@ class FeedContentTaggingService:
         allowed = {
             c.strip()
             for c in os.getenv(
-                "AUTO_FEED_TAG_CHANNELS", "twitter,youtube,news"
+                "AUTO_FEED_TAG_CHANNELS", "twitter,youtube,news,zhishixingqiu"
             ).split(",")
             if c.strip()
         }

@@ -537,3 +537,69 @@ def finalize_youtube_feed_task(
             raise self.retry(exc=exc)
         # 打标失败不影响字幕已落库的事实, 静默返回
         return {'ok': False, 'content_id': subscription_content_id, 'error': str(exc)}
+
+
+@app.task(
+    name='fetch_zhishixingqiu_subscription',
+    bind=True,
+    max_retries=2,
+    default_retry_delay=120,
+    # backfill 可能跨多星球翻多页，给足够大的上限
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def fetch_zhishixingqiu_subscription_task(
+    self,
+    subscription_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    force_fetch: bool = False,
+) -> Dict[str, Any]:
+    """
+    抓取用户订阅的知识星球话题，写入 subscription_content。
+
+    路由到 data_fetching 队列（rc-celery-data worker）。
+    由 subscriptions API 在新建订阅时触发首抓（backfill），
+    也由 Scheduler 定时触发增量抓取。
+    """
+    logger.info(
+        "[Celery Task] fetch_zhishixingqiu_subscription 开始: "
+        "subscription_id=%s user_id=%s force_fetch=%s",
+        subscription_id, user_id, force_fetch,
+    )
+    try:
+        from backend.services.zsxq_subscription_service import ZsxqSubscriptionService
+        result = ZsxqSubscriptionService().fetch_and_store_topics(
+            subscription_id=subscription_id,
+            user_id=user_id,
+            force_fetch=force_fetch,
+        )
+        logger.info(
+            "[Celery Task] fetch_zhishixingqiu_subscription 完成: "
+            "groups=%s new=%s updated=%s failed=%s",
+            result.get("groups_processed", 0),
+            result.get("topics_new", 0),
+            result.get("topics_updated", 0),
+            result.get("failed_groups", []),
+        )
+        return result
+
+    except Exception as exc:
+        logger.error(
+            "[Celery Task] fetch_zhishixingqiu_subscription 失败: %s",
+            exc,
+            exc_info=True,
+        )
+        if self.request.retries < self.max_retries:
+            logger.warning(
+                "[Celery Task] 重试中... (attempt %d/%d)",
+                self.request.retries + 1, self.max_retries,
+            )
+            raise self.retry(exc=exc)
+        return {
+            "success": False,
+            "message": str(exc),
+            "groups_processed": 0,
+            "topics_new": 0,
+            "topics_updated": 0,
+            "failed_groups": [],
+        }

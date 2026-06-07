@@ -673,7 +673,7 @@ class DatabaseManager:
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 
                 CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('cron', 'interval')),
-                CONSTRAINT valid_task_type CHECK (type IN ('twitter_subscription', 'youtube_subscription', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'watchlist_fundamentals', 'finviz_screener', 'eodhd_stock_prices', 'eodhd_eod_stock_prices', 'market_data', 'earnings_calendar', 'ipo_calendar', 'news_feed', 'twitter_author_summary', 'twitter_daily_report', 'youtube_author_summary', 'theme_report', 'market_weekly_report', 'cctv_news', 'eodhd_news', 'watchlist_news')),
+                CONSTRAINT valid_task_type CHECK (type IN ('twitter_subscription', 'youtube_subscription', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'watchlist_fundamentals', 'finviz_screener', 'eodhd_stock_prices', 'eodhd_eod_stock_prices', 'market_data', 'earnings_calendar', 'ipo_calendar', 'news_feed', 'twitter_author_summary', 'twitter_daily_report', 'youtube_author_summary', 'theme_report', 'market_weekly_report', 'cctv_news', 'eodhd_news', 'watchlist_news', 'zhishixingqiu_subscription')),
                 CONSTRAINT cron_or_interval CHECK (
                     (schedule_type = 'cron' AND cron_expression IS NOT NULL) OR
                     (schedule_type = 'interval' AND interval_minutes IS NOT NULL)
@@ -929,6 +929,7 @@ class DatabaseManager:
                 'cctv_news',
                 'eodhd_news',
                 'watchlist_news',
+                'zhishixingqiu_subscription',
             ]
             
             # 合并现有类型和新类型（去重）

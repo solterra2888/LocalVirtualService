@@ -8,6 +8,7 @@ from .twitter_adapter import TwitterAdapter
 from .youtube_adapter import YouTubeAdapter
 from .rss_adapter import RSSAdapter
 from .news_adapter import NewsAdapter
+from .zsxq_adapter import ZsxqAdapter
 
 __all__ = [
     'BaseContentAdapter',
@@ -15,6 +16,7 @@ __all__ = [
     'YouTubeAdapter',
     'RSSAdapter',
     'NewsAdapter',
+    'ZsxqAdapter',
 ]
 
 
@@ -36,6 +38,7 @@ def get_adapter(channel_type: str) -> BaseContentAdapter:
         'youtube': YouTubeAdapter(),
         'rss': RSSAdapter(),
         'news': NewsAdapter(),
+        'zhishixingqiu': ZsxqAdapter(),
     }
     
     adapter = adapters.get(channel_type)

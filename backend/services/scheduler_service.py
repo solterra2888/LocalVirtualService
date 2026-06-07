@@ -59,6 +59,7 @@ class SchedulerService:
             'earnings_calendar': self._execute_earnings_calendar_task,
             'ipo_calendar': self._execute_ipo_calendar_task,
             'news_feed': self._execute_news_feed_task,  # EODHD + CCTV Feed 订阅任务
+            'zhishixingqiu_subscription': self._execute_zhishixingqiu_subscription_task,
             'twitter_author_summary': self._execute_twitter_author_summary_task,
             'youtube_author_summary': self._execute_youtube_author_summary_task,
             'theme_report': self._execute_theme_report_task,
@@ -937,6 +938,54 @@ class SchedulerService:
                 'error': str(e)
             }
     
+    async def _execute_zhishixingqiu_subscription_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行知识星球订阅话题获取任务 — 通过 Celery 异步分发给 data-worker。
+
+        知识星球 backfill 可能需要翻多页，分发到 data_fetching 队列（time_limit=3600s）。
+
+        Args:
+            params: 任务参数
+                - subscription_id: 指定订阅ID（可选）
+                - user_id: 指定用户ID（可选）
+                - force_fetch: 是否强制获取（可选）
+
+        Returns:
+            执行结果（立即返回 Celery task_id，实际执行在 data-worker 中）
+        """
+        try:
+            logger.info("分发知识星球订阅话题获取 Celery 任务", params=params)
+
+            from backend.tasks.subscription_tasks import fetch_zhishixingqiu_subscription_task
+
+            subscription_id = params.get('subscription_id')
+            user_id = params.get('user_id')
+            force_fetch = params.get('force_fetch', False)
+
+            task = fetch_zhishixingqiu_subscription_task.delay(
+                subscription_id=subscription_id,
+                user_id=user_id,
+                force_fetch=force_fetch,
+            )
+
+            message = (
+                f"✅ 知识星球订阅话题获取任务已提交 Celery 异步执行，"
+                f"task_id={task.id}"
+            )
+            logger.info("知识星球订阅话题获取任务已提交", celery_task_id=task.id)
+
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"知识星球订阅任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+
+            return {
+                'success': False,
+                'message': f"❌ {error_msg}",
+                'error': str(e)
+            }
+
     async def _execute_youtube_subscription_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行YouTube订阅视频获取任务 —— 分发到 Celery youtube_fetching 队列。

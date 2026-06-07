@@ -33,7 +33,9 @@ load_dotenv()
 logger = logging.getLogger("zsxq")
 
 # ---------- 配置（修改 Cookie；API_VERSION 与浏览器 F12 的 x-version 一致） ----------
-COOKIE = "zsxq_access_token=73D19B08-F3A8-4F94-AF94-6AF20A6444D1_A2210141E560B087; sensorsdata2015jssdkcross=%7B%22distinct_id%22%3A%22218522421882411%22%2C%22first_id%22%3A%2219e5f8d9b44232f-0895f2a7db7a8e8-26061151-2073600-19e5f8d9b4525a4%22%2C%22props%22%3A%7B%7D%2C%22identities%22%3A%22eyIkaWRlbnRpdHlfY29va2llX2lkIjoiMTllNWY4ZDliNDQyMzJmLTA4OTVmMmE3ZGI3YThlOC0yNjA2MTE1MS0yMDczNjAwLTE5ZTVmOGQ5YjQ1MjVhNCIsIiRpZGVudGl0eV9sb2dpbl9pZCI6IjIxODUyMjQyMTg4MjQxMSJ9%22%2C%22history_login_id%22%3A%7B%22name%22%3A%22%24identity_login_id%22%2C%22value%22%3A%22218522421882411%22%7D%7D; abtest_env=product"
+# ⚠️ 已迁移到共享管理员 Cookie 模式（见 backend/services/zsxq_credential_service.py）
+# 此脚本仅供本地调试使用，生产环境请通过管理员后台 /zsxq-admin 录入 Cookie。
+COOKIE = "zsxq_access_token=<REPLACE_WITH_YOUR_COOKIE>"
 
 # ---------- 默认值（一般无需改，也不走 .env） ----------
 COUNT = 15
