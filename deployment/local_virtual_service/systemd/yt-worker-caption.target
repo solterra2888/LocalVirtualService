@@ -1,0 +1,9 @@
+[Unit]
+Description=YouTube Transcription Workers (caption node: SG VPS)
+# 字幕节点：Feed 抓取 + 用户上传字幕插队；不消费任何 ASR 队列
+Wants=yt-worker-fetch.service
+Wants=yt-worker-priority-transcript.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target

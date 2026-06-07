@@ -3,6 +3,7 @@ Description=YT Worker - long ASR queue (youtube_transcription_long)
 After=network-online.target
 Wants=network-online.target
 PartOf=yt-worker.target
+PartOf=yt-worker-asr-node.target
 
 [Service]
 Type=simple

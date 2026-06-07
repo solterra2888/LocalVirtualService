@@ -94,7 +94,29 @@ def _eager_init_webshare(sender=None, **kwargs):
     try:
         # 延迟 import 避免循环依赖（celery_app -> tasks -> services -> celery_app）
         from worker.services import YouTubeCaptionService
+        from worker.tasks import _asr_fallback_enabled, _ytdlp_caption_fallback_enabled, _ytdlp_enabled
         YouTubeCaptionService._get_webshare_proxy_config()
+        ytdlp_log = logging.getLogger(__name__)
+        if not _ytdlp_enabled():
+            ytdlp_log.info(
+                "○ yt-dlp 已全局禁用 (YTDLP_ENABLED=false)：仅使用 transcript-api 拉字幕，"
+                "不派发 / 不执行 ASR 音频下载"
+            )
+        elif _ytdlp_caption_fallback_enabled() and not _asr_fallback_enabled():
+            ytdlp_log.info(
+                "◐ yt-dlp 字幕-only 模式：transcript-api → yt-dlp 仅字幕回退 (skip_download)，"
+                "ASR 已禁用"
+            )
+            use_ws = os.getenv("CAPTION_YTDLP_USE_WEBSHARE", "false").strip().lower() \
+                in ("1", "true", "yes", "on")
+            if use_ws and YouTubeCaptionService._get_webshare_proxy_url():
+                ytdlp_log.info(
+                    "  → yt-dlp 字幕回退将走 Webshare 住宅代理 (CAPTION_YTDLP_USE_WEBSHARE=true)"
+                )
+        elif not _ytdlp_caption_fallback_enabled():
+            ytdlp_log.info("○ yt-dlp 字幕回退已禁用 (CAPTION_YTDLP_FALLBACK_ENABLED=false)")
+        elif not _asr_fallback_enabled():
+            ytdlp_log.info("○ ASR 降级已禁用 (CAPTION_ASR_FALLBACK_ENABLED=false)")
     except Exception as e:
         logging.getLogger(__name__).warning(
             "Webshare eager init 失败（不影响 worker 启动）: %s: %s",

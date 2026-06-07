@@ -1,6 +1,6 @@
 [Unit]
-Description=YouTube Transcription Workers (all queues)
-# Wants 四个 worker unit；systemctl restart yt-worker.target 一键重启全部
+Description=YouTube Transcription Workers (single-node: all queues)
+# 单机全栈：main + long + priority*。双节点请改用 yt-worker-caption / yt-worker-asr-node target
 Wants=yt-worker-main.service
 Wants=yt-worker-long.service
 Wants=yt-worker-priority-transcript.service

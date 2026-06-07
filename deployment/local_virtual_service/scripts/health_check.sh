@@ -7,8 +7,7 @@
 #
 # 检查逻辑（按顺序）：
 #   1. Redis/Broker 可达性预检（不可达则只告警，跳过 worker 重启）
-#   2. 4 个 worker 逐一 systemctl is-active 检查（服务非活跃则重启 + 告警）
-#      注意：曾用 celery inspect ping 但会立即失败（import/环境问题）导致误杀。
+#   2. 按 WORKER_NODE_ROLE 检查本节点应运行的 worker（systemctl is-active）
 #   3. 关键队列积压检测（持续超阈值则告警，按配置决定是否重启）
 #   4. 状态去重：同一故障每 HEALTH_ALERT_REPEAT_MINUTES 最多重发一次
 #   5. 故障消失时发送「✓ 已恢复」通知
@@ -33,8 +32,11 @@ fi
 
 # ── 配置变量（可在 .env 里覆盖） ──────────────────────────────
 : "${LARK_WEBHOOK_URL:=}"
+: "${WORKER_NODE_ROLE:=all}"
 : "${HEALTH_LONG_BACKLOG_THRESHOLD:=3}"
 : "${HEALTH_PRIORITY_BACKLOG_THRESHOLD:=5}"
+: "${HEALTH_FETCH_BACKLOG_THRESHOLD:=10}"
+: "${HEALTH_ASR_BACKLOG_THRESHOLD:=5}"
 : "${HEALTH_RESTART_ON_BACKLOG:=false}"
 : "${HEALTH_ALERT_REPEAT_MINUTES:=60}"
 : "${HEALTH_ALERT_PREFIX:=[HK-YT-Worker]}"
@@ -54,12 +56,9 @@ NOW_EPOCH=$(date +%s)
 # ── 工具函数 ──────────────────────────────────────────────
 
 log() {
-    # 直接输出到 stdout；systemd StandardOutput=append:worker.log 负责落盘。
-    # 不再用 tee，避免 systemd 重定向 + tee 双写造成每行出现两次。
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [health_check] $*"
 }
 
-# 发送飞书/Lark 告警（LARK_WEBHOOK_URL 为空则静默）
 lark_notify() {
     local msg="$1"
     if [[ -z "$LARK_WEBHOOK_URL" ]]; then
@@ -71,17 +70,14 @@ lark_notify() {
         || log "⚠️  Lark 通知发送失败（网络问题），消息: ${msg}"
 }
 
-# 读取状态文件中某个 key 的值，未找到返回空串
 state_get() {
     local key="$1"
     grep -E "^${key}=" "$STATE_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true
 }
 
-# 写入/更新状态文件中某个 key 的值
 state_set() {
     local key="$1"
     local val="$2"
-    # 先删后追，保持文件整洁
     local tmp
     tmp=$(mktemp)
     grep -v "^${key}=" "$STATE_FILE" > "$tmp" 2>/dev/null || true
@@ -89,7 +85,6 @@ state_set() {
     mv "$tmp" "$STATE_FILE"
 }
 
-# 判断是否超过去重间隔，可以重新告警（返回 0 = 可以发；返回 1 = 抑制）
 should_alert() {
     local key="$1"
     local last_alert
@@ -105,13 +100,11 @@ should_alert() {
     return 1
 }
 
-# 记录告警时间戳
 mark_alerted() {
     local key="$1"
     state_set "LAST_ALERT_${key}" "$NOW_EPOCH"
 }
 
-# 清除告警记录（故障消失时调用）
 clear_alert() {
     local key="$1"
     local tmp
@@ -120,10 +113,33 @@ clear_alert() {
     mv "$tmp" "$STATE_FILE"
 }
 
-# ── 1. Redis/Broker 可达性预检 ────────────────────────────
-log "检查 Broker 可达性..."
+# role → systemd unit
+declare -A UNIT_NAMES=(
+    ["main"]="yt-worker-main"
+    ["fetch"]="yt-worker-fetch"
+    ["asr"]="yt-worker-asr"
+    ["long"]="yt-worker-long"
+    ["priority-transcript"]="yt-worker-priority-transcript"
+    ["priority-asr"]="yt-worker-priority-asr"
+)
 
-# 从 REDIS_URL 提取 host:port（兼容 redis://:pass@host:port/db 格式）
+# 按节点角色决定检查哪些 worker
+ROLES_TO_CHECK=()
+case "$WORKER_NODE_ROLE" in
+    caption)
+        ROLES_TO_CHECK=(fetch priority-transcript)
+        ;;
+    asr)
+        ROLES_TO_CHECK=(asr long priority-asr)
+        ;;
+    all|*)
+        ROLES_TO_CHECK=(main long priority-transcript priority-asr)
+        ;;
+esac
+
+# ── 1. Redis/Broker 可达性预检 ────────────────────────────
+log "检查 Broker 可达性 (节点角色: ${WORKER_NODE_ROLE})..."
+
 BROKER_HOST=$(echo "$REDIS_URL" | sed -E 's|redis://([^:@]*:[^@]*@)?([^:/]+):([0-9]+).*|\2|')
 BROKER_PORT=$(echo "$REDIS_URL" | sed -E 's|redis://([^:@]*:[^@]*@)?([^:/]+):([0-9]+).*|\3|')
 BROKER_PORT="${BROKER_PORT:-6379}"
@@ -134,14 +150,12 @@ if ! nc -z -w 5 "$BROKER_HOST" "$BROKER_PORT" 2>/dev/null; then
     log "❌ Broker ${BROKER_HOST}:${BROKER_PORT} 不可达"
     ALERT_KEY="broker_down"
     if should_alert "$ALERT_KEY"; then
-        lark_notify "❌ Redis Broker ${BROKER_HOST}:${BROKER_PORT} 不可达。HK Worker 无法消费任务，等待 Broker 恢复后将自动重连。"
+        lark_notify "❌ Redis Broker ${BROKER_HOST}:${BROKER_PORT} 不可达。Worker 无法消费任务，等待 Broker 恢复后将自动重连。"
         mark_alerted "$ALERT_KEY"
     fi
-    # Broker 不可达时不对 worker 做任何重启（避免重启风暴），直接退出
     exit 0
 else
     log "✅ Broker ${BROKER_HOST}:${BROKER_PORT} 可达"
-    # Broker 若曾告警过，现已恢复则发恢复通知
     if [[ -n "$(state_get 'LAST_ALERT_broker_down')" ]]; then
         lark_notify "✅ Redis Broker ${BROKER_HOST}:${BROKER_PORT} 已恢复，Worker 将继续消费任务。"
         clear_alert "broker_down"
@@ -150,20 +164,10 @@ fi
 
 export PYTHONPATH="$BASE_DIR"
 
-# ── 2. Per-worker 存活检查（systemctl is-active） ──────────
-# 注意：曾用 celery inspect ping 做检查，但 ping 命令在 systemd-timer
-# 上下文中会立即失败（import 或网络问题），导致每轮都误杀所有 worker。
-# 现改用 systemctl is-active：它直接查询 systemd cgroup 状态，可靠、快速。
-declare -A UNIT_NAMES=(
-    ["main"]="yt-worker-main"
-    ["long"]="yt-worker-long"
-    ["priority-transcript"]="yt-worker-priority-transcript"
-    ["priority-asr"]="yt-worker-priority-asr"
-)
-
+# ── 2. Per-worker 存活检查 ────────────────────────────────
 PING_FAILED=()
 
-for ROLE in main long priority-transcript priority-asr; do
+for ROLE in "${ROLES_TO_CHECK[@]}"; do
     UNIT="${UNIT_NAMES[$ROLE]}"
     log "  检查 ${ROLE} (${UNIT}.service)..."
     if systemctl is-active --quiet "${UNIT}.service"; then
@@ -189,11 +193,10 @@ done
 # ── 3. 关键队列积压检测 ───────────────────────────────────
 log "检查队列积压..."
 
-# 用 conda env python 执行 redis LLEN 查询（复用 REDIS_URL，无需额外工具）
 get_queue_len() {
     local queue_name="$1"
     "$PYTHON" - <<PYEOF 2>/dev/null || echo "0"
-import os, re
+import os
 try:
     import redis
     url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
@@ -226,7 +229,6 @@ check_queue_backlog() {
         state_set "BACKLOG_LEN_${state_key}" "$cur_len"
         log "  ⚠️  队列 ${queue} 积压 ${cur_len} 条（阈值 ${threshold}，连续 ${new_count} 次）"
 
-        # 连续 ≥2 次且当前积压未下降 → 告警/重启
         if (( new_count >= 2 && cur_len >= prev_len )); then
             ALERT_KEY="backlog_${state_key}"
             if should_alert "$ALERT_KEY"; then
@@ -242,7 +244,6 @@ check_queue_backlog() {
         fi
     else
         log "  ✅ 队列 ${queue} 积压 ${cur_len} 条（阈值 ${threshold}）"
-        # 积压消退时清除状态和告警记录
         if (( prev_count > 0 )); then
             ALERT_KEY="backlog_${state_key}"
             if [[ -n "$(state_get "LAST_ALERT_${ALERT_KEY}")" ]]; then
@@ -255,8 +256,21 @@ check_queue_backlog() {
     fi
 }
 
-check_queue_backlog "youtube_transcription_long"     "$HEALTH_LONG_BACKLOG_THRESHOLD"     "long"
-check_queue_backlog "youtube_transcription_priority" "$HEALTH_PRIORITY_BACKLOG_THRESHOLD" "priority-asr"
+case "$WORKER_NODE_ROLE" in
+    caption)
+        check_queue_backlog "youtube_fetching"          "$HEALTH_FETCH_BACKLOG_THRESHOLD"    "fetch"
+        check_queue_backlog "youtube_priority"          "$HEALTH_PRIORITY_BACKLOG_THRESHOLD" "priority-transcript"
+        ;;
+    asr)
+        check_queue_backlog "youtube_transcription"          "$HEALTH_ASR_BACKLOG_THRESHOLD"      "asr"
+        check_queue_backlog "youtube_transcription_long"     "$HEALTH_LONG_BACKLOG_THRESHOLD"     "long"
+        check_queue_backlog "youtube_transcription_priority" "$HEALTH_PRIORITY_BACKLOG_THRESHOLD" "priority-asr"
+        ;;
+    all|*)
+        check_queue_backlog "youtube_transcription_long"     "$HEALTH_LONG_BACKLOG_THRESHOLD"     "long"
+        check_queue_backlog "youtube_transcription_priority" "$HEALTH_PRIORITY_BACKLOG_THRESHOLD" "priority-asr"
+        ;;
+esac
 
 # ── 汇总 ──────────────────────────────────────────────────
 if [[ ${#PING_FAILED[@]} -gt 0 ]]; then

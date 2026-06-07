@@ -6,20 +6,24 @@
 #   bash run_worker.sh <role>
 #
 # role 取值:
-#   main                 — youtube_fetching + youtube_transcription（Feed 批量）
+#   fetch                — youtube_fetching（Feed 抓取 + 字幕，双节点「字幕机」）
+#   asr                  — youtube_transcription（Feed 短视频 ASR，双节点「下载机」）
+#   main                 — youtube_fetching + youtube_transcription（单机全栈，向后兼容）
 #   long                 — youtube_transcription_long（长视频 ASR）
 #   priority-transcript  — youtube_priority（Upload Link 字幕，插队）
 #   priority-asr         — youtube_transcription_priority（Upload Link ASR，插队）
 #
+# 双节点分工见 DEPLOY_DUAL_NODE.md；单机部署仍用 yt-worker.target（main + long + priority*）
+#
 # 调试（前台运行，直接看日志）:
-#   bash run_worker.sh main
+#   bash run_worker.sh fetch
 # ============================================================
 
 set -euo pipefail
 
 ROLE="${1:-}"
 if [[ -z "$ROLE" ]]; then
-    echo "❌ 用法: $0 <main|long|priority-transcript|priority-asr>" >&2
+    echo "❌ 用法: $0 <fetch|asr|main|long|priority-transcript|priority-asr>" >&2
     exit 1
 fi
 
@@ -49,10 +53,14 @@ export PYTHONPATH="$SCRIPT_DIR"
 
 # 默认并发与任务数（可通过 .env 覆盖）
 : "${WORKER_MAIN_CONCURRENCY:=1}"
+: "${WORKER_FETCH_CONCURRENCY:=${WORKER_MAIN_CONCURRENCY}}"
+: "${WORKER_ASR_CONCURRENCY:=${WORKER_MAIN_CONCURRENCY}}"
 : "${WORKER_LONG_CONCURRENCY:=1}"
 : "${WORKER_PRIORITY_TRANSCRIPT_CONCURRENCY:=1}"
 : "${WORKER_PRIORITY_ASR_CONCURRENCY:=1}"
 : "${WORKER_MAIN_MAX_TASKS_PER_CHILD:=20}"
+: "${WORKER_FETCH_MAX_TASKS_PER_CHILD:=${WORKER_MAIN_MAX_TASKS_PER_CHILD}}"
+: "${WORKER_ASR_MAX_TASKS_PER_CHILD:=${WORKER_MAIN_MAX_TASKS_PER_CHILD}}"
 : "${WORKER_LONG_MAX_TASKS_PER_CHILD:=10}"
 : "${WORKER_PRIORITY_MAX_TASKS_PER_CHILD:=20}"
 : "${WORKER_LOG_LEVEL:=info}"
@@ -60,6 +68,24 @@ export PYTHONPATH="$SCRIPT_DIR"
 HOSTNAME_SUFFIX="@$(hostname)"
 
 case "$ROLE" in
+    fetch)
+        echo "[run_worker] 启动 Fetch Worker (youtube_fetching, concurrency=${WORKER_FETCH_CONCURRENCY})"
+        exec "$CELERY" -A worker.celery_app worker \
+            --queues=youtube_fetching \
+            --concurrency="${WORKER_FETCH_CONCURRENCY}" \
+            --max-tasks-per-child="${WORKER_FETCH_MAX_TASKS_PER_CHILD}" \
+            --hostname="youtube-fetch-worker${HOSTNAME_SUFFIX}" \
+            --loglevel="${WORKER_LOG_LEVEL}"
+        ;;
+    asr)
+        echo "[run_worker] 启动 ASR Worker (youtube_transcription, concurrency=${WORKER_ASR_CONCURRENCY})"
+        exec "$CELERY" -A worker.celery_app worker \
+            --queues=youtube_transcription \
+            --concurrency="${WORKER_ASR_CONCURRENCY}" \
+            --max-tasks-per-child="${WORKER_ASR_MAX_TASKS_PER_CHILD}" \
+            --hostname="youtube-asr-worker${HOSTNAME_SUFFIX}" \
+            --loglevel="${WORKER_LOG_LEVEL}"
+        ;;
     main)
         echo "[run_worker] 启动 Main Worker (youtube_fetching + youtube_transcription, concurrency=${WORKER_MAIN_CONCURRENCY})"
         exec "$CELERY" -A worker.celery_app worker \
@@ -102,7 +128,7 @@ case "$ROLE" in
             --loglevel="${WORKER_LOG_LEVEL}"
         ;;
     *)
-        echo "❌ 未知 role: $ROLE（可选值: main / long / priority-transcript / priority-asr）" >&2
+        echo "❌ 未知 role: $ROLE（可选值: fetch / asr / main / long / priority-transcript / priority-asr）" >&2
         exit 1
         ;;
 esac

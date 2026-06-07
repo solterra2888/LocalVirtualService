@@ -4,6 +4,9 @@
 .env.*.local
 .env.secrets
 
+# 浏览器导出的 YouTube cookies（含登录态，禁止提交）
+secrets/
+
 # Python
 __pycache__/
 *.py[cod]

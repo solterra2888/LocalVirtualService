@@ -274,10 +274,52 @@ def _classify_caption_error(err: Exception) -> tuple:
     return f"{orig_cls}: {short}{via_tag}", True
 
 
+def _env_flag(name: str, default: str = "true") -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _ytdlp_enabled() -> bool:
+    """总开关：false 时禁用所有 yt-dlp 路径（字幕回退 + ASR 音频下载）。"""
+    return _env_flag("YTDLP_ENABLED", "true")
+
+
+def _asr_fallback_enabled() -> bool:
+    """字幕失败后是否派发 Fun-ASR（依赖 yt-dlp 下载音频）。"""
+    if not _ytdlp_enabled():
+        return False
+    return _env_flag("CAPTION_ASR_FALLBACK_ENABLED", "true")
+
+
 def _ytdlp_caption_fallback_enabled() -> bool:
     """是否启用 yt-dlp 作为 youtube-transcript-api 的字幕 fallback。"""
-    return os.getenv("CAPTION_YTDLP_FALLBACK_ENABLED", "true").strip().lower() in \
-        ("1", "true", "yes", "on")
+    if not _ytdlp_enabled():
+        return False
+    return _env_flag("CAPTION_YTDLP_FALLBACK_ENABLED", "true")
+
+
+def _finalize_caption_failure(
+    api_reason: Optional[str],
+    api_should_asr: bool,
+    yt_reason: Optional[str] = None,
+) -> dict:
+    """统一构造字幕失败 outcome，并套用 ASR / yt-dlp 开关策略。"""
+    if not api_should_asr:
+        return {
+            "success": False, "result": None, "source": None,
+            "should_asr": False, "api_should_asr": False,
+            "api_reason": api_reason, "yt_reason": yt_reason,
+        }
+    if not _ytdlp_caption_fallback_enabled():
+        if not _ytdlp_enabled():
+            yt_reason = yt_reason or "yt-dlp 已禁用"
+        else:
+            yt_reason = yt_reason or "fallback 未启用"
+    return {
+        "success": False, "result": None, "source": None,
+        "should_asr": api_should_asr and _asr_fallback_enabled(),
+        "api_should_asr": api_should_asr,
+        "api_reason": api_reason, "yt_reason": yt_reason,
+    }
 
 
 def _fetch_transcript_with_fallback(video_url: str) -> dict:
@@ -291,7 +333,8 @@ def _fetch_transcript_with_fallback(video_url: str) -> dict:
       success:     最终是否拿到字幕
       result:      成功时的字幕数据 (与 fetch_transcript 同结构)
       source:      'API' 或 'yt-dlp'，表示最终由哪条路径拿到（失败时为 None）
-      should_asr:  失败时是否应降级到 ASR（永久失败如私有/直播未开始则 False）
+      should_asr:  失败时是否应降级到 ASR（受 YTDLP_ENABLED / CAPTION_ASR_FALLBACK_ENABLED 约束）
+      api_should_asr: transcript-api 层面是否属于可降级 ASR 的失败（永久失败为 False）
       api_reason:  transcript-api 的失败原因（未调用时为 None）
       yt_reason:   yt-dlp 的失败原因（未调用时为 None）
     """
@@ -302,7 +345,8 @@ def _fetch_transcript_with_fallback(video_url: str) -> dict:
     try:
         result = YouTubeCaptionService.fetch_transcript(video_url)
         return {"success": True, "result": result, "source": "API",
-                "should_asr": False, "api_reason": None, "yt_reason": None}
+                "should_asr": False, "api_should_asr": False,
+                "api_reason": None, "yt_reason": None}
     except ImportError:
         api_reason = "transcript-api 库未安装"
     except Exception as e:
@@ -310,23 +354,20 @@ def _fetch_transcript_with_fallback(video_url: str) -> dict:
 
     # 永久失败（直播未开始/私有/首播等）→ yt-dlp 也无能为力，直接返回
     if not api_should_asr:
-        return {"success": False, "result": None, "source": None,
-                "should_asr": False, "api_reason": api_reason, "yt_reason": None}
+        return _finalize_caption_failure(api_reason, api_should_asr)
 
     # ── Stage 2: yt-dlp fallback（慢 2-5s，但走不同 endpoint） ──
     if not _ytdlp_caption_fallback_enabled():
-        return {"success": False, "result": None, "source": None,
-                "should_asr": True, "api_reason": api_reason,
-                "yt_reason": "fallback 未启用"}
+        return _finalize_caption_failure(api_reason, api_should_asr)
 
     try:
         result = YouTubeCaptionService.fetch_transcript_via_ytdlp(video_url)
         return {"success": True, "result": result, "source": "yt-dlp",
-                "should_asr": False, "api_reason": api_reason, "yt_reason": None}
+                "should_asr": False, "api_should_asr": False,
+                "api_reason": api_reason, "yt_reason": None}
     except Exception as e:
         yt_reason = str(e).split("\n")[0][:120]
-        return {"success": False, "result": None, "source": None,
-                "should_asr": True, "api_reason": api_reason, "yt_reason": yt_reason}
+        return _finalize_caption_failure(api_reason, api_should_asr, yt_reason)
 
 
 def _format_caption_failure_reason(outcome: dict) -> str:
@@ -368,7 +409,7 @@ def _fetch_caption(content_db_id: int, raw_video: dict, store: ContentStore) -> 
 
 def _dispatch_asr_fallback(asr_pending: list):
     """将字幕失败的视频派发到 ASR 转录队列"""
-    if not asr_pending:
+    if not asr_pending or not _asr_fallback_enabled():
         return
     log.info("  📡 派发 ASR 转录: %d 个视频", len(asr_pending))
     for item in asr_pending:
@@ -518,7 +559,7 @@ def fetch_youtube_file_transcript_task(self, file_id: int, youtube_url: str,
         }
 
     # ── 永久失败 (直播 / 私有 / 首播未开始 ...): 不降级 ASR ─────────────
-    if not outcome["should_asr"]:
+    if not outcome.get("api_should_asr", outcome["should_asr"]):
         reason = _format_caption_failure_reason(outcome)
         elapsed = round(time.time() - task_start, 2)
         log.warning(
@@ -531,6 +572,26 @@ def fetch_youtube_file_transcript_task(self, file_id: int, youtube_url: str,
         store.signal_upload_file_ready(
             file_id, username, "failed",
             source="caption_permanent_fail",
+            reason=reason,
+            elapsed_seconds=elapsed,
+        )
+        return {"task_id": task_id, "status": "failed", "permanent": True,
+                "reason": reason, "file_id": file_id}
+
+    # ── 字幕失败且 ASR 已关闭: 明确失败，不派发 yt-dlp 下载任务 ────────
+    if not _asr_fallback_enabled():
+        reason = _format_caption_failure_reason(outcome)
+        elapsed = round(time.time() - task_start, 2)
+        log.warning(
+            "── Upload Caption 失败(ASR 已禁用): file_id=%d video=%s 原因=%s ──",
+            file_id, video_id, reason,
+        )
+        store.update_file_status(file_id, "failed")
+        _progress(status="failed", msg=f"Caption failed (ASR disabled): {reason}",
+                  url=youtube_url, failed=1)
+        store.signal_upload_file_ready(
+            file_id, username, "failed",
+            source="caption_asr_disabled",
             reason=reason,
             elapsed_seconds=elapsed,
         )
@@ -683,6 +744,17 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
     temp_dir = None
 
     current_queue = _current_routing_key(self)
+
+    if not _asr_fallback_enabled():
+        err = "ASR 已禁用 (CAPTION_ASR_FALLBACK_ENABLED=false 或 YTDLP_ENABLED=false)"
+        log.warning(
+            "── Feed ASR 跳过: content=%d video=%s reason=%s ──",
+            content_db_id, video_id, err,
+        )
+        _progress(status="failed", msg=err, url=video_url, failed=1)
+        return {"task_id": task_id, "status": "failed", "error": err,
+                "permanent": True, "reason": "asr_disabled",
+                "content_db_id": content_db_id}
 
     # ── 预探测: 获取元信息 (is_live / live_status / duration) ──────────────
     # 目的有两个:
@@ -839,6 +911,24 @@ def transcribe_youtube_file_asr_task(self, file_id: int, youtube_url: str, video
     task_start = time.time()
 
     current_queue = _current_routing_key(self)
+
+    if not _asr_fallback_enabled():
+        err = "ASR 已禁用 (CAPTION_ASR_FALLBACK_ENABLED=false 或 YTDLP_ENABLED=false)"
+        log.warning(
+            "── Upload ASR 跳过: file_id=%d video=%s reason=%s ──",
+            file_id, video_id, err,
+        )
+        store.update_file_status(file_id, "failed")
+        _progress(status="failed", msg=err, url=youtube_url, failed=1)
+        elapsed = round(time.time() - task_start, 2)
+        store.signal_upload_file_ready(
+            file_id, username, "failed",
+            source="asr_disabled",
+            reason=err,
+            elapsed_seconds=elapsed,
+        )
+        return {"task_id": task_id, "status": "failed", "error": err,
+                "permanent": True, "reason": "asr_disabled", "file_id": file_id}
 
     # ── 预探测: 直播永久失败 + 长视频路由 ────────────────────────────
     # 与 Feed 的 transcribe_youtube_feed_task 完全对齐, 只在短队列首次进入时做.

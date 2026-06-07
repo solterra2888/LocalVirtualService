@@ -3,6 +3,7 @@ Description=YT Worker - priority ASR (youtube_transcription_priority, Upload Lin
 After=network-online.target
 Wants=network-online.target
 PartOf=yt-worker.target
+PartOf=yt-worker-asr-node.target
 
 [Service]
 Type=simple
