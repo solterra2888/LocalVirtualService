@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Modal,
-  Steps,
   Form,
   Input,
   Select,
@@ -9,7 +8,6 @@ import {
   Space,
   Card,
   Typography,
-  Alert,
   Row,
   Col,
   InputNumber,
@@ -39,7 +37,7 @@ import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { getModalStyles } from '../utils/modalStyles';
 import CronExpressionGuide from './CronExpressionGuide';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 const THEME_COLORS = {
   light: {
@@ -61,6 +59,10 @@ interface DataSourceConfigModalProps {
   onSuccess: (taskId: string) => void;
   dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
+  /** 已有定时任务的 Cron，打开弹窗时预填 */
+  initialCronExpression?: string;
+  /** 已有定时任务的时区，打开弹窗时预填 */
+  initialTimezone?: string;
 }
 
 interface ConfigFormData {
@@ -81,16 +83,16 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
   onCancel,
   onSuccess,
   dataSourceType,
-  dataSourceName
+  dataSourceName,
+  initialCronExpression,
+  initialTimezone,
 }) => {
   const { themeMode } = useDashboardSettings();
   const colors = THEME_COLORS[themeMode];
-  const [currentStep, setCurrentStep] = useState(0);
   const [form] = Form.useForm<ConfigFormData>();
   const [loading, setLoading] = useState(false);
 
   const [timezoneOptions, setTimezoneOptions] = useState<TimezoneOption[]>([]);
-  const [formData, setFormData] = useState<Partial<ConfigFormData>>({});
   const [showCronGuide, setShowCronGuide] = useState(false);
 
   // 数据源配置映射
@@ -245,6 +247,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
   };
 
   const currentConfig = dataSourceConfigs[dataSourceType];
+  const hasParamFields = currentConfig.params.length > 0;
 
   const loadPresets = async () => {
     try {
@@ -264,15 +267,10 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
   };
 
   const resetModal = () => {
-    // EODHD Fundamentals不需要schedule configuration，直接跳到参数配置
-    const startStep = dataSourceType === 'eodhd_fundamentals' ? 1 : 0;
-    setCurrentStep(startStep);
-    setFormData({});
     form.resetFields();
-    
-    // 设置默认值（不显示cron表达式）
     form.setFieldsValue({
-      timezone: 'America/New_York'  // 默认选择美国纽约时区
+      timezone: initialTimezone || 'America/New_York',
+      cronExpression: initialCronExpression || currentConfig.defaultSchedule,
     });
   };
 
@@ -282,32 +280,17 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       resetModal();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, initialCronExpression, initialTimezone, dataSourceType]);
 
-  const handleNext = async () => {
+  const handleSubmit = async () => {
+    let data: Partial<ConfigFormData>;
     try {
-      const values = await form.validateFields();
-      const newFormData = { ...formData, ...values };
-      setFormData(newFormData);
-      
-      // EODHD Fundamentals跳过schedule configuration，直接提交
-      if (dataSourceType === 'eodhd_fundamentals') {
-        await handleSubmit(newFormData);
-      } else if (currentStep < 1) {
-        setCurrentStep(currentStep + 1);
-      } else {
-        await handleSubmit(newFormData);
-      }
+      data = await form.validateFields();
     } catch (error) {
       console.error('表单验证失败:', error);
+      return;
     }
-  };
 
-  const handlePrev = () => {
-    setCurrentStep(currentStep - 1);
-  };
-
-  const handleSubmit = async (data: Partial<ConfigFormData>) => {
     try {
       setLoading(true);
       
@@ -560,122 +543,11 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     onCancel();
   };
 
-  const renderStepContent = () => {
-    switch (currentStep) {
-      case 0:
-        return renderScheduleConfigStep();
-      case 1:
-        return renderTaskParamsStep();
-      default:
-        return null;
-    }
-  };
-
-  const renderScheduleConfigStep = () => (
-    <div>
-      <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <Title level={4}>
-          <ClockCircleOutlined /> Schedule Configuration
-        </Title>
-        <Text type="secondary">
-          Set the execution time and frequency for data acquisition for {dataSourceName}
-        </Text>
-      </div>
-
-      {/* Data source information card */}
-      <Card 
-        style={{ marginBottom: 24, backgroundColor: colors.cardSecondaryBg }}
-        size="small"
-      >
-        <Row align="middle">
-          <Col span={2}>
-            {currentConfig.icon}
-          </Col>
-          <Col span={22}>
-            <div>
-              <Text strong>{dataSourceName}</Text>
-              <div style={{ marginTop: 4 }}>
-                <Text type="secondary" style={{ fontSize: '12px' }}>
-                  {currentConfig.description}
-                </Text>
-              </div>
-            </div>
-          </Col>
-        </Row>
-      </Card>
-
-      <Form.Item
-        label={
-          <Space>
-            Cron Expression
-            <Button
-              type="text"
-              size="small"
-              icon={<QuestionCircleOutlined />}
-              onClick={() => setShowCronGuide(true)}
-              style={{ padding: 0, height: 'auto' }}
-            >
-              Usage Guide
-            </Button>
-          </Space>
-        }
-        name="cronExpression"
-        rules={[
-          { required: true, message: 'Please enter a Cron expression' },
-          {
-            validator: (_, value) => {
-              if (!value) return Promise.resolve();
-              const { valid, message: msg } = schedulerAPI.validateCronExpression(value);
-              return valid ? Promise.resolve() : Promise.reject(new Error(msg));
-            }
-          }
-        ]}
-        extra="Format: Minutes Hours Day Month Week (e.g., */15 * * * * means execute every 15 minutes)"
-      >
-        <Input 
-          placeholder="Enter Cron expression, e.g., */15 * * * *"
-          suffix={
-            <Tooltip title="Format: Minutes Hours Day Month Week">
-              <InfoCircleOutlined />
-            </Tooltip>
-          }
-        />
-      </Form.Item>
-
-      <Form.Item
-        label="Timezone"
-        name="timezone"
-        rules={[{ required: true, message: 'Please select a timezone' }]}
-      >
-        <Select placeholder="Select timezone" showSearch>
-          {timezoneOptions.map(tz => (
-            <Option key={tz.value} value={tz.value}>
-              {tz.label}
-            </Option>
-          ))}
-        </Select>
-      </Form.Item>
-
-
-
-
-    </div>
-  );
-
-  const renderTaskParamsStep = () => {
-    const renderParamFields = () => {
+  const renderParamFields = () => {
       switch (dataSourceType) {
         case 'eodhd_news':
           return (
             <>
-              <Alert
-                message="News Fetching Parameters"
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="Configure news data source and filtering parameters"
-              />
-              
               <Form.Item
                 label="Max Results"
                 name={['taskParams', 'max_results']}
@@ -774,17 +646,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 </Select>
               </Form.Item>
               
-              <Alert
-                message={
-                  <span>
-                    <strong>LLM Analysis Cost:</strong> ~¥0.02 per news item per template
-                  </span>
-                }
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-              />
-              
               <Form.Item
                 label="Analysis Batch Size"
                 name={['taskParams', 'analysis_batch_size']}
@@ -836,35 +697,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   unCheckedChildren="✗ Disabled"
                 />
               </Form.Item>
-              
-              <Alert
-                message={
-                  <Space size="large">
-                    <span>⚡ <strong>Speed:</strong> 50-100ms/item</span>
-                    <span>💰 <strong>Cost:</strong> ¥0.0007/item</span>
-                    <span>🎯 <strong>Accuracy:</strong> 82%</span>
-                  </Space>
-                }
-                type="success"
-                showIcon
-                icon={<CheckCircleOutlined />}
-                style={{ marginBottom: 16 }}
-                description="Vector-based theme matching is 140x cheaper and 20x faster than LLM analysis. Recommended to keep enabled."
-              />
             </>
           );
           
         case 'watchlist_news':
           return (
             <>
-              <Alert
-                message="Stock symbols are automatically fetched from your watchlist"
-                description="This scheduler will automatically get news for all stocks in your watchlist based on the primaryticker field from target_tracking_config table."
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-              />
-              
               <Form.Item
                 label="Max Results"
                 name={['taskParams', 'max_results']}
@@ -934,17 +772,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 </Select>
               </Form.Item>
               
-              <Alert
-                message={
-                  <span>
-                    <strong>LLM Analysis Cost:</strong> ~¥0.02 per news item per template
-                  </span>
-                }
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-              />
-              
               <Form.Item
                 label="Analysis Batch Size"
                 name={['taskParams', 'analysis_batch_size']}
@@ -996,35 +823,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   unCheckedChildren="✗ Disabled"
                 />
               </Form.Item>
-              
-              <Alert
-                message={
-                  <Space size="large">
-                    <span>⚡ <strong>Speed:</strong> 50-100ms/item</span>
-                    <span>💰 <strong>Cost:</strong> ¥0.0007/item</span>
-                    <span>🎯 <strong>Accuracy:</strong> 82%</span>
-                  </Space>
-                }
-                type="success"
-                showIcon
-                icon={<CheckCircleOutlined />}
-                style={{ marginBottom: 16 }}
-                description="Vector-based theme matching is 140x cheaper and 20x faster than LLM analysis. Recommended to keep enabled."
-              />
             </>
           );
           
         case 'cctv_news':
           return (
             <>
-              <Alert
-                message="CCTV News Scraper (央视新闻联播)"
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="Automatically scrape news from CCTV News website. Recommended to run daily at 8 PM Beijing time."
-              />
-              
               <Divider orientation="left">Scraping Parameters (爬取参数)</Divider>
               
               <Form.Item
@@ -1104,14 +908,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               >
                 <Switch defaultChecked />
               </Form.Item>
-              
-              <Alert
-                message="Tips (提示)"
-                type="warning"
-                showIcon
-                description="It's recommended to leave scraping parameters empty to get complete daily news. Use multiple templates for comprehensive analysis."
-                style={{ marginTop: 16 }}
-              />
             </>
           );
           
@@ -1122,13 +918,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         case 'youtube_author_summary':
           return (
             <>
-              <Alert
-                message="Force Regenerate"
-                type="info"
-                showIcon
-                description="Enable this to ignore cached summaries and regenerate all data using the latest prompt template and model settings. Disable after regeneration to resume normal caching behavior."
-                style={{ marginTop: 16 }}
-              />
               <Form.Item
                 label={
                   <span>
@@ -1138,15 +927,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                     </Tooltip>
                   </span>
                 }
+                name={['taskParams', 'force']}
+                valuePropName="checked"
+                initialValue={false}
                 style={{ marginTop: 16 }}
               >
-                <Switch
-                  checked={formData.taskParams?.force || false}
-                  onChange={(checked) => setFormData(prev => ({
-                    ...prev,
-                    taskParams: { ...prev.taskParams, force: checked }
-                  }))}
-                />
+                <Switch />
               </Form.Item>
             </>
           );
@@ -1157,13 +943,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         case 'news_feed':
           return (
             <>
-              <Alert
-                message="News Feed Parameters"
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="Fetch news from EODHD API and distribute to users who subscribed to specific news sources (Yahoo Finance, CNBC, etc.) in My Feeds."
-              />
 
               <Row gutter={16}>
                 <Col span={12}>
@@ -1205,13 +984,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         case 'eodhd_events':
           return (
             <>
-              <Alert
-                message="Economic Events Fetcher"
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="Automatically fetch economic calendar events from EODHD API. Similar to Earnings Calendar parameters - no limit parameter needed (fixed at 1000)."
-              />
               
               <Form.Item
                 label="Fetch Mode"
@@ -1239,14 +1011,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   style={{ width: '100%' }}
                 />
               </Form.Item>
-
-              <Alert
-                message="Optional: Custom Date Range"
-                type="warning"
-                showIcon
-                style={{ marginTop: 16, marginBottom: 16 }}
-                description="You can also specify exact start and end dates. If provided, these will override the 'Days Ahead' setting."
-              />
               
               <Form.Item
                 label="Start Date"
@@ -1813,27 +1577,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   style={{ width: '100%' }}
                 />
               </Form.Item>
-              
-              <Alert
-                message="Historical Price Data"
-                description="This scheduler will automatically fetch historical end-of-day price data for all stocks in your watchlist. Data includes open, high, low, close prices, volume, and adjusted close prices."
-                type="info"
-                showIcon
-                style={{ marginTop: 16 }}
-              />
             </>
           );
           
         case 'futu_themes':
           return (
             <>
-              <Alert
-                message="Futu Investment Themes Scraper"
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="Automatically scrape investment themes and related stocks from Futu website. Supports HK and US markets with daily full updates."
-              />
               
               <Form.Item
                 label="Markets"
@@ -1881,13 +1630,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         case 'market_data':
           return (
             <>
-              <Alert
-                message="Market Data Fetcher (32 Assets: Indices, Forex, Commodities, Bonds, Sectors)"
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="Automatically fetch real-time and historical (EOD) market data from EODHD API. Supports 8 indices, 4 forex pairs, 5 commodities, 4 bond yields, and 11 sectors."
-              />
               
               <Form.Item
                 label="Asset Types"
@@ -1952,13 +1694,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         case 'earnings_calendar':
           return (
             <>
-              <Alert
-                message="Earnings Calendar Fetcher"
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="Automatically fetch US earnings calendar from EODHD API. No S&P 500 filtering - all US stocks are included."
-              />
               
               <Form.Item
                 label="Fetch Mode"
@@ -1986,14 +1721,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   style={{ width: '100%' }}
                 />
               </Form.Item>
-
-              <Alert
-                message="Optional: Custom Date Range"
-                type="warning"
-                showIcon
-                style={{ marginTop: 16, marginBottom: 16 }}
-                description="You can also specify exact start and end dates. If provided, these will override the 'Days Ahead' setting."
-              />
               
               <Form.Item
                 label="Start Date"
@@ -2016,21 +1743,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         case 'ipo_calendar':
           return (
             <>
-              <Alert
-                message="IPO Calendar Fetcher"
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="Automatically fetch IPO calendar data from EODHD API. Note: EODHD API does not support exchange filtering - all exchanges data will be returned. If you need to filter by specific exchanges, you can query the database with WHERE conditions."
-              />
-              
-              <Alert
-                message="Exchange Filtering Not Supported"
-                type="warning"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="The EODHD IPO Calendar API does not support exchange filtering. All exchanges data will be fetched and stored. You can filter by exchange when querying the database."
-              />
               
               <Form.Item
                 label="Fetch Mode"
@@ -2058,14 +1770,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   style={{ width: '100%' }}
                 />
               </Form.Item>
-
-              <Alert
-                message="Optional: Custom Date Range"
-                type="warning"
-                showIcon
-                style={{ marginTop: 16, marginBottom: 16 }}
-                description="You can also specify exact start and end dates. If provided, these will override the 'Days Ahead' setting."
-              />
               
               <Form.Item
                 label="Start Date"
@@ -2088,13 +1792,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
         case 'watchlist_fundamentals':
           return (
             <>
-              <Alert
-                message="Watchlist Fundamentals Auto-Update"
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="Automatically update fundamentals data for all watchlist stocks. Ideal for maintaining up-to-date company information with intelligent skip logic to avoid unnecessary API calls."
-              />
               
               <Form.Item
                 label="Data Types to Update"
@@ -2136,29 +1833,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                   addonAfter="hours"
                 />
               </Form.Item>
-
-              <Alert
-                message="Smart Update Strategy"
-                type="success"
-                showIcon
-                style={{ marginTop: 16 }}
-                description={
-                  <div>
-                    <p><strong>Main Scheduler (Recommended):</strong></p>
-                    <ul style={{ marginBottom: 8, paddingLeft: 20 }}>
-                      <li>Weekly on Sunday 2 AM</li>
-                      <li>Updates all 12 data types</li>
-                      <li>Skips stocks updated within 24 hours</li>
-                    </ul>
-                    <p><strong>Earnings Season Fast Track (Optional):</strong></p>
-                    <ul style={{ paddingLeft: 20 }}>
-                      <li>Manual or temporary schedule during earnings season (Jan, Apr, Jul, Oct)</li>
-                      <li>Focus on: Earnings, Financials, Highlights, Valuation</li>
-                      <li>Run 2-3 times per week for faster updates</li>
-                    </ul>
-                  </div>
-                }
-              />
             </>
           );
           
@@ -2472,69 +2146,20 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           );
 
         case 'market_weekly_report':
-          return (
-            <Alert
-              message="Market Weekly Report Scheduler"
-              type="info"
-              showIcon
-              description="Generates a personalized static HTML report for every user who has at least one theme tagged 'Market Weekly'. Each user sees only their own tagged themes, indices, sectors, forex, commodities, bonds WoW performance, and next week's calendar."
-            />
-          );
+          return null;
 
         default:
           return null;
       }
-    };
-
-    return (
-      <div>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <Title level={4}>
-            <BulbOutlined /> Parameter Configuration
-          </Title>
-          <Text type="secondary">
-            Configure specific data acquisition parameters for {dataSourceName}
-          </Text>
-        </div>
-
-        {renderParamFields()}
-
-        <Alert
-          message="Parameter Description"
-          description="All parameters are optional, leave empty for default configuration. The task will be automatically enabled after creation, and you can control its enable/disable status through the switch on the main page, or modify parameters through the edit function."
-          type="info"
-          showIcon
-        />
-      </div>
-    );
   };
-
-  const steps = dataSourceType === 'eodhd_fundamentals' ? [
-    {
-      title: 'Parameter Configuration',
-      description: 'Configure data types and exchanges',
-      icon: <BulbOutlined />
-    }
-  ] : [
-    {
-      title: 'Schedule Configuration',
-      description: 'Set execution time',
-      icon: <ClockCircleOutlined />
-    },
-    {
-      title: 'Parameter Configuration',
-      description: 'Configure acquisition parameters',
-      icon: <BulbOutlined />
-    }
-  ];
 
   return (
     <Modal
       title={
         <Space>
           {currentConfig.icon}
-          {dataSourceType === 'eodhd_fundamentals' 
-            ? `Update Data for ${dataSourceName}` 
+          {dataSourceType === 'eodhd_fundamentals'
+            ? `Update Data for ${dataSourceName}`
             : `Configure Data Acquisition Strategy for ${dataSourceName}`}
         </Space>
       }
@@ -2543,51 +2168,106 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       width={800}
       styles={getModalStyles(themeMode)}
       footer={
-        <div style={{ textAlign: 'right' }}>
-          <Space>
-            <Button onClick={handleCancel}>
-              Cancel
-            </Button>
-            {currentStep > 0 && dataSourceType !== 'eodhd_fundamentals' && (
-              <Button onClick={handlePrev}>
-                Previous Step
-              </Button>
-            )}
-            <Button 
-              type="primary" 
-              onClick={handleNext}
-              loading={loading}
-              icon={(
-                dataSourceType === 'eodhd_fundamentals' || 
-                currentStep === 1
-              ) ? <CheckCircleOutlined /> : undefined}
-            >
-              {dataSourceType === 'eodhd_fundamentals' 
-                ? 'Update Data' 
-                : (currentStep === 1 ? 'Create Strategy' : 'Next Step')}
-            </Button>
-          </Space>
-        </div>
+        <Space style={{ justifyContent: 'flex-end', display: 'flex', width: '100%' }}>
+          <Button onClick={handleCancel}>Cancel</Button>
+          <Button
+            type="primary"
+            onClick={handleSubmit}
+            loading={loading}
+            icon={<CheckCircleOutlined />}
+          >
+            {dataSourceType === 'eodhd_fundamentals' ? 'Update Data' : 'Create Strategy'}
+          </Button>
+        </Space>
       }
       destroyOnClose
     >
-      <div style={{ padding: '20px 0' }}>
-        <Steps 
-          current={currentStep} 
-          style={{ marginBottom: 32 }}
-          items={steps}
-        />
+      <div style={{ maxHeight: '70vh', overflowY: 'auto', padding: '4px 0' }}>
+        <Form form={form} layout="vertical" size="middle">
+          <Card
+            style={{ marginBottom: 16, backgroundColor: colors.cardSecondaryBg }}
+            size="small"
+          >
+            <Row align="middle">
+              <Col span={2}>{currentConfig.icon}</Col>
+              <Col span={22}>
+                <Text strong>{dataSourceName}</Text>
+                <div style={{ marginTop: 4 }}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                    {currentConfig.description}
+                  </Text>
+                </div>
+              </Col>
+            </Row>
+          </Card>
 
-        <Form
-          form={form}
-          layout="vertical"
-          size="middle"
-        >
-          {renderStepContent()}
+          {dataSourceType !== 'eodhd_fundamentals' && (
+            <Row gutter={16}>
+              <Col span={14}>
+                <Form.Item
+                  label={
+                    <Space>
+                      Cron Expression
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<QuestionCircleOutlined />}
+                        onClick={() => setShowCronGuide(true)}
+                        style={{ padding: 0, height: 'auto' }}
+                      >
+                        Usage Guide
+                      </Button>
+                    </Space>
+                  }
+                  name="cronExpression"
+                  rules={[
+                    { required: true, message: 'Please enter a Cron expression' },
+                    {
+                      validator: (_, value) => {
+                        if (!value) return Promise.resolve();
+                        const { valid, message: msg } = schedulerAPI.validateCronExpression(value);
+                        return valid ? Promise.resolve() : Promise.reject(new Error(msg));
+                      },
+                    },
+                  ]}
+                  extra="Format: Minutes Hours Day Month Week (e.g., */15 * * * * means execute every 15 minutes)"
+                >
+                  <Input
+                    placeholder="Enter Cron expression, e.g., */15 * * * *"
+                    suffix={
+                      <Tooltip title="Format: Minutes Hours Day Month Week">
+                        <InfoCircleOutlined />
+                      </Tooltip>
+                    }
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={10}>
+                <Form.Item
+                  label="Timezone"
+                  name="timezone"
+                  rules={[{ required: true, message: 'Please select a timezone' }]}
+                >
+                  <Select placeholder="Select timezone" showSearch>
+                    {timezoneOptions.map((tz) => (
+                      <Option key={tz.value} value={tz.value}>
+                        {tz.label}
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
+
+          {hasParamFields && dataSourceType !== 'eodhd_fundamentals' && (
+            <Divider orientation="left">Task Parameters</Divider>
+          )}
+
+          {renderParamFields()}
         </Form>
       </div>
-      
-      {/* Cron expression usage guide */}
+
       <CronExpressionGuide
         open={showCronGuide}
         onCancel={() => setShowCronGuide(false)}

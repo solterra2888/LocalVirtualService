@@ -617,17 +617,21 @@ const SchedulerPage: React.FC = () => {
     });
   };
 
+  // Get the existing scheduled task for a data source (prefer enabled, then any with cron)
+  const getExistingScheduledTask = (sourceId: string): ScheduledTask | undefined => {
+    const relatedTasks = getRelatedTasks(sourceId);
+    return (
+      relatedTasks.find((task) => task.enabled && task.cron_expression) ||
+      relatedTasks.find((task) => task.cron_expression)
+    );
+  };
+
   // Get cron expression info for a data source
   const getCronInfo = (sourceId: string) => {
-    const relatedTasks = getRelatedTasks(sourceId);
-    const enabledTasks = relatedTasks.filter(task => task.enabled);
-    
-    if (enabledTasks.length === 0) {
+    const task = getExistingScheduledTask(sourceId);
+    if (!task) {
       return null;
     }
-    
-    // Get the first enabled task's cron expression
-    const task = enabledTasks[0];
     const cronExpression = task.cron_expression;
     
     if (!cronExpression) {
@@ -1378,18 +1382,23 @@ const SchedulerPage: React.FC = () => {
 
 
       {/* Data source specific configuration modal */}
-      {selectedDataSource && (
-        <DataSourceConfigModal
-          open={dataSourceConfigVisible}
-          onCancel={() => {
-            setDataSourceConfigVisible(false);
-            setSelectedDataSource(null);
-          }}
-          onSuccess={handleDataSourceConfigSuccess}
-          dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report'}
-          dataSourceName={selectedDataSource.name}
-        />
-      )}
+      {selectedDataSource && (() => {
+        const existingTask = getExistingScheduledTask(selectedDataSource.id);
+        return (
+          <DataSourceConfigModal
+            open={dataSourceConfigVisible}
+            onCancel={() => {
+              setDataSourceConfigVisible(false);
+              setSelectedDataSource(null);
+            }}
+            onSuccess={handleDataSourceConfigSuccess}
+            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'news_feed' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report'}
+            dataSourceName={selectedDataSource.name}
+            initialCronExpression={existingTask?.cron_expression}
+            initialTimezone={existingTask?.timezone}
+          />
+        );
+      })()}
 
       {/* Quick action parameter configuration dialog - Behance modal */}
       <Modal
