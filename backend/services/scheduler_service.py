@@ -1212,37 +1212,33 @@ class SchedulerService:
 
     async def _execute_market_weekly_report_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        为指定用户生成 Market Weekly Report 静态 HTML。
+        为所有打了 'Market Weekly' 标签的用户生成 Market Weekly Report 静态 HTML。
 
         Args:
             params:
-                - user_id: 用户标识（必须提供）
+                - user_id: 可选，仅生成指定用户
                 - week_end: 周结束日期 (YYYY-MM-DD)，默认最新周五
         """
         try:
             logger.info("分发 Market Weekly Report Celery 任务", params=params)
 
-            from backend.tasks.market_weekly_report_tasks import generate_market_weekly_report_task
+            from backend.tasks.market_weekly_report_tasks import generate_all_market_weekly_reports_task
 
             user_id = params.get('user_id')
             week_end = params.get('week_end')
             scheduler_timezone = params.get('scheduler_timezone')
 
-            if not user_id:
-                error_msg = "user_id 参数未提供，Market Weekly Report 生成需要指定用户"
-                logger.error(error_msg)
-                return {'success': False, 'message': f"❌ {error_msg}", 'error': 'user_id required'}
-
-            task = generate_market_weekly_report_task.delay(
+            task = generate_all_market_weekly_reports_task.delay(
                 user_id=user_id,
                 week_end=week_end,
                 scheduler_timezone=scheduler_timezone,
             )
 
             week_info = f", week_end={week_end}" if week_end else ", latest week"
+            user_info = f", user={user_id}" if user_id else ", all tagged users"
             message = (
                 f"✅ Market Weekly Report: "
-                f"已提交 Celery 异步任务 {task.id}, user={user_id}{week_info}"
+                f"已提交 Celery 异步任务 {task.id}{user_info}{week_info}"
             )
             logger.info(message)
             return {'success': True, 'message': message, 'celery_task_id': task.id}

@@ -38,6 +38,8 @@ _jinja_env = Environment(
 
 logger = get_logger("market_weekly_service")
 
+TAG_NAME = "Market Weekly"
+
 # 内存缓存（简单实现，如果Redis不可用则使用此缓存）
 _memory_cache = {}
 _cache_lock = {}  # 用于防止并发请求
@@ -2668,4 +2670,18 @@ class MarketWeeklyService:
         except Exception as e:
             logger.error(f"[get_report_html_by_token] Error: {e}")
             return None
+
+    def get_users_with_tag(self) -> List[str]:
+        """Return distinct user_ids that have at least one theme tagged 'Market Weekly'."""
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT DISTINCT user_id FROM theme_tags WHERE tag_name = %s",
+                (TAG_NAME,),
+            )
+            return [row[0] for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+            conn.close()
 

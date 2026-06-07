@@ -268,7 +268,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Market Weekly Report',
       type: 'market_weekly_report',
       category: 'report_generation',
-      description: 'Pre-generate Market Weekly Report static HTML (indices, sectors, forex, commodities, bonds WoW performance, AI themes, economic calendar).',
+      description: 'Pre-generate Market Weekly Report static HTML for all users with Market Weekly tagged themes (indices, sectors, forex, commodities, bonds WoW performance, AI themes, economic calendar).',
       enabled: true,
       status: 'idle',
       quickActions: [

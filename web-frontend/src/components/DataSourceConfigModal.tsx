@@ -237,10 +237,10 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     },
     market_weekly_report: {
       icon: <LineChartOutlined style={{ color: '#fa8c16' }} />,
-      params: ['user_id'],
+      params: [],
       defaultSchedule: '0 17 * * 5',
       defaultName: 'Market Weekly Report',
-      description: 'Pre-generate Market Weekly Report static HTML with indices, sectors, forex, commodities, bonds WoW performance (weekly Friday 5 PM ET)'
+      description: 'Pre-generate Market Weekly Report static HTML for all users with Market Weekly tagged themes (weekly Friday 5 PM ET)'
     },
   };
 
@@ -486,7 +486,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             cron_expression: data.cronExpression!,
             timezone: data.timezone!,
             enabled: true,
-            user_id: data.taskParams?.user_id,
           };
           result = await schedulerAPI.createMarketWeeklyReportTask(marketWeeklyReportParams);
         } else if (dataSourceType === 'watchlist_fundamentals') {
@@ -2474,24 +2473,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
 
         case 'market_weekly_report':
           return (
-            <>
-              <Alert
-                message="Market Weekly Report Scheduler"
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                description="Pre-generate Market Weekly Report static HTML. The report includes indices, sectors, forex, commodities, bonds WoW performance, AI-related themes, and next week's calendar."
-              />
-
-              <Form.Item
-                label="User ID"
-                name={['taskParams', 'user_id']}
-                rules={[{ required: true, message: 'Please enter the user ID' }]}
-                extra="User ID is required. This determines which user's Market Weekly tagged themes will be included."
-              >
-                <Input placeholder="Enter user ID" />
-              </Form.Item>
-            </>
+            <Alert
+              message="Market Weekly Report Scheduler"
+              type="info"
+              showIcon
+              description="Generates a personalized static HTML report for every user who has at least one theme tagged 'Market Weekly'. Each user sees only their own tagged themes, indices, sectors, forex, commodities, bonds WoW performance, and next week's calendar."
+            />
           );
 
         default:

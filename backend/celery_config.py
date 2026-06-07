@@ -93,7 +93,8 @@ task_routes = {
     'reconcile_vector_bucket': {'queue': 'ai_processing'},
     'generate_all_theme_reports': {'queue': 'data_fetching'},        # Theme Report 静态 HTML 生成
     'backfill_theme_report_eod_history': {'queue': 'data_fetching'}, # Theme Report EOD 历史回填
-    'generate_market_weekly_report': {'queue': 'data_fetching'},     # Market Weekly Report 静态 HTML 生成
+    'generate_all_market_weekly_reports': {'queue': 'data_fetching'},  # Market Weekly Report 批量静态 HTML 生成
+    'generate_market_weekly_report': {'queue': 'data_fetching'},       # Market Weekly Report 单用户静态 HTML 生成
     # Ebook Map-Reduce 章节摘要任务
     'ebook_map_reduce': {'queue': 'ai_processing'},
 }

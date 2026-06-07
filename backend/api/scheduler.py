@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar|news_feed|twitter_author_summary|youtube_author_summary|theme_report)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar|news_feed|twitter_author_summary|youtube_author_summary|theme_report|market_weekly_report)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|news_feed|twitter_author_summary|youtube_author_summary|theme_report)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|news_feed|twitter_author_summary|youtube_author_summary|theme_report|market_weekly_report)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -1908,6 +1908,134 @@ async def create_default_theme_report_task(
     except Exception as e:
         logger.error(
             "创建默认 Theme Report 定时任务失败",
+            exception=str(e),
+            user=current_user.username,
+        )
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+# ── Market Weekly Report 定时任务 ────────────────────────────────────────
+
+
+class CreateMarketWeeklyReportTaskRequest(BaseModel):
+    """创建 Market Weekly Report 定时任务请求模型"""
+    name: str = Field(default="Market Weekly Report", description="任务名称")
+    cron_expression: str = Field(
+        default="0 17 * * 5",
+        description="Cron表达式（默认每周五 17:00）",
+    )
+    timezone: str = Field(default="America/New_York", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    user_id: Optional[str] = Field(
+        default=None,
+        description="仅生成指定用户；为空则为所有打了 Market Weekly 标签的用户",
+    )
+    week_end: Optional[str] = Field(
+        default=None,
+        description="周结束日期 (YYYY-MM-DD)，为空则每次执行使用最新周五",
+    )
+
+
+@router.post("/tasks/market-weekly-report", summary="创建 Market Weekly Report 定时任务")
+async def create_market_weekly_report_task(
+    request: CreateMarketWeeklyReportTaskRequest,
+    current_user=Depends(get_current_user),
+):
+    """
+    定时为所有打了 'Market Weekly' 标签的用户生成 Market Weekly Report 静态 HTML。
+    """
+    try:
+        logger.info(
+            "创建 Market Weekly Report 定时任务请求",
+            user=current_user.username,
+            task_name=request.name,
+            cron_expression=request.cron_expression,
+            target_user_id=request.user_id or "all tagged users",
+        )
+
+        scheduler_service = await get_scheduler_service()
+
+        task_params: Dict[str, Any] = {}
+        if request.user_id:
+            task_params["user_id"] = request.user_id
+        if request.week_end:
+            task_params["week_end"] = request.week_end
+
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="market_weekly_report",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username,
+        )
+
+        if result["success"]:
+            return {
+                "success": True,
+                "message": result["message"],
+                "data": {
+                    "task_id": result["task_id"],
+                    "task_config": result["task_config"],
+                },
+            }
+        raise HTTPException(
+            status_code=400, detail=result.get("message", "创建任务失败")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "创建 Market Weekly Report 定时任务失败",
+            exception=str(e),
+            user=current_user.username,
+        )
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/market-weekly-report/default", summary="创建默认 Market Weekly Report 定时任务")
+async def create_default_market_weekly_report_task(
+    current_user=Depends(get_current_user),
+):
+    """创建默认 Market Weekly Report 定时任务（每周五 17:00 ET，覆盖所有打标用户）"""
+    try:
+        logger.info(
+            "创建默认 Market Weekly Report 定时任务请求",
+            user=current_user.username,
+        )
+
+        scheduler_service = await get_scheduler_service()
+
+        result = await scheduler_service.create_cron_task(
+            task_name="Market Weekly Report",
+            task_type="market_weekly_report",
+            cron_expression="0 17 * * 5",
+            timezone="America/New_York",
+            enabled=True,
+            task_params={},
+            created_by=current_user.username,
+        )
+
+        if result["success"]:
+            return {
+                "success": True,
+                "message": result["message"],
+                "data": {
+                    "task_id": result["task_id"],
+                    "task_config": result["task_config"],
+                },
+            }
+        raise HTTPException(
+            status_code=400, detail=result.get("message", "创建任务失败")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "创建默认 Market Weekly Report 定时任务失败",
             exception=str(e),
             user=current_user.username,
         )
