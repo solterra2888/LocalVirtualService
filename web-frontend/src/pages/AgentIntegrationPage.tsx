@@ -372,6 +372,7 @@ const AgentIntegrationPage: React.FC = () => {
     { intent: '帮我找找关于 NVDA / 英伟达的内容', endpoint: 'daily_feed', params: 'q=NVDA' },
     { intent: '我上传的文件里有没有关于 XX 的内容', endpoint: 'daily_feed', params: 'q=XX, sources=pdf' },
     { intent: '只看 Twitter 上的内容', endpoint: 'daily_feed', params: 'sources=twitter' },
+    { intent: '只看知识星球的内容', endpoint: 'daily_feed', params: 'sources=zhishixingqiu' },
     { intent: '只看我上传的文件', endpoint: 'daily_feed', params: 'sources=pdf,image,text,audio' },
     { intent: '帮我同时查 NVDA 和 AAPL 的内容', endpoint: 'daily_feed', params: 'tickers=NVDA.US,AAPL.US' },
     { intent: '展示 AI 概念相关的内容', endpoint: 'daily_feed', params: 'tags=AI' },
@@ -605,7 +606,7 @@ const AgentIntegrationPage: React.FC = () => {
               {[
                 { icon: '📁', title: '自己上传的文件', desc: 'PDF、图片、音频、文档等，经平台处理后的内容' },
                 { icon: '🔗', title: '他人分享给你的文件', desc: '其他用户明确分享到你账号的上传内容' },
-                { icon: '📡', title: '已启用的 Feed 订阅', desc: '订阅列表中状态为「已启用」的 Twitter、YouTube、新闻等频道；已停用（Disabled）的订阅不在结果中' },
+                { icon: '📡', title: '已启用的 Feed 订阅', desc: '订阅列表中状态为「已启用」的 Twitter、YouTube、新闻、知识星球等频道；已停用（Disabled）的订阅不在结果中' },
               ].map(({ icon, title, desc }) => (
                 <div key={title} style={{
                   display: 'flex', gap: 12, padding: '12px 14px',
@@ -878,6 +879,7 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'twitter', endpoint: '订阅的 Twitter Feed' },
                 { intent: 'youtube / youtube_feed', endpoint: '订阅的 YouTube Feed' },
                 { intent: 'web / news / podcast', endpoint: '订阅的网页 / 新闻 / 播客 Feed' },
+                { intent: 'zhishixingqiu', endpoint: '订阅的知识星球（Knowledge Planet）帖子' },
                 { intent: 'pdf', endpoint: '用户上传的 PDF' },
                 { intent: 'image', endpoint: '用户上传的图片' },
                 { intent: 'audio', endpoint: '用户上传的音频' },
@@ -1012,7 +1014,7 @@ const AgentIntegrationPage: React.FC = () => {
             <div style={{ height: 12 }} />
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', lineHeight: 1.6 }}>
               <code style={{ color: TEAL, fontSize: 12 }}>source</code> 可能值：
-              twitter · youtube · web · news · podcast · pdf · image · audio · text。
+              twitter · youtube · web · news · podcast · zhishixingqiu · pdf · image · audio · text。
               默认限速 <strong style={{ color: dark ? '#cbd5e1' : '#475569' }}>60 次 / 分钟</strong> / PAT。
             </p>
 

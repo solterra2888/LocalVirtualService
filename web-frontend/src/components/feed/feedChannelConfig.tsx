@@ -98,6 +98,14 @@ export function getChannelIcon(channelType: string) {
   return <GlobalOutlined />;
 }
 
+/** Avatar 背景色，与 CHANNEL_TYPES 品牌色一致 */
+export function getChannelColor(channelType: string): string {
+  const config = CHANNEL_TYPES.find((c) => c.value === channelType);
+  if (config) return config.color;
+  if (channelType === 'news') return '#8c8c8c';
+  return '#8c8c8c';
+}
+
 /**
  * 根据 news source identifier 获取颜色。
  * 用于订阅列表 Avatar 的 background-color。

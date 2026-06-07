@@ -14,6 +14,7 @@
  *   twitter    → TwitterOriginalView    (推文文本 + media + 转推/引用 / View on Twitter)
  *   news       → NewsOriginalView       (纯文本 + Read original)
  *   youtube_feed → YoutubeFeedOriginalBlock (YouTube embed + 描述; 字幕见抽屉 Transcript Tab)
+ *   zhishixingqiu → ZsxqOriginalView (话题正文 + 图片 + 附件)
  *
  * 资源 (image/audio/pdf 的 file_url + audio/youtube 的 ASR JSON) 通过
  *   filesAPI.getOriginalFileInfo(file_id)
@@ -40,6 +41,7 @@ import { appendServeAuthToken } from '../../utils/appendServeAuthToken';
 import YoutubeFeedOriginalBlock from '../feed/YoutubeFeedOriginalBlock';
 import TwitterOriginalView from '../shared/content-viewer/original-views/TwitterOriginalView';
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
+import ZsxqOriginalView from '../shared/content-viewer/original-views/ZsxqOriginalView';
 import type {
   DailyItemDetail,
   DailyItemDetailUpload,
@@ -130,6 +132,27 @@ const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({
             symbols={Array.isArray(f.metadata?.symbols) ? (f.metadata!.symbols as string[]) : []}
             categories={f.categories ?? []}
             sentiment={f.metadata?.sentiment as { polarity?: number } | null}
+            themeMode={themeMode}
+          />
+        );
+      case 'zhishixingqiu':
+        return (
+          <ZsxqOriginalView
+            title={f.title}
+            content={f.content}
+            url={f.url}
+            media_urls={f.media_urls}
+            post_author={
+              typeof f.metadata?.post_author === 'string' ? f.metadata.post_author : null
+            }
+            group_name={
+              typeof f.metadata?.group_name === 'string' ? f.metadata.group_name : f.author_name
+            }
+            files={
+              Array.isArray(f.metadata?.files)
+                ? (f.metadata!.files as unknown[]).map(String).filter(Boolean)
+                : []
+            }
             themeMode={themeMode}
           />
         );

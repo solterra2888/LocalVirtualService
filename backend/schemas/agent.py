@@ -21,6 +21,7 @@ AgentSource = Literal[
     "twitter",
     "youtube",
     "news",
+    "zhishixingqiu",
     # Upload sources — generic group
     "web",
     "audio",
@@ -45,7 +46,7 @@ class AgentDailyItem(BaseModel):
         ...,
         description=(
             "Source type. For uploaded files: 'pdf', 'word', 'excel', 'image', 'audio', 'text', 'podcast', 'web'. "
-            "For feeds: 'twitter', 'youtube', 'news'. "
+            "For feeds: 'twitter', 'youtube', 'news', 'zhishixingqiu'. "
             "All uploaded document-type files (PDF/Word/Excel/CSV/image) now return their specific format "
             "rather than the legacy 'pdf' catch-all."
         ),

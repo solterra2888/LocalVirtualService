@@ -48,7 +48,7 @@ _SINCE_HINT = (
 
 _SOURCES_HINT = (
     "Comma-separated source types to filter by. "
-    "Feed types: twitter, youtube, news. "
+    "Feed types: twitter, youtube, news, zhishixingqiu (知识星球 Knowledge Planet posts). "
     "Upload types: document (PDF/Word/Excel/CSV + images), image, audio, text, podcast, web. "
     "Aliases accepted for document: pdf, word, doc, docx, excel, xls, xlsx, csv, img, photo. "
     "'document' expands to cover all uploaded files including images. "
@@ -368,7 +368,7 @@ TOOLS: List[Dict[str, Any]] = [
                     "description": (
                         "Filter to specific source types. Values: 'upload' (PDFs/Word/CSV), 'upload_text', "
                         "'upload_web', 'upload_youtube', 'upload_audio', 'upload_podcast', "
-                        "'feed_twitter', 'feed_youtube', 'feed_news', 'feed_rss'. Omit for all."
+                        "'feed_twitter', 'feed_youtube', 'feed_news', 'feed_rss', 'feed_zhishixingqiu'. Omit for all."
                     ),
                 },
                 "file_ids": {

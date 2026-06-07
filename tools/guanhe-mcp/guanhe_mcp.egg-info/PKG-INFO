@@ -34,8 +34,8 @@ Old HTTP paths return **410 Gone** with an upgrade hint.
 ## Install
 
 ```bash
-# From the published wheel:
-pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.2.1-py3-none-any.whl"
+# From the published wheel (recommended for end users):
+pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.3.0-py3-none-any.whl"
 
 # From local source (dev):
 cd tools/guanhe-mcp

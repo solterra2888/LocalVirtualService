@@ -44,6 +44,7 @@ import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useMobileFeeds } from '../contexts/MobileFeedsContext';
 import { FEED_THEME_COLORS } from '../components/feed/feedTheme';
 import {
+  getChannelColor,
   getChannelIcon,
   getNewsSourceColor,
   getNewsSourceFaviconUrl,
@@ -891,15 +892,11 @@ const MobileFeedsListView: React.FC = () => {
                     }
                     style={{
                       backgroundColor:
-                        sub.channel_type === 'twitter'
-                          ? '#1DA1F2'
-                          : sub.channel_type === 'youtube'
-                            ? '#FF0000'
-                            : sub.channel_type === 'news'
-                              ? newsFavicon
-                                ? '#fff'
-                                : getNewsSourceColor(sub.channel_identifier)
-                              : '#ccc',
+                        sub.channel_type === 'news'
+                          ? newsFavicon
+                            ? '#fff'
+                            : getNewsSourceColor(sub.channel_identifier)
+                          : getChannelColor(sub.channel_type),
                     }}
                   />
                   <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>

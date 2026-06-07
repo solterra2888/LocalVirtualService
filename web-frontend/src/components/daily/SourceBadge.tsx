@@ -20,6 +20,7 @@ import {
   AudioOutlined,
   EditOutlined,
   AppleOutlined,
+  StarOutlined,
 } from '@ant-design/icons';
 import type { DailySourceSubtype } from '../../services/daily';
 import { SOURCE_BADGE_STYLES } from './sourceBadgeConfig';
@@ -36,6 +37,7 @@ const SUBTYPE_ICONS: Record<DailySourceSubtype, React.ReactNode> = {
   audio:        <AudioOutlined />,
   text:         <EditOutlined />,
   podcast:      <AppleOutlined />,
+  zhishixingqiu: <StarOutlined />,
 };
 
 interface SourceBadgeProps {

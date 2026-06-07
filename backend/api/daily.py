@@ -4,7 +4,7 @@ Daily 聚合视图 API.
 
 把两条数据链路（Upload Files + Feeds 订阅）合并成同一条按时间排序的卡片信息流，
 作为登录后的默认落地页 (/daily)。设计思路参考 AI Notes Daily 的 Summaries 页面，
-同时扩展支持本系统的 9 类来源（详见 schemas/daily.py 的 SourceSubtype）。
+同时扩展支持本系统的 10 类来源（详见 schemas/daily.py 的 SourceSubtype）。
 
 数据源:
     Upload: file_processing_details + processing_stats + file_tags
@@ -91,7 +91,7 @@ _UPLOAD_SUBTYPE_TO_DB_TYPES: Dict[str, List[str]] = {
 }
 
 # Feed 链路 channel_type 的标准化映射
-# subscription_content.channel_type 可能为：twitter/youtube/news/rss
+# subscription_content.channel_type 可能为：twitter/youtube/news/rss/zhishixingqiu
 # 注意：Feed 的 youtube 与 Upload 的 youtube 重名，前端徽章共用 'YT'，
 # 但内部 source_subtype 必须区分，否则点击跳转目标会错。
 _FEED_CHANNEL_TYPE_MAP = {
@@ -99,6 +99,7 @@ _FEED_CHANNEL_TYPE_MAP = {
     "youtube": "youtube_feed",
     "news": "news",
     "rss": "news",  # rss 暂归并到 news 同类展示
+    "zhishixingqiu": "zhishixingqiu",
 }
 
 # 所有合法 source_subtype
@@ -120,6 +121,7 @@ ALL_SOURCE_SUBTYPES = [
     "twitter",
     "news",
     "youtube_feed",
+    "zhishixingqiu",
 ]
 
 # podcast 上线前 Daily 已有的 6 类 Upload 子类型（旧「全选 Upload」preset 不含 podcast）
@@ -478,6 +480,8 @@ def _build_filter_clauses(
                     feed_subtypes_pg.append("youtube")
                 elif st == "news":
                     feed_subtypes_pg.extend(["news", "rss"])
+                elif st == "zhishixingqiu":
+                    feed_subtypes_pg.append("zhishixingqiu")
             # 任一边没匹配到对应类型 → 用恒假条件让该边返回 0 行（避免 IN ()
             if not upload_subtypes_pg:
                 upload_parts.append("AND FALSE")
@@ -733,7 +737,7 @@ def list_daily_feed(
         None,
         description=(
             "按来源子类型过滤（多选）: document, image, audio, youtube, web, text, podcast, "
-            "twitter, news, youtube_feed"
+            "twitter, news, youtube_feed, zhishixingqiu"
         ),
     ),
     q: Optional[str] = Query(None, max_length=200, description="标题/摘要/正文模糊搜索"),

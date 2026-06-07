@@ -2,7 +2,7 @@
  * Daily 模块 — 来源徽章 (Source Badge) 配色与文案配置.
  *
  * 设计原则:
- *  - 9 种来源子类型 (与 backend/api/daily.py 的 SourceSubtype 一一对应)
+ *  - 10 种来源子类型 (与 backend/api/daily.py 的 SourceSubtype 一一对应)
  *  - 短代号 (3-5 字母, 与 AI Notes Daily 的 GDOC/WEB 风格一致)
  *  - 浅 / 深主题各一组色彩, 与系统主色 (#1890ff) 区分但不冲突
  *  - badge 设计为右上角小芯片, 不影响标题和标签的扫读节奏
@@ -90,6 +90,12 @@ export const SOURCE_BADGE_STYLES: Record<DailySourceSubtype, SourceBadgeStyle> =
     light: { bg: '#fff1f0', fg: '#cf1322' },
     dark: { bg: 'rgba(245, 34, 45, 0.18)', fg: '#ff7875' },
   },
+  zhishixingqiu: {
+    label: '星球',
+    fullName: '知识星球',
+    light: { bg: '#fff7e6', fg: '#d46b08' },
+    dark: { bg: 'rgba(255, 107, 0, 0.20)', fg: '#ffa940' },
+  },
 };
 
 /**
@@ -106,4 +112,5 @@ export const SOURCE_BADGE_DISPLAY_ORDER: DailySourceSubtype[] = [
   'twitter',
   'youtube_feed',
   'news',
+  'zhishixingqiu',
 ];

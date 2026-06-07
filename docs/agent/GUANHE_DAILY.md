@@ -11,7 +11,7 @@
 MCP 工具只返回当前账号有权限访问的数据：
 - **自己上传的文件**：PDF、图片、音频、文档等，经平台处理后的内容
 - **他人分享给你的文件**：其他用户明确分享到你账号的上传内容
-- **已启用的 Feed 订阅**：订阅列表中状态为「已启用」的 Twitter、YouTube、新闻等频道；已停用的订阅不在结果中
+- **已启用的 Feed 订阅**：订阅列表中状态为「已启用」的 Twitter、YouTube、新闻、知识星球等频道；已停用的订阅不在结果中
 
 ---
 
@@ -44,6 +44,7 @@ MCP 工具只返回当前账号有权限访问的数据：
 | 这周的信息帮我总结 | `daily_feed` | `since=7d`（默认） |
 | 帮我找关于 NVDA / 英伟达的内容 | `daily_feed` | `q=NVDA OR 英伟达` |
 | 只看 Twitter 内容 | `daily_feed` | `sources=twitter` |
+| 只看知识星球的内容 | `daily_feed` | `sources=zhishixingqiu` |
 | 只看我上传的文件 | `daily_feed` | `sources=pdf,image,text,audio` |
 | 最近有哪些关于 Trump / Musk 的内容 | `daily_feed` | `people=Trump,Musk` |
 | 帮我找关于美国、中国的内容 | `daily_feed` | `countries=United States,China` |
@@ -138,7 +139,7 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 参数（全部可选）：
 - `since`：时间窗口，`24h / 48h / 7d / 14d / 30d / 2w` 或 ISO 日期时间。默认 7d。非法值返回 400。
 - `q`：关键词过滤。**语法**：空格=AND，`OR`=任一，`"短语"`=精确。不要传整句话。
-- `sources`：逗号分隔，如 `twitter,youtube_feed,pdf`。不填则使用网页端 preset。
+- `sources`：逗号分隔，如 `twitter,youtube_feed,pdf`，或 `zhishixingqiu`（知识星球）。不填则使用网页端 preset。
 - `tickers`：逗号分隔，**必须含交易所后缀**，如 `NVDA.US,9988.HK`。裸代码不会命中。
 - `tags`：逗号分隔概念标签（任一匹配），从上一轮结果的 `tags` 字段或 `list_subscriptions` 获取。
 - `people`：逗号分隔关键人物姓名（任一匹配），大小写不敏感，使用原文写法，如 `Trump,Jensen Huang`。
@@ -229,6 +230,7 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 | `twitter` | 订阅的 Twitter Feed | ✓ |
 | `youtube` / `youtube_feed` | 订阅的 YouTube Feed | ✓ |
 | `news` / `web` / `podcast` | 订阅的网页 / 新闻 / 播客 | ✓ |
+| `zhishixingqiu` | 订阅的知识星球（Knowledge Planet）帖子 | ✓ |
 | `pdf` | 用户上传的 PDF | ✓ |
 | `image` | 用户上传的图片 | ✓ |
 | `audio` | 用户上传的音频 | ✓ |

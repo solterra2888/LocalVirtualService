@@ -289,6 +289,8 @@ def _map_agent_source(
             return "youtube"
         if source_subtype in ("news", "rss"):
             return "news"
+        if source_subtype == "zhishixingqiu":
+            return "zhishixingqiu"
         return "news"
     # For uploads: use the raw DB file_type for a specific format label when available.
     if raw_file_type:
@@ -1009,7 +1011,7 @@ class AgentService:
             }
 
             for subtype, count in raw_counts.items():
-                if subtype in ("twitter", "youtube", "news", "rss"):
+                if subtype in ("twitter", "youtube", "news", "rss", "zhishixingqiu"):
                     # Feed channel_type — map via feed path
                     mapped = _map_agent_source("feed", subtype)
                     normalised[mapped] = normalised.get(mapped, 0) + count

@@ -24,7 +24,8 @@ export type DailySourceSubtype =
   | 'podcast'     // Apple Podcast Episode (Upload)
   | 'twitter'     // Feed Twitter/X
   | 'news'        // Feed News
-  | 'youtube_feed'; // Feed YouTube Subscription
+  | 'youtube_feed' // Feed YouTube Subscription
+  | 'zhishixingqiu'; // Feed 知识星球
 
 export type DailyNavigateType = 'execution' | 'feed_article' | 'external_url';
 
@@ -154,6 +155,7 @@ export const ALL_DAILY_SOURCE_SUBTYPES: DailySourceSubtype[] = [
   'twitter',
   'news',
   'youtube_feed',
+  'zhishixingqiu',
 ];
 
 // ─── Preset (per-user) ─────────────────────────────────────────────

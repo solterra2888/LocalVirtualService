@@ -19,17 +19,14 @@ import {
   LikeOutlined,
   LinkOutlined,
   MessageOutlined,
-  ReadOutlined,
   RetweetOutlined,
   RobotOutlined,
   SyncOutlined,
   TeamOutlined,
-  TwitterOutlined,
-  YoutubeOutlined,
   ClockCircleOutlined,
 } from '@ant-design/icons';
 import { api } from '../../services/api';
-import { getNewsSourceColor } from './feedChannelConfig';
+import { getChannelColor, getChannelIcon, getNewsSourceColor } from './feedChannelConfig';
 import YoutubeFeedOriginalBlock, {
   YoutubeFeedTranscriptPanel,
 } from './YoutubeFeedOriginalBlock';
@@ -609,23 +606,17 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                 : undefined
             }
             icon={
-              selectedContent.channel_type === 'youtube'
-                ? <YoutubeOutlined />
-                : selectedContent.channel_type === 'news'
-                ? <ReadOutlined />
-                : selectedContent.author_avatar
-                  ? undefined // 有头像时不显示图标
-                  : <TwitterOutlined />
+              selectedContent.channel_type === 'twitter' && selectedContent.author_avatar
+                ? undefined
+                : getChannelIcon(selectedContent.channel_type)
             }
             style={{
               backgroundColor:
                 selectedContent.channel_type === 'twitter' && selectedContent.author_avatar
-                  ? 'transparent' // 有头像时透明背景
-                  : selectedContent.channel_type === 'youtube'
-                    ? '#FF0000'
-                    : selectedContent.channel_type === 'news'
-                      ? getNewsSourceColor(selectedContent.author_identifier)
-                      : '#1DA1F2',
+                  ? 'transparent'
+                  : selectedContent.channel_type === 'news'
+                    ? getNewsSourceColor(selectedContent.author_identifier)
+                    : getChannelColor(selectedContent.channel_type),
             }}
           />
           <div>
@@ -1088,9 +1079,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             </Space>
           )}
 
-          {selectedContent.url &&
-            selectedContent.channel_type !== 'youtube' &&
-            selectedContent.channel_type !== 'news' && (
+          {selectedContent.url && selectedContent.channel_type === 'twitter' && (
             <a
               href={selectedContent.url}
               target="_blank"

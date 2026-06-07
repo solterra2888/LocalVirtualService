@@ -68,6 +68,7 @@ import {
   estimateSubscriptionContentReadingMinutes,
 } from '../components/feed/feedUtils';
 import {
+  getChannelColor,
   getChannelIcon,
   getNewsSourceColor,
   getNewsSourceFaviconUrl,
@@ -1153,16 +1154,12 @@ const FeedReaderPageInner: React.FC = () => {
                           style={{
                             backgroundColor:
                               subscription.channel_type === 'twitter' && subscription.channel_avatar
-                                ? 'transparent' // 有头像时透明背景
-                                : subscription.channel_type === 'twitter'
-                                  ? '#1DA1F2'
-                                  : subscription.channel_type === 'youtube'
-                                    ? '#FF0000'
-                                    : subscription.channel_type === 'news'
-                                      ? newsFavicon
-                                        ? '#fff'
-                                        : getNewsSourceColor(subscription.channel_identifier)
-                                      : '#ccc',
+                                ? 'transparent'
+                                : subscription.channel_type === 'news'
+                                  ? newsFavicon
+                                    ? '#fff'
+                                    : getNewsSourceColor(subscription.channel_identifier)
+                                  : getChannelColor(subscription.channel_type),
                           }}
                         />
                       }
