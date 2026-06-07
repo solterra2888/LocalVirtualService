@@ -60,7 +60,7 @@ const NAV_DESCRIPTIONS: Record<string, string> = {
   '/files': 'Sources & documents',
   '/feeds': 'Subscriptions & feeds',
   '/dashboard': 'Markets & watchlist',
-  '/reports': 'Daily reports',
+  '/reports': 'Daily & Weekly Reports',
   '/agent-integration': 'MCP & integrations',
   '/investment-themes': 'Investment themes & tags',
 };

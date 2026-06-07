@@ -43,6 +43,9 @@ import YouTubeDailyReportPage from './pages/YouTubeDailyReportPage';
 import MobileYouTubeReportsPage from './pages/MobileYouTubeReportsPage';
 import ReportsLayout from './components/ReportsLayout';
 import MobileReportsLayout from './components/MobileReportsLayout';
+import ReportsDetailLayout from './components/ReportsDetailLayout';
+import ReportsOverviewPage from './pages/ReportsOverviewPage';
+import DailyMarketReportPage from './pages/DailyMarketReportPage';
 import { DashboardSettingsProvider } from './contexts/DashboardSettingsContext';
 import { FileProcessingProvider } from './contexts/FileProcessingContext';
 import './App.css';
@@ -151,17 +154,66 @@ const AppContent: React.FC = () => {
           ) : (
             <Route path="feeds" element={<FeedReaderPage />} />
           )}
-          <Route path="reports" element={isMobile ? <MobileReportsLayout /> : <ReportsLayout />}>
-            <Route index element={<Navigate to="/reports/twitter" replace />} />
-            <Route path="twitter" element={isMobile ? <MobileReportsPage /> : <TwitterDailyReportPage />} />
-            <Route path="youtube" element={isMobile ? <MobileYouTubeReportsPage /> : <YouTubeDailyReportPage />} />
-            <Route path="market-weekly" element={<MarketWeeklyReportPage />} />
-            <Route path="theme" element={<ThemeReportPage />} />
-          </Route>
+          {/* Reports 路由 */}
+          {isMobile ? (
+            <Route path="reports" element={<MobileReportsLayout />}>
+              <Route index element={<Navigate to="/reports/twitter" replace />} />
+              <Route path="twitter" element={<MobileReportsPage />} />
+              <Route path="youtube" element={<MobileYouTubeReportsPage />} />
+              <Route path="market-weekly" element={<MarketWeeklyReportPage />} />
+              <Route path="theme" element={<ThemeReportPage />} />
+            </Route>
+          ) : (
+            <>
+              {/* 桌面端 Reports 概览页面 */}
+              <Route path="reports" element={<ReportsOverviewPage />} />
+              {/* 桌面端具体报告页面（使用 ReportsDetailLayout 提供返回按钮） */}
+              <Route
+                path="reports/twitter"
+                element={
+                  <ReportsDetailLayout>
+                    <TwitterDailyReportPage />
+                  </ReportsDetailLayout>
+                }
+              />
+              <Route
+                path="reports/youtube"
+                element={
+                  <ReportsDetailLayout>
+                    <YouTubeDailyReportPage />
+                  </ReportsDetailLayout>
+                }
+              />
+              <Route
+                path="reports/market-weekly"
+                element={
+                  <ReportsDetailLayout>
+                    <MarketWeeklyReportPage />
+                  </ReportsDetailLayout>
+                }
+              />
+              <Route
+                path="reports/theme"
+                element={
+                  <ReportsDetailLayout>
+                    <ThemeReportPage />
+                  </ReportsDetailLayout>
+                }
+              />
+              <Route
+                path="reports/daily-market"
+                element={
+                  <ReportsDetailLayout>
+                    <DailyMarketReportPage />
+                  </ReportsDetailLayout>
+                }
+              />
+            </>
+          )}
           {/* Backward-compatible redirects for old report URLs */}
           <Route path="twitter-daily-report" element={<Navigate to="/reports/twitter" replace />} />
           <Route path="youtube-daily-report" element={<Navigate to="/reports/youtube" replace />} />
-          <Route path="market-weekly" element={<Navigate to="/reports/market-weekly" replace />} />
+          <Route path="market-weekly-report" element={<Navigate to="/reports/market-weekly" replace />} />
           <Route path="prompt-templates" element={<PromptTemplatesPage />} />
           <Route path="investment-themes" element={<InvestmentThemesPage />} />
           <Route path="projects" element={<ProjectsPage />} />

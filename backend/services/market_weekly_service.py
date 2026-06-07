@@ -2319,8 +2319,8 @@ class MarketWeeklyService:
                     "week_start": str(week_start),
                     "week_end": str(week_end),
                     "generated_at_utc": generated_at.strftime("%Y-%m-%d %H:%M:%S UTC"),
-                    "assets_count": len(all_assets),
-                    "ohlc_assets_count": len(ohlc_data),
+                    "assets_count": len(chart_tickers),
+                    "stock_chart_tickers_count": len(stock_chart_data),
                 }
 
                 cursor.execute("""
@@ -2349,8 +2349,8 @@ class MarketWeeklyService:
                 "week_end": str(week_end),
                 "stats": {
                     "generation_time_seconds": round(elapsed, 2),
-                    "assets_count": len(all_assets),
-                    "ohlc_assets_count": len(ohlc_data),
+                    "assets_count": len(chart_tickers),
+                    "stock_chart_tickers_count": len(stock_chart_data),
                 },
             }
 
@@ -2421,6 +2421,10 @@ class MarketWeeklyService:
         """
         获取股票图表数据（Theme Report 格式）。
 
+        同时查询 stock_prices_eod 和 market_data_eod 表：
+        - 个股数据从 stock_prices_eod 获取
+        - 指数、板块、外汇、商品、债券从 market_data_eod 获取
+
         Args:
             tickers: 股票代码列表
             days: 回溯天数
@@ -2443,6 +2447,7 @@ class MarketWeeklyService:
             need_close_conn = True
 
         try:
+            # 1. 从 stock_prices_eod 获取个股数据
             cursor.execute("""
                 SELECT code, date::date AS trade_date,
                        open, high, low, close, volume
@@ -2455,6 +2460,24 @@ class MarketWeeklyService:
             """, (tickers, lookback_start, as_of))
 
             rows = cursor.fetchall()
+
+            # 2. 如果个股数据不足，从 market_data_eod 获取（指数、板块等）
+            found_codes = set(row[0] for row in rows)
+            missing_codes = [t for t in tickers if t not in found_codes]
+
+            if missing_codes:
+                cursor.execute("""
+                    SELECT code, date::date AS trade_date,
+                           open, high, low, close, volume
+                    FROM market_data_eod
+                    WHERE code = ANY(%s)
+                      AND date BETWEEN %s AND %s
+                      AND close IS NOT NULL
+                    ORDER BY code, date
+                """, (missing_codes, lookback_start, as_of))
+
+                rows.extend(cursor.fetchall())
+
             if not rows:
                 logger.warning("[_fetch_stock_chart_data] No OHLCV data found")
                 return {}
