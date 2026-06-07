@@ -30,6 +30,7 @@ import PromptTemplatesPage from './pages/PromptTemplatesPage';
 import InvestmentThemesPage from './pages/InvestmentThemesPage';
 import CandlestickDemoPage from './pages/CandlestickDemoPage';
 import MarketWeekly from './pages/MarketWeekly';
+import MarketWeeklyReportPage from './pages/MarketWeeklyReportPage';
 import ThemeReportPage from './pages/ThemeReportPage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
@@ -154,7 +155,7 @@ const AppContent: React.FC = () => {
             <Route index element={<Navigate to="/reports/twitter" replace />} />
             <Route path="twitter" element={isMobile ? <MobileReportsPage /> : <TwitterDailyReportPage />} />
             <Route path="youtube" element={isMobile ? <MobileYouTubeReportsPage /> : <YouTubeDailyReportPage />} />
-            <Route path="market-weekly" element={<MarketWeekly compact={isMobile} />} />
+            <Route path="market-weekly" element={<MarketWeeklyReportPage />} />
             <Route path="theme" element={<ThemeReportPage />} />
           </Route>
           {/* Backward-compatible redirects for old report URLs */}

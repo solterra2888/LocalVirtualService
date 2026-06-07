@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, market_weekly, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search, theme_report, chat_group_messages
+from backend.api import auth, files, tasks, users, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, market_weekly, market_weekly_report, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search, theme_report, chat_group_messages
 from backend.database.db_manager import DatabaseManager
 from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import init_logging, info, error, warning, shutdown_logging
@@ -150,6 +150,7 @@ app.include_router(personal_tokens.router, prefix="/api/users", tags=["Personal 
 app.include_router(markets.router, prefix="/api/markets", tags=["市场数据"])
 # Market Weekly Report API
 app.include_router(market_weekly.router, prefix="/api", tags=["Market Weekly"])
+app.include_router(market_weekly_report.router, prefix="/api", tags=["Market Weekly Report"])
 app.include_router(theme_report.router, prefix="/api", tags=["Theme Report"])
 # Twitter Daily Report API
 app.include_router(twitter_daily_reports.router, prefix="/api", tags=["Twitter Daily Report"])

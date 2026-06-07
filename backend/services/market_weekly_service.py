@@ -7,19 +7,34 @@ Market Weekly Report Service
 - 相对表现计算（indexed to 100）
 - 执行摘要生成
 - 日历数据聚合（经济事件、财报、IPO）
+- 静态HTML报告生成与OSS上传（新增）
 """
 
 import os
+import re
 import json
 import time
-from datetime import datetime, timedelta
+import secrets
+from datetime import datetime, timedelta, date, timezone
 from typing import Dict, List, Any, Optional
+from zoneinfo import ZoneInfo
+from uuid import uuid4
+
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.datetime_utils import utcnow, utc_today
 from backend.utils.logger import get_logger
 from backend.services.economic_events_service import EconomicEventsService
+from backend.services.oss_service import OSSService
 from config.settings import config
+
+# Jinja2 模板环境
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'templates')
+_jinja_env = Environment(
+    loader=FileSystemLoader(TEMPLATE_DIR),
+    autoescape=select_autoescape(['html', 'xml']),
+)
 
 logger = get_logger("market_weekly_service")
 
@@ -2053,23 +2068,581 @@ class MarketWeeklyService:
                     "category": category,
                     "market": market
                 }
-                
+
                 # 判断市场归属
                 if market == 'US':
                     us_stocks.append(stock_info)
                 elif market in ('HK', 'CN'):
                     china_stocks.append(stock_info)
-            
+
             logger.info(f"Found {len(us_stocks)} US stocks and {len(china_stocks)} China stocks in My Themes")
-            
+
             return {
                 "us_stocks": us_stocks,
                 "china_stocks": china_stocks
             }
-            
+
         except Exception as e:
             logger.error(f"Error fetching My Themes stocks: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             return {"us_stocks": [], "china_stocks": []}
+
+    # =====================================================
+    # 静态 HTML 报告生成与 OSS 上传（新增）
+    # =====================================================
+
+    _TZ_DISPLAY_LABELS: Dict[str, str] = {
+        "America/New_York": "US Eastern (New York)",
+        "Asia/Shanghai": "China (Beijing)",
+    }
+
+    def _build_generation_time_display(
+        self,
+        generated_at_utc: datetime,
+        scheduler_timezone: Optional[str] = None,
+    ) -> Dict[str, Optional[str]]:
+        """Format report generation instant in NY, Beijing, and optional scheduler TZ."""
+        if generated_at_utc.tzinfo is None:
+            generated_at_utc = generated_at_utc.replace(tzinfo=timezone.utc)
+
+        def _fmt_in_zone(dt: datetime, tz_name: str, place_label: str) -> str:
+            local = dt.astimezone(ZoneInfo(tz_name))
+            return f"{local.strftime('%b %d, %Y %H:%M %Z')} ({place_label})"
+
+        out: Dict[str, Optional[str]] = {
+            "generated_at_utc": generated_at_utc.strftime("%Y-%m-%d %H:%M UTC"),
+            "generated_at_new_york": _fmt_in_zone(
+                generated_at_utc, "America/New_York", "New York"
+            ),
+            "generated_at_beijing": _fmt_in_zone(
+                generated_at_utc, "Asia/Shanghai", "Beijing"
+            ),
+            "scheduler_timezone": scheduler_timezone,
+            "scheduler_timezone_label": None,
+            "generated_at_scheduler_tz": None,
+        }
+
+        if scheduler_timezone:
+            try:
+                local = generated_at_utc.astimezone(ZoneInfo(scheduler_timezone))
+                out["scheduler_timezone_label"] = self._TZ_DISPLAY_LABELS.get(
+                    scheduler_timezone,
+                    scheduler_timezone.replace("_", " "),
+                )
+                out["generated_at_scheduler_tz"] = local.strftime("%b %d, %Y %H:%M %Z")
+            except Exception:
+                out["scheduler_timezone_label"] = scheduler_timezone
+
+        return out
+
+    def generate_and_upload(
+        self,
+        user_id: str,
+        week_end: Optional[date] = None,
+        scheduler_timezone: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        为指定用户生成 Market Weekly HTML 报告，上传 OSS，写入数据库。
+
+        流程:
+        1. 计算周度时间范围
+        2. 创建 pending 记录（market_weekly_reports 表）
+        3. 调用现有 generate_report() 获取数据
+        4. 获取 OHLC 数据用于 K 线图
+        5. 渲染 Jinja2 HTML 模板
+        6. 上传至 OSS（reports/MarketWeekly/{user_id}/...）
+        7. 更新数据库状态为 completed
+        8. 返回结果（含 share_token）
+
+        Args:
+            user_id: 用户标识
+            week_end: 周结束日期（周五），默认使用最新周五
+            scheduler_timezone: 调度器时区（可选）
+
+        Returns:
+            dict with keys: success, oss_object_name, share_token, week_start, week_end, stats
+        """
+        start_time = time.time()
+
+        # 1. 计算周度时间范围
+        if week_end is None:
+            # 使用默认逻辑获取最新周五
+            week_start_dt, week_end_dt = self._calculate_week_range('latest')
+            week_start = week_start_dt.date()
+            week_end = week_end_dt.date()
+        else:
+            # 使用指定的 week_end
+            week_start = week_end - timedelta(days=7)
+            week_start_dt = datetime.combine(week_start, datetime.min.time())
+            week_end_dt = datetime.combine(week_end, datetime.max.time())
+
+        logger.info(f"[generate_and_upload] user={user_id}, week={week_start} to {week_end}")
+
+        # 2. 创建 pending 记录
+        share_token = secrets.token_urlsafe(16)[:32]
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            # 检查是否已存在该周的记录
+            cursor.execute("""
+                SELECT id, status, oss_object_name, share_token
+                FROM market_weekly_reports
+                WHERE user_id = %s AND week_end = %s
+            """, (user_id, week_end))
+            existing = cursor.fetchone()
+
+            if existing:
+                report_id = existing[0]
+                existing_status = existing[1]
+                # 如果已完成，直接返回
+                if existing_status == 'completed' and existing[2]:
+                    logger.info(f"[generate_and_upload] Found existing completed report id={report_id}")
+                    cursor.close()
+                    conn.close()
+                    return {
+                        "success": True,
+                        "report_id": report_id,
+                        "oss_object_name": existing[2],
+                        "share_token": existing[3],
+                        "week_start": str(week_start),
+                        "week_end": str(week_end),
+                        "stats": {"existing": True},
+                    }
+                # 否则更新状态为 generating
+                cursor.execute("""
+                    UPDATE market_weekly_reports
+                    SET status = 'generating', updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (report_id,))
+            else:
+                # 创建新记录
+                cursor.execute("""
+                    INSERT INTO market_weekly_reports
+                    (user_id, week_start, week_end, share_token, status)
+                    VALUES (%s, %s, %s, %s, 'generating')
+                    RETURNING id
+                """, (user_id, week_start, week_end, share_token))
+                report_id = cursor.fetchone()[0]
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+        except Exception as e:
+            logger.error(f"[generate_and_upload] Failed to create DB record: {e}")
+            return {"success": False, "error": str(e)}
+
+        # 3. 生成报告数据（不使用缓存）
+        try:
+            # 获取报告 JSON 数据
+            report_data = self.generate_report(
+                period='latest',
+                use_cache=False,
+                user_id=user_id
+            )
+
+            # 更新 week_start/week_end 使用计算出的值
+            report_data['meta']['week_start'] = week_start.strftime('%Y-%m-%d')
+            report_data['meta']['week_end'] = week_end.strftime('%Y-%m-%d')
+
+            # 4. 获取 OHLC 数据用于 K 线图（使用 Theme Report 格式）
+            # 技术视图中的资产
+            technical_views = report_data.get('technical_views', {})
+            chart_tickers = []
+            for asset_type in ['indices', 'sectors', 'forex', 'commodities', 'yields']:
+                for asset in technical_views.get(asset_type, []):
+                    chart_tickers.append(asset.get('symbol'))
+
+            # My Themes 中的股票
+            my_themes = report_data.get('my_themes_stocks', {})
+            for stock in my_themes.get('us_stocks', []):
+                chart_tickers.append(stock.get('ticker'))
+            for stock in my_themes.get('china_stocks', []):
+                chart_tickers.append(stock.get('ticker'))
+
+            # 使用 Theme Report 格式的数据获取方法
+            stock_chart_data = {}
+            if chart_tickers:
+                try:
+                    conn = self.db_manager.get_connection()
+                    cursor = conn.cursor()
+                    stock_chart_data = self._fetch_stock_chart_data(
+                        tickers=chart_tickers,
+                        days=380,
+                        cursor=cursor
+                    )
+                    cursor.close()
+                    conn.close()
+                    logger.info(f"[generate_and_upload] Stock chart data prepared for {len(stock_chart_data)} tickers")
+                except Exception as e:
+                    logger.warning(f"[generate_and_upload] Failed to get stock chart data: {e}")
+
+            # 5. 渲染 HTML
+            generated_at = utcnow()
+            generation_time_display = self._build_generation_time_display(
+                generated_at, scheduler_timezone
+            )
+
+            html_content = self._render_html(
+                report_data=report_data,
+                stock_chart_data=stock_chart_data,
+                generation_time_display=generation_time_display,
+            )
+
+            # 6. 上传 OSS
+            oss_service = OSSService()
+            timestamp = generated_at.strftime("%Y%m%dT%H%M%SZ")
+            oss_object_name = f"reports/MarketWeekly/{user_id}/report_{week_end.strftime('%Y%m%d')}_{timestamp}.html"
+
+            upload_result = oss_service.upload_bytes(
+                object_name=oss_object_name,
+                data=html_content.encode('utf-8'),
+                content_type='text/html; charset=utf-8',
+                content_disposition='inline'
+            )
+
+            if not upload_result.get('success'):
+                raise Exception(f"OSS upload failed: {upload_result.get('error')}")
+
+            logger.info(f"[generate_and_upload] Uploaded to OSS: {oss_object_name}")
+
+            # 7. 更新数据库状态为 completed
+            elapsed = time.time() - start_time
+            try:
+                conn = self.db_manager.get_connection()
+                cursor = conn.cursor()
+
+                metadata = {
+                    "generation_time_seconds": round(elapsed, 2),
+                    "week_start": str(week_start),
+                    "week_end": str(week_end),
+                    "generated_at_utc": generated_at.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                    "assets_count": len(all_assets),
+                    "ohlc_assets_count": len(ohlc_data),
+                }
+
+                cursor.execute("""
+                    UPDATE market_weekly_reports
+                    SET status = 'completed',
+                        oss_object_name = %s,
+                        metadata = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (oss_object_name, json.dumps(metadata), report_id))
+
+                conn.commit()
+                cursor.close()
+                conn.close()
+
+            except Exception as e:
+                logger.error(f"[generate_and_upload] Failed to update DB: {e}")
+
+            # 8. 返回结果
+            return {
+                "success": True,
+                "report_id": report_id,
+                "oss_object_name": oss_object_name,
+                "share_token": share_token,
+                "week_start": str(week_start),
+                "week_end": str(week_end),
+                "stats": {
+                    "generation_time_seconds": round(elapsed, 2),
+                    "assets_count": len(all_assets),
+                    "ohlc_assets_count": len(ohlc_data),
+                },
+            }
+
+        except Exception as e:
+            logger.error(f"[generate_and_upload] Generation failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+            # 更新数据库状态为 failed
+            try:
+                conn = self.db_manager.get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE market_weekly_reports
+                    SET status = 'failed', error_message = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (str(e), report_id))
+                conn.commit()
+                cursor.close()
+                conn.close()
+            except Exception:
+                pass
+
+            return {"success": False, "error": str(e), "report_id": report_id}
+
+    def _render_html(
+        self,
+        report_data: Dict[str, Any],
+        stock_chart_data: Dict[str, List[List[Any]]],
+        generation_time_display: Dict[str, Any],
+    ) -> str:
+        """
+        使用 Jinja2 模板渲染 Market Weekly HTML 报告。
+
+        Args:
+            report_data: 报告 JSON 数据
+            stock_chart_data: Theme Report 格式的股票图表数据 {ticker: [[date, o, h, l, c, vol], ...]}
+            generation_time_display: 时间显示配置
+
+        Returns:
+            渲染后的 HTML 字符串
+        """
+        import json
+        template = _jinja_env.get_template('market_weekly_report.html.j2')
+
+        # 构建模板上下文
+        context = {
+            "meta": report_data.get('meta', {}),
+            "executive_summary": report_data.get('executive_summary', {}),
+            "weekly_performance": report_data.get('weekly_performance', {}),
+            "technical_views": report_data.get('technical_views', {}),
+            "my_themes_stocks": report_data.get('my_themes_stocks', {}),
+            "next_week_outlook": report_data.get('next_week_outlook', {}),
+            "stock_chart_data": stock_chart_data,
+            "stock_chart_data_json": json.dumps(stock_chart_data),
+            "generation_time": generation_time_display,
+        }
+
+        html = template.render(**context)
+        return html
+
+    def _fetch_stock_chart_data(
+        self,
+        tickers: List[str],
+        days: int = 380,
+        cursor=None,
+    ) -> Dict[str, List[List[Any]]]:
+        """
+        获取股票图表数据（Theme Report 格式）。
+
+        Args:
+            tickers: 股票代码列表
+            days: 回溯天数
+            cursor: 数据库 cursor（可选，如不提供则新建连接）
+
+        Returns:
+            {ticker: [[date, open, high, low, close, volume], ...]}
+        """
+        if not tickers:
+            return {}
+
+        from datetime import timedelta
+        as_of = utc_today()
+        lookback_start = as_of - timedelta(days=days)
+
+        need_close_conn = False
+        if cursor is None:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            need_close_conn = True
+
+        try:
+            cursor.execute("""
+                SELECT code, date::date AS trade_date,
+                       open, high, low, close, volume
+                FROM stock_prices_eod
+                WHERE code = ANY(%s)
+                  AND date BETWEEN %s AND %s
+                  AND period = 'd'
+                  AND close IS NOT NULL
+                ORDER BY code, date
+            """, (tickers, lookback_start, as_of))
+
+            rows = cursor.fetchall()
+            if not rows:
+                logger.warning("[_fetch_stock_chart_data] No OHLCV data found")
+                return {}
+
+            by_code: Dict[str, List[List[Any]]] = {}
+            for code, trade_date, o, h, l, c, vol in rows:
+                close = float(c)
+                open_p = float(o) if o is not None else close
+                high_p = float(h) if h is not None else close
+                low_p = float(l) if l is not None else close
+                volume = int(vol) if vol is not None else 0
+                bar = [
+                    str(trade_date),
+                    open_p,
+                    high_p,
+                    low_p,
+                    close,
+                    volume,
+                ]
+                # 使用简化的 ticker key（去掉 .US/.HK）
+                key = code.replace('.US', '').replace('.HK', '')
+                by_code.setdefault(key, []).append(bar)
+
+            # 限制最多 260 条
+            chart_data: Dict[str, List[List[Any]]] = {}
+            for key, bars in by_code.items():
+                if len(bars) < 2:
+                    continue
+                chart_data[key] = bars[-260:]
+
+            logger.info(
+                f"[_fetch_stock_chart_data] Prepared data for {len(chart_data)} tickers "
+                f"({sum(len(v) for v in chart_data.values())} bars total)"
+            )
+            return chart_data
+
+        finally:
+            if need_close_conn:
+                cursor.close()
+                conn.close()
+
+    def get_latest_report(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取用户最新一份已完成的 Market Weekly 报告。
+
+        Returns:
+            报告元数据，含 share_token 和 OSS signed URL；若无则返回 None。
+        """
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT
+                    id, user_id, week_start, week_end, oss_object_name, share_token,
+                    status, metadata, created_at, updated_at, error_message
+                FROM market_weekly_reports
+                WHERE user_id = %s AND status = 'completed'
+                ORDER BY week_end DESC
+                LIMIT 1
+            """, (user_id,))
+
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if not row:
+                return None
+
+            report_id, uid, week_start, week_end, oss_name, token, status, meta, created, updated, error = row
+
+            # 生成 OSS signed URL（24h 有效）
+            oss_service = OSSService()
+            signed_url = oss_service.get_signed_url(oss_name, expires=86400) if oss_name else None
+
+            return {
+                "id": report_id,
+                "user_id": uid,
+                "week_start": str(week_start),
+                "week_end": str(week_end),
+                "oss_object_name": oss_name,
+                "share_token": token,
+                "signed_url": signed_url,
+                "status": status,
+                "metadata": meta or {},
+                "created_at": created.isoformat() if created else None,
+                "updated_at": updated.isoformat() if updated else None,
+                "error_message": error,
+            }
+
+        except Exception as e:
+            logger.error(f"[get_latest_report] Error: {e}")
+            return None
+
+    def list_reports(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        获取用户 Market Weekly 报告历史列表。
+
+        Returns:
+            报告列表，最新在前，每条含 share_token 和 OSS signed URL。
+        """
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT
+                    id, user_id, week_start, week_end, oss_object_name, share_token,
+                    status, metadata, created_at, updated_at, error_message
+                FROM market_weekly_reports
+                WHERE user_id = %s
+                ORDER BY week_end DESC
+                LIMIT %s
+            """, (user_id, limit))
+
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            oss_service = OSSService()
+            results = []
+
+            for row in rows:
+                report_id, uid, week_start, week_end, oss_name, token, status, meta, created, updated, error = row
+
+                signed_url = oss_service.get_signed_url(oss_name, expire_seconds=86400) if oss_name and status == 'completed' else None
+
+                results.append({
+                    "id": report_id,
+                    "user_id": uid,
+                    "week_start": str(week_start),
+                    "week_end": str(week_end),
+                    "oss_object_name": oss_name,
+                    "share_token": token,
+                    "signed_url": signed_url,
+                    "status": status,
+                    "metadata": meta or {},
+                    "created_at": created.isoformat() if created else None,
+                    "updated_at": updated.isoformat() if updated else None,
+                    "error_message": error,
+                })
+
+            return results
+
+        except Exception as e:
+            logger.error(f"[list_reports] Error: {e}")
+            return []
+
+    def get_report_html_by_token(self, token: str) -> Optional[bytes]:
+        """
+        通过 share_token 获取报告 HTML 内容（从 OSS）。
+
+        Args:
+            token: 分享 token
+
+        Returns:
+            HTML 内容 bytes；若找不到或未完成则返回 None。
+        """
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT oss_object_name, status
+                FROM market_weekly_reports
+                WHERE share_token = %s
+            """, (token,))
+
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if not row:
+                logger.warning(f"[get_report_html_by_token] Token not found: {token[:8]}...")
+                return None
+
+            oss_name, status = row
+            if status != 'completed' or not oss_name:
+                logger.warning(f"[get_report_html_by_token] Report not completed: status={status}")
+                return None
+
+            # 从 OSS 获取 HTML
+            oss_service = OSSService()
+            html_bytes = oss_service.get_object_bytes(oss_name)
+
+            return html_bytes
+
+        except Exception as e:
+            logger.error(f"[get_report_html_by_token] Error: {e}")
+            return None
 

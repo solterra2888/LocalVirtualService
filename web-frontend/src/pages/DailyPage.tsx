@@ -523,7 +523,6 @@ const DailyPageInner: React.FC = () => {
                       themeMode={themeMode}
                       clickable
                       active={activeSubtypes.includes(sub)}
-                      count={cnt}
                       onClick={() => toggleSubtype(sub)}
                     />
                   );

@@ -113,6 +113,12 @@ try:
 except ImportError as e:
     print(f"❌ 导入 Theme Report 任务模块失败: {e}")
 
+try:
+    from backend.tasks import market_weekly_report_tasks
+    print(f"✅ 成功导入 Market Weekly Report 任务模块: {market_weekly_report_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入 Market Weekly Report 任务模块失败: {e}")
+
 # 设置Celery日志
 @worker_init.connect
 def setup_worker_logging(sender=None, **kwargs):

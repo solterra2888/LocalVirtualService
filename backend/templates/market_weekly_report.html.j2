@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="en" data-color-mode="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Market Weekly Report</title>
+<script>
+/* Theme: manual Light/Dark toggle (localStorage), default light. */
+(function() {
+  var STORAGE_KEY = 'market-weekly-report-color-mode';
+  function readStored() {
+    try {
+      var s = localStorage.getItem(STORAGE_KEY);
+      if (s === 'light' || s === 'dark') return s;
+    } catch (e) {}
+    return 'light';
+  }
+  window.__updateThemeToggleUI = function() {
+    var mode = document.documentElement.getAttribute('data-color-mode') || 'light';
+    document.querySelectorAll('[data-theme-toggle]').forEach(function(btn) {
+      var on = btn.getAttribute('data-theme-toggle') === mode;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  };
+  window.__setReportColorMode = function(mode) {
+    if (mode !== 'light' && mode !== 'dark') return;
+    document.documentElement.setAttribute('data-color-mode', mode);
+    try { localStorage.setItem(STORAGE_KEY, mode); } catch (e) {}
+    if (typeof window.__updateThemeToggleUI === 'function') window.__updateThemeToggleUI();
+    window.dispatchEvent(new CustomEvent('report-colormode-change', { detail: mode }));
+  };
+  document.documentElement.setAttribute('data-color-mode', readStored());
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  /* ── Reset & base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html {
+    --sidebar-width: 260px;
+    --radius: 8px;
+    --font: 'Inter', 'SF Pro Text', system-ui, -apple-system, sans-serif;
+    color-scheme: light;
+    --bg: #f8fafc;
+    --surface: #ffffff;
+    --surface2: #f1f5f9;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --text-muted: #64748b;
+    --accent: #2563eb;
+    --pos: #059669;
+    --neg: #dc2626;
+    --na: #94a3b8;
+    --chart-text: #64748b;
+    --chart-grid: #e2e8f0;
+    scroll-behavior: smooth;
+  }
+  html[data-color-mode="dark"] {
+    color-scheme: dark;
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #222638;
+    --border: #2e3347;
+    --text: #e2e5f0;
+    --text-muted: #7b84a3;
+    --accent: #4f8ef7;
+    --pos: #3ecf8e;
+    --neg: #f75e5e;
+    --na: #555b7a;
+    --chart-text: #7b84a3;
+    --chart-grid: #2e3347;
+  }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Layout ── */
+  .layout {
+    display: flex;
+    min-height: 100vh;
+  }
+  .sidebar {
+    width: var(--sidebar-width);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 20px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  .sidebar-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-nav {
+    list-style: none;
+  }
+  .sidebar-nav li {
+    margin-bottom: 4px;
+  }
+  .sidebar-nav a {
+    display: block;
+    padding: 8px 12px;
+    color: var(--text);
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .sidebar-nav a:hover {
+    background: var(--surface2);
+    text-decoration: none;
+  }
+  .main-content {
+    flex: 1;
+    padding: 24px 40px;
+    max-width: calc(100vw - var(--sidebar-width));
+  }
+
+  /* ── Components ── */
+  .header {
+    margin-bottom: 32px;
+  }
+  .header-title {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .header-meta {
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+  .header-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .theme-btn {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .theme-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  .section {
+    margin-bottom: 48px;
+  }
+  .section-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  /* ── KPI Cards ── */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .kpi-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .kpi-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .kpi-value {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .kpi-value.pos { color: var(--pos); }
+  .kpi-value.neg { color: var(--neg); }
+
+  /* ── Tables ── */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .data-table th,
+  .data-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+  .data-table th {
+    background: var(--surface2);
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .data-table tr:hover td {
+    background: var(--surface2);
+  }
+  .change-pos { color: var(--pos); }
+  .change-neg { color: var(--neg); }
+
+  /* ── Charts (Chart.js for WoW/Relative) ── */
+  .chart-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+  .chart-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+  .chart-wrapper {
+    height: 300px;
+    position: relative;
+  }
+
+  /* ── Stock Charts (SVG Candlestick - Theme Report style) ── */
+  .stock-charts-section { margin-top: 48px; padding-top: 40px; border-top: 1px solid var(--border); scroll-margin-top: 24px; }
+  .stock-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .stock-category-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
+  .stock-category-group { scroll-margin-top: 92px; }
+  .stock-category-group.multi { grid-column: 1 / -1; }
+  .stock-category-group.single .stock-grid { grid-template-columns: 1fr; }
+  .stock-category-title { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--text); }
+  .stock-item {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    background: var(--surface);
+  }
+  .stock-item-title { margin-bottom: 8px; font-weight: 700; letter-spacing: 0.03em; color: var(--text); }
+  .js-stock-chart {
+    width: 100%;
+    height: 360px;
+    border: 1px solid #1F2937;
+    border-radius: 8px;
+    background: #000000;
+    box-sizing: border-box;
+    cursor: pointer;
+    overflow: hidden;
+  }
+  .js-stock-chart svg { display: block; width: 100%; height: 100%; }
+  .js-stock-empty {
+    display: flex; align-items: center; justify-content: center;
+    height: 360px; color: #CCCCCC; font-size: 12px;
+    border: 1px dashed #374151; border-radius: 8px; background: #000000;
+  }
+  .js-chart-modal {
+    display: none; position: fixed; inset: 0; z-index: 9998;
+    background: rgba(15, 23, 42, 0.86); padding: 42px;
+  }
+  .js-chart-modal.active { display: flex; align-items: center; justify-content: center; }
+  .js-chart-modal-panel {
+    width: min(1200px, 96vw); height: min(720px, 88vh);
+    background: var(--surface); border-radius: 12px; padding: 16px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+  }
+  .js-chart-modal-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+  }
+  .js-chart-modal-title { font-weight: 700; letter-spacing: 0.03em; color: var(--text); }
+  .js-chart-modal-actions { display: inline-flex; gap: 6px; align-items: center; }
+  .js-chart-modal-actions button {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border: 1px solid var(--border);
+    background: var(--surface); border-radius: 6px; padding: 0;
+    color: var(--text-muted); cursor: pointer;
+  }
+  .js-chart-modal-actions button:hover { color: var(--text); border-color: var(--accent); }
+  .js-chart-modal-actions svg { width: 15px; height: 15px; stroke: currentColor; }
+  #js-chart-modal-body { height: calc(100% - 38px); }
+  #js-chart-modal-body .js-stock-chart { height: 100%; cursor: default; }
+
+  /* ── Responsive ── */
+  @media (max-width: 1100px) {
+    .stock-category-layout { grid-template-columns: 1fr; }
+    .stock-category-group.multi { grid-column: auto; }
+    .stock-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 768px) {
+    .sidebar {
+      display: none;
+    }
+    .main-content {
+      padding: 16px;
+      max-width: 100vw;
+    }
+    .header-title {
+      font-size: 22px;
+    }
+    .kpi-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+    .chart-wrapper {
+      height: 250px;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-title">Contents</div>
+  <ul class="sidebar-nav">
+    <li><a href="#executive-summary">Executive Summary</a></li>
+    <li><a href="#weekly-performance">Weekly Performance</a></li>
+    <li><a href="#indices">Indices</a></li>
+    <li><a href="#sectors">Sectors</a></li>
+    <li><a href="#ai-themes">AI Themes</a></li>
+    <li><a href="#stock-charts">Stock Charts</a></li>
+    <li><a href="#next-week">Next Week Outlook</a></li>
+  </ul>
+</nav>
+
+<!-- Main Content -->
+<main class="main-content">
+
+<!-- Header -->
+<header class="header">
+  <h1 class="header-title">Market Weekly Report</h1>
+  <div class="header-meta">
+    <strong>Week:</strong> {{ meta.week_start }} — {{ meta.week_end }}<br>
+    {% if generation_time.generated_at_utc %}
+    <strong>Generated:</strong> {{ generation_time.generated_at_utc }}<br>
+    {% endif %}
+    {% if generation_time.generated_at_new_york %}
+    <small>{{ generation_time.generated_at_new_york }}</small><br>
+    {% endif %}
+    {% if generation_time.generated_at_beijing %}
+    <small>{{ generation_time.generated_at_beijing }}</small>
+    {% endif %}
+  </div>
+  <div class="header-actions">
+    <button class="theme-btn" data-theme-toggle="light" onclick="__setReportColorMode('light')">Light</button>
+    <button class="theme-btn" data-theme-toggle="dark" onclick="__setReportColorMode('dark')">Dark</button>
+  </div>
+</header>
+
+<script>__updateThemeToggleUI();</script>
+
+<!-- Executive Summary -->
+<section id="executive-summary" class="section">
+  <h2 class="section-title">Executive Summary</h2>
+  <div class="kpi-grid">
+    {% if executive_summary.top_performer %}
+    <div class="kpi-card">
+      <div class="kpi-label">Top Performer</div>
+      <div class="kpi-value {% if executive_summary.top_performer.change > 0 %}pos{% elif executive_summary.top_performer.change < 0 %}neg{% endif %}">
+        {{ executive_summary.top_performer.name }}
+        <span>{{ executive_summary.top_performer.change | round(2) }}%</span>
+      </div>
+    </div>
+    {% endif %}
+    {% if executive_summary.bottom_performer %}
+    <div class="kpi-card">
+      <div class="kpi-label">Bottom Performer</div>
+      <div class="kpi-value {% if executive_summary.bottom_performer.change > 0 %}pos{% elif executive_summary.bottom_performer.change < 0 %}neg{% endif %}">
+        {{ executive_summary.bottom_performer.name }}
+        <span>{{ executive_summary.bottom_performer.change | round(2) }}%</span>
+      </div>
+    </div>
+    {% endif %}
+    {% if executive_summary.regional_overview %}
+    <div class="kpi-card">
+      <div class="kpi-label">US Markets</div>
+      <div class="kpi-value">{{ executive_summary.regional_overview.us_markets }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">EU Markets</div>
+      <div class="kpi-value">{{ executive_summary.regional_overview.eu_markets }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Asia Markets</div>
+      <div class="kpi-value">{{ executive_summary.regional_overview.asia_markets }}</div>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+<!-- Weekly Performance -->
+<section id="weekly-performance" class="section">
+  <h2 class="section-title">Weekly Performance (Week-over-Week)</h2>
+
+  <!-- Indices WoW -->
+  <div id="indices" class="chart-container">
+    <h3 class="chart-title">Indices WoW</h3>
+    <div class="chart-wrapper">
+      <canvas id="indices-wow-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Sectors WoW -->
+  <div id="sectors" class="chart-container">
+    <h3 class="chart-title">Sectors WoW</h3>
+    <div class="chart-wrapper">
+      <canvas id="sectors-wow-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- AI Themes WoW -->
+  <div id="ai-themes" class="chart-container">
+    <h3 class="chart-title">AI Themes WoW (US & China)</h3>
+    <div class="chart-wrapper">
+      <canvas id="ai-wow-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Relative Performance -->
+  <div class="chart-container">
+    <h3 class="chart-title">Relative Performance (Indexed to 100, 3M)</h3>
+    <div class="chart-wrapper" style="height: 400px;">
+      <canvas id="relative-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- WoW Tables -->
+  <div class="card">
+    <h3 class="chart-title">Indices WoW Table</h3>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Change (%)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in weekly_performance.indices_wow %}
+        <tr>
+          <td>{{ item.name }}</td>
+          <td class="{% if item.change_pct > 0 %}change-pos{% elif item.change_pct < 0 %}change-neg{% endif %}">
+            {{ item.change_pct | round(2) }}%
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3 class="chart-title">Sectors WoW Table</h3>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Change (%)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in weekly_performance.sectors_wow %}
+        <tr>
+          <td>{{ item.name }}</td>
+          <td class="{% if item.change_pct > 0 %}change-pos{% elif item.change_pct < 0 %}change-neg{% endif %}">
+            {{ item.change_pct | round(2) }}%
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Stock Charts Section (Theme Report Style SVG Candlestick) -->
+<section id="stock-charts" class="section stock-charts-section">
+  <div class="theme-title-row" style="display: flex; justify-content: space-between; align-items: baseline;">
+    <div>
+      <div class="eyebrow" style="font-size: 11px; color: var(--text-muted); letter-spacing: 0.08em;">Charts</div>
+      <div class="theme-title" style="font-size: 18px; font-weight: 700;">Individual Stock Charts</div>
+    </div>
+    <div class="theme-meta" style="font-size: 12px; color: var(--text-muted);">{{ stock_chart_data.keys() | list | length }} tickers · candlestick + volume</div>
+  </div>
+
+  <!-- Technical Views Charts -->
+  {% for asset_type in ['indices', 'sectors', 'forex', 'commodities', 'yields'] %}
+  {% set assets = technical_views.get(asset_type, []) %}
+  {% if assets %}
+  <section class="section-card card" data-stock-section="{{ asset_type }}" id="stocks-{{ asset_type }}">
+    <div class="theme-title-row" style="margin-bottom: 12px;">
+      <div class="theme-title" style="font-size: 14px; font-weight: 600;">{{ asset_type | capitalize }}</div>
+    </div>
+    <div class="stock-category-layout">
+      <div class="stock-category-group multi">
+        <div class="stock-grid js-stock-grid">
+          {% for asset in assets[:10] %}
+          {% set ticker_key = asset.symbol | replace('.US', '') | replace('.HK', '') %}
+          <div class="stock-item js-stock-item" id="stock-{{ ticker_key }}" data-ticker="{{ ticker_key }}" data-theme="{{ asset_type }}">
+            <div class="stock-item-title">{{ asset.name }}</div>
+            <div class="js-stock-chart" data-ticker="{{ ticker_key }}" data-theme="{{ asset_type }}" role="button" tabindex="0" aria-label="{{ ticker_key }} price chart"></div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+  {% endfor %}
+
+  <!-- My Themes Charts -->
+  {% if my_themes_stocks.us_stocks %}
+  <section class="section-card card" data-stock-section="us-stocks" id="stocks-us-stocks">
+    <div class="theme-title-row" style="margin-bottom: 12px;">
+      <div class="theme-title" style="font-size: 14px; font-weight: 600;">My Themes - US Stocks</div>
+    </div>
+    <div class="stock-category-layout">
+      <div class="stock-category-group multi">
+        <div class="stock-grid js-stock-grid">
+          {% for stock in my_themes_stocks.us_stocks[:8] %}
+          {% set ticker_key = stock.ticker | replace('.US', '') | replace('.HK', '') %}
+          <div class="stock-item js-stock-item" id="stock-{{ ticker_key }}" data-ticker="{{ ticker_key }}" data-theme="us-stocks">
+            <div class="stock-item-title">{{ stock.company_name }}</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">{{ stock.theme_name }}</div>
+            <div class="js-stock-chart" data-ticker="{{ ticker_key }}" data-theme="us-stocks" role="button" tabindex="0" aria-label="{{ ticker_key }} price chart"></div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if my_themes_stocks.china_stocks %}
+  <section class="section-card card" data-stock-section="china-stocks" id="stocks-china-stocks">
+    <div class="theme-title-row" style="margin-bottom: 12px;">
+      <div class="theme-title" style="font-size: 14px; font-weight: 600;">My Themes - China Stocks</div>
+    </div>
+    <div class="stock-category-layout">
+      <div class="stock-category-group multi">
+        <div class="stock-grid js-stock-grid">
+          {% for stock in my_themes_stocks.china_stocks[:8] %}
+          {% set ticker_key = stock.ticker | replace('.US', '') | replace('.HK', '') %}
+          <div class="stock-item js-stock-item" id="stock-{{ ticker_key }}" data-ticker="{{ ticker_key }}" data-theme="china-stocks">
+            <div class="stock-item-title">{{ stock.company_name }}</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">{{ stock.theme_name }}</div>
+            <div class="js-stock-chart" data-ticker="{{ ticker_key }}" data-theme="china-stocks" role="button" tabindex="0" aria-label="{{ ticker_key }} price chart"></div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+</section>
+
+<!-- Chart Modal -->
+<div class="js-chart-modal" id="js-chart-modal">
+  <div class="js-chart-modal-panel">
+    <div class="js-chart-modal-header">
+      <div class="js-chart-modal-title" id="js-chart-modal-title"></div>
+      <div class="js-chart-modal-actions">
+        <button type="button" onclick="downloadJsStockChart()" title="Download image" aria-label="Download image">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M7 10l5 5 5-5"></path><path d="M12 15V3"></path></svg>
+        </button>
+        <button type="button" onclick="prevJsStockChart()" title="Previous chart" aria-label="Previous chart">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+        </button>
+        <button type="button" onclick="nextJsStockChart()" title="Next chart" aria-label="Next chart">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+        </button>
+        <button type="button" onclick="closeJsStockChart()" title="Close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" aria-hidden="true"><path d="M18 6L6 18"></path><path d="M6 6l12 12"></path></svg>
+        </button>
+      </div>
+    </div>
+    <div id="js-chart-modal-body"></div>
+  </div>
+</div>
+
+<!-- Next Week Outlook -->
+<section id="next-week" class="section">
+  <h2 class="section-title">Next Week Outlook</h2>
+
+  {% if next_week_outlook.economic_calendar %}
+  <div class="card">
+    <h3 class="chart-title">Economic Calendar</h3>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Event</th>
+          <th>Country</th>
+          <th>Actual</th>
+          <th>Forecast</th>
+          <th>Previous</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in next_week_outlook.economic_calendar[:20] %}
+        <tr>
+          <td>{{ event.date }}</td>
+          <td>{{ event.time }}</td>
+          <td>{{ event.event }}</td>
+          <td>{{ event.country }}</td>
+          <td>{{ event.actual }}</td>
+          <td>{{ event.forecast }}</td>
+          <td>{{ event.previous }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if next_week_outlook.earnings_calendar %}
+  <div class="card">
+    <h3 class="chart-title">Earnings Calendar</h3>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Ticker</th>
+          <th>Company</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in next_week_outlook.earnings_calendar[:20] %}
+        <tr>
+          <td>{{ event.date }}</td>
+          <td>{{ event.time }}</td>
+          <td>{{ event.ticker }}</td>
+          <td>{{ event.company }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if next_week_outlook.ipo_calendar %}
+  <div class="card">
+    <h3 class="chart-title">IPO Calendar</h3>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Ticker</th>
+          <th>Company</th>
+          <th>Exchange</th>
+          <th>Price Range</th>
+          <th>Shares</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in next_week_outlook.ipo_calendar[:20] %}
+        <tr>
+          <td>{{ event.date }}</td>
+          <td>{{ event.ticker }}</td>
+          <td>{{ event.company }}</td>
+          <td>{{ event.exchange }}</td>
+          <td>{{ event.price_range }}</td>
+          <td>{{ event.shares }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+</main>
+</div>
+
+<script>
+// ──────────────────────────────────────────────────────────────
+// Stock Chart Data (Theme Report format)
+// ──────────────────────────────────────────────────────────────
+window.STOCK_CHART_DATA = {{ stock_chart_data_json | safe }};
+let jsStockGallery = [];
+let jsStockIndex = 0;
+
+function movingAverage(values, windowSize) {
+  const out = new Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= windowSize) sum -= values[i - windowSize];
+    if (i >= windowSize - 1) out[i] = sum / windowSize;
+  }
+  return out;
+}
+
+function exponentialMovingAverage(values, span) {
+  const out = new Array(values.length).fill(null);
+  const alpha = 2 / (span + 1);
+  let prev = null;
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i];
+    prev = prev == null ? value : alpha * value + (1 - alpha) * prev;
+    if (i >= span - 1) out[i] = prev;
+  }
+  return out;
+}
+
+function formatVolume(value) {
+  const abs = Math.abs(value);
+  if (abs >= 1000000000) return (value / 1000000000).toFixed(1) + 'B';
+  if (abs >= 1000000) return (value / 1000000).toFixed(2) + 'M';
+  if (abs >= 1000) return (value / 1000).toFixed(0) + 'K';
+  return String(Math.round(value));
+}
+
+function formatVolumeAxis(value) {
+  const abs = Math.abs(value);
+  if (abs >= 1000000000) return (value / 1000000000).toFixed(1) + 'B';
+  if (abs >= 1000000) return (value / 1000000).toFixed(0) + 'M';
+  if (abs >= 1000) return (value / 1000).toFixed(0) + 'K';
+  return String(Math.round(value));
+}
+
+function formatPrice(value) {
+  if (value >= 1000) return Math.round(value).toLocaleString('en-US');
+  if (value >= 100) return value.toFixed(1);
+  return value.toFixed(2);
+}
+
+function escapeSvgText(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function renderJsStockChart(el, ticker, options) {
+  const rawData = (window.STOCK_CHART_DATA || {})[ticker];
+  if (!rawData || rawData.length < 2) {
+    el.innerHTML = '<div class="js-stock-empty">No price history available</div>';
+    return;
+  }
+
+  const width = options && options.width ? options.width : Math.max(el.clientWidth, 420);
+  const height = options && options.height ? options.height : Math.max(el.clientHeight, 300);
+  const visibleBars = options && options.visibleBars ? options.visibleBars : 126;
+  const data = rawData.slice(-visibleBars);
+  const margin = {top: 8, right: 52, bottom: 30, left: 8};
+  const plotW = width - margin.left - margin.right;
+  const usableH = height - margin.top - margin.bottom;
+  const priceH = Math.round(usableH * 0.80);
+  const volTop = margin.top + priceH;
+  const volH = usableH - priceH;
+  const rightMarginBars = 3;
+  const step = plotW / (data.length + rightMarginBars);
+  const axisX = margin.left + data.length * step;
+  const opens = data.map(d => Number(d[1]));
+  const highs = data.map(d => Number(d[2]));
+  const lows = data.map(d => Number(d[3]));
+  const closes = data.map(d => Number(d[4]));
+  const volumes = data.map(d => d[5] == null ? 0 : Number(d[5]));
+  const dates = data.map(d => d[0]);
+  const rawCloses = rawData.map(d => Number(d[4]));
+  const rawVolumes = rawData.map(d => d[5] == null ? 0 : Number(d[5]));
+  const minPrice = Math.min(...lows);
+  const maxPrice = Math.max(...highs);
+  const priceRange = Math.max(maxPrice - minPrice, maxPrice * 0.01);
+  const pad = priceRange * 0.06;
+  const yMin = minPrice - pad;
+  const yMax = maxPrice + pad;
+  const maxVol = Math.max(...volumes, 1);
+  const x = i => margin.left + i * step;
+  const y = v => margin.top + (yMax - v) * priceH / (yMax - yMin || 1);
+  const vy = v => volTop + volH - (v * volH / (maxVol * 1.15 || 1));
+  const linePath = values => values.map((v, i) => v == null ? '' : `${i === 0 || values[i - 1] == null ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const volLinePath = values => values.map((v, i) => v == null ? '' : `${i === 0 || values[i - 1] == null ? 'M' : 'L'}${x(i).toFixed(1)},${vy(v).toFixed(1)}`).join(' ');
+  const ema21 = exponentialMovingAverage(rawCloses, 21).slice(-visibleBars);
+  const ema50 = exponentialMovingAverage(rawCloses, 50).slice(-visibleBars);
+  const ema200 = exponentialMovingAverage(rawCloses, 200).slice(-visibleBars);
+  const volMa20 = movingAverage(rawVolumes, 20).slice(-visibleBars);
+  const priceTicks = [0, 0.2, 0.4, 0.6, 0.8, 1];
+  const priceGrid = priceTicks.map(t => {
+    const gy = margin.top + t * priceH;
+    const val = yMax - t * (yMax - yMin);
+    return `<line x1="${margin.left}" y1="${gy.toFixed(1)}" x2="${axisX.toFixed(1)}" y2="${gy.toFixed(1)}" stroke="#2A2A2A" stroke-width="0.6" vector-effect="non-scaling-stroke"/><text x="${(axisX + 7).toFixed(1)}" y="${(gy + 4).toFixed(1)}" fill="#CCCCCC" font-family="monospace" font-size="12">${formatPrice(val)}</text>`;
+  }).join('');
+  const volTicks = [0.5, 1].map(t => {
+    const gy = vy(maxVol * t);
+    return `<line x1="${margin.left}" y1="${gy.toFixed(1)}" x2="${axisX.toFixed(1)}" y2="${gy.toFixed(1)}" stroke="#2A2A2A" stroke-width="0.5" vector-effect="non-scaling-stroke"/><text x="${(axisX + 7).toFixed(1)}" y="${(gy + 4).toFixed(1)}" fill="#CCCCCC" font-family="monospace" font-size="11">${formatVolumeAxis(maxVol * t)}</text>`;
+  }).join('');
+  const gridStep = data.length <= 60 ? 5 : data.length <= 130 ? 10 : 15;
+  const xGrid = Array.from({length: Math.ceil(data.length / gridStep)}, (_, idx) => idx * gridStep)
+    .filter(i => i < data.length)
+    .map(i => `<line x1="${x(i).toFixed(1)}" y1="${margin.top}" x2="${x(i).toFixed(1)}" y2="${(volTop + volH).toFixed(1)}" stroke="#2A2A2A" stroke-width="0.45" vector-effect="non-scaling-stroke"/>`)
+    .join('');
+  const volBars = volumes.map((v, i) => {
+    const barW = Math.max(1, Math.min(7, step * 0.60));
+    const bx = x(i) - barW / 2;
+    const by = vy(v);
+    return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1, volTop + volH - by).toFixed(1)}" fill="#334455"/>`;
+  }).join('');
+  const candleW = Math.max(2, Math.min(8, step * 0.60));
+  const candles = closes.map((close, i) => {
+    const open = opens[i];
+    const high = highs[i];
+    const low = lows[i];
+    const cx = x(i);
+    const up = close >= open;
+    const top = y(Math.max(open, close));
+    const bottom = y(Math.min(open, close));
+    const bodyH = bottom - top;
+    const doji = Math.abs(close - open) < priceRange * 0.0008;
+    const wick = `<line x1="${cx.toFixed(1)}" y1="${y(high).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${y(low).toFixed(1)}" stroke="#BBBBBB" stroke-width="0.8" vector-effect="non-scaling-stroke"/>`;
+    if (doji) {
+      const color = up ? '#BBBBBB' : '#4499EE';
+      return wick + `<line x1="${(cx - candleW / 2).toFixed(1)}" y1="${y(open).toFixed(1)}" x2="${(cx + candleW / 2).toFixed(1)}" y2="${y(open).toFixed(1)}" stroke="${color}" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+    }
+    if (up) {
+      return wick + `<rect x="${(cx - candleW / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${candleW.toFixed(1)}" height="${Math.max(1, bodyH).toFixed(1)}" fill="#000000" stroke="#BBBBBB" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+    }
+    return wick + `<rect x="${(cx - candleW / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${candleW.toFixed(1)}" height="${Math.max(1, bodyH).toFixed(1)}" fill="#4499EE" stroke="none"/>`;
+  }).join('');
+  const last = closes[closes.length - 1];
+  const previous = rawCloses.length >= 2 ? rawCloses[rawCloses.length - 2] : closes[closes.length - 2];
+  const chg = previous ? (last - previous) / previous * 100 : 0;
+  const lastVol = volumes[volumes.length - 1] || 0;
+  const lastVolMa = volMa20[volMa20.length - 1];
+  const cleanTicker = escapeSvgText(ticker.replace(/\.US$/i, '').toUpperCase());
+  const lastDateLabel = new Date(dates[dates.length - 1] + 'T00:00:00')
+    .toLocaleDateString('en-US', {month: 'short', day: '2-digit', year: 'numeric'});
+  const priceLabelY = Math.max(margin.top + 10, Math.min(volTop - 10, y(last)));
+  const lastVolY = Math.max(volTop + 10, Math.min(volTop + volH - 10, vy(lastVol)));
+  const lastVolMaY = lastVolMa == null ? null : Math.max(volTop + 10, Math.min(volTop + volH - 10, vy(lastVolMa)));
+  const tag = (x0, y0, text, arrow) => {
+    const h = 18;
+    const w = Math.max(44, text.length * 7 + 10);
+    if (arrow) {
+      return `<path d="M${x0},${y0.toFixed(1)} L${x0 + 8},${(y0 - h / 2).toFixed(1)} H${x0 + w} V${(y0 + h / 2).toFixed(1)} H${x0 + 8} Z" fill="#DD8800"/><text x="${x0 + 12}" y="${(y0 + 4).toFixed(1)}" fill="#FFFFFF" font-family="monospace" font-size="11" font-weight="700">${escapeSvgText(text)}</text>`;
+    }
+    return `<rect x="${x0}" y="${(y0 - h / 2).toFixed(1)}" width="${w}" height="${h}" fill="#DD8800"/><text x="${x0 + 5}" y="${(y0 + 4).toFixed(1)}" fill="#FFFFFF" font-family="monospace" font-size="10" font-weight="700">${escapeSvgText(text)}</text>`;
+  };
+  const monthTicks = [];
+  let prevMonth = null;
+  for (let i = 0; i < dates.length; i++) {
+    const dt = new Date(dates[i] + 'T00:00:00');
+    const key = `${dt.getFullYear()}-${dt.getMonth()}`;
+    if (key !== prevMonth) {
+      if (dt.getDate() <= 7 || monthTicks.length === 0) {
+        monthTicks.push({i, label: dt.toLocaleDateString('en-US', {month: 'short', day: '2-digit'})});
+      }
+      prevMonth = key;
+    }
+  }
+  const fallbackStep = Math.max(1, Math.floor(data.length / 8));
+  const dateTicks = monthTicks.length >= 5 ? monthTicks : Array.from({length: Math.ceil(data.length / fallbackStep)}, (_, idx) => idx * fallbackStep)
+    .filter(i => i < data.length)
+    .map(i => ({i, label: new Date(dates[i] + 'T00:00:00').toLocaleDateString('en-US', {month: 'short', day: '2-digit'})}));
+  const dateLabels = dateTicks.map(t => `<text x="${x(t.i).toFixed(1)}" y="${height - 9}" fill="#CCCCCC" font-family="monospace" font-size="11" text-anchor="middle">${escapeSvgText(t.label)}</text>`).join('');
+
+  el.innerHTML = `
+<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${ticker} price chart">
+  <rect width="${width}" height="${height}" fill="#000000"/>
+  ${xGrid}
+  ${priceGrid}
+  ${volTicks}
+  ${candles}
+  <path d="${linePath(ema21)}" fill="none" stroke="#AAAAAA" stroke-width="0.9" opacity="0.70" vector-effect="non-scaling-stroke"/>
+  <path d="${linePath(ema50)}" fill="none" stroke="#AAAAAA" stroke-width="0.9" opacity="0.70" vector-effect="non-scaling-stroke"/>
+  <path d="${linePath(ema200)}" fill="none" stroke="#AAAAAA" stroke-width="0.9" opacity="0.70" vector-effect="non-scaling-stroke"/>
+  ${volBars}
+  <path d="${volLinePath(volMa20)}" fill="none" stroke="#AAAAAA" stroke-width="0.8" opacity="0.85" vector-effect="non-scaling-stroke"/>
+  <line x1="${margin.left}" y1="${margin.top}" x2="${axisX.toFixed(1)}" y2="${margin.top}" stroke="#444444" stroke-width="0.6" vector-effect="non-scaling-stroke"/>
+  <line x1="${margin.left}" y1="${volTop.toFixed(1)}" x2="${axisX.toFixed(1)}" y2="${volTop.toFixed(1)}" stroke="#555555" stroke-width="0.7" vector-effect="non-scaling-stroke"/>
+  <line x1="${margin.left}" y1="${(volTop + volH).toFixed(1)}" x2="${axisX.toFixed(1)}" y2="${(volTop + volH).toFixed(1)}" stroke="#777777" stroke-width="0.7" vector-effect="non-scaling-stroke"/>
+  <line x1="${axisX.toFixed(1)}" y1="${margin.top}" x2="${axisX.toFixed(1)}" y2="${(volTop + volH).toFixed(1)}" stroke="#777777" stroke-width="0.8" vector-effect="non-scaling-stroke"/>
+  <text x="${margin.left + 3}" y="${margin.top + 13}" fill="#DDDDDD" font-family="monospace" font-size="11.5">■ ${cleanTicker} | Last ${formatPrice(last)} | ${chg >= 0 ? '+' : ''}${chg.toFixed(2)}% | ${escapeSvgText(lastDateLabel)}</text>
+  <text x="${margin.left + 3}" y="${volTop + 13}" fill="#DDDDDD" font-family="monospace" font-size="11.5">■ ${cleanTicker} | Vol ${formatVolume(lastVol)} | ${escapeSvgText(lastDateLabel)}</text>
+  ${tag(axisX + 5, priceLabelY, formatPrice(last), true)}
+  ${tag(axisX + 5, lastVolY, formatVolume(lastVol), false)}
+  ${lastVolMaY == null ? '' : tag(axisX + 5, lastVolMaY, formatVolume(lastVolMa), false)}
+  ${dateLabels}
+</svg>`;
+}
+
+function initJsStockCharts() {
+  const charts = Array.from(document.querySelectorAll('.js-stock-chart[data-ticker]'));
+  if (!charts.length) return;
+  const render = el => renderJsStockChart(el, el.dataset.ticker);
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting || entry.target.dataset.rendered) return;
+        render(entry.target);
+        entry.target.dataset.rendered = '1';
+        observer.unobserve(entry.target);
+      });
+    }, {rootMargin: '400px'});
+    charts.forEach(el => observer.observe(el));
+  } else {
+    charts.forEach(render);
+  }
+  charts.forEach(el => {
+    el.addEventListener('click', () => openJsStockChart(el.dataset.ticker, el.dataset.theme));
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openJsStockChart(el.dataset.ticker, el.dataset.theme);
+      }
+    });
+  });
+}
+
+function openJsStockChart(ticker, themeKey) {
+  const section = themeKey ? document.querySelector('[data-stock-section="' + themeKey + '"]') : null;
+  const scope = section || document;
+  jsStockGallery = Array.from(scope.querySelectorAll('.js-stock-chart[data-ticker]')).map(el => ({
+    ticker: el.dataset.ticker,
+    theme: el.dataset.theme
+  }));
+  jsStockIndex = Math.max(0, jsStockGallery.findIndex(item => item.ticker === ticker));
+  setJsStockModal();
+  document.getElementById('js-chart-modal').classList.add('active');
+}
+
+function setJsStockModal() {
+  if (!jsStockGallery.length) return;
+  const item = jsStockGallery[jsStockIndex];
+  const body = document.getElementById('js-chart-modal-body');
+  document.getElementById('js-chart-modal-title').textContent = item.ticker;
+  body.innerHTML = '<div class="js-stock-chart" data-ticker="' + item.ticker + '"></div>';
+  const chart = body.querySelector('.js-stock-chart');
+  renderJsStockChart(chart, item.ticker, {width: 1120, height: 620});
+}
+
+function getJsStockModalPngBlob() {
+  const svg = document.querySelector('#js-chart-modal-body svg');
+  if (!svg) return Promise.reject(new Error('No chart available'));
+  const viewBox = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+  const width = viewBox[2] || Math.round(svg.getBoundingClientRect().width) || 1120;
+  const height = viewBox[3] || Math.round(svg.getBoundingClientRect().height) || 620;
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('width', String(width));
+  clone.setAttribute('height', String(height));
+  const svgText = new XMLSerializer().serializeToString(clone);
+  const svgBlob = new Blob([svgText], {type: 'image/svg+xml;charset=utf-8'});
+  const url = URL.createObjectURL(svgBlob);
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('PNG export failed')), 'image/png');
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Chart image export failed'));
+    };
+    img.src = url;
+  });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 250);
+}
+
+async function downloadJsStockChart() {
+  const ticker = (document.getElementById('js-chart-modal-title')?.textContent || 'chart').trim();
+  const blob = await getJsStockModalPngBlob();
+  downloadBlob(blob, ticker + '_candlestick.png');
+}
+
+function closeJsStockChart() {
+  const modal = document.getElementById('js-chart-modal');
+  if (modal) modal.classList.remove('active');
+}
+
+function prevJsStockChart() {
+  if (!jsStockGallery.length) return;
+  jsStockIndex = (jsStockIndex - 1 + jsStockGallery.length) % jsStockGallery.length;
+  setJsStockModal();
+}
+
+function nextJsStockChart() {
+  if (!jsStockGallery.length) return;
+  jsStockIndex = (jsStockIndex + 1) % jsStockGallery.length;
+  setJsStockModal();
+}
+
+// ──────────────────────────────────────────────────────────────
+// Chart.js for WoW and Relative Performance
+// ──────────────────────────────────────────────────────────────
+const getChartColors = () => {
+  const mode = document.documentElement.getAttribute('data-color-mode') || 'light';
+  return {
+    text: mode === 'dark' ? '#7b84a3' : '#64748b',
+    grid: mode === 'dark' ? '#2e3347' : '#e2e8f0',
+    pos: mode === 'dark' ? '#3ecf8e' : '#059669',
+    neg: mode === 'dark' ? '#f75e5e' : '#dc2626',
+    accent: mode === 'dark' ? '#4f8ef7' : '#2563eb',
+  };
+};
+
+function createWoWBarChart(canvasId, data, title) {
+  const colors = getChartColors();
+  const ctx = document.getElementById(canvasId);
+  if (!ctx || !data || data.length === 0) return;
+
+  const labels = data.map(d => d.name);
+  const values = data.map(d => d.change_pct);
+  const barColors = values.map(v => v >= 0 ? colors.pos : colors.neg);
+
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: title,
+        data: values,
+        backgroundColor: barColors,
+        borderColor: barColors.map(c => c),
+        borderWidth: 1,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.raw.toFixed(2)}%`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: colors.text, maxRotation: 45 },
+          grid: { display: false }
+        },
+        y: {
+          ticks: { color: colors.text, callback: v => v + '%' },
+          grid: { color: colors.grid }
+        }
+      }
+    }
+  });
+}
+
+function createRelativeLineChart(canvasId, data) {
+  const colors = getChartColors();
+  const ctx = document.getElementById(canvasId);
+  if (!ctx || !data || data.length === 0) return;
+
+  const keys = Object.keys(data[0]).filter(k => k !== 'date');
+  const datasets = keys.map((key, i) => ({
+    label: key,
+    data: data.map(d => d[key]),
+    borderColor: i === 0 ? colors.accent : `hsl(${i * 30}, 70%, 50%)`,
+    borderWidth: 2,
+    pointRadius: 0,
+    tension: 0.1,
+  }));
+
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: data.map(d => d.date),
+      datasets: datasets
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: { color: colors.text, usePointStyle: true }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: colors.text, maxTicksLimit: 10 },
+          grid: { color: colors.grid }
+        },
+        y: {
+          ticks: { color: colors.text },
+          grid: { color: colors.grid }
+        }
+      }
+    }
+  });
+}
+
+// ──────────────────────────────────────────────────────────────
+// Initialize all charts
+// ──────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  // Stock charts (SVG Candlestick)
+  initJsStockCharts();
+
+  // WoW Charts (Chart.js)
+  {% if weekly_performance.indices_wow %}
+  createWoWBarChart('indices-wow-chart', {{ weekly_performance.indices_wow | tojson }}, 'Indices WoW');
+  {% endif %}
+
+  {% if weekly_performance.sectors_wow %}
+  createWoWBarChart('sectors-wow-chart', {{ weekly_performance.sectors_wow | tojson }}, 'Sectors WoW');
+  {% endif %}
+
+  {% set all_ai_wow = (weekly_performance.us_ai_wow or []) + (weekly_performance.china_ai_wow or []) %}
+  {% if all_ai_wow %}
+  createWoWBarChart('ai-wow-chart', {{ all_ai_wow | tojson }}, 'AI Themes WoW');
+  {% endif %}
+
+  {% if weekly_performance.indices_relative %}
+  createRelativeLineChart('relative-chart', {{ weekly_performance.indices_relative | tojson }});
+  {% endif %}
+});
+</script>
+
+</body>
+</html>
