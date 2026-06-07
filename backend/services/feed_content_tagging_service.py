@@ -203,6 +203,17 @@ class FeedContentTaggingService:
                 text = text[:max_chars]
             return text, "youtube"
 
+        if channel_type == "zhishixingqiu":
+            min_len = int(os.getenv("AUTO_FEED_TAG_MIN_LENGTH_ZSXQ", "30"))
+            title = (row.get("title") or "").strip()
+            content = (row.get("content") or "").strip()
+            text = f"{title}\n\n{content}" if (title and content) else (title or content)
+            if len(text) < min_len:
+                return None
+            if len(text) > max_chars:
+                text = text[:max_chars]
+            return text, "zhishixingqiu"
+
         return None
 
     # ------------------------------------------------------------------
