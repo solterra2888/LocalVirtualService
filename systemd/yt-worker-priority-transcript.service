@@ -3,6 +3,7 @@ Description=YT Worker - priority transcript (youtube_priority, Upload Link å­—å¹
 After=network-online.target
 Wants=network-online.target
 PartOf=yt-worker.target
+PartOf=yt-worker-caption.target
 
 [Service]
 Type=simple

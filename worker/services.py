@@ -70,6 +70,7 @@ class YouTubeCaptionService:
     _PROXY_CONFIG_CACHE: Any = "__unset__"
     _PROXY_LOG_DONE: bool = False
     _PROXY_PROBE_DONE: bool = False
+    _CAPTION_YTDLP_PROXY_LOG_DONE: bool = False
 
     @staticmethod
     def extract_video_id(url: str) -> Optional[str]:
@@ -154,6 +155,60 @@ class YouTubeCaptionService:
             YouTubeCaptionService._PROXY_PROBE_DONE = True
 
         return cfg
+
+    @staticmethod
+    def _get_webshare_proxy_url() -> Optional[str]:
+        """返回 Webshare 旋转代理 URL（与 transcript-api 同源），失败返回 None。"""
+        cfg = YouTubeCaptionService._get_webshare_proxy_config()
+        if not cfg:
+            return None
+        try:
+            return cfg.url
+        except Exception as e:
+            log.warning("无法从 WebshareProxyConfig 读取 .url: %s", e)
+            return None
+
+    @staticmethod
+    def _get_caption_ytdlp_proxy() -> Optional[str]:
+        """
+        yt-dlp **字幕回退专用**代理（不作用于 ASR 音频下载 / probe_youtube_metadata）。
+
+        优先级:
+          1. CAPTION_YTDLP_PROXY          显式 URL（高级覆盖）
+          2. CAPTION_YTDLP_USE_WEBSHARE   复用 WEBSHARE_PROXY_* 构造的旋转住宅代理
+          3. YOUTUBE_PROXY                可选兜底（勿设 HTTPS_PROXY，避免误伤 OSS）
+
+        故意不读取 HTTPS_PROXY / HTTP_PROXY，防止全局代理泄漏到 OSS 上传等大流量路径。
+        """
+        explicit = os.getenv("CAPTION_YTDLP_PROXY", "").strip()
+        if explicit:
+            proxy = explicit
+            via = "CAPTION_YTDLP_PROXY"
+        elif os.getenv("CAPTION_YTDLP_USE_WEBSHARE", "false").strip().lower() \
+                in ("1", "true", "yes", "on"):
+            proxy = YouTubeCaptionService._get_webshare_proxy_url()
+            via = "webshare"
+            if not proxy:
+                log.warning(
+                    "CAPTION_YTDLP_USE_WEBSHARE=true 但未启用 Webshare "
+                    "(请检查 WEBSHARE_PROXY_USERNAME / WEBSHARE_PROXY_PASSWORD)"
+                )
+                return None
+        else:
+            yt_proxy = os.getenv("YOUTUBE_PROXY", "").strip()
+            if not yt_proxy:
+                return None
+            proxy = yt_proxy
+            via = "YOUTUBE_PROXY"
+
+        if not YouTubeCaptionService._CAPTION_YTDLP_PROXY_LOG_DONE:
+            masked = re.sub(r":[^:@/]+@", ":***@", proxy)
+            log.info(
+                "✓ yt-dlp 字幕回退代理已启用 (via=%s): %s",
+                via, masked,
+            )
+            YouTubeCaptionService._CAPTION_YTDLP_PROXY_LOG_DONE = True
+        return proxy
 
     @staticmethod
     def _probe_webshare_exit(cfg: Any) -> None:
@@ -399,8 +454,8 @@ class YouTubeCaptionService:
                     os.getenv("CAPTION_YTDLP_SLEEP_REQUESTS_SECONDS", "0.5")
                 ),
             }
-            # 复用与下载音频相同的代理/认证配置
-            proxy = os.getenv("YOUTUBE_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
+            # 字幕回退专用代理（Webshare / CAPTION_YTDLP_PROXY），不走 ASR 的 YOUTUBE_PROXY 全局链
+            proxy = YouTubeCaptionService._get_caption_ytdlp_proxy()
             if proxy:
                 opts["proxy"] = proxy
             cookies = os.getenv("YOUTUBE_COOKIES_FILE")

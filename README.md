@@ -1,6 +1,24 @@
 # Local Virtual Service — YouTube 转录独立 Worker
 
-将 YouTube 视频获取、字幕拉取、yt-dlp 音频下载和 Fun-ASR 语音识别打包为**独立可部署的 Celery Worker**，部署在家庭网络虚拟机上，解决远程服务器无法直接访问 YouTube 的问题。
+将 YouTube 视频获取、字幕拉取、yt-dlp 字幕回退和 Fun-ASR 语音识别打包为**独立可部署的 Celery Worker**，部署在**边缘节点**（当前为新加坡 VPS），通过公网连接香港主站的 Redis / PostgreSQL，解决主站无法直接访问 YouTube 的问题。
+
+### 部署拓扑（当前生产）
+
+> **双节点分工（新加坡字幕 + 香港 ASR）**：见 [DEPLOY_DUAL_NODE.md](./DEPLOY_DUAL_NODE.md)。配置模板：`.env.template.caption`（新加坡）/ `.env.template.asr`（香港）。
+
+| 节点 | 位置 | 职责 |
+|------|------|------|
+| **香港主服务器** (`43.99.37.76`) | 远程 | Web API、Celery Beat、Redis Broker、PostgreSQL、`ai-worker`（`file_processing` 队列） |
+| **新加坡 VPS** (`/opt/local_virtual_service`) | 字幕节点 (`caption`) | `youtube_fetching` + `youtube_priority`；Webshare 字幕；ASR 只派发不执行 |
+| **香港家用机**（可选） | ASR 节点 (`asr`) | `youtube_transcription*`；yt-dlp 音频下载 + OSS + Fun-ASR |
+
+```
+香港主站 ──派发任务──► Redis Broker ◄──消费任务── 新加坡 VPS Worker
+     ▲                                              │
+     └──── finalize_*_task 回调 ────── 直写 PostgreSQL
+```
+
+> 历史上曾部署在香港**家用 VM**（住宅宽带 IP，yt-dlp / ASR 直连可用）。迁到云 VPS 后机房 IP 易被 YouTube bot 检测，需通过下方「字幕链路开关」和 `YOUTUBE_COOKIES_FILE` 分阶段启用能力（详见 [字幕链路开关](#字幕链路开关-yt-dlp--asr)）。
 
 ### 覆盖的业务入口
 
@@ -50,7 +68,7 @@
 ┌──────────────────────────┼─────────────────────────────┼─────────┐
 │                          ▼                              │          │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │         YouTube Transcription Worker (家庭虚拟机, 4 个进程)   │ │
+│  │      YouTube Transcription Worker (边缘节点 VPS, 4 个进程)    │ │
 │  │                                                            │ │
 │  │  ⓪ youtube_priority 队列  ★ Upload Link 用户上传专用 ★      │ │
 │  │      (Priority Transcript Worker, concurrency=1)           │ │
@@ -96,7 +114,7 @@
 │  │      │    └ signal_feed_transcript_ready ──────────────────┼─┼── finalize_youtube_feed_task ★
 │  │      └ Upload Link 路径 → signal_upload_file_ready ─────────┘│ │
 │  └────────────────────────────────────────────────────────────┘ │
-│                    家庭虚拟机 (可访问 YouTube)                     │
+│                 边缘 Worker VPS (新加坡, 可访问 YouTube)          │
 └─────────────────────────────────────────────────────────────────┘
 
 ASR 轮询超时对比：
@@ -314,7 +332,7 @@ flowchart TD
 2. `backend/celery_config.py` 的 `CELERY_TASK_ROUTES`（已配置 `fetch_youtube_file_transcript_task → youtube_priority`、`transcribe_youtube_file_asr_task → youtube_transcription_priority`）
 3. `@app.task(queue=...)` 装饰器默认（兜底）
 
-所以**不需要在调用方手动 `queue=...`**，路由表已经处理。HK 端 `tasks.py` 内部 fetch 任务派发 ASR 时显式写了 `queue="youtube_transcription_priority"`，避免依赖远端的路由表。
+所以**不需要在调用方手动 `queue=...`**，路由表已经处理。边缘 Worker 端 `tasks.py` 内部 fetch 任务派发 ASR 时显式写了 `queue="youtube_transcription_priority"`，避免依赖远端的路由表。
 
 **长视频例外**：`transcribe_youtube_file_asr_task` 探测到时长 > 30min 时，会通过 `apply_async(queue=_LONG_QUEUE)` 转发到 `youtube_transcription_long`，由 Long Worker 处理。**长视频不会有独立的 priority 长队列**，因为 30min+ 的视频本来就要跑 30–60 min ASR，用户对"长视频要等"有合理预期。
 
@@ -393,7 +411,7 @@ Upload YouTube Link 终态（成功或永久失败）由本地 Worker 通过 `Co
 
 ### 部署事实
 
-- 远程主服务器、家用虚拟机、共享 PostgreSQL 实例 **全部部署在 HK (UTC+8)**。
+- 远程主服务器、共享 PostgreSQL 实例部署在 **HK (UTC+8)**；边缘 Worker 当前在**新加坡 VPS (UTC)**。
 - PostgreSQL 实例的服务器默认 `TimeZone = 'Asia/Shanghai'`。
 - `subscription_content.fetched_at` / `published_at` 等列均为 `timestamp WITHOUT time zone`（裸时间戳，不含时区元数据）。
 
@@ -428,9 +446,9 @@ Upload YouTube Link 终态（成功或永久失败）由本地 Worker 通过 `Co
 - 必查 dateutil/feedparser/第三方解析返回值的 tzinfo 状态
 - 详细背景见主仓库 `docs/instructions/TIMEZONE_OPTIMIZATION.md` §7.5.5
 
-## HK VM 运维手册
+## 边缘 Worker 运维手册
 
-> 以下所有命令均在**香港家用 VM**（`localhost001`）上以 root 身份执行，除非特别注明。
+> 以下所有命令均在**边缘 Worker 节点**（当前：新加坡 VPS，`/opt/local_virtual_service`）上以 root 身份执行，除非特别注明。
 
 ---
 
@@ -443,6 +461,7 @@ git clone https://github.com/solterra2888/LocalVirtualService.git /opt/local_vir
 # 2. 编辑配置（填入 Redis、DB、OSS、DashScope、Webshare、Lark 等密钥）
 cd /opt/local_virtual_service
 cp .env.template .env
+mkdir -p secrets && chmod 700 secrets   # YouTube cookies 放此目录（可选）
 nano .env
 
 # 3. 一键部署（安装 conda 环境、复制文件、注册并启动 4 个独立 systemd unit + health timer）
@@ -474,7 +493,7 @@ git -c http.version=HTTP/1.1 subtree push --prefix=deployment/local_virtual_serv
 > git branch -D lvs-temp
 > ```
 
-**在香港 VM 执行** — 拉取代码并重启：
+**在边缘 Worker 执行** — 拉取代码并重启：
 
 ```bash
 cd /opt/local_virtual_service
@@ -486,8 +505,8 @@ systemctl status 'yt-worker-*.service'
 tail -20 /opt/local_virtual_service/logs/worker.log
 ```
 
-> 📌 **只改了主站 `backend/` 的代码不需要动 HK VM**，只在主站重启 Celery 即可。
-> 只有修改了 `worker/` 目录下的文件（`tasks.py` / `services.py` / `db.py` 等），或修改了 `run_worker.sh` / `systemd/` / `scripts/` 下的部署文件时，才需要在 HK VM 执行上面两步。
+> 📌 **只改了主站 `backend/` 的代码不需要动边缘 Worker**，只在主站重启 Celery 即可。
+> 只有修改了 `worker/` 目录下的文件（`tasks.py` / `services.py` / `db.py` 等），或修改了 `run_worker.sh` / `systemd/` / `scripts/` 下的部署文件时，才需要在边缘 Worker 执行上面两步。
 
 ---
 
@@ -616,7 +635,7 @@ sudo systemctl restart yt-worker.target
 | `HEALTH_PRIORITY_BACKLOG_THRESHOLD` | `5` | 优先 ASR 队列积压告警阈值（条数） |
 | `HEALTH_RESTART_ON_BACKLOG` | `false` | 积压持续时是否自动重启对应 worker |
 | `HEALTH_ALERT_REPEAT_MINUTES` | `60` | 同一告警最短重发间隔（分钟） |
-| `HEALTH_ALERT_PREFIX` | `[HK-YT-Worker]` | 飞书消息前缀 |
+| `HEALTH_ALERT_PREFIX` | `[SG-YT-Worker]` | 飞书消息前缀（按实际部署节点修改，如 `[HK-YT-Worker]`） |
 
 **常用运维命令**：
 
@@ -654,7 +673,47 @@ bash setup.sh
 > - **Feed 链路**：写 `subscription_content.transcript / transcript_data`，成功后调 `_signal_feed_transcript_ready` → 远程 `finalize_youtube_feed_task` → `tag_feed_content_task` → AI 打标写入 `subscription_content_tags`（失败静默）。
 > - **Upload 链路**：写 `file_processing_details.content / asr_with_diarization`，成功/永久失败后均回调远程 `finalize_youtube_file_task` → 更新 `processing_stats` + 触发 auto-tag / auto-name / auto-classify。
 
-字幕获取有两条独立路径，失败后再降级到 ASR，最大化成功率：
+### 字幕链路开关（yt-dlp / ASR）
+
+三条 Stage 可由 `.env` **独立开关**，不必全开。启动时 worker 会打印当前模式（如 `◐ yt-dlp 字幕-only 模式`）。
+
+| 变量 | 默认值 | 作用 |
+|------|--------|------|
+| `YTDLP_ENABLED` | `true` | **总开关**。`false` = 完全禁用 yt-dlp（字幕回退 + ASR 音频下载 + ASR 派发） |
+| `CAPTION_YTDLP_FALLBACK_ENABLED` | `true` | Stage 2：transcript-api 失败后，yt-dlp **仅拉字幕**（`skip_download`，不下视频/音频）。`YTDLP_ENABLED=false` 时自动禁用 |
+| `CAPTION_ASR_FALLBACK_ENABLED` | `true` | Stage 3：字幕两路均失败后是否派发 Fun-ASR。`YTDLP_ENABLED=false` 时自动禁用 |
+
+**推荐配置（按部署环境）：**
+
+| 模式 | 配置 | 适用场景 |
+|------|------|----------|
+| **仅 transcript-api** | `YTDLP_ENABLED=false` | 先稳住 Webshare + API；最快、无 yt-dlp bot 问题 |
+| **字幕-only** ★ 当前生产 | `YTDLP_ENABLED=true`<br>`CAPTION_YTDLP_FALLBACK_ENABLED=true`<br>`CAPTION_ASR_FALLBACK_ENABLED=false` | 云 VPS 未配 cookies：API + yt-dlp 字幕回退，不碰 ASR |
+| **全功能** | 以上三项均为 `true` + `YOUTUBE_COOKIES_FILE` | 家用宽带或已配 cookies 的 VPS，需要 ASR 兜底 |
+
+修改后重启：`sudo systemctl restart yt-worker.target`
+
+### YouTube Cookies（yt-dlp 用，需手动导出）
+
+`youtube_cookies.txt` **不会自动生成**。仅 Stage 2（yt-dlp 字幕）和 Stage 3（ASR 音频下载）会读取；transcript-api **不使用** cookies。
+
+1. 在本地 Chrome/Edge 安装扩展 [**Get cookies.txt LOCALLY**](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
+2. 登录 [youtube.com](https://www.youtube.com)，打开任意视频页 → 扩展 → **Export** → 保存为 `youtube_cookies.txt`
+3. 上传到边缘 Worker：
+   ```bash
+   scp youtube_cookies.txt root@<VPS-IP>:/opt/local_virtual_service/secrets/
+   ```
+4. 在 `.env` 启用（目录 `secrets/` 已在 `.gitignore`，勿提交 Git）：
+   ```bash
+   YOUTUBE_COOKIES_FILE=/opt/local_virtual_service/secrets/youtube_cookies.txt
+   ```
+5. `sudo systemctl restart yt-worker.target`
+
+> Cookies 含登录态，通常 **1–4 周过期**；过期后 yt-dlp 可能再次出现 `Sign in to confirm you're not a bot`，需重新导出。建议用非主账号。
+
+### 三阶段降级（全功能模式）
+
+字幕获取有两条独立路径，失败后可再降级到 ASR（需 `CAPTION_ASR_FALLBACK_ENABLED=true`）：
 
 ```
 新视频入库
@@ -682,12 +741,15 @@ bash setup.sh
 
 两条字幕路径的关键区别：
 
-| 路径 | Endpoint | 被风控的独立性 | 延迟 |
-|------|----------|----------------|------|
-| transcript-api | `/api/timedtext` | 批量请求秒封，IP 信誉墙严格 | ~1s |
-| yt-dlp | `/watch` + `/player_api` | 容忍度高，伪装成正常播放器 | ~3-5s |
+| 路径 | Endpoint | 代理 / IP | 流量 | 延迟 |
+|------|----------|-----------|------|------|
+| transcript-api | `/api/timedtext` | **Webshare** 住宅代理 | ~5–50 KB | ~1s |
+| yt-dlp 字幕 | `/watch` + `/player_api` | VPS 直连 + 可选 `YOUTUBE_COOKIES_FILE` | ~几百 KB | ~3–5s |
+| yt-dlp 音频 (ASR) | 同上 | VPS 直连 + **强烈建议 cookies** | MB ~ 数百 MB | 分钟级 |
 
-当出口 IP 在 transcript-api 上被封时，yt-dlp 路径通常仍可用，能显著降低 ASR 调用率。可通过 `CAPTION_YTDLP_FALLBACK_ENABLED=false` 禁用 fallback。
+当 transcript-api 失败时，yt-dlp 字幕回退走**不同 endpoint**，可独立限流。云 VPS 机房 IP 对 yt-dlp 更严，**未配 cookies 时 Stage 2 也常失败**；家用宽带历史上 Stage 2 成功率更高。
+
+可通过 `CAPTION_YTDLP_FALLBACK_ENABLED=false` 或 `YTDLP_ENABLED=false` 禁用 yt-dlp。
 
 ### 启用 Webshare 住宅代理给 transcript-api（IP 被封时的根治方案）
 
@@ -709,17 +771,16 @@ bash setup.sh
 
 1. 在 [Webshare Dashboard](https://dashboard.webshare.io/) 注册并购买 **Rotating Residential** 套餐（最小 1 GB / $3.50/月即可，**不要**买 "Proxy Server" 或 "Static Residential"）。
 2. 在 [Proxy Settings](https://dashboard.webshare.io/proxy/settings) 复制 Proxy Username / Password。
-3. 编辑家庭 VM 上的 `~/local_virtual_service/.env`，添加：
+3. 编辑边缘 Worker 上的 `/opt/local_virtual_service/.env`，添加：
    ```bash
    WEBSHARE_PROXY_USERNAME=<your-username>
    WEBSHARE_PROXY_PASSWORD=<your-password>
-   # 出口国家白名单（逗号分隔），HK/CN 服务器推荐 jp,tw,sg；可省略 = 全球池
-   WEBSHARE_FILTER_IP_LOCATIONS=jp,tw,us
+   # 出口国家白名单（逗号分隔）。云 VPS / 亚洲节点推荐 jp,tw,sg,us；留空 = 全球池（脏 IP 多，不推荐）
+   WEBSHARE_FILTER_IP_LOCATIONS=jp,tw,sg,us
    ```
 4. 重启 worker：
    ```bash
-   pkill -f "celery -A worker.celery_app"
-   sleep 2 && nohup bash /opt/local_virtual_service/start.sh > /opt/local_virtual_service/logs/worker.log 2>&1 &
+   sudo systemctl restart yt-worker.target
    ```
 5. 确认日志里出现一行启动提示：
    ```
@@ -730,18 +791,27 @@ bash setup.sh
 
 #### 何时不需要
 
-- 出口 IP 干净、字幕成功率 > 80%：完全不需要，开了反而增加每条视频几百毫秒延迟；
-- 已经迁移到日本/新加坡的小众机房 VPS：先观察一周，没被 ban 就别开。
+- 仅跑 yt-dlp 字幕回退、且 transcript-api 已 100% 成功（极少见）；
+- 测试环境临时直连且批量极小。
 
 #### 何时强烈建议开
 
-- 日志里出现 `✗ 字幕获取失败: 原因=IpBlocked`、`RequestBlocked`、`Too Many Requests` 占比 > 30%；
-- ASR 队列莫名暴涨、OSS 上行被打满（你正在经历的情况）；
-- 同一频道连续 5+ 条视频都是 `[→ ASR]`，但视频本身明明有字幕（手动在 YouTube 网页上能看到）。
+- **云 VPS 跑 transcript-api 批量抓取**（当前新加坡生产环境）：机房 IP 极易被 `/api/timedtext` 封禁；
+- 日志里 `API=请求过于频繁 (429)[via=webshare]` 或 `IpBlocked` 占比高；
+- 启动日志出现 `locations=global` 警告 — 务必设置 `WEBSHARE_FILTER_IP_LOCATIONS`。
+
+> Webshare **只保护 Stage 1**，不保护 yt-dlp。云 VPS 上 yt-dlp 需另配 `YOUTUBE_COOKIES_FILE`（见上文）。
 
 ## 日志输出示例
 
 前台运行时日志直接输出到终端，后台运行时写入 `logs/worker.log`。
+
+**Worker 启动 — 字幕-only 模式**（`YTDLP_ENABLED=true`，`CAPTION_ASR_FALLBACK_ENABLED=false`）：
+```
+✓ youtube-transcript-api 已启用 Webshare 住宅代理 (locations=['jp', 'tw', 'sg', 'us'])
+✓ Webshare 自检通过: exit_ip=151.192.179.234 延迟=1499ms
+◐ yt-dlp 字幕-only 模式：transcript-api → yt-dlp 仅字幕回退 (skip_download)，ASR 已禁用
+```
 
 **字幕成功后触发远程打标回调**（Phase 3 新增）：
 ```
@@ -805,7 +875,7 @@ Feeds 打标完成: content_id=1009214 channel=youtube sector=信息技术 ticke
 
 ## 可调环境变量
 
-所有参数都在 `.env` 里，分为 8 个分区。修改后重启 worker 生效（`pkill -f celery && nohup bash start.sh ...`）。
+所有参数都在 `.env` 里，分为 9 个分区。修改后重启 worker 生效（`sudo systemctl restart yt-worker.target`）。
 
 ### 三、Worker 资源
 
@@ -864,7 +934,9 @@ Feeds 打标完成: content_id=1009214 channel=youtube sector=信息技术 ticke
 | `YOUTUBE_FEED_TIMEOUT_SECONDS` | `5` | RSS / Data API 单次请求超时 |
 | `YOUTUBE_FEED_MAX_RETRIES` | `2` | RSS **5xx 瞬时错误**的最大尝试次数（含首次），即重试 1 次。**404 不重试**——YouTube RSS 对部分频道/IP 固定返回 404，重试无效且浪费时间，直接 fallback 到 Data API v3 |
 | `YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS` | `60` | youtube-transcript-api 硬超时。启用 Webshare 后每次请求最多触发 10 次 IP 旋转重试，默认值已预留该开销；纯直连场景可降回 `30` |
-| `CAPTION_YTDLP_FALLBACK_ENABLED` | `true` | transcript-api 失败时是否用 yt-dlp 再试一次 |
+| `YTDLP_ENABLED` | `true` | yt-dlp 总开关。`false` = 禁用字幕回退与 ASR 音频下载 |
+| `CAPTION_YTDLP_FALLBACK_ENABLED` | `true` | transcript-api 失败时是否用 yt-dlp **仅拉字幕**（`skip_download`）。依赖 `YTDLP_ENABLED=true` |
+| `CAPTION_ASR_FALLBACK_ENABLED` | `true` | 字幕失败后是否派发 Fun-ASR。依赖 `YTDLP_ENABLED=true`；云 VPS 未配 cookies 前建议 `false` |
 | `CAPTION_YTDLP_TIMEOUT_SECONDS` | `60` | yt-dlp 拉字幕总超时（元信息 + 字幕下载）|
 | `CAPTION_YTDLP_SLEEP_SUBTITLES_SECONDS` | `0.5` | 每次字幕下载前睡眠秒数（yt-dlp `--sleep-subtitles`）|
 | `CAPTION_YTDLP_SLEEP_REQUESTS_SECONDS` | `0.5` | 元信息提取期间每次请求间睡眠（yt-dlp `--sleep-requests`）|
@@ -879,7 +951,7 @@ Feeds 打标完成: content_id=1009214 channel=youtube sector=信息技术 ticke
 | `YOUTUBE_DATA_API_KEY` | — | YouTube Data API v3 主 Key（RSS 成功率极低，此 Key 已成为主力；强烈建议配置）|
 | `YOUTUBE_DATA_API_KEY_BACKUP` | — | YouTube Data API v3 备用 Key，主 Key HTTP 403（配额耗尽）时自动切换；日志中可见 `Data API v3 Key #1 配额已用尽，切换备用 Key` |
 | `YOUTUBE_PROXY` / `HTTPS_PROXY` | — | yt-dlp / RSS / 探测时长 统一走此代理 (**注意**：此变量**不会**作用于 youtube-transcript-api，那条链路独立用 `WEBSHARE_*` 配置) |
-| `YOUTUBE_COOKIES_FILE` | — | 用于绕过 YouTube 的风控 |
+| `YOUTUBE_COOKIES_FILE` | — | yt-dlp 字幕回退 / ASR 音频下载用；**不作用于** transcript-api。需浏览器手动导出，见 [YouTube Cookies](#youtube-cookiesyt-dlp-用需手动导出) |
 | `YOUTUBE_PO_TOKEN` + `YOUTUBE_VISITOR_DATA` | — | yt-dlp PO token 机制 |
 | `WEBSHARE_PROXY_USERNAME` | — | Webshare Rotating Residential 用户名，**仅作用于 youtube-transcript-api** |
 | `WEBSHARE_PROXY_PASSWORD` | — | Webshare Rotating Residential 密码，与上一条配对生效；缺一个 = 走直连 |
@@ -893,8 +965,11 @@ Feeds 打标完成: content_id=1009214 channel=youtube sector=信息技术 ticke
 | Upload Link 用户并发多、Feed 批量任务被饿死 | `WORKER_MAIN_CONCURRENCY` 调到 3-4；必要时为 Upload 单独建专属 worker 只消费 `youtube_fetching` |
 | 长视频积压严重 | `WORKER_LONG_CONCURRENCY` 调到 2 |
 | 网络经常抖动 | `YTDLP_SOCKET_TIMEOUT_SECONDS` 60+，`YOUTUBE_FEED_TIMEOUT_SECONDS` 10+ |
-| YouTube 风控严重 | `YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS` 60，配合 `YOUTUBE_COOKIES_FILE` |
-| transcript-api 出口 IP 被批量封 | 配置 `WEBSHARE_PROXY_USERNAME` / `WEBSHARE_PROXY_PASSWORD`（详见上文 [Webshare 一节](#启用-webshare-住宅代理给-transcript-api-ip-被封时的根治方案)）|
+| 云 VPS 先稳住字幕、暂不跑 ASR | `YTDLP_ENABLED=true`，`CAPTION_YTDLP_FALLBACK_ENABLED=true`，`CAPTION_ASR_FALLBACK_ENABLED=false`（**当前生产**） |
+| 完全禁用 yt-dlp，仅 transcript-api | `YTDLP_ENABLED=false` |
+| yt-dlp 报 `Sign in to confirm you're not a bot` | 配置 `YOUTUBE_COOKIES_FILE`（见 [Cookies 一节](#youtube-cookiesyt-dlp-用需手动导出)）；恢复 ASR 时还需 `CAPTION_ASR_FALLBACK_ENABLED=true` |
+| YouTube 风控严重（yt-dlp 路径） | 配合 `YOUTUBE_COOKIES_FILE` / `YOUTUBE_PO_TOKEN` |
+| transcript-api 出口 IP 被批量封 | 配置 `WEBSHARE_*` + `WEBSHARE_FILTER_IP_LOCATIONS=jp,tw,sg,us`（详见上文 Webshare 一节）|
 | 家用宽带上行 < 50 Mbps，OSS 频繁 ReadTimeout | 上传已由跨进程锁串行化，仍超时说明有超大文件长期占锁；调大 `OSS_UPLOAD_LOCK_TIMEOUT_SECONDS=120` 后重启所有 worker |
 | RSS 持续 404 / Data API v3 配额告急 | 配置 `YOUTUBE_DATA_API_KEY_BACKUP`；或降低批量抓取频率（每个 Key 约可查 100 频道/天）|
 | 长视频 Fun-ASR 排队严重（>1h）| `ASR_POLL_TIMEOUT_MINUTES_LONG` 调到 90-120 |
@@ -923,7 +998,7 @@ Feeds 打标完成: content_id=1009214 channel=youtube sector=信息技术 ticke
 ### ⚠ 远端 Worker 的 task time_limit 实际受主项目 stub 控制
 
 Celery 会把调用侧 `@task(time_limit=..., soft_time_limit=...)` **作为消息头**随任务发到远端 Worker，
-**压过**本地 `celery_app.py` 里配置的 `TASK_TIME_LIMIT_SECONDS` 默认值。因此跑在 HK 家用 Worker 上的
+**压过**本地 `celery_app.py` 里配置的 `TASK_TIME_LIMIT_SECONDS` 默认值。因此跑在边缘 Worker 上的
 下面两个任务，实际生效的是**主项目** `backend/tasks/subscription_tasks.py` 里装饰器上的数字：
 
 | 任务名 | 主项目 stub 位置 | 当前 time_limit / soft | 为什么这么大 |
@@ -931,8 +1006,8 @@ Celery 会把调用侧 `@task(time_limit=..., soft_time_limit=...)` **作为消�
 | `fetch_all_youtube_subscriptions` | `fetch_all_youtube_subscriptions_task` | 4200 / 3600（70 / 60 min）| concurrency=1 + Webshare 串行处理 20 频道 × ~15 视频，实测整批 30–60 min |
 | `fetch_youtube_transcripts_batch` | `fetch_youtube_transcripts_batch_task` | 2400 / 2100（40 / 35 min）| 补抓 ~150 视频，每项 Webshare 路径 5–30s |
 
-下次若在 HK 日志里看到 `Soft time limit (XXXs) exceeded for fetch_all_youtube_subscriptions`
-然后 worker 被 `SIGKILL`，第一时间检查**主项目**这两个装饰器而不是 HK 的 `.env`。
+下次若在边缘 Worker 日志里看到 `Soft time limit (XXXs) exceeded for fetch_all_youtube_subscriptions`
+然后 worker 被 `SIGKILL`，第一时间检查**主项目**这两个装饰器而不是 Worker 的 `.env`。
 
 ### 灰度开关（服务器端环境变量）
 
@@ -940,7 +1015,7 @@ Celery 会把调用侧 `@task(time_limit=..., soft_time_limit=...)` **作为消�
 |------|------|------|
 | `YOUTUBE_UPLOAD_USE_LOCAL` | `true` | `/api/files/upload-youtube` 是否走新本地路径。`false` 走远程遗留 `upload_and_process_youtube_task`（紧急回滚用）|
 | `YOUTUBE_SUBSCRIPTION_USE_LOCAL` | `true` | 新订阅首抓是否走本地队列。`false` 走远程遗留派发器（自动再派到本地）|
-| `AUTO_FEED_TAG_ENABLED` | `true` | Feed 字幕落库后是否触发 AI 打标（twitter/youtube）。`false` 时 `trigger_auto_feed_tagging` 直接 return，家用 VM 发来的 `finalize_youtube_feed_task` 仍会被消费但不派 `tag_feed_content`。**不影响字幕入库**。|
+| `AUTO_FEED_TAG_ENABLED` | `true` | Feed 字幕落库后是否触发 AI 打标（twitter/youtube）。`false` 时 `trigger_auto_feed_tagging` 直接 return，边缘 Worker 发来的 `finalize_youtube_feed_task` 仍会被消费但不派 `tag_feed_content`。**不影响字幕入库**。|
 | `AUTO_FEED_TAG_CHANNELS` | `twitter,youtube,news` | 白名单，只对指定渠道允许打标 task 运行。news 打标由 `NEWS_AUTO_TAG_ENABLED` 独立控制入口，这里保留 news 使 task 不被短路。|
 | `AUTO_FEED_TAG_MIN_LENGTH_TWITTER` | `50` | Twitter 组装后文本最短字符数；低于此值 skip（过短纯表情/链接等）|
 | `AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE` | `200` | YouTube transcript 最短字符数；低于此值 skip（字幕残缺）|
@@ -962,7 +1037,7 @@ Celery 会把调用侧 `@task(time_limit=..., soft_time_limit=...)` **作为消�
 | 仓库 | 用途 |
 |------|------|
 | [guanhetech](https://github.com/solterra2888/guanhetech) | 主仓库，包含完整项目 |
-| [LocalVirtualService](https://github.com/solterra2888/LocalVirtualService) | 独立仓库，仅含本目录内容，家用 VM 从此仓库 `git pull` |
+| [LocalVirtualService](https://github.com/solterra2888/LocalVirtualService) | 独立仓库，仅含本目录内容，边缘 Worker 从此仓库 `git pull` |
 
 **日常更新流程**详见上方「[日常代码更新](#日常代码更新)」章节。
 

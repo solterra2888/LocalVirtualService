@@ -1,0 +1,10 @@
+[Unit]
+Description=YouTube Transcription Workers (ASR node: HK home)
+# ASR 节点：Feed 短视频 ASR + 长视频 ASR + 用户上传 ASR 插队；不跑字幕抓取
+Wants=yt-worker-asr.service
+Wants=yt-worker-long.service
+Wants=yt-worker-priority-asr.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target
