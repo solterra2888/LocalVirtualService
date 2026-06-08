@@ -15,6 +15,11 @@ from typing import Dict, Optional
 WORKER_LOGGER_NAME = "celery"
 TASK_LOGGER_NAME = "celery.task"
 
+# 高频任务：跳过常规开始/成功 INFO，失败与重试仍记录
+QUIET_TASK_NAMES = frozenset({
+    "tag_feed_content",
+})
+
 _celery_logging_initialized = False
 _file_handlers: Dict[str, logging.Handler] = {}
 
@@ -104,12 +109,19 @@ class CeleryLogger:
             f"任务接收 - ID: {task_id}, 名称: {task_name}, 参数: {args}, 关键字参数: {kwargs}"
         )
 
+    def _is_quiet_task(self, task_name: str) -> bool:
+        return task_name in QUIET_TASK_NAMES
+
     def log_task_started(self, task_id: str, task_name: str):
+        if self._is_quiet_task(task_name):
+            return
         self.task_logger.info(f"任务开始 - ID: {task_id}, 名称: {task_name}")
 
     def log_task_succeeded(
         self, task_id: str, task_name: str, result=None, runtime: float = None
     ):
+        if self._is_quiet_task(task_name):
+            return
         runtime_info = f", 运行时间: {runtime:.2f}秒" if runtime else ""
 
         if task_name in ["analyze_unanalyzed_news", "analyze_news_batch"] and isinstance(
