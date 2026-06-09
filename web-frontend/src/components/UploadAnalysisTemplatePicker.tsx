@@ -56,11 +56,21 @@ const PROVIDER_MODELS: Record<string, string[]> = {
     'qwen3-max',
     'qwen3.6-flash', 'qwen3.6-plus', 'qwen3.6-max-preview',
   ],
-  doubao: ['doubao-seed-1-6-250615'],
-  glm: ['glm-4.6', 'glm-4', 'glm-4-flash'],
-  claude: ['anthropic/claude-sonnet-4.6', 'anthropic/claude-opus-4.7'],
+  glm: ['glm-5.1', 'glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.7-flashx', 'glm-4.5-air', 'glm-4.6', 'glm-4', 'glm-4-flash', 'glm-4-flashx'],
   deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash'],
   gemini: ['google/gemini-3.1-pro-preview', 'google/gemini-3.5-flash', 'google/gemini-3.1-flash-lite-preview'],
+  claude: ['anthropic/claude-sonnet-4.6', 'anthropic/claude-opus-4.7'],
+  doubao: ['doubao-seed-1-6-250615'],
+};
+
+// Provider 显示名称映射
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  qwen: 'Qwen',
+  glm: 'GLM',
+  deepseek: 'DeepSeek',
+  gemini: 'Google Gemini',
+  claude: 'Claude',
+  doubao: 'Doubao',
 };
 
 // ── 公开类型 ─────────────────────────────────────────────────────────────
@@ -502,7 +512,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
               <Form.Item label="Provider" name="recommended_provider">
                 <Select
                   options={Object.keys(PROVIDER_MODELS).map((k) => ({
-                    label: k,
+                    label: PROVIDER_DISPLAY_NAMES[k] || k,
                     value: k,
                   }))}
                 />

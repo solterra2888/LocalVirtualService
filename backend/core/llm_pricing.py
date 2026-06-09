@@ -199,15 +199,58 @@ _DOUBAO_PRICING: Dict[str, List[PriceTier]] = {
 # ──────────────────────────────────────────────────────────────────────────────
 # 智谱 AI（GLM）模型定价
 # 参考：https://docs.bigmodel.cn / https://bigmodel.cn/pricing
+# 文档截取时间：2026-06
 # 计费单位：元/百万 tokens
-# 注意：GLM 系列多为统一定价（不区分输入/输出），此时 input_price == output_price
+#
+# 重要说明：
+# 1. GLM-5.1/5-Turbo/5 采用输入 token 阶梯计费（32K 分界）
+# 2. GLM-4.7/4.5-Air 采用"输入+输出双重阶梯"，输出价格按保守值估算
+#    （使用输出 >0.2M 的价格，避免低估成本）
+# 3. GLM-4.7-FlashX 为固定价格（200K 上下文）
 # ──────────────────────────────────────────────────────────────────────────────
 _GLM_PRICING: Dict[str, List[PriceTier]] = {
-    # glm-4.6（旗舰模型，价格参考官方定价页，以 bigmodel.cn/pricing 为准）
-    # 当前估算：输入 ¥4/M、输出 ¥12/M，请在官网确认后更新
+    # ── GLM-5 系列（2026-06 新增）───────────────────────────────────────────────
+    # GLM-5.1：最新旗舰，两档阶梯
+    "glm-5.1": [
+        PriceTier(threshold=32_000,  input_price_per_m=6.0,   output_price_per_m=24.0),
+        PriceTier(threshold=None,    input_price_per_m=8.0,   output_price_per_m=28.0),
+    ],
+    # GLM-5-Turbo：高效模型，两档阶梯
+    "glm-5-turbo": [
+        PriceTier(threshold=32_000,  input_price_per_m=5.0,   output_price_per_m=22.0),
+        PriceTier(threshold=None,    input_price_per_m=7.0,   output_price_per_m=26.0),
+    ],
+    # GLM-5：标准版，两档阶梯
+    "glm-5": [
+        PriceTier(threshold=32_000,  input_price_per_m=4.0,   output_price_per_m=18.0),
+        PriceTier(threshold=None,    input_price_per_m=6.0,   output_price_per_m=22.0),
+    ],
+
+    # ── GLM-4.7 系列（2026-06 新增）───────────────────────────────────────────────
+    # GLM-4.7：双重阶梯计费，输出价格保守估计（使用 >0.2M 的价格）
+    # 实际计费还区分输出长度 ≤0.2M 和 >0.2M，此处取保守值避免低估
+    "glm-4.7": [
+        PriceTier(threshold=32_000,  input_price_per_m=3.0,   output_price_per_m=14.0),  # 输出 >0.2M 的价格
+        PriceTier(threshold=200_000, input_price_per_m=4.0,   output_price_per_m=16.0),  # 长上下文
+        PriceTier(threshold=None,    input_price_per_m=4.0,   output_price_per_m=16.0),
+    ],
+    # GLM-4.7-FlashX：高速推理，固定价格
+    "glm-4.7-flashx": _flat(0.5, 3.0),
+    # GLM-4.7-Flash：（表格截断，暂用 FlashX 价格估算）
+    "glm-4.7-flash":  _flat(0.5, 3.0),
+
+    # ── GLM-4.5 系列 ─────────────────────────────────────────────────────────────
+    # GLM-4.5-Air：轻量级，双重阶梯，输出价格保守估计
+    "glm-4.5-air": [
+        PriceTier(threshold=32_000,  input_price_per_m=0.8,   output_price_per_m=6.0),   # 输出 >0.2M 的价格
+        PriceTier(threshold=128_000, input_price_per_m=1.2,   output_price_per_m=8.0),
+        PriceTier(threshold=None,    input_price_per_m=1.2,   output_price_per_m=8.0),
+    ],
+
+    # ── GLM-4.6 系列 ─────────────────────────────────────────────────────────────
     "glm-4.6":          _flat(4.0, 12.0),
 
-    # glm-4 系列（官方为统一单价）
+    # ── GLM-4 系列（官方为统一单价）───────────────────────────────────────────────
     "glm-4-plus":       _flat(5.0,  5.0),
     "glm-4":            _flat(5.0,  5.0),   # 映射到 GLM-4-Plus 层级
     "glm-4-air":        _flat(0.5,  0.5),
@@ -314,7 +357,7 @@ _GEMINI_PRICING: Dict[str, List[PriceTier]] = {
 PRICING_LAST_UPDATED = {
     "qwen":    "2026-05",
     "doubao":  "2026-05",
-    "glm":     "2026-05",
+    "glm":     "2026-06",  # 新增 GLM-5.1/GLM-4.7 系列，定价待官方确认
     "claude":  "2026-06",  # CherryIN 定价表
     "deepseek": "2026-06",
     "gemini":  "2026-06",  # CherryIN 定价表

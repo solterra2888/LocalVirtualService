@@ -16,7 +16,14 @@ logger = get_logger("config_resolver")
 _SLOW_MODEL_TIMEOUT_FLOOR = 300
 # tier-2: max_tokens ≥ 16000（超长生成，如详细会议纪要总结）
 _HUGE_OUTPUT_TIMEOUT_FLOOR = 480
-_SLOW_MODEL_HINTS = ("max-preview", "max-longcontext", "qwen3-max", "qwen-max", "seed-1-6", "deepseek-r")
+# 慢模型关键词（模型名包含这些词时触发 tier-1 抬升）
+_SLOW_MODEL_HINTS = (
+    "max-preview", "max-longcontext", "qwen3-max", "qwen-max",  # Qwen 慢模型
+    "seed-1-6",                                              # Doubao 慢模型
+    "deepseek-r", "deepseek-v4-pro",                         # DeepSeek 推理/旗舰模型
+    "gemini-pro", "gemini-3.1-pro",                          # Gemini Pro 版本
+    "glm-5.1", "glm-5", "glm-4.7",                           # GLM 旗舰模型（不含 turbo/flash）
+)
 _LARGE_OUTPUT_MAX_TOKENS = 8000
 _HUGE_OUTPUT_MAX_TOKENS = 16000
 

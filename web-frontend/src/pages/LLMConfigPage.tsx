@@ -606,29 +606,31 @@ const LLMConfigPage: React.FC = () => {
   };
 
   const renderProviderCard = (provider: LLMProvider) => (
-    <Card 
+    <Card
       key={provider.id}
-      style={{ marginBottom: 16 }}
+      size="small"
+      style={{ height: '100%' }}
+      styles={{
+        body: { padding: '12px 16px' },
+      }}
       title={
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <LLMProviderBrandIcon
               providerId={provider.id}
               fallbackIcon={provider.icon}
-              size={22}
+              size={18}
               style={{ marginRight: 8 }}
             />
-            <div>
-              <Title level={4} style={{ margin: 0 }}>{provider.displayName}</Title>
-              <Text type="secondary">{provider.description}</Text>
-            </div>
+            <Title level={5} style={{ margin: 0, fontSize: 14 }}>{provider.displayName}</Title>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <Badge 
-              status={getStatusColor(provider.status) as any} 
-              text={getStatusText(provider.status)} 
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Badge
+              status={getStatusColor(provider.status) as any}
+              text={<span style={{ fontSize: 12 }}>{getStatusText(provider.status)}</span>}
             />
             <Switch
+              size="small"
               checked={provider.enabled}
               onChange={(enabled) => updateProvider(provider.id, { enabled })}
             />
@@ -636,124 +638,111 @@ const LLMConfigPage: React.FC = () => {
         </div>
       }
     >
-      <Row gutter={16}>
+      {/* API Key & Base URL - 紧凑一行 */}
+      <Row gutter={12}>
         <Col span={12}>
-          <div style={{ marginBottom: 16 }}>
-            <Text strong>API Key</Text>
+          <div style={{ marginBottom: 10 }}>
+            <Text strong style={{ fontSize: 12 }}>API Key</Text>
             <Input.Password
-              placeholder="Please enter API key"
+              size="small"
+              placeholder="API key"
               value={provider.apiKey}
               onChange={(e) => updateProvider(provider.id, { apiKey: e.target.value })}
-              style={{ marginTop: 4, fontFamily: 'monospace' }}
+              style={{ marginTop: 2, fontFamily: 'monospace', fontSize: 12 }}
               iconRender={(visible) => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
             />
           </div>
         </Col>
         <Col span={12}>
-          <div style={{ marginBottom: 16 }}>
-            <Text strong>API Endpoint</Text>
+          <div style={{ marginBottom: 10 }}>
+            <Text strong style={{ fontSize: 12 }}>Endpoint</Text>
             <Input
-              placeholder="API Base URL"
+              size="small"
+              placeholder="Base URL"
               value={provider.baseUrl}
               onChange={(e) => updateProvider(provider.id, { baseUrl: e.target.value })}
-              style={{ marginTop: 4, fontFamily: 'monospace' }}
+              style={{ marginTop: 2, fontFamily: 'monospace', fontSize: 12 }}
             />
           </div>
         </Col>
       </Row>
 
-      <Row gutter={16}>
-        <Col span={8}>
-          <div style={{ marginBottom: 16 }}>
-            <Text strong>Default Model</Text>
+      {/* Model & Parameters - 紧凑布局 */}
+      <Row gutter={12}>
+        <Col span={6}>
+          <div style={{ marginBottom: 10 }}>
+            <Text strong style={{ fontSize: 12 }}>Model</Text>
             <Select
+              size="small"
               value={provider.defaultModel}
               onChange={(value) => updateProvider(provider.id, { defaultModel: value })}
-              style={{ width: '100%', marginTop: 4 }}
+              style={{ width: '100%', marginTop: 2 }}
+              popupMatchSelectWidth={false}
             >
               {provider.models.map((model) => (
                 <Option key={model} value={model}>
-                  {model}
+                  <span style={{ fontSize: 11 }}>{model}</span>
                 </Option>
               ))}
             </Select>
           </div>
         </Col>
-        <Col span={8}>
-          <div style={{ marginBottom: 16 }}>
-            <Text strong>Temperature ({provider.temperature})</Text>
-            <Slider
+        <Col span={6}>
+          <div style={{ marginBottom: 10 }}>
+            <Text strong style={{ fontSize: 12 }}>Temp</Text>
+            <InputNumber
+              size="small"
               min={0}
               max={2}
               step={0.1}
               value={provider.temperature}
-              onChange={(value) => updateProvider(provider.id, { temperature: value })}
-              style={{ marginTop: 4 }}
+              onChange={(value) => updateProvider(provider.id, { temperature: value ?? 0.7 })}
+              style={{ width: '100%', marginTop: 2, fontSize: 12 }}
             />
           </div>
         </Col>
-        <Col span={8}>
-          <div style={{ marginBottom: 16 }}>
-            <Text strong>Max Tokens</Text>
+        <Col span={6}>
+          <div style={{ marginBottom: 10 }}>
+            <Text strong style={{ fontSize: 12 }}>Tokens</Text>
             <InputNumber
+              size="small"
               min={100}
               max={65536}
               value={provider.maxTokens}
               onChange={(value) => updateProvider(provider.id, { maxTokens: value || 1000 })}
-              style={{ width: '100%', marginTop: 4 }}
+              style={{ width: '100%', marginTop: 2, fontSize: 12 }}
             />
           </div>
         </Col>
-      </Row>
-
-      <Row gutter={16}>
-        <Col span={8}>
-          <div style={{ marginBottom: 16 }}>
-            <Tooltip title="API request timeout in seconds. Recommended: 180s for long documents, 30s for short texts">
-              <Text strong>Timeout (seconds) ⓘ</Text>
+        <Col span={6}>
+          <div style={{ marginBottom: 10 }}>
+            <Tooltip title="API request timeout (seconds)">
+              <Text strong style={{ fontSize: 12 }}>Timeout</Text>
             </Tooltip>
             <InputNumber
+              size="small"
               min={10}
               max={600}
               value={provider.timeout}
               onChange={(value) => updateProvider(provider.id, { timeout: value || 30 })}
-              style={{ width: '100%', marginTop: 4 }}
-              placeholder="Default: 30s"
+              style={{ width: '100%', marginTop: 2, fontSize: 12 }}
             />
           </div>
-        </Col>
-        <Col span={8}>
-          <div style={{ marginBottom: 16 }}>
-            <Text strong>Top P ({provider.topP})</Text>
-            <Slider
-              min={0}
-              max={1}
-              step={0.1}
-              value={provider.topP}
-              onChange={(value) => updateProvider(provider.id, { topP: value })}
-              style={{ marginTop: 4 }}
-            />
-          </div>
-        </Col>
-        <Col span={8}>
-          {/* Placeholder for future settings */}
         </Col>
       </Row>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 16, borderTop: `1px solid ${colors.cardBorder}` }}>
-        <Space wrap>
-          {provider.models.map((model) => (
-            <Tag key={model} color="blue">{model}</Tag>
-          ))}
-        </Space>
+      {/* Test Button - 底部对齐 */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 4 }}>
         <Button
+          size="small"
           type="primary"
           ghost
           icon={testingProvider === provider.id ? <ReloadOutlined spin /> : <ExperimentOutlined />}
           onClick={() => testConnection(provider.id)}
           disabled={!provider.apiKey || testingProvider === provider.id}
+          style={{ fontSize: 12 }}
         >
-          {testingProvider === provider.id ? 'Testing...' : 'Test Connection'}
+          {testingProvider === provider.id ? 'Testing' : 'Test'}
         </Button>
       </div>
     </Card>
@@ -845,26 +834,15 @@ const LLMConfigPage: React.FC = () => {
               </Paragraph>
             </div>
           </div>
-          <Space>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => {
-                loadConfig();
-                loadUsageStats();
-              }}
-            >
-              Refresh
-            </Button>
-            <Button
-              type="primary"
-              icon={saveStatus === 'saving' ? <ReloadOutlined spin /> : <SaveOutlined />}
-              onClick={saveConfig}
-              loading={saveStatus === 'saving'}
-              size="large"
-            >
-              {saveStatus === 'saving' ? 'Saving...' : 'Save Configuration'}
-            </Button>
-          </Space>
+          <Button
+            type="primary"
+            icon={saveStatus === 'saving' ? <ReloadOutlined spin /> : <SaveOutlined />}
+            onClick={saveConfig}
+            loading={saveStatus === 'saving'}
+            size="large"
+          >
+            {saveStatus === 'saving' ? 'Saving...' : 'Save Configuration'}
+          </Button>
         </div>
       </div>
 
@@ -913,12 +891,16 @@ const LLMConfigPage: React.FC = () => {
               <RobotOutlined />
               Model Providers
             </span>
-          } 
+          }
           key="providers"
         >
-          <div>
-            {config.providers.map(renderProviderCard)}
-          </div>
+          <Row gutter={[16, 16]}>
+            {config.providers.map((provider) => (
+              <Col span={12} key={provider.id}>
+                {renderProviderCard(provider)}
+              </Col>
+            ))}
+          </Row>
         </TabPane>
 
         <TabPane 
