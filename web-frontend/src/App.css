@@ -1883,10 +1883,10 @@
 
 /* 与 Files / Watchlist 一致：固定栏宽，避免三栏 flex 时 My Feeds / 文章列表被压扁 */
 .feed-page-layout__sider-my-feeds.ant-layout-sider {
-  flex: 0 0 280px !important;
-  width: 280px !important;
-  max-width: 280px !important;
-  min-width: 280px !important;
+  flex: 0 0 300px !important;
+  width: 300 !important;
+  max-width: 300px !important;
+  min-width: 300px !important;
   display: flex;
   flex-direction: column;
   min-height: 0;

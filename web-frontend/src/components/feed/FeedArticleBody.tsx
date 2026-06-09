@@ -83,8 +83,12 @@ export interface FeedArticleBodyProps {
   onViewModeChange?: (mode: FeedArticleViewMode) => void;
 }
 
-/** Channels that participate in auto-tagging (see FEEDS_AUTO_TAGGING_PLAN.md §1). */
-const AUTO_TAG_CHANNELS = new Set(['twitter', 'youtube']);
+/** Channels that participate in auto-tagging (see FEEDS_AUTO_TAGGING_PLAN.md §1).
+ * 对齐后端 AUTO_FEED_TAG_CHANNELS 环境变量 (deployment/config.defaults.env).
+ * - News 打标路由: CCTV → LLM (NEWS_LLM_TAG_SOURCES); EODHD → 轻量映射 (map_news_tags).
+ * - 知识星球: 入库后 trigger_auto_feed_tagging，使用 content_tag_feeds_v1 模板。
+ */
+const AUTO_TAG_CHANNELS = new Set(['twitter', 'youtube', 'news', 'zhishixingqiu']);
 
 interface CeleryTaskStatusResponse {
   task_id: string;
@@ -580,14 +584,11 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   const effectiveSummary = displayTags?.summary || null;
 
   // 个性化摘要按钮可见性 (FEED_SUMMARY_AUTO_FANOUT_ENABLED=false, 纯手动模式):
-  // 对所有 twitter/youtube 渠道始终显示 "Generate AI Analysis" 主按钮.
-  // autoSummaryEnabled 仅用于 Modal 内的文案描述, 不再控制按钮是否出现.
-  const channelSetting =
-    channelType === 'twitter' || channelType === 'youtube'
-      ? feedSummarySettings[channelType as FeedSummaryChannel]
-      : null;
-  const autoSummaryEnabled = !!channelSetting?.enabled;
-  const showPersonalizeButton = showAiTagsPanel;
+  // 仅对 twitter / youtube 渠道显示 "Generate AI Analysis" 主按钮,
+  // 因为后端 FeedSummaryPersonalizationService._CHANNEL_TO_MODULE 只定义了这两个渠道。
+  // News 渠道有 Brief digest (全局打标), 但不支持 per-user 个性化摘要。
+  const personalizeSupportedChannels = new Set(['twitter', 'youtube']);
+  const showPersonalizeButton = personalizeSupportedChannels.has(channelType);
   const personalizeButtonLabel = isPersonalized ? 'Re-analyze' : 'Generate AI Analysis';
   const personalizeButtonTooltip = isPersonalized
     ? 'Re-generate personalized AI analysis for this content using your template.'
