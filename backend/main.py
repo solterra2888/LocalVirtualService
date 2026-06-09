@@ -202,6 +202,9 @@ app.include_router(logs.router, tags=["系统日志"])
 # Redis / Celery 运行时监控 API（admin-only）
 app.include_router(monitoring.router, tags=["系统监控"])
 
+# 群消息入库：Lark Webhook 回调 + 外部批量写入
+app.include_router(chat_group_messages.router, prefix="/api", tags=["群消息"])
+
 # 静态文件服务
 # Agent Skill 文档 (SKILL.md)
 _agent_skill_dir = os.path.join(
