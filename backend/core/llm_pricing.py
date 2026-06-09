@@ -266,18 +266,21 @@ _CLAUDE_PRICING: Dict[str, List[PriceTier]] = {
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DeepSeek AI 模型定价
-# 参考：https://api-docs.deepseek.com/quick_start/pricing
-# 计费单位：元/百万 tokens（RMB）
-# 注意：以下价格为估算值，请根据官方定价页更新
+# 参考：DeepSeek 官方定价（2026-06）
+# 原价：美元/百万 tokens（USD）
+#       deepseek-chat: $0.27 输入, $1.10 输出
+#       deepseek-reasoner: $0.55 输入, $2.19 输出
+# 计费单位：元/百万 tokens（RMB，汇率 ~7.2）
 # ──────────────────────────────────────────────────────────────────────────────
 _DEEPSEEK_PRICING: Dict[str, List[PriceTier]] = {
-    # deepseek-v4-pro（旗舰模型）
-    "deepseek-v4-pro": _flat(4.0, 16.0),
-    # deepseek-v4-flash（轻量模型）
-    "deepseek-v4-flash": _flat(1.0, 4.0),
-    # 通用别名
-    "deepseek-chat": _flat(4.0, 16.0),
-    "deepseek-reasoner": _flat(4.0, 16.0),
+    # DeepSeek Chat (V3) — 通用对话模型
+    "deepseek-chat": _flat(1.94, 7.92),   # $0.27/M → ¥1.94/M, $1.10/M → ¥7.92/M
+    # DeepSeek Reasoner (R1) — 推理模型
+    "deepseek-reasoner": _flat(3.96, 15.77),  # $0.55/M → ¥3.96/M, $2.19/M → ¥15.77/M
+
+    # 用户自定义模型名（映射到 deepseek-chat）
+    "deepseek-v4-pro": _flat(1.94, 7.92),
+    "deepseek-v4-flash": _flat(1.94, 7.92),  # 暂用相同价格，如 flash 有更低价格请更新
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
