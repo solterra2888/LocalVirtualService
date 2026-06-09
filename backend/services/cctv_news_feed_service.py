@@ -76,19 +76,21 @@ class CCTVNewsFeedService:
         self,
         date: Optional[str] = None,
         max_articles: int = 30,
+        recent_days: int = 2,
     ) -> Dict[str, Any]:
         """
         抓取 CCTV 新闻并分发给所有订阅了 CCTV 频道的用户。
 
         Args:
-            date:         日期字符串 YYYYMMDD，None 表示今天最新
+            date:         日期字符串 YYYYMMDD，None 表示根据 recent_days 抓取多天
             max_articles: 最多爬取文章数（防止单次运行时间过长）
+            recent_days:  抓取最近几天的数据（默认2天，包含今天）
 
         Returns:
             执行结果统计 dict
         """
         start_time = time.time()
-        logger.info("开始 CCTV News Feed 抓取", date=date, max_articles=max_articles)
+        logger.info("开始 CCTV News Feed 抓取", date=date, max_articles=max_articles, recent_days=recent_days)
 
         # 1. 查询 CCTV 订阅用户
         user_ids = self._get_cctv_subscriber_ids()
@@ -103,7 +105,7 @@ class CCTVNewsFeedService:
             }
 
         # 2. 爬取文章列表
-        articles = self._scrape_article_list(date=date, max_articles=max_articles)
+        articles = self._scrape_article_list(date=date, max_articles=max_articles, recent_days=recent_days)
         if not articles:
             logger.warning("未抓取到任何 CCTV 文章")
             return {
@@ -175,63 +177,164 @@ class CCTVNewsFeedService:
         self,
         date: Optional[str] = None,
         max_articles: int = 30,
+        recent_days: int = 2,
     ) -> List[Dict[str, Any]]:
-        url = f"{CCTV_BASE_URL}?date={date}" if date else CCTV_BASE_URL
-        response = self._request(url)
-        if not response:
-            return []
+        """
+        抓取 CCTV 文章列表。
+        支持单日期或日期范围（默认抓取最近N天，提高覆盖率）。
+        """
+        from datetime import datetime, timedelta
 
-        soup = BeautifulSoup(response.content, "html.parser")
-        seen_urls: set = set()
-        items = []
+        # 确定要抓取的日期列表
+        dates_to_fetch = []
+        if date:
+            # 指定的单个日期
+            dates_to_fetch = [date]
+        else:
+            # 默认抓取最近 N 天（提高覆盖率）
+            today = datetime.now()
+            dates_to_fetch = [
+                (today - timedelta(days=i)).strftime("%Y%m%d")
+                for i in range(recent_days)
+            ]
 
-        for link in soup.find_all("a", href=True):
-            href = link.get("href", "")
-            text = link.get_text(strip=True)
+        all_items = []
+        seen_urls = set()
 
-            if href.startswith("/"):
-                href = "https://tv.cctv.com" + href
-            elif href.startswith("./"):
-                href = "https://tv.cctv.com/lm/xwlb/" + href[2:]
+        for fetch_date in dates_to_fetch:
+            if fetch_date == datetime.now().strftime("%Y%m%d"):
+                url = CCTV_BASE_URL
+            else:
+                url = f"{CCTV_BASE_URL}?date={fetch_date}"
 
-            if "VIDE" in href.upper() and "tv.cctv.com" in href and text:
-                if href not in seen_urls:
-                    seen_urls.add(href)
-                    title = re.sub(r"\s+", " ", text).strip()
-                    title = re.sub(r"^(完整版|_完整版_|\[视频\])\s*", "", title).strip()
-                    if not title:
-                        continue
+            logger.debug(f"抓取 CCTV 列表: {url}")
+            response = self._request(url)
+            if not response:
+                continue
 
-                    date_match = re.search(r"/(\d{4})/(\d{2})/(\d{2})/", href)
-                    pub_date = None
-                    if date_match:
-                        y, m, d = date_match.groups()
-                        pub_date = f"{y}-{m}-{d}"
+            soup = BeautifulSoup(response.content, "html.parser")
 
-                    items.append({"title": title, "url": href, "date": pub_date})
-                    if len(items) >= max_articles:
-                        break
+            for link in soup.find_all("a", href=True):
+                href = link.get("href", "")
+                text = link.get_text(strip=True)
 
-        return items
+                # 处理相对路径和绝对路径
+                if href.startswith("/"):
+                    href = "https://tv.cctv.com" + href
+                elif href.startswith("./"):
+                    href = "https://tv.cctv.com/lm/xwlb/" + href[2:]
+                elif not href.startswith("http"):
+                    # 其他相对路径
+                    continue
+
+                # 匹配条件：URL 包含 VIDE 或 VIDEO（支持各种大小写和变体）
+                # 例如: VIDEajMiSJz3bVQrCMW4ycrY260607, VIDEO52tKHJTSDyMZlCuHDOt260608
+                url_upper = href.upper()
+                if not (("VIDE" in url_upper or "VIDEO" in url_upper) and "tv.cctv.com" in href):
+                    continue
+
+                if not text or len(text) < 2:
+                    continue
+
+                if href in seen_urls:
+                    continue
+                seen_urls.add(href)
+
+                # 清理标题：移除前缀
+                title = re.sub(r"\s+", " ", text).strip()
+                title = re.sub(r"^(完整版|_完整版_|\[视频\])\s*", "", title).strip()
+                if not title:
+                    continue
+
+                # 提取日期
+                date_match = re.search(r"/(\d{4})/(\d{2})/(\d{2})/", href)
+                pub_date = None
+                if date_match:
+                    y, m, d = date_match.groups()
+                    pub_date = f"{y}-{m}-{d}"
+
+                all_items.append({"title": title, "url": href, "date": pub_date})
+
+                if len(all_items) >= max_articles:
+                    break
+
+            if len(all_items) >= max_articles:
+                break
+
+        logger.info(f"CCTV 列表抓取完成", count=len(all_items), dates=dates_to_fetch)
+        return all_items
 
     def _extract_content(self, url: str) -> Optional[str]:
+        """从 CCTV 页面提取正文内容。返回 None 表示该页面无文字内容（如纯视频）。"""
         response = self._request(url)
         if not response:
             return None
 
         soup = BeautifulSoup(response.content, "html.parser")
 
+        # 策略1: id="content_area" (最常见)
         content_area = soup.find("div", id="content_area")
         if content_area:
             paragraphs = [p.get_text(strip=True) for p in content_area.find_all("p") if p.get_text(strip=True)]
             if paragraphs:
-                return "\n".join(paragraphs)
+                text = "\n".join(paragraphs)
+                if len(text) > 50:  # 确保有实质内容
+                    return text
 
-        for div in soup.find_all("div", class_=lambda x: x and "content" in x.lower()):
+        # 策略2: class="content"
+        content_div = soup.find("div", class_="content")
+        if content_div:
+            paragraphs = [p.get_text(strip=True) for p in content_div.find_all("p") if p.get_text(strip=True)]
+            if paragraphs:
+                text = "\n".join(paragraphs)
+                if len(text) > 50:
+                    return text
+
+        # 策略3: 查找包含"主要内容"的区域
+        main_content = soup.find(lambda tag: tag.name in ('div', 'section') and tag.get_text(strip=True).startswith('主要内容'))
+        if main_content:
+            paragraphs = [p.get_text(strip=True) for p in main_content.find_all("p") if p.get_text(strip=True)]
+            if paragraphs:
+                text = "\n".join(paragraphs)
+                if len(text) > 50:
+                    return text
+
+        # 策略4: 查找 video_text 或 transcript 相关区域
+        for div in soup.find_all("div", class_=lambda x: x and any(k in str(x).lower() for k in ["text", "desc", "intro"])):
             paragraphs = [p.get_text(strip=True) for p in div.find_all("p") if p.get_text(strip=True)]
             if len(paragraphs) > 2:
-                return "\n".join(paragraphs)
+                text = "\n".join(paragraphs)
+                if len(text) > 50:
+                    return text
 
+        # 策略5: 查找 article 或 body 相关区域
+        for tag in soup.find_all(["div", "article"], class_=lambda x: x and any(k in str(x).lower() for k in ["article", "body", "main"])):
+            paragraphs = [p.get_text(strip=True) for p in tag.find_all("p") if p.get_text(strip=True)]
+            if len(paragraphs) > 2:
+                text = "\n".join(paragraphs)
+                if len(text) > 50:
+                    return text
+
+        # 策略6: 查找所有包含"央视网消息"的文本块
+        text_elements = soup.find_all(string=lambda t: t and "央视网消息" in t)
+        if text_elements:
+            parent = text_elements[0].find_parent(["div", "section", "article"])
+            if parent:
+                paragraphs = [p.get_text(strip=True) for p in parent.find_all("p") if p.get_text(strip=True)]
+                if paragraphs:
+                    text = "\n".join(paragraphs)
+                    if len(text) > 50:
+                        return text
+
+        # 检查是否是新闻联播视频页面（无文字内容）
+        title_elem = soup.find("h1") or soup.find("h2") or soup.find("title")
+        title_text = title_elem.get_text(strip=True) if title_elem else ""
+        if "新闻联播" in title_text:
+            logger.debug(f"新闻联播视频页面，跳过（无文字内容）: {url}")
+            return None
+
+        # 没有提取到内容
+        logger.debug(f"CCTV 内容提取失败: {url}")
         return None
 
     def _request(self, url: str, max_retries: int = 3) -> Optional[requests.Response]:

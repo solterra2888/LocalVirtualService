@@ -1041,10 +1041,11 @@ class SchedulerService:
 
         Args:
             params: 任务参数
-                - max_results:    EODHD 每次拉取最大条数（默认 200）
-                - recent_days:    EODHD 拉取最近 N 天的新闻（默认 1）
-                - cctv_max:       CCTV 每次最多爬取文章数（默认 20）
-                - skip_cctv:      跳过 CCTV 抓取（默认 False）
+                - max_results:      EODHD 每次拉取最大条数（默认 200）
+                - recent_days:      EODHD 拉取最近 N 天的新闻（默认 1）
+                - cctv_max:         CCTV 每次最多爬取文章数（默认 20）
+                - cctv_recent_days: CCTV 抓取最近几天的数据（默认 2）
+                - skip_cctv:        跳过 CCTV 抓取（默认 False）
         """
         import asyncio
         import concurrent.futures
@@ -1055,6 +1056,7 @@ class SchedulerService:
             max_results = params.get('max_results', 200)
             recent_days = params.get('recent_days', 1)
             cctv_max = params.get('cctv_max', 20)
+            cctv_recent_days = params.get('cctv_recent_days', 2)
             skip_cctv = params.get('skip_cctv', False)
 
             from backend.services.eodhd_news_feed_service import EODHDNewsFeedService
@@ -1079,7 +1081,10 @@ class SchedulerService:
                     with concurrent.futures.ThreadPoolExecutor() as executor:
                         cctv_result = await loop.run_in_executor(
                             executor,
-                            lambda: CCTVNewsFeedService().fetch_and_distribute(max_articles=cctv_max),
+                            lambda: CCTVNewsFeedService().fetch_and_distribute(
+                                max_articles=cctv_max,
+                                recent_days=cctv_recent_days,
+                            ),
                         )
                 except Exception as cctv_exc:
                     logger.error(f"CCTV Feed 执行异常: {cctv_exc}")
