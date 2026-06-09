@@ -266,6 +266,7 @@ QwenProvider / DoubaoProvider / GLMProvider / ClaudeProvider
 | **Doubao（豆包）** | `doubao` | Volcengine Ark `/api/v3/chat/completions` | — |
 | **GLM（智谱 AI）** | `glm` | Zhipu PAAS `/api/paas/v4/chat/completions` | — |
 | **Claude（Anthropic，经聚合网关）** | `claude` | 网关 `{base_url}/v1/chat/completions`（OpenAI 兼容；生产示例：CherryIN `https://open.cherryin.net`） | 请求体**不传** `top_p`（与 `temperature` 二选一，Bedrock 后端限制）；`llm_pricing` 中按 **USD** 估算；需在 DB `llm_provider_configs` 中 **enabled=true** 且填好 API Key，Celery Worker 进程才会加载该 Provider |
+| **DeepSeek** | `deepseek` | DeepSeek API `/v1/chat/completions`（OpenAI 兼容；`https://api.deepseek.com`） | ✅ OpenAI 完全兼容；支持 `deepseek-v4-pro`（旗舰）和 `deepseek-v4-flash`（轻量）；`llm_pricing` 中按 **RMB** 估算 |
 
 ### 2.3 配置加载顺序
 
@@ -857,7 +858,7 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 |------|---------|------|------|
 | `DEFAULT_LLM_PROVIDER` / `default_provider` | 全局 | `qwen` | 默认 Provider |
 | `LLM_FALLBACK_ENABLED` / `fallback_enabled` | 全局 | `true` | 是否启用 Provider 降级 |
-| `LLM_FALLBACK_ORDER` / `fallback_order` | 全局 | **`["qwen","doubao","glm","claude"]`** | 降级顺序；claude 已纳入链尾（§0.4） |
+| `LLM_FALLBACK_ORDER` / `fallback_order` | 全局 | **`["qwen","doubao","glm","claude","deepseek"]`** | 降级顺序；deepseek 作为最终兜底 |
 | `global_timeout`（DB only） | 全局 | **120s** | provider 未单独配置 timeout 时的默认值（已接入请求层，§0.4） |
 | `global_retry_count`（DB only） | 全局 | **2** | 连接/5xx 重试次数，传入每个 `LLMConfig.retry_count`（§0.4） |
 | `QWEN_API_KEY` / `QWEN_ENABLED` | Qwen | DashScope API Key |
@@ -872,6 +873,9 @@ Celery:   analyze_news_by_ids_task / analyze_unanalyzed_news_task
 | `CLAUDE_API_KEY` / `CLAUDE_ENABLED` | Claude | 聚合网关 API Key（如 CherryIN） |
 | `CLAUDE_BASE_URL` | Claude | 网关根 URL（默认 `https://open.cherryin.net`，实际请求 `{base}/v1/chat/completions`） |
 | `CLAUDE_DEFAULT_MODEL` | Claude | 默认模型（如 `anthropic/claude-sonnet-4.6`；网关约定名） |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_ENABLED` | DeepSeek | DeepSeek API Key |
+| `DEEPSEEK_BASE_URL` | DeepSeek | API 根 URL（默认 `https://api.deepseek.com`） |
+| `DEEPSEEK_DEFAULT_MODEL` | DeepSeek | 默认模型（如 `deepseek-v4-pro`） |
 
 > ⚠️ **DB 配置优先于环境变量**。Admin UI (`/admin/llm-config`) 可热更新 DB 中的 Provider 配置并触发 `reload_from_database()`。  
 > ⚠️ **Celery Worker** 启动时从 DB 加载 **仅 `enabled=true` 且有 API Key** 的 Provider；若模板 `recommended_provider=claude` 但 Claude 未启用，会出现 `Provider claude not found or not enabled`。保存 LLM 配置后需 **重启 Worker**（或依赖生产环境 systemd 重载）使新 Provider 生效。
@@ -1188,6 +1192,7 @@ Provider 调用抛出异常
 | qwen | ✅ | 1（主 provider） | qwen-turbo | 120s | 8000 |
 | doubao | ✅ | 2 | doubao-seed-1-6-250615 | 120s | 8000 |
 | glm | ✅ | 3 | glm-4 | 120s | 8000 |
-| claude | ✅ | 4（最终兜底） | anthropic/claude-sonnet-4.6 | 120s | 32000 |
+| claude | ✅ | 4 | anthropic/claude-sonnet-4.6 | 120s | 32000 |
+| deepseek | ✅ | 5（最终兜底） | deepseek-v4-pro | 120s | 8000 |
 
 > 注意：provider 的 `timeout` 是**基准值**；模板/策略命中超长生成（`max_tokens≥16000` 或慢模型）时，`_apply_timeout_policy` 会将实际 HTTP 读超时动态抬升至 300～480s，不受此处 120s 限制。

@@ -112,6 +112,8 @@ const PROVIDER_MODELS: Record<string, string[]> = {
   doubao: ['doubao-seed-1-6-250615'],
   glm: ['glm-4.6', 'glm-4', 'glm-4-flash'],
   claude: ['anthropic/claude-sonnet-4.6', 'anthropic/claude-opus-4.7'],
+  deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash'],
+  gemini: ['google/gemini-3.1-pro-preview', 'google/gemini-3.5-flash', 'google/gemini-3.1-flash-lite-preview'],
 };
 
 interface EditableForm {

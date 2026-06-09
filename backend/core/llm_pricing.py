@@ -225,41 +225,86 @@ _GLM_PRICING: Dict[str, List[PriceTier]] = {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Anthropic Claude 模型定价
-# 参考：https://www.anthropic.com/pricing
-# 计费单位：美元/百万 tokens（USD）
-# 注意：Claude 以美元计价，与其他 Provider 的人民币（RMB）不同；
-#       calculate_cost 对 claude provider 返回 currency="USD"。
+# Anthropic Claude 模型定价（via CherryIN 网关）
+# 参考：CherryIN 官方定价表（2026-06）
+# 计费单位：元/百万 tokens（RMB）
 # ──────────────────────────────────────────────────────────────────────────────
 _CLAUDE_PRICING: Dict[str, List[PriceTier]] = {
     # ── CherryIN 网关模型名（前缀 anthropic/）────────────────────────────────
-    # 价格以 Anthropic 官方同系列模型为参考，实际以网关账单为准
-    "anthropic/claude-sonnet-4.6":          _flat(3.0,   15.0),
-    "anthropic/claude-opus-4.7":            _flat(15.0,  75.0),
-    "anthropic/claude-opus-4-20250514":     _flat(15.0,  75.0),
-    "anthropic/claude-sonnet-4-20250514":   _flat(3.0,   15.0),
-    "anthropic/claude-3-5-sonnet-20241022": _flat(3.0,   15.0),
-    "anthropic/claude-3-5-haiku-20241022":  _flat(0.8,    4.0),
-    "anthropic/claude-3-haiku-20240307":    _flat(0.25,   1.25),
+    "anthropic/claude-opus-4.7":            _flat(60.0, 240.0),
+    "anthropic/claude-opus-4.5":            _flat(60.0, 240.0),
+    "anthropic/claude-opus-4":              _flat(60.0, 240.0),
+    "anthropic/claude-sonnet-4.6":          _flat(15.0,  60.0),
+    "anthropic/claude-sonnet-4.5":          _flat(15.0,  60.0),
+    "anthropic/claude-sonnet-4":            _flat(15.0,  60.0),
+    "anthropic/claude-opus-4-20250514":     _flat(60.0, 240.0),
+    "anthropic/claude-sonnet-4-20250514":   _flat(15.0,  60.0),
+    "anthropic/claude-3-5-sonnet-20241022": _flat(15.0,  60.0),
+    "anthropic/claude-3-5-haiku-20241022":  _flat(1.0,    4.0),
+    "anthropic/claude-3-haiku-20240307":    _flat(1.0,    4.0),
 
     # ── Claude 4 系列（直接 API 名称） ────────────────────────────────────────
-    "claude-opus-4.7":            _flat(15.0,  75.0),
-    "claude-opus-4-20250514":     _flat(15.0,  75.0),
-    "claude-opus-4":              _flat(15.0,  75.0),
-    "claude-sonnet-4-20250514":   _flat(3.0,   15.0),
-    "claude-sonnet-4":            _flat(3.0,   15.0),
-    "claude-sonnet-4.6":          _flat(3.0,   15.0),
+    "claude-opus-4.7":            _flat(60.0, 240.0),
+    "claude-opus-4.5":            _flat(60.0, 240.0),
+    "claude-opus-4-20250514":     _flat(60.0, 240.0),
+    "claude-opus-4":              _flat(60.0, 240.0),
+    "claude-sonnet-4.6":          _flat(15.0,  60.0),
+    "claude-sonnet-4.5":          _flat(15.0,  60.0),
+    "claude-sonnet-4-20250514":   _flat(15.0,  60.0),
+    "claude-sonnet-4":            _flat(15.0,  60.0),
 
-    # ── Claude 3.7 / 3.5 系列 ────────────────────────────────────────────────
-    "claude-3-7-sonnet-20250219": _flat(3.0,   15.0),
-    "claude-3-5-sonnet-20241022": _flat(3.0,   15.0),
-    "claude-3-5-sonnet-20240620": _flat(3.0,   15.0),
-    "claude-3-5-haiku-20241022":  _flat(0.8,    4.0),
+    # ── Claude 3.5 系列 ────────────────────────────────────────────────────────
+    "claude-3-5-sonnet-20241022": _flat(15.0,  60.0),
+    "claude-3-5-sonnet-20240620": _flat(15.0,  60.0),
+    "claude-3-5-haiku-20241022":  _flat(1.0,    4.0),
 
     # ── Claude 3 系列 ─────────────────────────────────────────────────────────
-    "claude-3-opus-20240229":     _flat(15.0,  75.0),
-    "claude-3-sonnet-20240229":   _flat(3.0,   15.0),
-    "claude-3-haiku-20240307":    _flat(0.25,   1.25),
+    "claude-3-opus-20240229":     _flat(60.0, 240.0),
+    "claude-3-sonnet-20240229":   _flat(15.0,  60.0),
+    "claude-3-haiku-20240307":    _flat(1.0,    4.0),
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DeepSeek AI 模型定价
+# 参考：https://api-docs.deepseek.com/quick_start/pricing
+# 计费单位：元/百万 tokens（RMB）
+# 注意：以下价格为估算值，请根据官方定价页更新
+# ──────────────────────────────────────────────────────────────────────────────
+_DEEPSEEK_PRICING: Dict[str, List[PriceTier]] = {
+    # deepseek-v4-pro（旗舰模型）
+    "deepseek-v4-pro": _flat(4.0, 16.0),
+    # deepseek-v4-flash（轻量模型）
+    "deepseek-v4-flash": _flat(1.0, 4.0),
+    # 通用别名
+    "deepseek-chat": _flat(4.0, 16.0),
+    "deepseek-reasoner": _flat(4.0, 16.0),
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Google Gemini 模型定价（via CherryIN 网关）
+# 参考：CherryIN 官方定价表（2026-06）
+# 计费单位：元/百万 tokens（RMB）
+# ──────────────────────────────────────────────────────────────────────────────
+_GEMINI_PRICING: Dict[str, List[PriceTier]] = {
+    # Gemini 3.1 Pro Preview（对应 Gemini 2.5 Pro Preview）
+    "gemini-3.1-pro-preview": _flat(63.0, 252.0),
+    "google/gemini-3.1-pro-preview": _flat(63.0, 252.0),
+    # Gemini 3.5 Flash（对应 Gemini 2.5 Flash）
+    "gemini-3.5-flash": _flat(3.6, 14.4),
+    "google/gemini-3.5-flash": _flat(3.6, 14.4),
+    # Gemini 3.1 Flash Lite Preview（对应 Gemini 1.5 Flash）
+    "gemini-3.1-flash-lite-preview": _flat(0.72, 2.88),
+    "google/gemini-3.1-flash-lite-preview": _flat(0.72, 2.88),
+    # 其他 Gemini 模型别名
+    "gemini-2.5-pro-preview": _flat(63.0, 252.0),
+    "gemini-2.5-flash": _flat(3.6, 14.4),
+    "gemini-2.5-pro": _flat(63.0, 252.0),
+    "gemini-2.0-flash": _flat(3.6, 14.4),
+    "gemini-1.5-pro": _flat(18.0, 72.0),
+    "gemini-1.5-flash": _flat(0.72, 2.88),
+    # 通用别名
+    "gemini-pro": _flat(63.0, 252.0),
+    "gemini-flash": _flat(3.6, 14.4),
 }
 
 # 价格表最后更新时间（格式：YYYY-MM）
@@ -267,7 +312,9 @@ PRICING_LAST_UPDATED = {
     "qwen":    "2026-05",
     "doubao":  "2026-05",
     "glm":     "2026-05",
-    "claude":  "2026-05",
+    "claude":  "2026-06",  # CherryIN 定价表
+    "deepseek": "2026-06",
+    "gemini":  "2026-06",  # CherryIN 定价表
 }
 
 _PROVIDER_TABLES: Dict[str, Dict[str, List[PriceTier]]] = {
@@ -275,6 +322,8 @@ _PROVIDER_TABLES: Dict[str, Dict[str, List[PriceTier]]] = {
     "doubao": _DOUBAO_PRICING,
     "glm":    _GLM_PRICING,
     "claude": _CLAUDE_PRICING,
+    "deepseek": _DEEPSEEK_PRICING,
+    "gemini": _GEMINI_PRICING,
 }
 
 

@@ -58,6 +58,28 @@ def _get_default_providers():
             "icon": "🧠",
             "models": ["glm-4.6", "glm-4", "glm-4-flash"],
             "baseUrl": "https://open.bigmodel.cn"
+        },
+        "claude": {
+            "displayName": "Claude",
+            "description": "Anthropic Claude via OpenAI-compatible gateway (e.g. CherryIN)",
+            "icon": "🤖",
+            "models": ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.7",
+                      "anthropic/claude-3-5-sonnet-20241022", "anthropic/claude-3-5-haiku-20241022"],
+            "baseUrl": "https://open.cherryin.net"
+        },
+        "deepseek": {
+            "displayName": "DeepSeek",
+            "description": "DeepSeek AI large language model with OpenAI-compatible API",
+            "icon": "🧠",
+            "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+            "baseUrl": "https://api.deepseek.com"
+        },
+        "gemini": {
+            "displayName": "Google Gemini",
+            "description": "Google Gemini via CherryIN OpenAI-compatible gateway",
+            "icon": "✨",
+            "models": ["google/gemini-3.1-pro-preview", "google/gemini-3.5-flash", "google/gemini-3.1-flash-lite-preview"],
+            "baseUrl": "https://open.cherryin.cc"
         }
     }
     
@@ -201,7 +223,7 @@ async def get_llm_config(current_user: TokenData = Depends(get_current_admin_use
         
         default_provider = get_setting_value('default_provider', 'qwen')
         fallback_enabled = get_setting_value('fallback_enabled', True)
-        fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'glm', 'claude'])
+        fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'glm', 'claude', 'deepseek', 'gemini'])
         enable_logging = get_setting_value('enable_logging', True)
         enable_monitoring = get_setting_value('enable_monitoring', True)
         
@@ -306,13 +328,15 @@ async def test_provider_connection(
         start_time = time.time()
         
         # 临时创建provider进行测试
-        from backend.core.llm_framework import LLMConfig, QwenProvider, DoubaoProvider, GLMProvider, ClaudeProvider
-        
+        from backend.core.llm_framework import LLMConfig, QwenProvider, DoubaoProvider, GLMProvider, ClaudeProvider, DeepSeekProvider, GeminiProvider
+
         provider_map = {
             "qwen": (QwenProvider, LLMProviderType.QWEN),
             "doubao": (DoubaoProvider, LLMProviderType.DOUBAO),
             "glm": (GLMProvider, LLMProviderType.GLM),
             "claude": (ClaudeProvider, LLMProviderType.CLAUDE),
+            "deepseek": (DeepSeekProvider, LLMProviderType.DEEPSEEK),
+            "gemini": (GeminiProvider, LLMProviderType.GEMINI),
         }
         
         if request.providerId not in provider_map:
@@ -562,7 +586,7 @@ async def test_global_settings(current_user: TokenData = Depends(get_current_adm
         
         # 测试2: 故障转移配置
         fallback_enabled = get_setting_value('fallback_enabled', True)
-        fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'glm', 'claude'])
+        fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'glm', 'claude', 'deepseek', 'gemini'])
         
         if fallback_enabled:
             valid_fallback_providers = [p for p in fallback_order if p in enabled_provider_ids]

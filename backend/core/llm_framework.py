@@ -30,6 +30,8 @@ class LLMProviderType(Enum):
     DOUBAO = "doubao"
     GLM = "glm"
     CLAUDE = "claude"
+    DEEPSEEK = "deepseek"
+    GEMINI = "gemini"
 
 
 class LLMModelStatus(Enum):
@@ -842,6 +844,279 @@ class ClaudeProvider(LLMProvider):
         return calculate_cost("claude", model, prompt_tokens, completion_tokens)
 
 
+class DeepSeekProvider(LLMProvider):
+    """DeepSeek provider implementation.
+
+    DeepSeek API is OpenAI-compatible:
+      - Endpoint: /v1/chat/completions
+      - Auth: Authorization: Bearer <api_key>
+      - Message format: OpenAI-compatible (system in messages array)
+      - Models: deepseek-v4-pro, deepseek-v4-flash, etc.
+
+    Docs: https://api-docs.deepseek.com/
+    """
+
+    def __init__(self, config: LLMConfig):
+        super().__init__(config)
+        base = (self.config.base_url or "https://api.deepseek.com").rstrip("/")
+        self.api_url = f"{base}/v1/chat/completions"
+
+    async def chat_completion(
+        self,
+        messages: List[LLMMessage],
+        model: Optional[str] = None,
+        **kwargs,
+    ) -> LLMResponse:
+        """DeepSeek chat completion (OpenAI-compatible format)."""
+        start_time = time.time()
+        model = model or self.config.default_model
+
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        formatted_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in messages
+        ]
+
+        data = {
+            "model": model,
+            "messages": formatted_messages,
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "temperature": kwargs.get("temperature", self.config.temperature),
+            "top_p": kwargs.get("top_p", self.config.top_p),
+        }
+
+        try:
+            response = await self._make_request(headers, data, read_timeout=self._resolve_read_timeout(kwargs))
+            response_time = time.time() - start_time
+
+            if response.status_code == 200:
+                result = response.json()
+                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                usage = result.get("usage", {})
+                cost, currency = self._calculate_cost(usage, model)
+                return LLMResponse(
+                    content=content,
+                    model=result.get("model", model),
+                    provider=self.config.provider_type.value,
+                    usage=usage,
+                    response_time=response_time,
+                    cost=cost,
+                    currency=currency,
+                )
+            else:
+                raise Exception(f"API request failed: {response.status_code} - {response.text}")
+
+        except Exception as e:
+            self.logger.error(f"Chat completion failed: {str(e)}")
+            raise
+
+    async def stream_completion(
+        self,
+        messages: List[LLMMessage],
+        model: Optional[str] = None,
+        **kwargs,
+    ) -> AsyncIterator[LLMResponse]:
+        """DeepSeek streaming (暂用普通响应包装，TODO: 实现 SSE 流式)."""
+        response = await self.chat_completion(messages, model, **kwargs)
+        yield response
+
+    async def test_connection(self) -> bool:
+        """Test DeepSeek connection."""
+        try:
+            self.status = LLMModelStatus.TESTING
+            self.logger.info(f"Starting DeepSeek connection test, API URL: {self.api_url}")
+            self.logger.info(f"测试参数 - 默认模型: {self.config.default_model}")
+            self.logger.info(f"测试参数 - 温度值: {self.config.temperature}")
+            self.logger.info(f"测试参数 - 最大Token: {self.config.max_tokens}")
+            self.logger.info(f"测试参数 - 超时时间: {self.config.timeout}秒")
+
+            test_messages = [LLMMessage(role="user", content="你好")]
+            response = await self.chat_completion(test_messages)
+
+            if response.content:
+                self.status = LLMModelStatus.CONNECTED
+                self.logger.info(f"DeepSeek connection test successful, response: {response.content[:50]}...")
+                self.logger.info(f"实际使用模型: {response.model}")
+                self.logger.info(f"响应时间: {response.response_time:.2f}秒")
+                return True
+            else:
+                self.status = LLMModelStatus.ERROR
+                self.logger.error("DeepSeek connection test failed: empty response content")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"DeepSeek connection test failed: {str(e)}")
+            import traceback
+            self.logger.error(f"错误堆栈: {traceback.format_exc()}")
+            self.status = LLMModelStatus.ERROR
+            return False
+
+    async def _make_request(self, headers: Dict, data: Dict, read_timeout: Optional[int] = None) -> requests.Response:
+        """发送异步请求。read_timeout 优先于 provider 配置（支持模板/策略动态抬升）。"""
+        loop = asyncio.get_event_loop()
+        connect_timeout = getattr(self.config, "connect_timeout", 15)
+        effective_read_timeout = int(read_timeout) if read_timeout else self.config.timeout
+        return await loop.run_in_executor(
+            None,
+            lambda: self.session.post(
+                self.api_url,
+                headers=headers,
+                json=data,
+                timeout=(connect_timeout, effective_read_timeout),
+            ),
+        )
+
+    def _calculate_cost(self, usage: Dict, model: str) -> tuple:
+        """按定价表计算本次调用费用（RMB）。"""
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        if not prompt_tokens and not completion_tokens:
+            total = usage.get("total_tokens", 0)
+            prompt_tokens = int(total * 0.75)
+            completion_tokens = total - prompt_tokens
+        return calculate_cost("deepseek", model, prompt_tokens, completion_tokens)
+
+
+class GeminiProvider(LLMProvider):
+    """Google Gemini provider implementation（通过 CherryIN OpenAI 兼容网关）。
+
+    CherryIN（https://open.cherryin.net）聚合网关使用 OpenAI 兼容格式：
+      - 端点：/v1/chat/completions
+      - 鉴权：Authorization: Bearer <api_key>
+      - 消息格式：system 写进 messages 数组（与其他 provider 一致）
+      - 模型名：使用网关约定的名称，如 google/gemini-3.5-flash
+    """
+
+    def __init__(self, config: LLMConfig):
+        super().__init__(config)
+        base = (self.config.base_url or "https://open.cherryin.cc").rstrip("/")
+        self.api_url = f"{base}/v1/chat/completions"
+
+    async def chat_completion(
+        self,
+        messages: List[LLMMessage],
+        model: Optional[str] = None,
+        **kwargs,
+    ) -> LLMResponse:
+        """Gemini chat completion（OpenAI 兼容格式）"""
+        start_time = time.time()
+        model = model or self.config.default_model
+
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        formatted_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in messages
+        ]
+
+        data = {
+            "model": model,
+            "messages": formatted_messages,
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "temperature": kwargs.get("temperature", self.config.temperature),
+            "top_p": kwargs.get("top_p", self.config.top_p),
+        }
+
+        try:
+            response = await self._make_request(headers, data, read_timeout=self._resolve_read_timeout(kwargs))
+            response_time = time.time() - start_time
+
+            if response.status_code == 200:
+                result = response.json()
+                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                usage = result.get("usage", {})
+                cost, currency = self._calculate_cost(usage, model)
+                return LLMResponse(
+                    content=content,
+                    model=result.get("model", model),
+                    provider=self.config.provider_type.value,
+                    usage=usage,
+                    response_time=response_time,
+                    cost=cost,
+                    currency=currency,
+                )
+            else:
+                raise Exception(f"API request failed: {response.status_code} - {response.text}")
+
+        except Exception as e:
+            self.logger.error(f"Chat completion failed: {str(e)}")
+            raise
+
+    async def stream_completion(
+        self,
+        messages: List[LLMMessage],
+        model: Optional[str] = None,
+        **kwargs,
+    ) -> AsyncIterator[LLMResponse]:
+        """Gemini streaming（暂用普通响应包装，TODO: 实现 SSE 流式）"""
+        response = await self.chat_completion(messages, model, **kwargs)
+        yield response
+
+    async def test_connection(self) -> bool:
+        """Test Gemini connection"""
+        try:
+            self.status = LLMModelStatus.TESTING
+            self.logger.info(f"Starting Gemini connection test, API URL: {self.api_url}")
+            self.logger.info(f"测试参数 - 默认模型: {self.config.default_model}")
+            self.logger.info(f"测试参数 - 温度值: {self.config.temperature}")
+            self.logger.info(f"测试参数 - 最大Token: {self.config.max_tokens}")
+            self.logger.info(f"测试参数 - 超时时间: {self.config.timeout}秒")
+            self.logger.info(f"测试参数 - 可用模型: {self.config.models}")
+
+            test_messages = [LLMMessage(role="user", content="Hello")]
+            response = await self.chat_completion(test_messages)
+
+            if response.content:
+                self.status = LLMModelStatus.CONNECTED
+                self.logger.info(f"Gemini connection test successful, response: {response.content[:50]}...")
+                self.logger.info(f"实际使用模型: {response.model}")
+                self.logger.info(f"响应时间: {response.response_time:.2f}秒")
+                return True
+            else:
+                self.status = LLMModelStatus.ERROR
+                self.logger.error("Gemini connection test failed: empty response content")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Gemini connection test failed: {str(e)}")
+            import traceback
+            self.logger.error(f"错误堆栈: {traceback.format_exc()}")
+            self.status = LLMModelStatus.ERROR
+            return False
+
+    async def _make_request(self, headers: Dict, data: Dict, read_timeout: Optional[int] = None) -> requests.Response:
+        """发送异步请求。read_timeout 优先于 provider 配置（支持模板/策略动态抬升）。"""
+        loop = asyncio.get_event_loop()
+        connect_timeout = getattr(self.config, "connect_timeout", 15)
+        effective_read_timeout = int(read_timeout) if read_timeout else self.config.timeout
+        return await loop.run_in_executor(
+            None,
+            lambda: self.session.post(
+                self.api_url,
+                headers=headers,
+                json=data,
+                timeout=(connect_timeout, effective_read_timeout),
+            ),
+        )
+
+    def _calculate_cost(self, usage: Dict, model: str) -> tuple:
+        """按定价表计算本次调用费用（USD）。"""
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        if not prompt_tokens and not completion_tokens:
+            total = usage.get("total_tokens", 0)
+            prompt_tokens = int(total * 0.75)
+            completion_tokens = total - prompt_tokens
+        return calculate_cost("gemini", model, prompt_tokens, completion_tokens)
+
+
 class LLMService:
     """统一的LLM服务入口"""
     
@@ -946,6 +1221,12 @@ class LLMService:
                 elif provider_id == 'claude':
                     provider_type = LLMProviderType.CLAUDE
                     provider_class = ClaudeProvider
+                elif provider_id == 'deepseek':
+                    provider_type = LLMProviderType.DEEPSEEK
+                    provider_class = DeepSeekProvider
+                elif provider_id == 'gemini':
+                    provider_type = LLMProviderType.GEMINI
+                    provider_class = GeminiProvider
                 else:
                     self.logger.warning(f"未知的提供商类型: {provider_id}")
                     continue
@@ -972,7 +1253,7 @@ class LLMService:
             # 应用全局策略配置（settings 已在循环前加载）
             self.default_provider = get_setting_value('default_provider', 'qwen')
             self.fallback_enabled = get_setting_value('fallback_enabled', True)
-            self.fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'glm', 'claude'])
+            self.fallback_order = get_setting_value('fallback_order', ['qwen', 'doubao', 'glm', 'claude', 'deepseek', 'gemini'])
             
             return True
             
@@ -987,11 +1268,13 @@ class LLMService:
         self._load_doubao_config()
         self._load_glm_config()
         self._load_claude_config()
+        self._load_deepseek_config()
+        self._load_gemini_config()
 
         # 设置默认提供商和故障转移
         self.default_provider = os.getenv('DEFAULT_LLM_PROVIDER', 'qwen')
         self.fallback_enabled = os.getenv('LLM_FALLBACK_ENABLED', 'true').lower() == 'true'
-        fallback_order_str = os.getenv('LLM_FALLBACK_ORDER', 'qwen,doubao,glm,claude')
+        fallback_order_str = os.getenv('LLM_FALLBACK_ORDER', 'qwen,doubao,glm,claude,deepseek,gemini')
         self.fallback_order = [p.strip() for p in fallback_order_str.split(',')]
     
     def reload_from_database(self):
@@ -1102,7 +1385,45 @@ class LLMService:
             )
             self.providers['claude'] = ClaudeProvider(config)
             self.logger.info("已加载提供商: claude (Anthropic Claude via CherryIN)")
-    
+
+    def _load_deepseek_config(self):
+        """Load DeepSeek configuration (OpenAI-compatible API)."""
+        api_key = os.getenv('DEEPSEEK_API_KEY')
+        if api_key and os.getenv('DEEPSEEK_ENABLED', 'false').lower() == 'true':
+            _cap = get_file_processing_timeout_seconds()
+            config = LLMConfig(
+                provider_type=LLMProviderType.DEEPSEEK,
+                api_key=api_key,
+                base_url=os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com'),
+                default_model=os.getenv('DEEPSEEK_DEFAULT_MODEL', 'deepseek-v4-pro'),
+                models=['deepseek-v4-pro', 'deepseek-v4-flash'],
+                max_tokens=int(os.getenv('DEEPSEEK_MAX_TOKENS', '8000')),
+                temperature=float(os.getenv('DEEPSEEK_TEMPERATURE', '0.7')),
+                top_p=float(os.getenv('DEEPSEEK_TOP_P', '0.9')),
+                timeout=min(120, _cap),
+            )
+            self.providers['deepseek'] = DeepSeekProvider(config)
+            self.logger.info("已加载提供商: deepseek (DeepSeek AI)")
+
+    def _load_gemini_config(self):
+        """Load Gemini configuration (via CherryIN OpenAI-compatible gateway)."""
+        api_key = os.getenv('GEMINI_API_KEY')
+        if api_key and os.getenv('GEMINI_ENABLED', 'false').lower() == 'true':
+            _cap = get_file_processing_timeout_seconds()
+            config = LLMConfig(
+                provider_type=LLMProviderType.GEMINI,
+                api_key=api_key,
+                base_url=os.getenv('GEMINI_BASE_URL', 'https://open.cherryin.cc'),
+                default_model=os.getenv('GEMINI_DEFAULT_MODEL', 'google/gemini-3.5-flash'),
+                models=['google/gemini-3.1-pro-preview', 'google/gemini-3.5-flash', 'google/gemini-3.1-flash-lite-preview'],
+                max_tokens=int(os.getenv('GEMINI_MAX_TOKENS', '8000')),
+                temperature=float(os.getenv('GEMINI_TEMPERATURE', '0.7')),
+                top_p=float(os.getenv('GEMINI_TOP_P', '0.9')),
+                timeout=min(120, _cap),
+            )
+            self.providers['gemini'] = GeminiProvider(config)
+            self.logger.info("已加载提供商: gemini (Google Gemini via CherryIN)")
+
     async def chat_completion(
         self, 
         messages: List[LLMMessage], 

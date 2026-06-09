@@ -1027,14 +1027,6 @@ const LLMConfigPage: React.FC = () => {
                       </Space>
                     </div>
                     
-                    <Alert
-                      message="Drag Instructions"
-                      description="Drag the drag icon on the left to adjust order. Number 1 indicates highest priority. When the main provider fails, other providers will be tried in order."
-                      type="info"
-                      showIcon
-                      style={{ marginBottom: 12 }}
-                    />
-                    
                     <DndContext
                       sensors={sensors}
                       collisionDetection={closestCenter}
@@ -1071,19 +1063,7 @@ const LLMConfigPage: React.FC = () => {
               </Col>
 
               <Col span={12}>
-                <Alert
-                  message="参数配置位置说明"
-                  description={
-                    <div>
-                      <p style={{ marginBottom: 8 }}>Global Settings 只负责系统级策略（Provider选择、Fallback等）</p>
-                      <p style={{ marginBottom: 8 }}>参数默认值（Temperature、Max Tokens、Timeout等）请在各个 <strong>Provider 配置</strong>中设置</p>
-                      <p style={{ marginBottom: 0 }}>任务特定的优化参数请在 <strong>Prompt Templates</strong> 中配置</p>
-                    </div>
-                  }
-                  type="info"
-                  showIcon
-                  style={{ marginBottom: 24 }}
-                />
+                {/* Future settings placeholder */}
               </Col>
             </Row>
 
