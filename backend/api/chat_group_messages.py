@@ -7,6 +7,7 @@ Endpoints:
   POST /chat-group-messages/batch         - Batch add group messages
 """
 
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
@@ -47,6 +48,40 @@ def _get_service() -> ChatGroupMessagesService:
     return ChatGroupMessagesService()
 
 
+def _expected_lark_token() -> str:
+    return os.getenv("LARK_ROBOT_VERIFICATION", "").strip()
+
+
+def _extract_lark_token(body: Dict[str, Any]) -> Optional[str]:
+    if isinstance(body.get("token"), str):
+        return body["token"]
+    header = body.get("header")
+    if isinstance(header, dict) and isinstance(header.get("token"), str):
+        return header["token"]
+    return None
+
+
+def _extract_lark_challenge(body: Dict[str, Any]) -> Optional[str]:
+    if isinstance(body.get("challenge"), str):
+        return body["challenge"]
+    event = body.get("event")
+    if isinstance(event, dict) and isinstance(event.get("challenge"), str):
+        return event["challenge"]
+    return None
+
+
+def _is_lark_url_verification(body: Dict[str, Any]) -> bool:
+    if body.get("type") == "url_verification":
+        return True
+    header = body.get("header")
+    if isinstance(header, dict) and header.get("event_type") == "url_verification":
+        return True
+    event = body.get("event")
+    if isinstance(event, dict) and event.get("type") == "url_verification":
+        return True
+    return False
+
+
 @router.post("/lark/callback", summary="接收 Lark 群消息回调")
 async def receive_lark_callback(payload: Dict[str, Any] = Body(...)):
     """
@@ -55,14 +90,21 @@ async def receive_lark_callback(payload: Dict[str, Any] = Body(...)):
     Only `event.message.chat_type == "group"` messages are normalized and saved.
     """
     try:
-        if payload.get("challenge"):
-            return {"challenge": payload["challenge"]}
+        expected_token = _expected_lark_token()
+        token = _extract_lark_token(payload)
+        if not expected_token or token != expected_token:
+            raise HTTPException(status_code=403, detail="invalid_token")
 
-        if payload.get("type") == "url_verification" and payload.get("challenge"):
-            return {"challenge": payload["challenge"]}
+        if _is_lark_url_verification(payload):
+            challenge = _extract_lark_challenge(payload)
+            if not challenge:
+                raise HTTPException(status_code=400, detail="missing_challenge")
+            return {"challenge": challenge}
 
         result = _get_service().save_lark_callback(payload)
         return {"success": True, "data": result}
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Lark 群消息回调处理失败: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
