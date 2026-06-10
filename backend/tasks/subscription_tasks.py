@@ -6,6 +6,7 @@ import logging
 from typing import Optional, Dict, Any
 
 from backend.celery_app import app
+from backend.utils.datetime_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -561,17 +562,21 @@ def fetch_zhishixingqiu_subscription_task(
     由 subscriptions API 在新建订阅时触发首抓（backfill），
     也由 Scheduler 定时触发增量抓取。
     """
+    is_scheduler_run = subscription_id is None and user_id is None
     logger.info(
         "[Celery Task] fetch_zhishixingqiu_subscription 开始: "
-        "subscription_id=%s user_id=%s force_fetch=%s",
-        subscription_id, user_id, force_fetch,
+        "subscription_id=%s user_id=%s force_fetch=%s scheduler=%s",
+        subscription_id, user_id, force_fetch, is_scheduler_run,
     )
     try:
         from backend.services.zsxq_subscription_service import ZsxqSubscriptionService
+        from backend.utils.lark_notifier import send_zsxq_scheduler_report
+
         result = ZsxqSubscriptionService().fetch_and_store_topics(
             subscription_id=subscription_id,
             user_id=user_id,
             force_fetch=force_fetch,
+            collect_report=is_scheduler_run,
         )
         logger.info(
             "[Celery Task] fetch_zhishixingqiu_subscription 完成: "
@@ -581,6 +586,8 @@ def fetch_zhishixingqiu_subscription_task(
             result.get("topics_updated", 0),
             result.get("failed_groups", []),
         )
+        if is_scheduler_run:
+            send_zsxq_scheduler_report(result)
         return result
 
     except Exception as exc:
@@ -595,11 +602,19 @@ def fetch_zhishixingqiu_subscription_task(
                 self.request.retries + 1, self.max_retries,
             )
             raise self.retry(exc=exc)
-        return {
+        failure_result = {
             "success": False,
             "message": str(exc),
             "groups_processed": 0,
             "topics_new": 0,
             "topics_updated": 0,
             "failed_groups": [],
+            "report": {
+                "errors": [str(exc)],
+                "finished_at": utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            },
         }
+        if is_scheduler_run:
+            from backend.utils.lark_notifier import send_zsxq_scheduler_report
+            send_zsxq_scheduler_report(failure_result)
+        return failure_result
