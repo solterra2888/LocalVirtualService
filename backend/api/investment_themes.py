@@ -335,68 +335,6 @@ async def update_theme_embedding(request: UpdateThemeRequest):
         raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
 
 
-@router.get("/news/{news_id}/themes")
-async def get_news_themes(news_id: int):
-    """
-    获取某条新闻匹配的投资主题
-    
-    从 news_theme_matches 表查询已保存的匹配结果
-    
-    示例：
-    ```
-    GET /api/investment-themes/news/123/themes
-    ```
-    """
-    try:
-        from backend.database.db_manager import DatabaseManager
-        
-        db_config = get_database_config()
-        db_manager = DatabaseManager(db_config)
-        conn = db_manager.get_connection()
-        
-        if not conn:
-            raise HTTPException(status_code=500, detail="Database connection failed")
-        
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT 
-                theme_id,
-                theme_name,
-                category,
-                similarity_score,
-                match_rank,
-                match_method,
-                matched_at
-            FROM news_theme_matches
-            WHERE news_id = %s
-            ORDER BY match_rank ASC
-        """, (news_id,))
-        
-        results = []
-        for row in cursor.fetchall():
-            results.append({
-                'theme_id': row[0],
-                'theme_name': row[1],
-                'category': row[2],
-                'similarity': float(row[3]),
-                'rank': row[4],
-                'match_method': row[5],
-                'matched_at': row[6].isoformat() if row[6] else None
-            })
-        
-        cursor.close()
-        conn.close()
-        
-        return {
-            "success": True,
-            "news_id": news_id,
-            "themes": results,
-            "count": len(results)
-        }
-        
-    except Exception as e:
-        logger.error(f"Getting news themes failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Getting failed: {str(e)}")
 
 
 @router.get("/themes")
@@ -1419,7 +1357,7 @@ async def delete_theme(
     - 硬删除主题（物理删除，不可恢复）
     - 级联删除相关数据：
       * 向量数据（investment_theme_embeddings）
-      * 新闻匹配记录（news_theme_matches）
+      * 主题-公司关联（theme_company_associations）
     - ⚠️ 警告：此操作不可逆！
     
     示例：
@@ -1620,7 +1558,7 @@ async def batch_delete_themes(
     - 硬删除多个主题（物理删除，不可恢复）
     - 批量删除相关数据：
       * 向量数据（investment_theme_embeddings）
-      * 新闻匹配记录（news_theme_matches）
+      * 主题-公司关联（theme_company_associations）
     - ⚠️ 警告：此操作不可逆！
     
     示例：
