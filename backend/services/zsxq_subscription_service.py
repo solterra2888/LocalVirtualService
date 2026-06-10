@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 # ---------- 常量（对齐 scripts/zsxq/my_zsxq.py） ----------
 COUNT = 15
-BACKFILL_DAYS = 3
+BACKFILL_DAYS = 1
 INCREMENT_MAX_PAGES = 5
 PAGE_INTERVAL = 5.0
 PAGES_PER_BATCH = 15
