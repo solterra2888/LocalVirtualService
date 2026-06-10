@@ -59,13 +59,13 @@ class ThemeFileParser:
         """
         if not text:
             return text
-        
+
         # 替换下划线为空格
         normalized = text.replace('_', ' ')
-        
-        # 转换为小写
-        normalized = normalized.lower()
-        
+
+        # 移除首尾空白，保留原始大小写
+        normalized = normalized.strip()
+
         return normalized
     
     def parse_file(self, file: UploadFile, market: str = 'US', group: str = None, creator_username: str = None) -> Dict[str, Any]:
