@@ -1180,6 +1180,12 @@ class InvestmentThemeEmbeddingService:
             theme_name = row[0]
             
             # 硬删除主题（物理删除）
+            # 先级联删除 content_theme_matches
+            cursor.execute(
+                "DELETE FROM content_theme_matches WHERE theme_id = %s",
+                (theme_id,),
+            )
+            # 再删除主题本身
             cursor.execute("""
                 DELETE FROM investment_theme_embeddings
                 WHERE theme_id = %s
@@ -1268,8 +1274,14 @@ class InvestmentThemeEmbeddingService:
                         continue
                     
                     theme_name = row[0]
-                    
+
                     # 硬删除主题（物理删除）
+                    # 先级联删除 content_theme_matches
+                    cursor.execute(
+                        "DELETE FROM content_theme_matches WHERE theme_id = %s",
+                        (theme_id,),
+                    )
+                    # 再删除主题本身
                     cursor.execute("""
                         DELETE FROM investment_theme_embeddings
                         WHERE theme_id = %s

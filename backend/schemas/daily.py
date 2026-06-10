@@ -129,6 +129,14 @@ class DailyFeedItem(BaseModel):
         ),
     )
 
+    matched_themes: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "关联的投资主题 [{theme_id, theme_name, category, match_mode, "
+            "confidence, matched_tickers}]，由内容打标后自动匹配生成"
+        ),
+    )
+
 
 class DailyFeedResponse(BaseModel):
     """分页响应."""

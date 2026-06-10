@@ -13,6 +13,7 @@ export type AiTagChipVariant =
   | 'overflow'
   | 'country'
   | 'person'
+  | 'theme'
   | 'signal-bullish'
   | 'signal-bearish'
   | 'signal-neutral'
@@ -26,6 +27,7 @@ const PALETTE = {
     overflow:         { bg: 'rgba(0, 0, 0, 0.06)',  fg: 'rgba(0, 0, 0, 0.72)' },
     country:          { bg: '#fff3e0', fg: '#e65100' },
     person:           { bg: '#e8eaf6', fg: '#283593' },
+    theme:            { bg: '#e0f7fa', fg: '#00695c' },
     'signal-bullish': { bg: '#e8f5e9', fg: '#2e7d32' },
     'signal-bearish': { bg: '#fce4ec', fg: '#c62828' },
     'signal-neutral': { bg: '#f5f5f5', fg: '#616161' },
@@ -38,6 +40,7 @@ const PALETTE = {
     overflow:         { bg: 'rgba(255, 255, 255, 0.1)',  fg: 'rgba(255, 255, 255, 0.78)' },
     country:          { bg: 'rgba(255, 152, 0, 0.22)',   fg: '#ffcc80' },
     person:           { bg: 'rgba(63, 81, 181, 0.28)',   fg: '#9fa8da' },
+    theme:            { bg: 'rgba(0, 150, 136, 0.22)',   fg: '#80cbc4' },
     'signal-bullish': { bg: 'rgba(76, 175, 80, 0.28)',   fg: '#a5d6a7' },
     'signal-bearish': { bg: 'rgba(244, 67, 54, 0.28)',   fg: '#ef9a9a' },
     'signal-neutral': { bg: 'rgba(255, 255, 255, 0.08)', fg: '#9e9e9e' },

@@ -4493,6 +4493,63 @@ export const ExecutionDetailsPanel: React.FC<{
                 </Space>
               </Descriptions.Item>
             )}
+            {fileTags.matched_themes && fileTags.matched_themes.length > 0 && (() => {
+              const all = fileTags.matched_themes;
+              const seen = new Set<string>();
+              const deduped = all.filter((t: { theme_name: string }) => {
+                if (seen.has(t.theme_name)) return false;
+                seen.add(t.theme_name);
+                return true;
+              });
+              const subThemes = Array.from(new Set(all.map((t: { category?: string }) => t.category).filter(Boolean) as string[]));
+              return (
+                <>
+                  <Descriptions.Item label="Themes">
+                    <Space size={[4, 4]} wrap>
+                      {deduped.slice(0, 6).map((theme: { theme_id?: string; theme_name: string; confidence?: number | null }) => (
+                        <Tooltip
+                          key={theme.theme_id || theme.theme_name}
+                          title={theme.confidence ? `${(theme.confidence * 100).toFixed(0)}%` : undefined}
+                          mouseEnterDelay={0.4}
+                        >
+                          <Tag bordered={false} style={aiTagChipStyle('theme', tagThemeMode)}>
+                            {theme.theme_name}
+                          </Tag>
+                        </Tooltip>
+                      ))}
+                      {deduped.length > 6 && (
+                        <Tooltip
+                          title={deduped.slice(6).map((t: { theme_name: string }) => t.theme_name).join(', ')}
+                          mouseEnterDelay={0.3}
+                        >
+                          <Tag bordered={false} style={aiTagChipStyle('overflow', tagThemeMode)}>
+                            +{deduped.length - 6}
+                          </Tag>
+                        </Tooltip>
+                      )}
+                    </Space>
+                  </Descriptions.Item>
+                  {subThemes.length > 0 && (
+                    <Descriptions.Item label="Sub-Themes">
+                      <Space size={[4, 4]} wrap>
+                        {subThemes.slice(0, 6).map((cat: string) => (
+                          <Tag key={cat} bordered={false} style={aiTagChipStyle('concept', tagThemeMode)}>
+                            {cat}
+                          </Tag>
+                        ))}
+                        {subThemes.length > 6 && (
+                          <Tooltip title={subThemes.slice(6).join(', ')} mouseEnterDelay={0.3}>
+                            <Tag bordered={false} style={aiTagChipStyle('overflow', tagThemeMode)}>
+                              +{subThemes.length - 6}
+                            </Tag>
+                          </Tooltip>
+                        )}
+                      </Space>
+                    </Descriptions.Item>
+                  )}
+                </>
+              );
+            })()}
             {fileTags.confidence != null && (
               <Descriptions.Item label="Confidence">
                 <Space size={4}>

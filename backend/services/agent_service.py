@@ -338,6 +338,12 @@ def _daily_feed_item_to_agent(d: DailyFeedItem) -> AgentDailyItem:
         tags=list(d.concepts or [])[:50],
         people=_people_names_from_daily(d)[:30],
         countries=list(d.countries or [])[:30],
+        matched_themes=[{
+            "theme_id": t.get("theme_id"),
+            "theme_name": t.get("theme_name"),
+            "category": t.get("category"),
+            "match_mode": t.get("match_mode"),
+        } for t in (d.matched_themes or [])[:10]],
     )
 
 

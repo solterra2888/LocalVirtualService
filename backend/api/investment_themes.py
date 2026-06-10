@@ -86,6 +86,12 @@ class BatchDeleteThemeRequest(BaseModel):
     theme_ids: List[str] = Field(..., description="主题ID列表")
 
 
+class BatchShareThemeRequest(BaseModel):
+    """批量更新主题分享状态请求"""
+    theme_ids: List[str] = Field(..., description="主题ID列表")
+    is_shared: bool = Field(..., description="是否公开分享")
+
+
 class GenerateDescriptionRequest(BaseModel):
     """生成主题描述请求"""
     group: Optional[str] = Field(None, max_length=100, description="主题分组（如 AI、crypto 等，可选）")
@@ -1540,6 +1546,117 @@ async def update_theme_share_status(
     except Exception as e:
         logger.error(f"Update theme share status failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+
+
+@router.post("/batch-share")
+async def batch_update_theme_share_status(
+    request: BatchShareThemeRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    批量更新主题的分享状态
+
+    权限：
+    - Admin：可以分享/取消分享所有主题
+    - 普通用户：只能分享/取消分享自己创建的主题
+
+    示例：
+    ```
+    POST /api/investment-themes/batch-share
+    {
+        "theme_ids": ["BK1001", "US_TECH"],
+        "is_shared": true
+    }
+    ```
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+
+        if not request.theme_ids:
+            raise HTTPException(status_code=400, detail="主题ID列表不能为空")
+
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+
+        if not current_user.is_admin:
+            conn = db_manager.get_connection()
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
+
+            cursor = conn.cursor()
+            placeholders = ','.join(['%s'] * len(request.theme_ids))
+            cursor.execute(f"""
+                SELECT theme_id, created_by
+                FROM investment_theme_embeddings
+                WHERE theme_id IN ({placeholders})
+            """, request.theme_ids)
+
+            theme_creators = {row[0]: row[1] for row in cursor.fetchall()}
+            cursor.close()
+            conn.close()
+
+            unauthorized_themes = [
+                tid for tid in request.theme_ids
+                if theme_creators.get(tid) != current_user.username
+            ]
+
+            if unauthorized_themes:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"权限不足：只能分享自己创建的主题: {', '.join(unauthorized_themes)}"
+                )
+
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+
+        cursor = conn.cursor()
+        placeholders = ','.join(['%s'] * len(request.theme_ids))
+
+        if request.is_shared:
+            cursor.execute(f"""
+                UPDATE investment_theme_embeddings
+                SET is_shared = TRUE,
+                    shared_at = NOW(),
+                    shared_by = %s,
+                    updated_at = NOW()
+                WHERE theme_id IN ({placeholders})
+            """, (current_user.username, *request.theme_ids))
+        else:
+            cursor.execute(f"""
+                UPDATE investment_theme_embeddings
+                SET is_shared = FALSE,
+                    shared_at = NULL,
+                    shared_by = NULL,
+                    updated_at = NOW()
+                WHERE theme_id IN ({placeholders})
+            """, (*request.theme_ids,))
+
+        updated_count = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        action_text = "分享" if request.is_shared else "取消分享"
+        logger.info(
+            f"User {current_user.username} batch {action_text} {updated_count} themes",
+            theme_ids=request.theme_ids,
+            is_shared=request.is_shared,
+            is_admin=current_user.is_admin
+        )
+
+        return {
+            "success": True,
+            "message": f"成功{action_text} {updated_count} 个主题",
+            "updated_count": updated_count,
+            "is_shared": request.is_shared
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch update theme share status failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量更新失败: {str(e)}")
 
 
 @router.post("/batch-delete")
@@ -3090,4 +3207,115 @@ async def remove_tag_from_theme(
     except Exception as e:
         logger.error(f"Remove tag from theme failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"移除标签失败: {str(e)}")
+
+
+# ==================== Content Theme Matches API ====================
+
+class ContentMatchTriggerRequest(BaseModel):
+    """手动触发单条内容匹配"""
+    content_type: str = Field(..., pattern=r'^(file|feed)$', description="内容类型: file | feed")
+    content_id: int = Field(..., description="内容 ID")
+    match_mode: str = Field('both', pattern=r'^(ticker|vector|both)$', description="匹配模式: ticker | vector | both")
+
+
+class ContentMatchBackfillRequest(BaseModel):
+    """批量回填请求"""
+    content_type: Optional[str] = Field(None, pattern=r'^(file|feed)$', description="内容类型（空=两者都回填）")
+    force: bool = Field(False, description="是否强制重新匹配已有记录")
+    hours: int = Field(48, ge=1, le=720, description="回填时间窗口（小时），默认 48")
+
+
+@router.get("/content-matches")
+async def get_content_matches(
+    content_type: Optional[str] = Query(None, pattern=r'^(file|feed)$', description="内容类型"),
+    content_id: Optional[int] = Query(None, description="内容 ID"),
+    theme_id: Optional[str] = Query(None, description="主题 ID"),
+    match_mode: Optional[str] = Query(None, pattern=r'^(ticker|vector)$', description="匹配模式"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """查询内容与投资主题的匹配结果"""
+    from backend.services.content_theme_matching_service import ContentThemeMatchingService
+
+    service = ContentThemeMatchingService()
+
+    if content_type and content_id:
+        # 查询指定内容的匹配
+        matches = service.get_matches_for_content(content_type, content_id, match_mode=match_mode)
+        return {"items": matches, "total": len(matches)}
+    elif theme_id:
+        # 查询指定主题的所有关联内容
+        result = service.get_matches_for_theme(
+            theme_id,
+            content_type=content_type,
+            match_mode=match_mode,
+            limit=limit,
+            offset=offset,
+        )
+        return result
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="必须提供 content_type + content_id 或 theme_id 参数",
+        )
+
+
+@router.post("/content-matches/trigger")
+async def trigger_content_match(
+    request: ContentMatchTriggerRequest,
+    current_user: TokenData = Depends(get_current_admin_user),
+):
+    """手动触发单条内容的主题匹配（Admin only）"""
+    from backend.tasks.theme_matching_tasks import (
+        match_content_themes_ticker_task,
+        match_content_themes_vector_task,
+    )
+
+    task_ids = []
+
+    if request.match_mode in ('ticker', 'both'):
+        task = match_content_themes_ticker_task.apply_async(
+            args=(request.content_type, request.content_id),
+            countdown=1,
+        )
+        task_ids.append({"mode": "ticker", "task_id": task.id})
+
+    if request.match_mode in ('vector', 'both'):
+        # 如果是 both，vector 会由 ticker 任务自动链式派发，这里只单独触发 vector 时手动派发
+        if request.match_mode == 'vector':
+            task = match_content_themes_vector_task.apply_async(
+                args=(request.content_type, request.content_id),
+                countdown=2,
+            )
+            task_ids.append({"mode": "vector", "task_id": task.id})
+
+    return {
+        "success": True,
+        "message": f"已派发 {len(task_ids)} 个匹配任务",
+        "tasks": task_ids,
+    }
+
+
+@router.post("/content-matches/backfill")
+async def backfill_content_matches(
+    request: ContentMatchBackfillRequest,
+    current_user: TokenData = Depends(get_current_admin_user),
+):
+    """批量回填历史内容的主题匹配（Admin only）"""
+    from backend.tasks.theme_matching_tasks import backfill_content_theme_matches_task
+
+    task = backfill_content_theme_matches_task.apply_async(
+        kwargs={
+            "content_type": request.content_type,
+            "force": request.force,
+            "hours": request.hours,
+        },
+    )
+
+    return {
+        "success": True,
+        "message": "回填任务已派发",
+        "task_id": task.id,
+    }
 

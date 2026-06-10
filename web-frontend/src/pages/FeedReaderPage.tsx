@@ -1716,7 +1716,7 @@ const FeedReaderPageInner: React.FC = () => {
                           {content.tags
                             && content.tags.sector !== '未分类'
                             && content.tags.sector_en !== 'Uncategorized'
-                            && (content.tags.tickers?.length || content.tags.sector) && (
+                            && (content.tags.tickers?.length || content.tags.sector || content.matched_themes?.length) && (
                               <Space size={[8, 8]} wrap style={{ marginTop: 4 }}>
                                 {content.tags.sector && (
                                   <Tag
@@ -1752,6 +1752,69 @@ const FeedReaderPageInner: React.FC = () => {
                                     )}
                                   </>
                                 )}
+                                {content.matched_themes && content.matched_themes.length > 0 && (() => {
+                                  const all = content.matched_themes!;
+                                  const seen = new Set<string>();
+                                  const deduped = all.filter(t => {
+                                    if (seen.has(t.theme_name)) return false;
+                                    seen.add(t.theme_name);
+                                    return true;
+                                  });
+                                  const subThemes = Array.from(new Set(all.map(t => t.category).filter(Boolean) as string[]));
+                                  return (
+                                    <>
+                                      {deduped.slice(0, 2).map((theme) => (
+                                        <Tooltip
+                                          key={theme.theme_id || theme.theme_name}
+                                          title={theme.confidence ? `${(theme.confidence * 100).toFixed(0)}%` : undefined}
+                                          mouseEnterDelay={0.4}
+                                        >
+                                          <Tag
+                                            bordered={false}
+                                            style={aiTagChipStyle('theme', themeMode)}
+                                          >
+                                            {theme.theme_name}
+                                          </Tag>
+                                        </Tooltip>
+                                      ))}
+                                      {deduped.length > 2 && (
+                                        <Tooltip title={deduped.slice(2).map(t => t.theme_name).join(', ')}>
+                                          <Tag
+                                            bordered={false}
+                                            style={{
+                                              ...aiTagChipStyle('overflow', themeMode),
+                                              cursor: 'default',
+                                            }}
+                                          >
+                                            +{deduped.length - 2}
+                                          </Tag>
+                                        </Tooltip>
+                                      )}
+                                      {subThemes.slice(0, 2).map((cat) => (
+                                        <Tag
+                                          key={`st-${cat}`}
+                                          bordered={false}
+                                          style={aiTagChipStyle('concept', themeMode)}
+                                        >
+                                          {cat}
+                                        </Tag>
+                                      ))}
+                                      {subThemes.length > 2 && (
+                                        <Tooltip title={subThemes.slice(2).join(', ')}>
+                                          <Tag
+                                            bordered={false}
+                                            style={{
+                                              ...aiTagChipStyle('overflow', themeMode),
+                                              cursor: 'default',
+                                            }}
+                                          >
+                                            +{subThemes.length - 2}
+                                          </Tag>
+                                        </Tooltip>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </Space>
                             )}
                         </div>

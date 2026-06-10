@@ -59,6 +59,15 @@ export interface DailyFeedItem {
   tickers: string[];
   concepts: string[];
   confidence: number | null;
+  /** 关联的投资主题 (向量语义匹配) */
+  matched_themes?: Array<{
+    theme_id?: string;
+    theme_name: string;
+    category?: string;
+    match_mode?: string;
+    confidence?: number | null;
+    matched_tickers?: string[];
+  }>;
   published_at: string;        // ISO 8601
   reading_time_min: number | null;
   navigate: DailyNavigate;

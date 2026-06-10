@@ -76,6 +76,7 @@ import {
   updateThemeTickers,
   updateThemeWithConflictResolution,
   updateThemeShareStatus,
+  batchUpdateThemeShareStatus,
   getAvailableTags,
   batchTagThemes
 } from '../services/investmentThemes';
@@ -1450,6 +1451,98 @@ const InvestmentThemesPageInner: React.FC = () => {
     });
   };
 
+  const handleBatchShare = (isShared: boolean) => {
+    if (state.selectedRowKeys.length === 0) {
+      message.warning(isShared ? 'Please select themes to share' : 'Please select themes to unshare');
+      return;
+    }
+
+    const selectedThemes = state.themes.filter(theme =>
+      state.selectedRowKeys.includes(theme.theme_id)
+    );
+
+    if (!isAdmin) {
+      const unauthorizedThemes = selectedThemes.filter(
+        theme => !(theme.can_share ?? theme.created_by === user?.username)
+      );
+
+      if (unauthorizedThemes.length > 0) {
+        message.error(`You can only share your own themes. ${unauthorizedThemes.length} theme(s) selected cannot be shared.`);
+        return;
+      }
+    }
+
+    const actionText = isShared ? '分享' : '取消分享';
+    const alreadyInTargetState = selectedThemes.filter(
+      theme => Boolean(theme.is_shared) === isShared
+    );
+
+    modal.confirm({
+      title: isShared ? `Confirm Batch Share ${selectedThemes.length} Themes?` : `Confirm Batch Unshare ${selectedThemes.length} Themes?`,
+      icon: <InfoCircleOutlined />,
+      width: 600,
+      styles: modalStyles,
+      okButtonProps: {
+        style: { borderRadius: 10, fontWeight: 500, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) },
+      },
+      cancelButtonProps: {
+        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
+      },
+      content: (
+        <div>
+          <Paragraph>
+            {isShared
+              ? 'After sharing, all users can view and use these themes (but cannot edit).'
+              : 'After unsharing, only you can view and use these themes.'}
+          </Paragraph>
+          {alreadyInTargetState.length > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              message={`${alreadyInTargetState.length} theme(s) are already ${isShared ? 'shared' : 'unshared'} and will be skipped.`}
+              style={{ marginBottom: 16 }}
+            />
+          )}
+          <div style={{ maxHeight: '240px', overflowY: 'auto' }}>
+            {selectedThemes.map(theme => (
+              <div key={theme.theme_id} style={{ padding: '8px', background: colors.codeBlockBg, marginBottom: '4px', borderRadius: 8 }}>
+                <Text strong>{theme.theme_name}</Text>
+                {' '}
+                <Text type="secondary">({theme.theme_id})</Text>
+              </div>
+            ))}
+          </div>
+        </div>
+      ),
+      okText: isShared ? 'Confirm Batch Share' : 'Confirm Batch Unshare',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          const themeIds = selectedThemes
+            .filter(theme => Boolean(theme.is_shared) !== isShared)
+            .map(theme => theme.theme_id);
+
+          if (themeIds.length === 0) {
+            message.info(`All selected themes are already ${isShared ? 'shared' : 'unshared'}`);
+            return;
+          }
+
+          const result = await batchUpdateThemeShareStatus(themeIds, isShared);
+
+          if (result.success) {
+            message.success(result.message || `Successfully ${actionText} ${result.updated_count} themes`);
+            setState(prev => ({ ...prev, selectedRowKeys: [] }));
+            loadThemes(state.currentPage);
+          } else {
+            message.error(result.message);
+          }
+        } catch (error: any) {
+          message.error(`${actionText}失败: ${getErrorMessage(error)}`);
+        }
+      }
+    });
+  };
+
   // Handle batch delete themes
   const handleBatchDelete = () => {
     if (state.selectedRowKeys.length === 0) {
@@ -2395,6 +2488,28 @@ const InvestmentThemesPageInner: React.FC = () => {
                 disabled={state.selectedRowKeys.length === 0}
               >
                 Remove Tags {state.selectedRowKeys.length > 0 ? `(${state.selectedRowKeys.length})` : ''}
+              </Button>
+            </Tooltip>
+
+            <Tooltip title={state.selectedRowKeys.length === 0 ? "Select themes to share" : `Share selected themes with all users${!isAdmin ? " (only your own)" : ""}`}>
+              <Button
+                type="default"
+                icon={<ShareAltOutlined />}
+                onClick={() => handleBatchShare(true)}
+                disabled={state.selectedRowKeys.length === 0}
+              >
+                Batch Share {state.selectedRowKeys.length > 0 ? `(${state.selectedRowKeys.length})` : ''}
+              </Button>
+            </Tooltip>
+
+            <Tooltip title={state.selectedRowKeys.length === 0 ? "Select themes to unshare" : `Unshare selected themes${!isAdmin ? " (only your own)" : ""}`}>
+              <Button
+                type="default"
+                icon={<CloseCircleOutlined />}
+                onClick={() => handleBatchShare(false)}
+                disabled={state.selectedRowKeys.length === 0}
+              >
+                Batch Unshare {state.selectedRowKeys.length > 0 ? `(${state.selectedRowKeys.length})` : ''}
               </Button>
             </Tooltip>
             

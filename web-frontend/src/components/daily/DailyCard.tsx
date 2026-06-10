@@ -30,6 +30,21 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
   const currentUser = useAuthStore((s) => s.user);
   const [hover, setHover] = React.useState(false);
 
+  // 去重: 同一 theme_name 可能通过 ticker + vector 两种模式匹配
+  const dedupedThemes = React.useMemo(() => {
+    const seen = new Set<string>();
+    return (item.matched_themes ?? []).filter(t => {
+      if (seen.has(t.theme_name)) return false;
+      seen.add(t.theme_name);
+      return true;
+    });
+  }, [item.matched_themes]);
+
+  const subThemes = React.useMemo(
+    () => Array.from(new Set((item.matched_themes ?? []).map(t => t.category).filter(Boolean) as string[])),
+    [item.matched_themes],
+  );
+
   const isIncomingShare = item.source === 'upload' && !!item.shared_by_username;
   const isOutgoingShare =
     item.source === 'upload' &&
@@ -140,6 +155,42 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
               {concept}
             </span>
           ))}
+          {dedupedThemes.length > 0 && dedupedThemes.slice(0, 3).map((theme) => (
+            <Tooltip
+              key={`th-${theme.theme_id || theme.theme_name}`}
+              title={theme.confidence ? `${(theme.confidence * 100).toFixed(0)}%` : undefined}
+              mouseEnterDelay={0.4}
+            >
+              <span style={aiTagChipStyle('theme', themeMode)}>
+                {theme.theme_name}
+              </span>
+            </Tooltip>
+          ))}
+          {dedupedThemes.length > 3 && (
+            <Tooltip
+              title={dedupedThemes.slice(3).map(t => t.theme_name).join(', ')}
+              mouseEnterDelay={0.3}
+            >
+              <span style={aiTagChipStyle('overflow', themeMode)}>
+                +{dedupedThemes.length - 3}
+              </span>
+            </Tooltip>
+          )}
+          {subThemes.length > 0 && subThemes.slice(0, 2).map((cat) => (
+            <span key={`st-${cat}`} style={aiTagChipStyle('concept', themeMode)}>
+              {cat}
+            </span>
+          ))}
+          {subThemes.length > 2 && (
+            <Tooltip
+              title={subThemes.slice(2).join(', ')}
+              mouseEnterDelay={0.3}
+            >
+              <span style={aiTagChipStyle('overflow', themeMode)}>
+                +{subThemes.length - 2}
+              </span>
+            </Tooltip>
+          )}
         </div>
       )}
 

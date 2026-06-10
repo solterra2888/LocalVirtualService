@@ -66,6 +66,12 @@ class AgentDailyItem(BaseModel):
         default_factory=list,
         description="Countries mentioned, full English names (e.g. 'United States').",
     )
+    matched_themes: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Matched investment themes [{theme_id, theme_name, category, match_mode}]"
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

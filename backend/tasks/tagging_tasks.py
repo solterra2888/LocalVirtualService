@@ -288,7 +288,26 @@ def tag_file_content_task(
             f"耗时={result['processing_time']:.2f}秒",
             source="celery_tagging"
         )
-        
+
+        # ── Theme Matching Chain: 打标完成后自动关联投资主题（向量匹配） ──
+        try:
+            theme_matching_enabled = os.getenv('THEME_VECTOR_MATCHING_ENABLED', 'false').lower() == 'true'
+            if theme_matching_enabled:
+                from backend.tasks.theme_matching_tasks import match_content_themes_vector_task
+                match_content_themes_vector_task.apply_async(
+                    args=('file', file_id),
+                    countdown=2,
+                )
+                info(
+                    f"打标签任务 {self.request.id}: 已链式派发 theme vector matching file_id={file_id}",
+                    source="celery_tagging",
+                )
+        except Exception as theme_err:
+            error(
+                f"Theme matching dispatch failed: {theme_err}",
+                source="celery_tagging",
+            )
+
         return final_result
         
     except Exception as e:

@@ -160,6 +160,24 @@ export async function updateThemeShareStatus(
 }
 
 /**
+ * Batch update theme share status
+ */
+export async function batchUpdateThemeShareStatus(
+  themeIds: string[],
+  isShared: boolean
+): Promise<{
+  success: boolean;
+  message: string;
+  updated_count: number;
+  is_shared: boolean;
+}> {
+  return await api.post('/investment-themes/batch-share', {
+    theme_ids: themeIds,
+    is_shared: isShared,
+  });
+}
+
+/**
  * Verify ticker for a theme (Admin only)
  * If ticker not in database, fetch from EODHD and save
  */

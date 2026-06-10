@@ -148,8 +148,34 @@ def get_file_tags(
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="File tags not found")
-        
-        return _row_to_file_tags_response(row)
+
+        result = _row_to_file_tags_response(row)
+
+        # 附加 matched_themes（从 content_theme_matches 查询）
+        try:
+            cursor.execute(
+                """
+                SELECT json_agg(json_build_object(
+                    'theme_id', ctm.theme_id,
+                    'theme_name', ite.theme_name,
+                    'category', ite.category,
+                    'match_mode', ctm.match_mode,
+                    'confidence', ctm.confidence,
+                    'matched_tickers', ctm.matched_tickers
+                ) ORDER BY ctm.confidence DESC)
+                FROM content_theme_matches ctm
+                JOIN investment_theme_embeddings ite ON ite.theme_id = ctm.theme_id
+                WHERE ctm.content_type = 'file' AND ctm.content_id = %s
+                """,
+                (file_id,),
+            )
+            themes_row = cursor.fetchone()
+            result['matched_themes'] = themes_row[0] if themes_row and themes_row[0] else []
+        except Exception as e:
+            logger.warning(f"查询 matched_themes 失败 (file_id={file_id}): {e}")
+            result['matched_themes'] = []
+
+        return result
     finally:
         conn.close()
 

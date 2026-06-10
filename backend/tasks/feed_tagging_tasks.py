@@ -224,6 +224,27 @@ def tag_feed_content_task(
                     source="celery_feed_tagging",
                 )
 
+        # ── Theme Matching Chain: 打标完成后自动关联投资主题（向量匹配） ──
+        try:
+            theme_matching_enabled = os.getenv('THEME_VECTOR_MATCHING_ENABLED', 'false').lower() == 'true'
+            if theme_matching_enabled:
+                from backend.tasks.theme_matching_tasks import match_content_themes_vector_task
+                match_content_themes_vector_task.apply_async(
+                    args=('feed', content_id),
+                    countdown=2,
+                )
+                info(
+                    f"FeedTagging {self.request.id}: 已链式派发 theme vector matching "
+                    f"content_id={content_id}",
+                    source="celery_feed_tagging",
+                )
+        except Exception as theme_err:
+            error(
+                f"FeedTagging {self.request.id}: Theme matching dispatch 失败 "
+                f"content_id={content_id} err={theme_err}",
+                source="celery_feed_tagging",
+            )
+
         return {
             "status": "completed",
             "content_id": content_id,
@@ -367,6 +388,27 @@ def map_news_tags_task(
             f"concepts={len(result.get('concepts') or [])}",
             source="celery_feed_tagging",
         )
+
+        # ── Theme Matching Chain: EODHD news 映射后也关联投资主题（向量匹配） ──
+        if status == "completed":
+            try:
+                theme_matching_enabled = os.getenv('THEME_VECTOR_MATCHING_ENABLED', 'false').lower() == 'true'
+                if theme_matching_enabled:
+                    from backend.tasks.theme_matching_tasks import match_content_themes_vector_task
+                    match_content_themes_vector_task.apply_async(
+                        args=('feed', content_id),
+                        countdown=2,
+                    )
+                    info(
+                        f"map_news_tags: 已链式派发 theme vector matching content_id={content_id}",
+                        source="celery_feed_tagging",
+                    )
+            except Exception as theme_err:
+                error(
+                    f"map_news_tags: Theme matching dispatch 失败 content_id={content_id} err={theme_err}",
+                    source="celery_feed_tagging",
+                )
+
         return {
             "status": status,
             "content_id": content_id,

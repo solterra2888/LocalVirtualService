@@ -1202,7 +1202,21 @@ async def get_subscription_contents(
                 scus.summary    AS personalized_summary,
                 scus.reasoning  AS personalized_reasoning,
                 CASE WHEN scus.id IS NOT NULL THEN 'personalized' ELSE 'global' END AS summary_source,
-                sc.categories
+                sc.categories,
+                COALESCE(
+                    (SELECT json_agg(json_build_object(
+                        'theme_id', ctm.theme_id,
+                        'theme_name', ite.theme_name,
+                        'category', ite.category,
+                        'match_mode', ctm.match_mode,
+                        'confidence', ctm.confidence,
+                        'matched_tickers', ctm.matched_tickers
+                    ) ORDER BY ctm.confidence DESC)
+                    FROM content_theme_matches ctm
+                    JOIN investment_theme_embeddings ite ON ite.theme_id = ctm.theme_id
+                    WHERE ctm.content_type = 'feed' AND ctm.content_id = sc.id
+                    ), '[]'::json
+                ) AS matched_themes_raw
             FROM subscription_content sc
             LEFT JOIN subscription_content_tags sct ON sct.subscription_content_id = sc.id
             LEFT JOIN subscription_content_user_summaries scus
@@ -1236,11 +1250,11 @@ async def get_subscription_contents(
             user_read_status = row[15].get(str(user_id), {}) if row[15] else {}
 
             # AI 标签 (LEFT JOIN 结果, 未打标 → None)
-            # 列序: [30]sector [31]sector_en [32]industry [32]industry_en
+            # 列序: [30]sector [31]sector_en [32]industry [33]industry_en
             #       [34]ticker [35]concepts [36]summary [37]confidence [38]tagged_at
             #       [39]people [40]countries [41]tag_schema_version
             #       [42]personalized_summary [43]personalized_reasoning [44]summary_source
-            #       [45]categories
+            #       [45]categories [46]matched_themes_raw
             tags_payload = None
             if row[30] is not None or row[41] == 'tweet_signal_v1':
                 tickers_raw = row[34]
@@ -1312,6 +1326,8 @@ async def get_subscription_contents(
                 'summary_source': row[44],
                 # News: EODHD 原始分类标签 (TEXT[])，供前端 NewsOriginalView 展示
                 'categories': list(row[45]) if row[45] else [],
+                # Investment Themes 语义匹配结果
+                'matched_themes': row[46] if row[46] else [],
             })
         
         cursor.close()

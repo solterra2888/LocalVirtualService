@@ -61,6 +61,10 @@ class FileTagsResponse(BaseModel):
     tagged_at: Optional[UtcDateTime]
     created_at: Optional[UtcDateTime]
     updated_at: Optional[UtcDateTime]
+    matched_themes: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="关联的投资主题 [{theme_id, theme_name, category, match_mode, confidence, matched_tickers}]"
+    )
 
     class Config:
         from_attributes = True

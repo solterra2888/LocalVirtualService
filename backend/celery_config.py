@@ -72,6 +72,10 @@ task_routes = {
     'batch_tag_feed_content': {'queue': 'file_processing'},      # Feeds 批量打标派发器
     'personalize_feed_summary': {'queue': 'file_processing'},    # PR-6: Feeds per-user 个性化 summary
     'fan_out_personalize_summary': {'queue': 'file_processing'}, # PR-N2: tag 完成后扇出 per-user 个性化派发器
+    # 内容主题匹配（tag 完成后链式触发）
+    'match_content_themes_ticker': {'queue': 'file_processing'},  # Phase 1: ticker 重叠匹配（纯 SQL）
+    'match_content_themes_vector': {'queue': 'ai_processing'},    # Phase 2: 向量语义匹配（Qwen embedding）
+    'backfill_content_theme_matches': {'queue': 'ai_processing'}, # 批量回填历史内容
     'fetch_zhishixingqiu_subscription': {'queue': 'data_fetching'},  # 知识星球订阅抓取
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
     'smart_wait_and_add_user': {'queue': 'data_fetching'},

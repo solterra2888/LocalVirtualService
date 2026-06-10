@@ -252,6 +252,7 @@ def _normalize_subtypes(raw: Optional[List[str]]) -> Optional[List[str]]:
 #  24  shared_by_user_id       int / null   (Upload 共享：分享者 user_id)
 #  25  shared_by_avatar_url_raw text / null  (Upload 共享：分享者头像原始值, Python 层再经 resolve_avatar_url 签名)
 #  26  shared_to_recipients_raw json / null   (Upload owner：分享给的用户 JSON 数组; 非 owner = null)
+#  27  matched_themes_raw json / null          (关联的投资主题 JSON 数组)
 
 _UPLOAD_SQL = """
     SELECT
@@ -324,7 +325,22 @@ _UPLOAD_SQL = """
               '[]'::json
             )
           ELSE NULL
-        END                                           AS shared_to_recipients_raw
+        END                                           AS shared_to_recipients_raw,
+        COALESCE(
+            (SELECT json_agg(json_build_object(
+                'theme_id', ctm.theme_id,
+                'theme_name', ite.theme_name,
+                'category', ite.category,
+                'match_mode', ctm.match_mode,
+                'confidence', ctm.confidence,
+                'matched_tickers', ctm.matched_tickers
+            ) ORDER BY ctm.confidence DESC)
+            FROM content_theme_matches ctm
+            JOIN investment_theme_embeddings ite ON ite.theme_id = ctm.theme_id
+            WHERE ctm.content_type = 'upload'
+              AND ctm.content_id = fpd.id
+            ), '[]'::json
+        )                                               AS matched_themes_raw
     FROM file_processing_details fpd
     JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
     LEFT JOIN file_tags ft ON ft.file_id = fpd.id
@@ -381,7 +397,22 @@ _FEED_SQL = """
         NULL::text                                    AS shared_by_username,
         NULL::integer                                 AS shared_by_user_id,
         NULL::text                                    AS shared_by_avatar_url_raw,
-        NULL::json                                    AS shared_to_recipients_raw
+        NULL::json                                    AS shared_to_recipients_raw,
+        COALESCE(
+            (SELECT json_agg(json_build_object(
+                'theme_id', ctm.theme_id,
+                'theme_name', ite.theme_name,
+                'category', ite.category,
+                'match_mode', ctm.match_mode,
+                'confidence', ctm.confidence,
+                'matched_tickers', ctm.matched_tickers
+            ) ORDER BY ctm.confidence DESC)
+            FROM content_theme_matches ctm
+            JOIN investment_theme_embeddings ite ON ite.theme_id = ctm.theme_id
+            WHERE ctm.content_type = 'feed'
+              AND ctm.content_id = sc.id
+            ), '[]'::json
+        )                                               AS matched_themes_raw
     FROM subscription_content sc
     LEFT JOIN subscription_content_tags sct
         ON sct.subscription_content_id = sc.id
@@ -438,6 +469,7 @@ def _build_filter_clauses(
     author: Optional[str] = None,
     people: Optional[List[str]] = None,
     countries: Optional[List[str]] = None,
+    themes: Optional[List[str]] = None,
 ) -> tuple[str, str, Dict[str, Any]]:
     """构造 Upload / Feed 两侧的额外 WHERE 子句与参数。
 
@@ -562,6 +594,19 @@ def _build_filter_clauses(
             " OR COALESCE(sc.author_identifier, '') ILIKE %(author_like)s)"
         )
 
+    if themes:
+        params["theme_ids"] = themes
+        upload_parts.append(
+            "AND EXISTS (SELECT 1 FROM content_theme_matches ctm "
+            "WHERE ctm.content_type='upload' AND ctm.content_id=fpd.id "
+            "AND ctm.theme_id = ANY(%(theme_ids)s))"
+        )
+        feed_parts.append(
+            "AND EXISTS (SELECT 1 FROM content_theme_matches ctm "
+            "WHERE ctm.content_type='feed' AND ctm.content_id=sc.id "
+            "AND ctm.theme_id = ANY(%(theme_ids)s))"
+        )
+
     return " ".join(upload_parts), " ".join(feed_parts), params
 
 
@@ -624,6 +669,38 @@ def _parse_shared_to_recipients_json(raw: Any) -> List[DailyShareRecipient]:
     return out
 
 
+def _parse_matched_themes(raw: Any) -> List[Dict[str, Any]]:
+    """解析 scalar subquery 返回的 matched_themes JSON 数组。"""
+    if raw is None:
+        return []
+    data: Any = raw
+    if isinstance(raw, (bytes, memoryview)):
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return []
+    elif isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(data, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        out.append({
+            "theme_id": item.get("theme_id"),
+            "theme_name": item.get("theme_name"),
+            "category": item.get("category"),
+            "match_mode": item.get("match_mode"),
+            "confidence": float(item["confidence"]) if item.get("confidence") is not None else None,
+            "matched_tickers": item.get("matched_tickers") or [],
+        })
+    return out
+
+
 def _row_to_item(
     row: tuple,
     subscription_id_map: Dict[tuple, int],
@@ -657,6 +734,7 @@ def _row_to_item(
         shared_by_user_id,
         shared_by_avatar_url_raw,
         shared_to_recipients_raw,
+        matched_themes_raw,
     ) = row
 
     if source == "upload":
@@ -723,6 +801,7 @@ def _row_to_item(
         shared_to=_parse_shared_to_recipients_json(shared_to_recipients_raw)
         if source == "upload"
         else [],
+        matched_themes=_parse_matched_themes(matched_themes_raw),
     )
 
 
@@ -743,6 +822,9 @@ def list_daily_feed(
     q: Optional[str] = Query(None, max_length=200, description="标题/摘要/正文模糊搜索"),
     tickers: Optional[List[str]] = Query(
         None, description='Ticker 多选过滤，如 ["NVDA.US"]'
+    ),
+    themes: Optional[List[str]] = Query(
+        None, description='投资主题 ID 多选过滤，如 ["crypto_etf"]'
     ),
     limit: int = Query(30, ge=1, le=100, description="每页条数"),
     offset: int = Query(0, ge=0, description="偏移量"),
@@ -765,6 +847,7 @@ def list_daily_feed(
         source_subtypes=source_subtypes,
         q=q,
         tickers=tickers,
+        themes=themes,
     )
 
     base_params: Dict[str, Any] = {
@@ -853,6 +936,7 @@ def get_daily_stats(
     date_to: Optional[datetime] = Query(None, description="结束时间 (ISO 8601)"),
     q: Optional[str] = Query(None, max_length=200),
     tickers: Optional[List[str]] = Query(None),
+    themes: Optional[List[str]] = Query(None, description='投资主题 ID 过滤'),
     db: DatabaseManager = Depends(get_db),
     current_user: TokenData = Depends(get_current_user),
 ):
@@ -868,6 +952,7 @@ def get_daily_stats(
         source_subtypes=None,  # stats 不按 subtype 过滤
         q=q,
         tickers=tickers,
+        themes=themes,
     )
 
     base_params: Dict[str, Any] = {
@@ -943,6 +1028,7 @@ def list_daily_calendar(
     source_subtypes: Optional[List[str]] = Query(None),
     q: Optional[str] = Query(None, max_length=200),
     tickers: Optional[List[str]] = Query(None),
+    themes: Optional[List[str]] = Query(None, description='投资主题 ID 过滤'),
     db: DatabaseManager = Depends(get_db),
     current_user: TokenData = Depends(get_current_user),
 ):
@@ -977,6 +1063,7 @@ def list_daily_calendar(
         source_subtypes=source_subtypes,
         q=q,
         tickers=tickers,
+        themes=themes,
     )
 
     base_params: Dict[str, Any] = {
