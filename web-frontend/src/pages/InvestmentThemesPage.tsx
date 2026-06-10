@@ -50,7 +50,6 @@ import {
   UploadOutlined,
   InboxOutlined,
   DownloadOutlined,
-  ShareAltOutlined,
   UserOutlined,
   CloseCircleOutlined,
   QuestionCircleOutlined
@@ -75,8 +74,7 @@ import {
   getAllUsers,
   updateThemeTickers,
   updateThemeWithConflictResolution,
-  updateThemeShareStatus,
-  batchUpdateThemeShareStatus,
+  exportThemes,
   getAvailableTags,
   batchTagThemes
 } from '../services/investmentThemes';
@@ -200,7 +198,7 @@ interface PageState {
     selectedUsers: string[];  // 选中的 User 筛选值（支持多选，admin专用）
     availableUsers: string[];  // 所有可用的 users（从 API 获取）
     loadingUsers: boolean;  // 是否正在加载 users
-    ownershipFilter: 'all' | 'own' | 'shared';  // 所有权筛选器：全部/自己创建/他人分享
+    ownershipFilter: 'all' | 'own';  // 所有权筛选器：全部/自己创建
     // 批量打标签相关
     batchTagModalVisible: boolean;
     batchTagAction: 'add' | 'remove';
@@ -305,8 +303,7 @@ const InvestmentThemesPageInner: React.FC = () => {
         (currentPage - 1) * currentPageSize,
         effectiveSearch,
         effectiveTags.length > 0 ? effectiveTags : undefined,
-        isAdmin && effectiveUsers.length > 0 ? effectiveUsers : undefined,
-        true  // showShared: 默认显示所有（非admin用户：自己创建的+已分享的；admin用户：所有主题）
+        isAdmin && effectiveUsers.length > 0 ? effectiveUsers : undefined
       );
       
       setState(prev => ({
@@ -351,7 +348,7 @@ const InvestmentThemesPageInner: React.FC = () => {
     loadThemes(1, state.pageSize, state.searchKeyword, state.selectedFilterTags, users);
   };
 
-  const handleOwnershipFilterChange = (filter: 'all' | 'own' | 'shared') => {
+  const handleOwnershipFilterChange = (filter: 'all' | 'own') => {
     setState(prev => ({
       ...prev,
       ownershipFilter: filter,
@@ -1355,36 +1352,26 @@ const InvestmentThemesPageInner: React.FC = () => {
     }
   };
 
-  // Handle toggle share status
-  const handleToggleShare = async (theme: InvestmentTheme) => {
-    const newStatus = !theme.is_shared;
-    const actionText = newStatus ? '分享' : '取消分享';
-    
-    modal.confirm({
-      title: newStatus ? 'Confirm Share Theme?' : 'Confirm Unshare Theme?',
-      icon: <InfoCircleOutlined />,
-      styles: modalStyles,
-      okButtonProps: {
-        style: { borderRadius: 10, fontWeight: 500, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) },
-      },
-      cancelButtonProps: {
-        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
-      },
-      content: newStatus 
-        ? 'After sharing, all users can view and use this theme (but cannot edit).'
-        : 'After unsharing, only you can view and use this theme.',
-      okText: newStatus ? 'Confirm Share' : 'Confirm Unshare',
-      cancelText: 'Cancel',
-      onOk: async () => {
-        try {
-          await updateThemeShareStatus(theme.theme_id, newStatus);
-          message.success(`主题${actionText}成功`);
-          loadThemes(state.currentPage);
-        } catch (error) {
-          message.error(`${actionText}失败: ${getErrorMessage(error)}`);
-        }
-      }
-    });
+  // Handle export themes to Excel
+  const handleExportThemes = async () => {
+    try {
+      const blob = await exportThemes();
+      const url = URL.createObjectURL(blob);
+
+      // 从 Content-Disposition 提取文件名，或使用默认值
+      const filename = `investment_themes_${user?.username}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      message.success('主题导出成功');
+    } catch (error: any) {
+      message.error(`导出失败: ${getErrorMessage(error)}`);
+    }
   };
 
   // Handle delete theme
@@ -1446,98 +1433,6 @@ const InvestmentThemesPageInner: React.FC = () => {
           const errorMsg = getErrorMessage(error);
           console.error('Delete theme error:', error);
           message.error(`Delete failed: ${errorMsg}`);
-        }
-      }
-    });
-  };
-
-  const handleBatchShare = (isShared: boolean) => {
-    if (state.selectedRowKeys.length === 0) {
-      message.warning(isShared ? 'Please select themes to share' : 'Please select themes to unshare');
-      return;
-    }
-
-    const selectedThemes = state.themes.filter(theme =>
-      state.selectedRowKeys.includes(theme.theme_id)
-    );
-
-    if (!isAdmin) {
-      const unauthorizedThemes = selectedThemes.filter(
-        theme => !(theme.can_share ?? theme.created_by === user?.username)
-      );
-
-      if (unauthorizedThemes.length > 0) {
-        message.error(`You can only share your own themes. ${unauthorizedThemes.length} theme(s) selected cannot be shared.`);
-        return;
-      }
-    }
-
-    const actionText = isShared ? '分享' : '取消分享';
-    const alreadyInTargetState = selectedThemes.filter(
-      theme => Boolean(theme.is_shared) === isShared
-    );
-
-    modal.confirm({
-      title: isShared ? `Confirm Batch Share ${selectedThemes.length} Themes?` : `Confirm Batch Unshare ${selectedThemes.length} Themes?`,
-      icon: <InfoCircleOutlined />,
-      width: 600,
-      styles: modalStyles,
-      okButtonProps: {
-        style: { borderRadius: 10, fontWeight: 500, ...(isDark ? { background: '#2196F3', borderColor: '#2196F3' } : {}) },
-      },
-      cancelButtonProps: {
-        style: isDark ? { color: colors.textSecondary, borderColor: colors.cardBorder } : undefined,
-      },
-      content: (
-        <div>
-          <Paragraph>
-            {isShared
-              ? 'After sharing, all users can view and use these themes (but cannot edit).'
-              : 'After unsharing, only you can view and use these themes.'}
-          </Paragraph>
-          {alreadyInTargetState.length > 0 && (
-            <Alert
-              type="info"
-              showIcon
-              message={`${alreadyInTargetState.length} theme(s) are already ${isShared ? 'shared' : 'unshared'} and will be skipped.`}
-              style={{ marginBottom: 16 }}
-            />
-          )}
-          <div style={{ maxHeight: '240px', overflowY: 'auto' }}>
-            {selectedThemes.map(theme => (
-              <div key={theme.theme_id} style={{ padding: '8px', background: colors.codeBlockBg, marginBottom: '4px', borderRadius: 8 }}>
-                <Text strong>{theme.theme_name}</Text>
-                {' '}
-                <Text type="secondary">({theme.theme_id})</Text>
-              </div>
-            ))}
-          </div>
-        </div>
-      ),
-      okText: isShared ? 'Confirm Batch Share' : 'Confirm Batch Unshare',
-      cancelText: 'Cancel',
-      onOk: async () => {
-        try {
-          const themeIds = selectedThemes
-            .filter(theme => Boolean(theme.is_shared) !== isShared)
-            .map(theme => theme.theme_id);
-
-          if (themeIds.length === 0) {
-            message.info(`All selected themes are already ${isShared ? 'shared' : 'unshared'}`);
-            return;
-          }
-
-          const result = await batchUpdateThemeShareStatus(themeIds, isShared);
-
-          if (result.success) {
-            message.success(result.message || `Successfully ${actionText} ${result.updated_count} themes`);
-            setState(prev => ({ ...prev, selectedRowKeys: [] }));
-            loadThemes(state.currentPage);
-          } else {
-            message.error(result.message);
-          }
-        } catch (error: any) {
-          message.error(`${actionText}失败: ${getErrorMessage(error)}`);
         }
       }
     });
@@ -2369,11 +2264,10 @@ const InvestmentThemesPageInner: React.FC = () => {
       title: 'Actions',
       key: 'actions',
       render: (_: any, record: InvestmentTheme) => {
-        // Check if user can edit/delete/share this theme
+        // Check if user can edit/delete this theme
         const canEdit = record.can_edit ?? (isAdmin || record.created_by === user?.username);
         const canDelete = record.can_delete ?? canEdit;
-        const canShare = record.can_share ?? canEdit;
-        
+
         return (
           <Space size="small">
             <Tooltip title={canEdit ? "Edit Theme" : "只能编辑自己创建的主题"}>
@@ -2385,19 +2279,7 @@ const InvestmentThemesPageInner: React.FC = () => {
                 disabled={!canEdit}
               />
             </Tooltip>
-            
-            {canShare && (
-              <Tooltip title={record.is_shared ? "取消分享" : "分享给所有用户"}>
-                <Button
-                  type="link"
-                  size="small"
-                  icon={record.is_shared ? <CloseCircleOutlined /> : <ShareAltOutlined />}
-                  onClick={() => handleToggleShare(record)}
-                  style={{ color: record.is_shared ? '#52c41a' : undefined }}
-                />
-              </Tooltip>
-            )}
-            
+
             <Tooltip title={canDelete ? "Delete Theme" : "只能删除自己创建的主题"}>
               <Button
                 type="link"
@@ -2491,28 +2373,16 @@ const InvestmentThemesPageInner: React.FC = () => {
               </Button>
             </Tooltip>
 
-            <Tooltip title={state.selectedRowKeys.length === 0 ? "Select themes to share" : `Share selected themes with all users${!isAdmin ? " (only your own)" : ""}`}>
+            <Tooltip title="Export your themes to Excel file">
               <Button
                 type="default"
-                icon={<ShareAltOutlined />}
-                onClick={() => handleBatchShare(true)}
-                disabled={state.selectedRowKeys.length === 0}
+                icon={<DownloadOutlined />}
+                onClick={handleExportThemes}
               >
-                Batch Share {state.selectedRowKeys.length > 0 ? `(${state.selectedRowKeys.length})` : ''}
+                Export
               </Button>
             </Tooltip>
 
-            <Tooltip title={state.selectedRowKeys.length === 0 ? "Select themes to unshare" : `Unshare selected themes${!isAdmin ? " (only your own)" : ""}`}>
-              <Button
-                type="default"
-                icon={<CloseCircleOutlined />}
-                onClick={() => handleBatchShare(false)}
-                disabled={state.selectedRowKeys.length === 0}
-              >
-                Batch Unshare {state.selectedRowKeys.length > 0 ? `(${state.selectedRowKeys.length})` : ''}
-              </Button>
-            </Tooltip>
-            
             <Tooltip title={state.selectedRowKeys.length === 0 ? "Select themes to delete" : `Delete selected themes${!isAdmin ? " (only your own)" : ""}`}>
               <Button
                 danger
@@ -2630,19 +2500,20 @@ const InvestmentThemesPageInner: React.FC = () => {
               onSearch={handleSearchThemes}
               style={{ width: 260, ...(isDark ? { backgroundColor: colors.inputBg } : {}) }}
             />
-            <Space size="small">
-              <Text type="secondary">Ownership:</Text>
-              <Select
-                value={state.ownershipFilter}
-                onChange={handleOwnershipFilterChange}
-                style={{ width: 120, ...(isDark ? { backgroundColor: colors.inputBg } : {}) }}
-                size="small"
-              >
-                <Select.Option value="all">All</Select.Option>
-                <Select.Option value="own">My Own</Select.Option>
-                <Select.Option value="shared">Shared</Select.Option>
-              </Select>
-            </Space>
+            {isAdmin && (
+              <Space size="small">
+                <Text type="secondary">Ownership:</Text>
+                <Select
+                  value={state.ownershipFilter}
+                  onChange={handleOwnershipFilterChange}
+                  style={{ width: 120, ...(isDark ? { backgroundColor: colors.inputBg } : {}) }}
+                  size="small"
+                >
+                  <Select.Option value="all">All</Select.Option>
+                  <Select.Option value="own">My Own</Select.Option>
+                </Select>
+              </Space>
+            )}
             <Space size="small">
               <Text type="secondary">Tags:</Text>
               <Select
@@ -2703,11 +2574,7 @@ const InvestmentThemesPageInner: React.FC = () => {
             }
             return state.themes.filter(theme => {
               if (state.ownershipFilter === 'own') {
-                // My own: created by current user
                 return (theme as any).created_by === user?.username;
-              } else if (state.ownershipFilter === 'shared') {
-                // Shared: is_shared is true and not created by current user
-                return (theme as any).is_shared === true && (theme as any).created_by !== user?.username;
               }
               return true;
             });
@@ -2737,13 +2604,9 @@ const InvestmentThemesPageInner: React.FC = () => {
               const filteredThemes = state.themes.filter(theme => {
                 if (state.ownershipFilter === 'own') {
                   return (theme as any).created_by === user?.username;
-                } else if (state.ownershipFilter === 'shared') {
-                  return (theme as any).is_shared === true && (theme as any).created_by !== user?.username;
                 }
                 return true;
               });
-              // Note: This is the filtered count for current page only
-              // For accurate total count, we would need backend filtering
               return filteredThemes.length;
             }, [state.themes, state.ownershipFilter, state.total, user?.username]),
             showSizeChanger: true,

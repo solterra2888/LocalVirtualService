@@ -86,12 +86,6 @@ class BatchDeleteThemeRequest(BaseModel):
     theme_ids: List[str] = Field(..., description="主题ID列表")
 
 
-class BatchShareThemeRequest(BaseModel):
-    """批量更新主题分享状态请求"""
-    theme_ids: List[str] = Field(..., description="主题ID列表")
-    is_shared: bool = Field(..., description="是否公开分享")
-
-
 class GenerateDescriptionRequest(BaseModel):
     """生成主题描述请求"""
     group: Optional[str] = Field(None, max_length=100, description="主题分组（如 AI、crypto 等，可选）")
@@ -143,11 +137,6 @@ class VerifyTickerRequest(BaseModel):
     """验证ticker请求"""
     theme_id: str = Field(..., description="主题ID")
     ticker: str = Field(..., description="要验证的ticker（完整格式，如 TLN.US）")
-
-
-class UpdateShareStatusRequest(BaseModel):
-    """更新分享状态请求"""
-    is_shared: bool = Field(..., description="是否公开分享")
 
 
 class BatchTagRequest(BaseModel):
@@ -349,30 +338,28 @@ async def list_all_themes(
     search: Optional[str] = Query(None, description="Search keyword for theme name or category"),
     group: Optional[List[str]] = Query(None, description="Filter by group name(s) - multiple selection supported"),
     created_by: Optional[List[str]] = Query(None, description="Filter by creator username(s) - multiple selection supported (admin only)"),
-    show_shared: bool = Query(True, description="是否显示已分享的themes（非admin用户）"),
     limit: int = 100,
     offset: int = 0,
     current_user: TokenData = Depends(get_current_user)
 ):
     """
     列出所有投资主题
-    
+
     权限：
     - admin用户：可以查看所有主题
-    - 非admin用户：可以查看自己创建的主题 + 已分享的主题(is_shared=true)
-    
+    - 非admin用户：只能查看自己创建的主题
+
     参数：
     - market: 市场过滤（HK/US/CN）
     - search: 搜索关键词（主题名称或类别）
     - group: 按组名筛选（支持多个，逗号分隔或多次传递）
     - created_by: 按创建者用户名筛选（支持多个，仅admin用户可用）
-    - show_shared: 是否显示已分享的themes（非admin用户，默认true）
     - limit: 每页数量
     - offset: 偏移量
-    
+
     示例：
     ```
-    GET /api/investment-themes/themes?market=US&limit=20&group=AI&group=crypto&created_by=user1&created_by=user2&show_shared=true
+    GET /api/investment-themes/themes?market=US&limit=20&group=AI&group=crypto&created_by=user1&created_by=user2
     ```
     """
     try:
@@ -393,19 +380,9 @@ async def list_all_themes(
 
         # 权限和筛选逻辑
         if not current_user.is_admin:
-            # 非admin用户：自己创建的 OR 已分享的
-            if show_shared:
-                filters.append("(ite.created_by = %s OR ite.is_shared = TRUE)")
-                filter_params.append(current_user.username)
-            else:
-                # 只看自己创建的
-                filters.append("ite.created_by = %s")
-                filter_params.append(current_user.username)
-        else:
-            # admin用户：如果选择"仅我创建的"，则只显示自己创建的
-            if not show_shared:
-                filters.append("ite.created_by = %s")
-                filter_params.append(current_user.username)
+            # 非admin用户：只能看自己创建的主题
+            filters.append("ite.created_by = %s")
+            filter_params.append(current_user.username)
 
         search_value = search.strip() if search else None
         if search_value:
@@ -468,10 +445,7 @@ async def list_all_themes(
                 ite.description,
                 ite.description_source,
                 ite.is_enabled_for_matching,
-                ite."group",
-                ite.is_shared,
-                ite.shared_at,
-                ite.shared_by
+                ite."group"
             FROM investment_theme_embeddings ite
             {where_clause}
             ORDER BY ite.theme_name
@@ -496,15 +470,11 @@ async def list_all_themes(
                 'description_source': row[11],
                 'is_enabled_for_matching': row[12] if row[12] is not None else True,
                 'group': row[13],
-                'is_shared': row[14] if row[14] is not None else False,
-                'shared_at': row[15].isoformat() if row[15] else None,
-                'shared_by': row[16],
                 'has_embedding': True,
                 'tickers': [],
                 # 权限标记
                 'can_edit': current_user.is_admin or row[9] == current_user.username,
                 'can_delete': current_user.is_admin or row[9] == current_user.username,
-                'can_share': current_user.is_admin or row[9] == current_user.username,
             })
         
         if themes:
@@ -1436,229 +1406,6 @@ async def delete_theme(
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
-@router.patch("/{theme_id}/share")
-async def update_theme_share_status(
-    theme_id: str,
-    request: UpdateShareStatusRequest,
-    current_user: TokenData = Depends(get_current_user)
-):
-    """
-    更新主题的分享状态
-    
-    权限：
-    - Admin：可以分享/取消分享所有主题
-    - 普通用户：只能分享/取消分享自己创建的主题
-    
-    说明：
-    - is_shared=true: 主题对所有用户可见和可用（但只有创建者和admin可编辑）
-    - is_shared=false: 主题仅对创建者和admin可见
-    
-    示例：
-    ```
-    PATCH /api/investment-themes/BK1001/share
-    {
-        "is_shared": true
-    }
-    ```
-    """
-    try:
-        from backend.database.db_manager import DatabaseManager
-        
-        db_config = get_database_config()
-        db_manager = DatabaseManager(db_config)
-        
-        # 非admin用户需要检查是否是主题的创建者
-        if not current_user.is_admin:
-            conn = db_manager.get_connection()
-            if not conn:
-                raise HTTPException(status_code=500, detail="Database connection failed")
-            
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT created_by FROM investment_theme_embeddings 
-                WHERE theme_id = %s
-            """, (theme_id,))
-            result_row = cursor.fetchone()
-            cursor.close()
-            conn.close()
-            
-            if not result_row:
-                raise HTTPException(status_code=404, detail="主题不存在")
-            
-            if result_row[0] != current_user.username:
-                raise HTTPException(
-                    status_code=403, 
-                    detail="权限不足：只能分享自己创建的主题"
-                )
-        
-        # 更新分享状态
-        conn = db_manager.get_connection()
-        if not conn:
-            raise HTTPException(status_code=500, detail="Database connection failed")
-        
-        cursor = conn.cursor()
-        
-        if request.is_shared:
-            # 设置为分享
-            cursor.execute("""
-                UPDATE investment_theme_embeddings
-                SET is_shared = TRUE,
-                    shared_at = NOW(),
-                    shared_by = %s,
-                    updated_at = NOW()
-                WHERE theme_id = %s
-            """, (current_user.username, theme_id))
-        else:
-            # 取消分享
-            cursor.execute("""
-                UPDATE investment_theme_embeddings
-                SET is_shared = FALSE,
-                    shared_at = NULL,
-                    shared_by = NULL,
-                    updated_at = NOW()
-                WHERE theme_id = %s
-            """, (theme_id,))
-        
-        if cursor.rowcount == 0:
-            cursor.close()
-            conn.close()
-            raise HTTPException(status_code=404, detail="主题不存在")
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        logger.info(
-            f"User {current_user.username} updated share status for theme {theme_id}",
-            is_shared=request.is_shared,
-            is_admin=current_user.is_admin
-        )
-        
-        return {
-            "success": True,
-            "message": f"主题{'已分享' if request.is_shared else '已取消分享'}",
-            "theme_id": theme_id,
-            "is_shared": request.is_shared
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Update theme share status failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
-
-
-@router.post("/batch-share")
-async def batch_update_theme_share_status(
-    request: BatchShareThemeRequest,
-    current_user: TokenData = Depends(get_current_user)
-):
-    """
-    批量更新主题的分享状态
-
-    权限：
-    - Admin：可以分享/取消分享所有主题
-    - 普通用户：只能分享/取消分享自己创建的主题
-
-    示例：
-    ```
-    POST /api/investment-themes/batch-share
-    {
-        "theme_ids": ["BK1001", "US_TECH"],
-        "is_shared": true
-    }
-    ```
-    """
-    try:
-        from backend.database.db_manager import DatabaseManager
-
-        if not request.theme_ids:
-            raise HTTPException(status_code=400, detail="主题ID列表不能为空")
-
-        db_config = get_database_config()
-        db_manager = DatabaseManager(db_config)
-
-        if not current_user.is_admin:
-            conn = db_manager.get_connection()
-            if not conn:
-                raise HTTPException(status_code=500, detail="Database connection failed")
-
-            cursor = conn.cursor()
-            placeholders = ','.join(['%s'] * len(request.theme_ids))
-            cursor.execute(f"""
-                SELECT theme_id, created_by
-                FROM investment_theme_embeddings
-                WHERE theme_id IN ({placeholders})
-            """, request.theme_ids)
-
-            theme_creators = {row[0]: row[1] for row in cursor.fetchall()}
-            cursor.close()
-            conn.close()
-
-            unauthorized_themes = [
-                tid for tid in request.theme_ids
-                if theme_creators.get(tid) != current_user.username
-            ]
-
-            if unauthorized_themes:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"权限不足：只能分享自己创建的主题: {', '.join(unauthorized_themes)}"
-                )
-
-        conn = db_manager.get_connection()
-        if not conn:
-            raise HTTPException(status_code=500, detail="Database connection failed")
-
-        cursor = conn.cursor()
-        placeholders = ','.join(['%s'] * len(request.theme_ids))
-
-        if request.is_shared:
-            cursor.execute(f"""
-                UPDATE investment_theme_embeddings
-                SET is_shared = TRUE,
-                    shared_at = NOW(),
-                    shared_by = %s,
-                    updated_at = NOW()
-                WHERE theme_id IN ({placeholders})
-            """, (current_user.username, *request.theme_ids))
-        else:
-            cursor.execute(f"""
-                UPDATE investment_theme_embeddings
-                SET is_shared = FALSE,
-                    shared_at = NULL,
-                    shared_by = NULL,
-                    updated_at = NOW()
-                WHERE theme_id IN ({placeholders})
-            """, (*request.theme_ids,))
-
-        updated_count = cursor.rowcount
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-        action_text = "分享" if request.is_shared else "取消分享"
-        logger.info(
-            f"User {current_user.username} batch {action_text} {updated_count} themes",
-            theme_ids=request.theme_ids,
-            is_shared=request.is_shared,
-            is_admin=current_user.is_admin
-        )
-
-        return {
-            "success": True,
-            "message": f"成功{action_text} {updated_count} 个主题",
-            "updated_count": updated_count,
-            "is_shared": request.is_shared
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Batch update theme share status failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"批量更新失败: {str(e)}")
-
-
 @router.post("/batch-delete")
 async def batch_delete_themes(
     request: BatchDeleteThemeRequest,
@@ -1757,6 +1504,138 @@ async def batch_delete_themes(
     except Exception as e:
         logger.error(f"Batch delete themes failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}")
+
+
+@router.get("/export")
+async def export_themes(
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    导出当前用户的所有主题为 Excel 文件
+
+    导出格式与 batch-upload 兼容，每行一个 ticker，列：
+    theme, category, ticker, company, description, group
+
+    其他用户可直接将此文件通过 batch-upload 导入。
+    """
+    try:
+        from backend.database.db_manager import DatabaseManager
+        import openpyxl
+        import io
+        from datetime import datetime
+
+        db_config = get_database_config()
+        db_manager = DatabaseManager(db_config)
+        conn = db_manager.get_connection()
+
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+
+        cursor = conn.cursor()
+
+        # 查询当前用户的所有主题
+        cursor.execute("""
+            SELECT ite.theme_id, ite.theme_name, ite.category,
+                   ite.description, ite."group", ite.is_enabled_for_matching,
+                   ite.description_source
+            FROM investment_theme_embeddings ite
+            WHERE ite.created_by = %s
+            ORDER BY ite.theme_name
+        """, (current_user.username,))
+
+        themes = cursor.fetchall()
+
+        if not themes:
+            cursor.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="没有可导出的主题")
+
+        # 查询所有关联的 tickers
+        theme_ids = [t[0] for t in themes]
+        placeholders = ','.join(['%s'] * len(theme_ids))
+
+        cursor.execute(f"""
+            SELECT tca.theme_id, tca.ticker, tca.company_name
+            FROM theme_company_associations tca
+            WHERE tca.theme_id IN ({placeholders})
+            ORDER BY tca.theme_id, tca.ticker
+        """, tuple(theme_ids))
+
+        ticker_rows = cursor.fetchall()
+
+        # 构建 theme_id -> [(ticker, company)] 映射
+        from collections import defaultdict
+        ticker_map = defaultdict(list)
+        for row in ticker_rows:
+            ticker_map[row[0]].append((row[1], row[2] or ''))
+
+        cursor.close()
+        conn.close()
+
+        # 生成 Excel
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Investment Themes"
+
+        # 表头
+        headers = ['theme', 'category', 'ticker', 'company', 'description', 'group']
+        ws.append(headers)
+
+        # 数据行：每个 ticker 一行
+        for theme_row in themes:
+            theme_id, theme_name, category, description, group, is_enabled, desc_source = theme_row
+            tickers = ticker_map.get(theme_id, [])
+
+            if not tickers:
+                # 没有 ticker 的主题也导出一行
+                ws.append([
+                    theme_name,
+                    category,
+                    '',
+                    '',
+                    description or '',
+                    group or ''
+                ])
+            else:
+                for ticker, company in tickers:
+                    ws.append([
+                        theme_name,
+                        category,
+                        ticker,
+                        company,
+                        description or '',
+                        group or ''
+                    ])
+
+        # 设置列宽
+        ws.column_dimensions['A'].width = 25
+        ws.column_dimensions['B'].width = 20
+        ws.column_dimensions['C'].width = 15
+        ws.column_dimensions['D'].width = 30
+        ws.column_dimensions['E'].width = 50
+        ws.column_dimensions['F'].width = 15
+
+        # 写入内存
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        filename = f"investment_themes_{current_user.username}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Export themes failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
 
 
 @router.post("/generate-description")
@@ -2958,13 +2837,13 @@ async def batch_tag_themes(
         cursor = conn.cursor()
         
         # 🔥 验证用户是否有权限查看这些主题
-        # 用户可以为自己创建的主题 OR 已分享的主题打标签
+        # 用户只能为自己创建的主题打标签
         placeholders = ','.join(['%s'] * len(request.theme_ids))
         if not current_user.is_admin:
             cursor.execute(f"""
                 SELECT theme_id FROM investment_theme_embeddings
                 WHERE theme_id IN ({placeholders})
-                  AND (created_by = %s OR is_shared = TRUE)
+                  AND created_by = %s
             """, (*request.theme_ids, current_user.username))
         else:
             # Admin can tag all themes

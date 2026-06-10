@@ -53,27 +53,25 @@ export async function listThemes(
   offset: number = 0,
   search?: string,
   tags?: string[],
-  createdBy?: string[],
-  showShared: boolean = true
+  createdBy?: string[]
 ): Promise<ThemeListResponse> {
-  const params: Record<string, any> = { limit, offset, show_shared: showShared };
+  const params: Record<string, any> = { limit, offset };
   if (search !== undefined && search !== null && search !== '') {
     params.search = search;
   }
-  
+
   // FastAPI 的 Query(List[str]) 需要多个同名参数，如 ?group=AI&group=Market%20Weekly
   // 注意：后端参数名仍为 'group'，但实际用于筛选 theme_tags 表中的 tag_name
   // axios 默认会将数组转换为 group[]=crypto&group[]=market%20weekly 或其他格式
   // 我们需要手动构建 URL 参数来确保格式正确
   const hasTags = tags !== undefined && tags !== null && tags.length > 0;
   const hasUsers = createdBy !== undefined && createdBy !== null && createdBy.length > 0;
-  
+
   if (hasTags || hasUsers) {
     // 手动构建查询字符串，确保每个 group 和 created_by 都是独立的参数
     const queryParams = new URLSearchParams();
     queryParams.append('limit', limit.toString());
     queryParams.append('offset', offset.toString());
-    queryParams.append('show_shared', showShared.toString());
     if (search) {
       queryParams.append('search', search);
     }
@@ -89,7 +87,7 @@ export async function listThemes(
         queryParams.append('created_by', user);
       });
     }
-    
+
     const url = `/investment-themes/themes?${queryParams.toString()}`;
     // URL 已经包含查询参数，不再传递 params 对象
     return await api.get<ThemeListResponse>(url, undefined);
@@ -140,41 +138,25 @@ export async function getThemeAssociations(
 }
 
 /**
- * Update theme share status
+ * Export current user's themes to Excel file
  */
-export async function updateThemeShareStatus(
-  themeId: string,
-  isShared: boolean
-): Promise<{
-  success: boolean;
-  message: string;
-  theme_id: string;
-  is_shared: boolean;
-}> {
-  return await api.patch<{
-    success: boolean;
-    message: string;
-    theme_id: string;
-    is_shared: boolean;
-  }>(`/investment-themes/${themeId}/share`, { is_shared: isShared });
-}
+export async function exportThemes(): Promise<Blob> {
+  const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '/api';
+  const token = localStorage.getItem('access_token');
 
-/**
- * Batch update theme share status
- */
-export async function batchUpdateThemeShareStatus(
-  themeIds: string[],
-  isShared: boolean
-): Promise<{
-  success: boolean;
-  message: string;
-  updated_count: number;
-  is_shared: boolean;
-}> {
-  return await api.post('/investment-themes/batch-share', {
-    theme_ids: themeIds,
-    is_shared: isShared,
+  const response = await fetch(`${API_BASE_URL}/investment-themes/export`, {
+    method: 'GET',
+    headers: {
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
   });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Export failed' }));
+    throw new Error(error.detail || 'Export failed');
+  }
+
+  return await response.blob();
 }
 
 /**

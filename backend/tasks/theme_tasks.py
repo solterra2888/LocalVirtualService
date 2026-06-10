@@ -705,29 +705,34 @@ def batch_create_themes_task(
                         continue
                     
                     theme_names_batch.append((theme_name, data, theme_id))
-                    
+
+                    # 如果已有 description（如从导出文件导入），跳过 LLM 描述生成
+                    if data.get('description'):
+                        desc_tasks.append(None)  # 占位符，表示已有描述
+                        continue
+
                     # 验证并获取股票信息
                     stock_symbols = None
                     company_names = None
-                    
+
                     if data.get('tickers') and data.get('market'):
                         try:
                             from backend.services.theme_company_association_service import ThemeCompanyAssociationService
-                            
+
                             association_service = ThemeCompanyAssociationService(db_config)
                             validation_result = association_service.validate_and_complete_tickers(
                                 data['tickers'],
                                 data['market']
                             )
-                            
+
                             if validation_result.get("valid"):
                                 stock_symbols = ", ".join([v["full_ticker"] for v in validation_result["valid"]])
                                 company_names = ", ".join([v["company_name"] for v in validation_result["valid"]])
                                 logger.debug(f"Validated tickers for '{theme_name}': {stock_symbols}")
-                                
+
                         except Exception as e:
                             logger.warning(f"Failed to validate tickers for '{theme_name}': {str(e)}")
-                    
+
                     # 创建生成描述的任务
                     task = service.generate_theme_description(
                         theme_name=theme_name,
@@ -741,21 +746,40 @@ def batch_create_themes_task(
                 if not desc_tasks:
                     logger.info(f"Batch {batch_number}: All themes skipped")
                     continue
-                
-                # Execute all description generation tasks concurrently
-                descriptions = loop.run_until_complete(
-                    asyncio.gather(*desc_tasks, return_exceptions=True)
-                )
-                
+
+                # 分离需要 LLM 生成描述的主题和已有描述的主题
+                llm_desc_tasks = [t for t in desc_tasks if t is not None]
+                llm_desc_indices = [i for i, t in enumerate(desc_tasks) if t is not None]
+                pre_desc_indices = [i for i, t in enumerate(desc_tasks) if t is None]
+
+                # 并发生成描述（仅对需要 LLM 的主题）
+                llm_results = []
+                if llm_desc_tasks:
+                    llm_results = loop.run_until_complete(
+                        asyncio.gather(*llm_desc_tasks, return_exceptions=True)
+                    )
+
+                # 构建完整的描述结果列表（与 desc_tasks 一一对应）
+                descriptions = [None] * len(desc_tasks)
+                llm_idx = 0
+                for i in range(len(desc_tasks)):
+                    if i in pre_desc_indices:
+                        # 已有描述，直接使用 data 中的 description
+                        _, data, _ = theme_names_batch[i]
+                        descriptions[i] = {'success': True, 'description': data.get('description', '')}
+                    else:
+                        descriptions[i] = llm_results[llm_idx]
+                        llm_idx += 1
+
                 # Step 2: 并发创建主题
                 logger.info(f"Batch {batch_number}: Creating themes in database")
-                
+
                 create_tasks = []
                 create_params = []
-                
+
                 for idx, result in enumerate(descriptions):
                     theme_name, data, theme_id = theme_names_batch[idx]
-                    
+
                     if isinstance(result, Exception):
                         logger.error(f"Description generation failed for '{theme_name}': {str(result)}")
                         failed += 1
@@ -765,7 +789,7 @@ def batch_create_themes_task(
                             "reason": f"Description generation failed: {str(result)}"
                         })
                         continue
-                    
+
                     if not result.get('success'):
                         logger.error(f"Description generation failed for '{theme_name}': {result.get('message')}")
                         failed += 1
@@ -775,12 +799,12 @@ def batch_create_themes_task(
                             "reason": result.get('message', 'Unknown error')
                         })
                         continue
-                    
+
                     description = result.get('description', '')
-                    
+
                     # 获取 category（从 theme_names_batch 中的 data）
                     category = data['category']
-                    
+
                     # 创建主题的任务
                     task = service.create_theme(
                         theme_name=theme_name,

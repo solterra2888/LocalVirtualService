@@ -27,7 +27,7 @@ class ThemeFileParser:
     REQUIRED_COLUMNS = ['theme', 'category', 'ticker']
     
     # 可选字段
-    OPTIONAL_COLUMNS = ['company']
+    OPTIONAL_COLUMNS = ['company', 'description', 'group']
     
     # 文件大小限制（10MB）
     MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -260,12 +260,18 @@ class ThemeFileParser:
         grouped_data = {}
         
         # 数据清洗：去除空值和空格
-        df['theme'] = df['theme'].astype(str).str.strip()
-        df['category'] = df['category'].astype(str).str.strip()
-        df['ticker'] = df['ticker'].astype(str).str.strip().str.upper()
-        
+        df['theme'] = df['theme'].fillna('').astype(str).str.strip()
+        df['category'] = df['category'].fillna('').astype(str).str.strip()
+        df['ticker'] = df['ticker'].fillna('').astype(str).str.strip().str.upper()
+
         if 'company' in df.columns:
-            df['company'] = df['company'].astype(str).str.strip()
+            df['company'] = df['company'].fillna('').astype(str).str.strip()
+
+        # 保留 description 和 group 列用于导出文件的导入
+        if 'description' in df.columns:
+            df['description'] = df['description'].fillna('').astype(str).str.strip()
+        if 'group' in df.columns:
+            df['group'] = df['group'].fillna('').astype(str).str.strip()
         
         # 过滤掉无效行
         df = df[
@@ -311,17 +317,39 @@ class ThemeFileParser:
                     company = row.get('company', '')
                     if ticker and company and company != 'nan':
                         ticker_company_map[ticker] = company
-                
+
                 companies = [ticker_company_map.get(t, '') for t in tickers]
-            
+
+            # 获取 description（取组内第一个非空值）
+            description = None
+            if 'description' in group_df.columns:
+                for _, row in group_df.iterrows():
+                    desc = row.get('description', '')
+                    if desc and desc != 'nan' and desc.strip():
+                        description = desc.strip()
+                        break
+
+            # 获取 group（优先从 Excel 列取，其次用函数参数）
+            group_value = group  # 默认用函数参数
+            if 'group' in group_df.columns:
+                for _, row in group_df.iterrows():
+                    grp = row.get('group', '')
+                    if grp and grp != 'nan' and grp.strip():
+                        group_value = grp.strip()
+                        break
+
             grouped_data[theme_id] = {
-                'group': group,
+                'group': group_value,
                 'theme_name': theme_name,
                 'category': category,
                 'tickers': tickers,
                 'companies': companies,
                 'market': market
             }
+
+            # 如果有 description，加入数据
+            if description:
+                grouped_data[theme_id]['description'] = description
         
         return grouped_data
     

@@ -32,7 +32,7 @@ requests==2.31.0
 pandas==3.0.1
 # NumPy 2.x：与 pandas 3.0 一致，且在 Python 3.13 上有官方 wheel（避免从源码编译需 g++）
 numpy>=2.0,<3
-openpyxl==3.1.2
+openpyxl==3.1.5
 Pillow==12.1.1
 
 # Quick Process 本地文档解析（PDF / Word，需 Python >=3.10）
