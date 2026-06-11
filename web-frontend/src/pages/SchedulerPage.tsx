@@ -117,7 +117,7 @@ type SchedulerCategory = 'data_fetch' | 'report_generation';
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'other';
   category: SchedulerCategory;
   description: string;
   enabled: boolean;
@@ -296,6 +296,25 @@ const SchedulerPage: React.FC = () => {
           name: 'Configure Market Weekly Report Schedule',
           description: 'Set up periodic Market Weekly Report generation (default: weekly Friday 5 PM ET)',
           endpoint: '/scheduler/tasks/market-weekly-report',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'the_close_summary',
+      name: 'Bloomberg The Close Summary',
+      type: 'the_close_summary',
+      category: 'report_generation',
+      description: 'Generate daily PM Brief summary from Bloomberg Television "The Close" episode transcript (8-section structured markdown).',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_the_close_summary_schedule',
+          name: 'Configure The Close Summary Schedule',
+          description: 'Set up periodic The Close PM Brief generation (default: weekdays 7 AM Beijing / 7 PM ET)',
+          endpoint: '/scheduler/tasks/the-close-summary',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -560,7 +579,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
           (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
           (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
-          (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
+          (sourceIdLower === 'the_close_summary' && taskType === 'the_close_summary') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -568,7 +587,6 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower.includes('finviz_screener') && taskType.includes('finviz_screener'))
         );
       });
-      
       // If there are related tasks, use the task's enabled status
       if (relatedTasks.length > 0) {
         // As long as one task is enabled, consider the data source enabled
@@ -629,6 +647,7 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
         (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
         (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
+        (sourceIdLower === 'the_close_summary' && taskType === 'the_close_summary') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -843,7 +862,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
           (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
           (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
-          (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
+          (sourceIdLower === 'the_close_summary' && taskType === 'the_close_summary') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||

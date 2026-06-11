@@ -102,6 +102,8 @@ task_routes = {
     'generate_market_weekly_report': {'queue': 'data_fetching'},       # Market Weekly Report 单用户静态 HTML 生成
     # Ebook Map-Reduce 章节摘要任务
     'ebook_map_reduce': {'queue': 'ai_processing'},
+    # The Close Summary — Bloomberg The Close 每日 PM Brief
+    'generate_the_close_summary': {'queue': 'ai_processing'},
 }
 
 # Worker配置
