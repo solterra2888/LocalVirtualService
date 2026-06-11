@@ -14,10 +14,11 @@ from . import screener
 from . import twitter_daily_reports
 from . import youtube_daily_reports
 from . import chat_group_messages
+from . import daily_market_report
 
 __all__ = [
     'auth',
-    'files', 
+    'files',
     'tasks',
     'users',
     'markets',
@@ -27,4 +28,5 @@ __all__ = [
     'twitter_daily_reports',
     'youtube_daily_reports',
     'chat_group_messages',
+    'daily_market_report',
 ] 

@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Market Report - {{ report_date }}</title>
+<style>
+/* === RESET & BASE === */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    --bg-page: #ffffff;
+    --bg-card: #ffffff;
+    --bg-header: linear-gradient(90deg, #2d4a6f 0%, #1e3a5f 100%);
+    --bg-table-header: linear-gradient(180deg, #1e3a5f 0%, #152d4a 100%);
+    --bg-hover: #f0f4f8;
+    --text-primary: #111111;
+    --text-secondary: #3d4f5f;
+    --text-muted: #6b7a8a;
+    --text-header: #ffffff;
+    --text-tab: rgba(255,255,255,0.65);
+    --text-tab-active: #ffffff;
+    --border: rgba(224, 224, 224, 0.6);
+    --border-subtle: #e8ecf1;
+    --color-pos: #0a7c42;
+    --color-neg: #c41230;
+    --color-neutral: #888;
+    --tab-active-border: #ffffff;
+    --tab-hover-bg: rgba(255,255,255,0.1);
+    --shadow-card: 0 2px 12px rgba(0,0,0,0.06);
+}
+
+[data-theme="dark"] {
+    --bg-page: #0B0E14;
+    --bg-card: #141820;
+    --bg-header: linear-gradient(90deg, #1a2235 0%, #141820 100%);
+    --bg-table-header: linear-gradient(180deg, #1a2235 0%, #111622 100%);
+    --bg-hover: #1e2536;
+    --text-primary: #edf0f4;
+    --text-secondary: #a3adbc;
+    --text-muted: #727f92;
+    --text-header: #edf0f4;
+    --text-tab: rgba(255,255,255,0.45);
+    --text-tab-active: #6dacf0;
+    --border: rgba(60, 70, 90, 0.5);
+    --border-subtle: rgba(60, 70, 90, 0.3);
+    --color-pos: #00e676;
+    --color-neg: #ff5252;
+    --color-neutral: #727f92;
+    --tab-active-border: #6dacf0;
+    --tab-hover-bg: rgba(255,255,255,0.05);
+    --shadow-card: 0 2px 16px rgba(0,0,0,0.3);
+}
+
+html { font-size: 15px; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    line-height: 1.5;
+    min-height: 100vh;
+}
+
+/* === HEADER === */
+.report-header {
+    background: var(--bg-header);
+    padding: 20px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.report-header h1 {
+    color: var(--text-header);
+    font-size: 1.35rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+.report-header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    color: var(--text-header);
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+.theme-toggle {
+    background: rgba(255,255,255,0.15);
+    border: none;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+/* === SECTION BAR === */
+.section-bar {
+    background: var(--bg-header);
+    padding: 10px 28px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-header);
+    letter-spacing: 0.02em;
+}
+
+/* === MARKET SECTIONS === */
+.market-section { margin-bottom: 32px; }
+
+/* === CONTENT === */
+.content { max-width: 1280px; margin: 0 auto; padding: 24px 28px; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* === TABLE === */
+.table-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 12px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    background: var(--bg-card);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+}
+
+thead tr {
+    background: var(--bg-table-header);
+}
+th {
+    padding: 10px 12px;
+    text-align: right;
+    font-weight: 600;
+    font-size: 11px;
+    color: rgba(255,255,255,0.9);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+}
+th:hover { background: rgba(255,255,255,0.08); }
+th .sort-arrow { font-size: 0.65rem; margin-left: 3px; opacity: 0.4; }
+th.sorted .sort-arrow { opacity: 1; }
+th.col-ticker, th.col-name { text-align: left; }
+
+td {
+    padding: 9px 12px;
+    text-align: right;
+    border-bottom: 1px solid var(--border-subtle);
+    white-space: nowrap;
+}
+td.col-ticker {
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 11px;
+}
+td.col-name {
+    text-align: left;
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+/* === VALUE STYLING === */
+.val-pos { color: var(--color-pos); }
+.val-neg { color: var(--color-neg); }
+.val-neutral { color: var(--color-neutral); }
+.val-na { color: var(--text-muted); font-style: italic; }
+td.price-cell { font-weight: 500; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }
+td.rsi-cell { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }
+
+tbody tr:hover { background: var(--bg-hover); }
+
+/* === CHART VIEWER === */
+.chart-viewer {
+    margin-top: 16px;
+    background: var(--bg-card);
+    border-radius: 8px;
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+}
+.chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-card);
+}
+.chart-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.chart-label .chart-ticker {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    color: var(--text-primary);
+}
+.chart-label .chart-name {
+    color: var(--text-secondary);
+    font-weight: 400;
+    margin-left: 6px;
+    font-size: 0.82rem;
+}
+.chart-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.chart-range-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 3px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+.chart-range-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.chart-range-btn.active { background: var(--bg-hover); color: var(--text-primary); border-color: var(--text-muted); }
+.chart-close-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    transition: all 0.15s;
+}
+.chart-close-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.chart-ma-btn {
+    background: none;
+    border: 1px solid transparent;
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-weight: 600;
+    opacity: 0.4;
+    transition: all 0.15s;
+}
+.chart-ma-btn:hover { opacity: 0.7; }
+.chart-ma-btn.active { opacity: 1; border-color: currentColor; }
+.chart-container {
+    height: 380px;
+    padding: 0 4px;
+}
+.chart-nav-hint {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    padding: 0 16px 8px;
+    text-align: center;
+}
+tbody tr.chart-row { cursor: pointer; }
+tbody tr.chart-active { background: var(--bg-hover); }
+
+/* === PERFORMANCE CHARTS TAB === */
+.perf-section { margin-bottom: 24px; }
+.perf-section:last-child { margin-bottom: 0; }
+.perf-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: var(--bg-card);
+    border-radius: 8px 8px 0 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.perf-section-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.perf-range-btns {
+    display: flex;
+    gap: 4px;
+}
+.perf-viewer {
+    background: var(--bg-card);
+    overflow: hidden;
+}
+.perf-viewer .chart-container { height: 380px; }
+.perf-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    padding: 10px 16px;
+    background: var(--bg-card);
+    border-radius: 0 0 8px 8px;
+    border-top: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-card);
+}
+.perf-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    transition: opacity 0.15s;
+    user-select: none;
+}
+.perf-legend-item:hover { background: var(--bg-hover); }
+.perf-legend-item .perf-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.perf-legend-item .perf-ticker {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-weight: 600;
+    font-size: 0.72rem;
+}
+.perf-legend-item .perf-name {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+.perf-legend-item .perf-pct {
+    font-size: 0.7rem;
+    font-weight: 500;
+}
+.perf-legend-item.hidden {
+    opacity: 0.35;
+    text-decoration: line-through;
+}
+
+/* === NOTES SECTION === */
+.notes-section {
+    margin-top: 20px;
+    background: var(--bg-card);
+    border-radius: 8px;
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+}
+.notes-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border-subtle);
+    user-select: none;
+    transition: background 0.15s;
+}
+.notes-toggle:hover { background: var(--bg-hover); }
+.notes-toggle .toggle-arrow {
+    font-size: 0.7rem;
+    transition: transform 0.2s;
+    color: var(--text-muted);
+}
+.notes-toggle.open .toggle-arrow { transform: rotate(180deg); }
+.notes-content { display: none; padding: 4px 0; }
+.notes-content.open { display: block; }
+.note-item {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 0.82rem;
+    line-height: 1.7;
+    color: var(--text-secondary);
+}
+.note-item:last-child { border-bottom: none; }
+.note-item .note-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+.note-item .note-title .note-ticker {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    color: var(--text-primary);
+    font-weight: 700;
+}
+.note-item .note-detail { margin-top: 2px; }
+.note-item .note-detail strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* === FOOTER === */
+.footer {
+    max-width: 1280px;
+    margin: 24px auto 40px;
+    padding: 0 28px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.7;
+}
+.footer p { margin-bottom: 4px; }
+
+/* === RESPONSIVE === */
+@media (max-width: 768px) {
+    .report-header { padding: 14px 16px; }
+    .section-bar { padding: 8px 12px; font-size: 0.85rem; }
+    .content { padding: 16px; }
+    table { font-size: 11px; }
+    th, td { padding: 7px 8px; }
+}
+</style>
+</head>
+<body>
+
+<div class="report-header">
+    <h1>Daily Market Report</h1>
+    <div class="report-header-right">
+        <span>{{ report_date }}</span>
+        <button class="theme-toggle" onclick="toggleTheme()">&#9790;</button>
+    </div>
+</div>
+
+<div class="section-bar">Market Overview</div>
+
+<div class="content">
+
+{# ── US Assets Section ── #}
+<div class="market-section" id="section-us-assets">
+    <div class="table-title">US ASSETS</div>
+    <table id="table-us-assets">
+        <thead>
+            <tr>
+                <th class="col-ticker" data-col="ticker" data-type="string">Ticker <span class="sort-arrow">▲</span></th>
+                <th class="col-name" data-col="name" data-type="string">Name <span class="sort-arrow">▲</span></th>
+                <th data-col="price" data-type="number">Price <span class="sort-arrow">▲</span></th>
+                <th data-col="day" data-type="number">Day <span class="sort-arrow">▲</span></th>
+                <th data-col="open" data-type="number">Open <span class="sort-arrow">▲</span></th>
+                <th data-col="gap" data-type="number">Gap <span class="sort-arrow">▲</span></th>
+                <th data-col="week" data-type="number">Week <span class="sort-arrow">▲</span></th>
+                <th data-col="month" data-type="number">Month <span class="sort-arrow">▲</span></th>
+                <th data-col="y" data-type="number">1Y <span class="sort-arrow">▲</span></th>
+                <th data-col="sma20" data-type="number">SMA20 <span class="sort-arrow">▲</span></th>
+                <th data-col="sma50" data-type="number">SMA50 <span class="sort-arrow">▲</span></th>
+                <th data-col="sma200" data-type="number">SMA200 <span class="sort-arrow">▲</span></th>
+                <th data-col="rsi" data-type="number">RSI <span class="sort-arrow">▲</span></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in us_assets %}
+            <tr class="chart-row" data-ticker="{{ row.ticker }}">
+                <td class="col-ticker">{{ row.ticker }}</td>
+                <td class="col-name">{{ row.name }}</td>
+                <td class="price-cell" data-val="{{ row.price }}">{{ row.price|fmt_price }}</td>
+                <td data-val="{{ row.day }}">{{ row.day|fmt_pct }}</td>
+                <td data-val="{{ row.open }}">{{ row.open|fmt_pct }}</td>
+                <td data-val="{{ row.gap }}">{{ row.gap|fmt_pct }}</td>
+                <td data-val="{{ row.week }}">{{ row.week|fmt_pct }}</td>
+                <td data-val="{{ row.month }}">{{ row.month|fmt_pct }}</td>
+                <td data-val="{{ row.y }}">{{ row.y|fmt_pct }}</td>
+                <td data-val="{{ row.sma20 }}">{{ row.sma20|fmt_pct }}</td>
+                <td data-val="{{ row.sma50 }}">{{ row.sma50|fmt_pct }}</td>
+                <td data-val="{{ row.sma200 }}">{{ row.sma200|fmt_pct }}</td>
+                <td class="rsi-cell" data-val="{{ row.rsi }}">{{ row.rsi|fmt_rsi }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="chart-viewer" id="chart-viewer-us-assets" style="display:none">
+        <div class="chart-header">
+            <span class="chart-label"><span class="chart-ticker" id="chart-ticker-us-assets"></span><span class="chart-name" id="chart-name-us-assets"></span></span>
+            <div class="chart-controls">
+                <button class="chart-range-btn active" data-range="3m" onclick="setChartRange('us-assets','3m',this)">3M</button>
+                <button class="chart-range-btn" data-range="6m" onclick="setChartRange('us-assets','6m',this)">6M</button>
+                <button class="chart-range-btn" data-range="all" onclick="setChartRange('us-assets','all',this)">All</button>
+                <span style="width:1px;height:16px;background:var(--border-subtle);margin:0 6px;display:inline-block"></span>
+                <button class="chart-ma-btn active" data-ma="20" onclick="toggleMA('us-assets',20,this)" style="color:#f59e0b">MA20</button>
+                <button class="chart-ma-btn active" data-ma="50" onclick="toggleMA('us-assets',50,this)" style="color:#3b82f6">MA50</button>
+                <button class="chart-ma-btn" data-ma="200" onclick="toggleMA('us-assets',200,this)" style="color:#a855f7">MA200</button>
+                <button class="chart-close-btn" onclick="closeChart('us-assets')" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="chart-container" id="chart-container-us-assets"></div>
+        <div class="chart-nav-hint">← → navigate between tickers · Esc to close</div>
+    </div>
+
+    {# ── US Assets Notes ── #}
+    <div class="notes-section">
+        <div class="notes-toggle" onclick="toggleNotes('us-assets-notes')">
+            <span>📖 ETF 说明（点击展开）</span>
+            <span class="toggle-arrow">▼</span>
+        </div>
+        <div class="notes-content" id="us-assets-notes">
+        {% for ticker, note in us_assets_notes.items() %}
+            <div class="note-item">
+                <div class="note-title">
+                    <span class="note-ticker">{{ ticker }}</span>（{{ note.name }}）：代表"{{ note.represents }}"
+                </div>
+                <div class="note-detail">
+                    <strong>跟踪标的：</strong>{{ note.index }}<br>
+                    <strong>特点：</strong>{{ note.description }}
+                </div>
+            </div>
+        {% endfor %}
+        </div>
+    </div>
+</div>
+
+{# ── US Sector Section ── #}
+<div class="market-section" id="section-us-sector">
+    <div class="table-title">US SECTOR</div>
+    <table id="table-us-sector">
+        <thead>
+            <tr>
+                <th class="col-ticker" data-col="ticker" data-type="string">Ticker <span class="sort-arrow">▲</span></th>
+                <th class="col-name" data-col="name" data-type="string">Name <span class="sort-arrow">▲</span></th>
+                <th data-col="price" data-type="number">Price <span class="sort-arrow">▲</span></th>
+                <th data-col="day" data-type="number">Day <span class="sort-arrow">▲</span></th>
+                <th data-col="open" data-type="number">Open <span class="sort-arrow">▲</span></th>
+                <th data-col="gap" data-type="number">Gap <span class="sort-arrow">▲</span></th>
+                <th data-col="week" data-type="number">Week <span class="sort-arrow">▲</span></th>
+                <th data-col="month" data-type="number">Month <span class="sort-arrow">▲</span></th>
+                <th data-col="y" data-type="number">1Y <span class="sort-arrow">▲</span></th>
+                <th data-col="sma20" data-type="number">SMA20 <span class="sort-arrow">▲</span></th>
+                <th data-col="sma50" data-type="number">SMA50 <span class="sort-arrow">▲</span></th>
+                <th data-col="sma200" data-type="number">SMA200 <span class="sort-arrow">▲</span></th>
+                <th data-col="rsi" data-type="number">RSI <span class="sort-arrow">▲</span></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in us_sector %}
+            <tr class="chart-row" data-ticker="{{ row.ticker }}">
+                <td class="col-ticker">{{ row.ticker }}</td>
+                <td class="col-name">{{ row.name }}</td>
+                <td class="price-cell" data-val="{{ row.price }}">{{ row.price|fmt_price }}</td>
+                <td data-val="{{ row.day }}">{{ row.day|fmt_pct }}</td>
+                <td data-val="{{ row.open }}">{{ row.open|fmt_pct }}</td>
+                <td data-val="{{ row.gap }}">{{ row.gap|fmt_pct }}</td>
+                <td data-val="{{ row.week }}">{{ row.week|fmt_pct }}</td>
+                <td data-val="{{ row.month }}">{{ row.month|fmt_pct }}</td>
+                <td data-val="{{ row.y }}">{{ row.y|fmt_pct }}</td>
+                <td data-val="{{ row.sma20 }}">{{ row.sma20|fmt_pct }}</td>
+                <td data-val="{{ row.sma50 }}">{{ row.sma50|fmt_pct }}</td>
+                <td data-val="{{ row.sma200 }}">{{ row.sma200|fmt_pct }}</td>
+                <td class="rsi-cell" data-val="{{ row.rsi }}">{{ row.rsi|fmt_rsi }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="chart-viewer" id="chart-viewer-us-sector" style="display:none">
+        <div class="chart-header">
+            <span class="chart-label"><span class="chart-ticker" id="chart-ticker-us-sector"></span><span class="chart-name" id="chart-name-us-sector"></span></span>
+            <div class="chart-controls">
+                <button class="chart-range-btn active" data-range="3m" onclick="setChartRange('us-sector','3m',this)">3M</button>
+                <button class="chart-range-btn" data-range="6m" onclick="setChartRange('us-sector','6m',this)">6M</button>
+                <button class="chart-range-btn" data-range="all" onclick="setChartRange('us-sector','all',this)">All</button>
+                <span style="width:1px;height:16px;background:var(--border-subtle);margin:0 6px;display:inline-block"></span>
+                <button class="chart-ma-btn active" data-ma="20" onclick="toggleMA('us-sector',20,this)" style="color:#f59e0b">MA20</button>
+                <button class="chart-ma-btn active" data-ma="50" onclick="toggleMA('us-sector',50,this)" style="color:#3b82f6">MA50</button>
+                <button class="chart-ma-btn" data-ma="200" onclick="toggleMA('us-sector',200,this)" style="color:#a855f7">MA200</button>
+                <button class="chart-close-btn" onclick="closeChart('us-sector')" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="chart-container" id="chart-container-us-sector"></div>
+        <div class="chart-nav-hint">← → navigate between tickers · Esc to close</div>
+    </div>
+
+    {# ── US Sector Notes ── #}
+    <div class="notes-section">
+        <div class="notes-toggle" onclick="toggleNotes('sector-notes')">
+            <span>📖 ETF 说明（点击展开）</span>
+            <span class="toggle-arrow">▼</span>
+        </div>
+        <div class="notes-content" id="sector-notes">
+        {% for ticker, note in sector_notes.items() %}
+            <div class="note-item">
+                <div class="note-title">
+                    <span class="note-ticker">{{ ticker }}</span>（{{ note.name }} ETF）：代表"{{ note.represents }}"
+                </div>
+                <div class="note-detail">
+                    <strong>追踪指数：</strong>{{ note.index }}<br>
+                    <strong>特点：</strong>{{ note.description }}
+                </div>
+            </div>
+        {% endfor %}
+        </div>
+    </div>
+</div>
+
+{# ── Thematic ETFs Section ── #}
+<div class="market-section" id="section-thematic">
+    <div class="table-title">THEMATIC ETFS</div>
+    <table id="table-thematic">
+        <thead>
+            <tr>
+                <th class="col-ticker" data-col="ticker" data-type="string">Ticker <span class="sort-arrow">▲</span></th>
+                <th class="col-name" data-col="name" data-type="string">Name <span class="sort-arrow">▲</span></th>
+                <th data-col="price" data-type="number">Price <span class="sort-arrow">▲</span></th>
+                <th data-col="day" data-type="number">Day <span class="sort-arrow">▲</span></th>
+                <th data-col="open" data-type="number">Open <span class="sort-arrow">▲</span></th>
+                <th data-col="gap" data-type="number">Gap <span class="sort-arrow">▲</span></th>
+                <th data-col="week" data-type="number">Week <span class="sort-arrow">▲</span></th>
+                <th data-col="month" data-type="number">Month <span class="sort-arrow">▲</span></th>
+                <th data-col="y" data-type="number">1Y <span class="sort-arrow">▲</span></th>
+                <th data-col="sma20" data-type="number">SMA20 <span class="sort-arrow">▲</span></th>
+                <th data-col="sma50" data-type="number">SMA50 <span class="sort-arrow">▲</span></th>
+                <th data-col="sma200" data-type="number">SMA200 <span class="sort-arrow">▲</span></th>
+                <th data-col="rsi" data-type="number">RSI <span class="sort-arrow">▲</span></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in thematic %}
+            <tr class="chart-row" data-ticker="{{ row.ticker }}">
+                <td class="col-ticker">{{ row.ticker }}</td>
+                <td class="col-name">{{ row.name }}</td>
+                <td class="price-cell" data-val="{{ row.price }}">{{ row.price|fmt_price }}</td>
+                <td data-val="{{ row.day }}">{{ row.day|fmt_pct }}</td>
+                <td data-val="{{ row.open }}">{{ row.open|fmt_pct }}</td>
+                <td data-val="{{ row.gap }}">{{ row.gap|fmt_pct }}</td>
+                <td data-val="{{ row.week }}">{{ row.week|fmt_pct }}</td>
+                <td data-val="{{ row.month }}">{{ row.month|fmt_pct }}</td>
+                <td data-val="{{ row.y }}">{{ row.y|fmt_pct }}</td>
+                <td data-val="{{ row.sma20 }}">{{ row.sma20|fmt_pct }}</td>
+                <td data-val="{{ row.sma50 }}">{{ row.sma50|fmt_pct }}</td>
+                <td data-val="{{ row.sma200 }}">{{ row.sma200|fmt_pct }}</td>
+                <td class="rsi-cell" data-val="{{ row.rsi }}">{{ row.rsi|fmt_rsi }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="chart-viewer" id="chart-viewer-thematic" style="display:none">
+        <div class="chart-header">
+            <span class="chart-label"><span class="chart-ticker" id="chart-ticker-thematic"></span><span class="chart-name" id="chart-name-thematic"></span></span>
+            <div class="chart-controls">
+                <button class="chart-range-btn active" data-range="3m" onclick="setChartRange('thematic','3m',this)">3M</button>
+                <button class="chart-range-btn" data-range="6m" onclick="setChartRange('thematic','6m',this)">6M</button>
+                <button class="chart-range-btn" data-range="all" onclick="setChartRange('thematic','all',this)">All</button>
+                <span style="width:1px;height:16px;background:var(--border-subtle);margin:0 6px;display:inline-block"></span>
+                <button class="chart-ma-btn active" data-ma="20" onclick="toggleMA('thematic',20,this)" style="color:#f59e0b">MA20</button>
+                <button class="chart-ma-btn active" data-ma="50" onclick="toggleMA('thematic',50,this)" style="color:#3b82f6">MA50</button>
+                <button class="chart-ma-btn" data-ma="200" onclick="toggleMA('thematic',200,this)" style="color:#a855f7">MA200</button>
+                <button class="chart-close-btn" onclick="closeChart('thematic')" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="chart-container" id="chart-container-thematic"></div>
+        <div class="chart-nav-hint">← → navigate between tickers · Esc to close</div>
+    </div>
+
+    {# ── Thematic ETFs Notes ── #}
+    <div class="notes-section">
+        <div class="notes-toggle" onclick="toggleNotes('thematic-notes')">
+            <span>📖 ETF 说明（点击展开）</span>
+            <span class="toggle-arrow">▼</span>
+        </div>
+        <div class="notes-content" id="thematic-notes">
+        {% for ticker, note in thematic_notes.items() %}
+            <div class="note-item">
+                <div class="note-title">
+                    <span class="note-ticker">{{ ticker }}</span>（{{ note.name }} ETF）：代表"{{ note.represents }}"
+                </div>
+                <div class="note-detail">
+                    <strong>追踪指数：</strong>{{ note.index }}<br>
+                    <strong>特点：</strong>{{ note.description }}
+                </div>
+            </div>
+        {% endfor %}
+        </div>
+    </div>
+</div>
+
+{# ── Performance Charts Section ── #}
+<div class="market-section" id="section-performance">
+
+    <div class="perf-section">
+        <div class="perf-section-header">
+            <span class="perf-section-title">US Index ETFs</span>
+            <div class="perf-range-btns" id="perf-range-index">
+                <button class="chart-range-btn active" data-range="6m" onclick="setPerfRange('index','6m',this)">6M</button>
+                <button class="chart-range-btn" data-range="ytd" onclick="setPerfRange('index','ytd',this)">YTD</button>
+            </div>
+        </div>
+        <div class="perf-viewer">
+            <div class="chart-container" id="chart-container-perf-index"></div>
+        </div>
+        <div class="perf-legend" id="perf-legend-index"></div>
+        <div class="notes-section">
+            <div class="notes-toggle" onclick="toggleNotes('perf-notes-index')">
+                <span>📖 ETF 说明（点击展开）</span>
+                <span class="toggle-arrow">▼</span>
+            </div>
+            <div class="notes-content" id="perf-notes-index">
+            {% for ticker in ['SPY', 'QQQ', 'IWM', 'DIA', 'RSP'] %}
+            {% set note = us_assets_notes.get(ticker) %}
+            {% if note %}
+                <div class="note-item">
+                    <div class="note-title"><span class="note-ticker">{{ ticker }}</span>（{{ note.name }}）：代表"{{ note.represents }}"</div>
+                    <div class="note-detail"><strong>跟踪标的：</strong>{{ note.index }}<br><strong>特点：</strong>{{ note.description }}</div>
+                </div>
+            {% endif %}
+            {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="perf-section">
+        <div class="perf-section-header">
+            <span class="perf-section-title">US Sector ETFs</span>
+            <div class="perf-range-btns" id="perf-range-sector">
+                <button class="chart-range-btn active" data-range="6m" onclick="setPerfRange('sector','6m',this)">6M</button>
+                <button class="chart-range-btn" data-range="ytd" onclick="setPerfRange('sector','ytd',this)">YTD</button>
+            </div>
+        </div>
+        <div class="perf-viewer">
+            <div class="chart-container" id="chart-container-perf-sector"></div>
+        </div>
+        <div class="perf-legend" id="perf-legend-sector"></div>
+        <div class="notes-section">
+            <div class="notes-toggle" onclick="toggleNotes('perf-notes-sector')">
+                <span>📖 ETF 说明（点击展开）</span>
+                <span class="toggle-arrow">▼</span>
+            </div>
+            <div class="notes-content" id="perf-notes-sector">
+            {% for ticker in ['XLC', 'XLY', 'XLP', 'XLE', 'XLF', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLK', 'XLU'] %}
+            {% set note = sector_notes.get(ticker) %}
+            {% if note %}
+                <div class="note-item">
+                    <div class="note-title"><span class="note-ticker">{{ ticker }}</span>（{{ note.name }} ETF）：代表"{{ note.represents }}"</div>
+                    <div class="note-detail"><strong>追踪指数：</strong>{{ note.index }}<br><strong>特点：</strong>{{ note.description }}</div>
+                </div>
+            {% endif %}
+            {% endfor %}
+            </div>
+        </div>
+    </div>
+
+</div>
+
+</div>
+
+<div class="footer">
+    <p>Generated: {{ generated_at_utc }} | {{ generated_at_new_york }} | {{ generated_at_beijing }}</p>
+    <p>Data source: Finviz Elite | Powered by GuanHe Capital Research Platform</p>
+</div>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+// ── Embedded chart data (OHLCV daily from EODHD) ──
+const CHART_DATA = {{ chart_data_json | safe }};
+
+// ── Ticker display names for chart header ──
+const DISPLAY_NAMES = {{ display_names_json | safe }};
+
+// ── Chart state per panel ──
+const chartState = {
+    'us-assets': { chart: null, candleSeries: null, volSeries: null, maSeries: {}, currentTicker: null, currentRange: '3m', scrollY: 0, maEnabled: {20: true, 50: true, 200: false} },
+    'us-sector': { chart: null, candleSeries: null, volSeries: null, maSeries: {}, currentTicker: null, currentRange: '3m', scrollY: 0, maEnabled: {20: true, 50: true, 200: false} },
+    'thematic':  { chart: null, candleSeries: null, volSeries: null, maSeries: {}, currentTicker: null, currentRange: '3m', scrollY: 0, maEnabled: {20: true, 50: true, 200: false} },
+};
+
+// ── All sections visible (no tab switching needed) ──
+
+// ── Auto-render performance charts on load ──
+window.addEventListener('load', () => {
+    renderPerfSection('index');
+    renderPerfSection('sector');
+});
+
+// ── Sortable columns ──
+document.querySelectorAll('th[data-col]').forEach(th => {
+    th.addEventListener('click', function(e) {
+        e.stopPropagation(); // don't trigger row click
+        const table = this.closest('table');
+        const tbody = table.querySelector('tbody');
+        const col = this.dataset.col;
+        const type = this.dataset.type;
+        const isAsc = this.classList.contains('sorted-asc');
+
+        table.querySelectorAll('th').forEach(h => {
+            h.classList.remove('sorted', 'sorted-asc', 'sorted-desc');
+            h.querySelector('.sort-arrow').textContent = '▲';
+        });
+
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const colIndex = Array.from(this.closest('tr').children).indexOf(this);
+
+        rows.sort((a, b) => {
+            let va = a.children[colIndex].dataset.val || a.children[colIndex].textContent.trim();
+            let vb = b.children[colIndex].dataset.val || b.children[colIndex].textContent.trim();
+            if (type === 'number') {
+                va = parseFloat(va) || 0; vb = parseFloat(vb) || 0;
+                return isAsc ? vb - va : va - vb;
+            } else {
+                return isAsc ? vb.localeCompare(va) : va.localeCompare(vb);
+            }
+        });
+        rows.forEach(r => tbody.appendChild(r));
+        this.classList.add('sorted', isAsc ? 'sorted-desc' : 'sorted-asc');
+        this.querySelector('.sort-arrow').textContent = isAsc ? '▼' : '▲';
+    });
+});
+
+// ── Notes toggle ──
+function toggleNotes(id) {
+    const content = document.getElementById(id);
+    const toggle = content.previousElementSibling;
+    content.classList.toggle('open');
+    toggle.classList.toggle('open');
+}
+
+// ── Theme toggle ──
+function toggleTheme() {
+    const html = document.documentElement;
+    const isDark = html.getAttribute('data-theme') === 'dark';
+    html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+    localStorage.setItem('dmr-theme', isDark ? 'light' : 'dark');
+    document.querySelector('.theme-toggle').textContent = isDark ? '☾' : '☀';
+    // Re-render any open charts with new theme (skip scroll)
+    Object.keys(chartState).forEach(pid => {
+        if (chartState[pid].chart && chartState[pid].currentTicker) {
+            const ticker = chartState[pid].currentTicker;
+            chartState[pid].currentTicker = null; // force re-render
+            showChart(pid, ticker, true);
+        }
+    });
+    // Re-render performance charts
+    renderPerfSection('index');
+    renderPerfSection('sector');
+}
+
+// Restore theme
+(function() {
+    const saved = localStorage.getItem('dmr-theme');
+    if (saved === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        document.querySelector('.theme-toggle').textContent = '☀';
+    }
+})();
+
+// ── Chart: get tickers for a panel ──
+function getPanelTickers(panelId) {
+    const table = document.getElementById('table-' + panelId);
+    if (!table) return [];
+    return Array.from(table.querySelectorAll('tbody tr.chart-row')).map(tr => tr.dataset.ticker);
+}
+
+// ── Chart: filter data by range ──
+function filterByRange(data, range) {
+    if (!data || !data.length || range === 'all') return data;
+    const lastDate = new Date(data[data.length - 1].time);
+    let startDate;
+    if (range === '1m') {
+        startDate = new Date(lastDate); startDate.setMonth(startDate.getMonth() - 1);
+    } else if (range === '3m') {
+        startDate = new Date(lastDate); startDate.setMonth(startDate.getMonth() - 3);
+    } else if (range === '6m') {
+        startDate = new Date(lastDate); startDate.setMonth(startDate.getMonth() - 6);
+    }
+    if (!startDate) return data;
+    const startStr = startDate.toISOString().split('T')[0];
+    return data.filter(d => d.time >= startStr);
+}
+
+// ── Chart: is dark mode ──
+function isDarkMode() {
+    return document.documentElement.getAttribute('data-theme') === 'dark';
+}
+
+// ── Chart: calculate SMA ──
+function calcSMA(data, period) {
+    const result = [];
+    for (let i = period - 1; i < data.length; i++) {
+        let sum = 0;
+        for (let j = i - period + 1; j <= i; j++) sum += data[j].close;
+        result.push({ time: data[i].time, value: sum / period });
+    }
+    return result;
+}
+
+// ── Chart: toggle MA line ──
+function toggleMA(panelId, period, btn) {
+    const state = chartState[panelId];
+    state.maEnabled[period] = !state.maEnabled[period];
+    btn.classList.toggle('active', state.maEnabled[period]);
+
+    // If chart is showing, re-render
+    if (state.currentTicker) {
+        const ticker = state.currentTicker;
+        state.currentTicker = null; // prevent toggle
+        showChart(panelId, ticker);
+    }
+}
+
+// ── Chart: show chart for a ticker in a panel ──
+function showChart(panelId, ticker, skipScroll) {
+    const state = chartState[panelId];
+    const viewer = document.getElementById('chart-viewer-' + panelId);
+    const container = document.getElementById('chart-container-' + panelId);
+
+    // Toggle: clicking same ticker again closes chart
+    if (state.currentTicker === ticker && viewer.style.display !== 'none') {
+        closeChart(panelId);
+        return;
+    }
+
+    const data = CHART_DATA[ticker];
+    if (!data || !data.length) {
+        // No chart data — show message
+        document.getElementById('chart-ticker-' + panelId).textContent = ticker;
+        document.getElementById('chart-name-' + panelId).textContent = '— no chart data available';
+        viewer.style.display = 'block';
+        container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted)">No historical data for ' + ticker + '</div>';
+        if (state.chart) { state.chart = null; state.candleSeries = null; state.volSeries = null; }
+        state.currentTicker = ticker;
+        highlightRow(panelId, ticker);
+        return;
+    }
+
+    // Save scroll position before showing viewer
+    const isFirstOpen = !state.currentTicker || viewer.style.display === 'none';
+    if (isFirstOpen) {
+        state.scrollY = window.scrollY;
+    }
+
+    const filtered = filterByRange(data, state.currentRange);
+    const name = DISPLAY_NAMES[ticker] || ticker;
+
+    // Update header
+    document.getElementById('chart-ticker-' + panelId).textContent = ticker;
+    document.getElementById('chart-name-' + panelId).textContent = name;
+
+    // Destroy old chart if exists
+    if (state.chart) {
+        state.chart.remove();
+        state.chart = null;
+    }
+    container.innerHTML = '';
+
+    // Show viewer BEFORE creating chart so container.clientWidth is correct
+    viewer.style.display = 'block';
+
+    const dark = isDarkMode();
+
+    // Create chart
+    const chart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: 340,
+        layout: {
+            background: { color: dark ? '#141820' : '#ffffff' },
+            textColor: dark ? '#a3adbc' : '#3d4f5f',
+            fontSize: 11,
+        },
+        grid: {
+            vertLines: { color: dark ? 'rgba(60,70,90,0.3)' : 'rgba(224,224,224,0.4)' },
+            horzLines: { color: dark ? 'rgba(60,70,90,0.3)' : 'rgba(224,224,224,0.4)' },
+        },
+        crosshair: { mode: 0 }, // Normal
+        rightPriceScale: { borderColor: dark ? 'rgba(60,70,90,0.5)' : 'rgba(224,224,224,0.6)' },
+        timeScale: {
+            borderColor: dark ? 'rgba(60,70,90,0.5)' : 'rgba(224,224,224,0.6)',
+            timeVisible: false,
+        },
+    });
+
+    // Candlestick series
+    const candleSeries = chart.addCandlestickSeries({
+        upColor: dark ? '#00e676' : '#0a7c42',
+        downColor: dark ? '#ff5252' : '#c41230',
+        borderUpColor: dark ? '#00e676' : '#0a7c42',
+        borderDownColor: dark ? '#ff5252' : '#c41230',
+        wickUpColor: dark ? '#00e676' : '#0a7c42',
+        wickDownColor: dark ? '#ff5252' : '#c41230',
+    });
+    candleSeries.setData(filtered);
+
+    // Volume series
+    const volSeries = chart.addHistogramSeries({
+        priceFormat: { type: 'volume' },
+        priceScaleId: 'vol',
+        color: dark ? '#334155' : '#c8d6e0',
+    });
+    chart.priceScale('vol').applyOptions({
+        scaleMargins: { top: 0.8, bottom: 0 },
+    });
+    const volData = filtered.map(d => ({
+        time: d.time,
+        value: d.volume,
+        color: d.close >= d.open
+            ? (dark ? 'rgba(0,230,118,0.25)' : 'rgba(10,124,66,0.2)')
+            : (dark ? 'rgba(255,82,82,0.25)' : 'rgba(196,18,48,0.2)'),
+    }));
+    volSeries.setData(volData);
+
+    // Moving average lines — compute from ALL data for accuracy
+    const maColors = { 20: '#f59e0b', 50: '#3b82f6', 200: '#a855f7' };
+    state.maSeries = {};
+    [20, 50, 200].forEach(period => {
+        if (!state.maEnabled[period]) return;
+        const maFull = calcSMA(data, period); // calc from full dataset
+        const maFiltered = filterByRange(maFull, state.currentRange);
+        if (!maFiltered.length) return;
+        const maSeries = chart.addLineSeries({
+            color: maColors[period],
+            lineWidth: 1,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+        });
+        maSeries.setData(maFiltered);
+        state.maSeries[period] = maSeries;
+    });
+
+    chart.timeScale().fitContent();
+    state.chart = chart;
+    state.candleSeries = candleSeries;
+    state.volSeries = volSeries;
+    state.currentTicker = ticker;
+
+    // Scroll: only on first open, skip during theme toggle or arrow nav
+    if (isFirstOpen && !skipScroll) {
+        viewer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+        window.scrollTo(0, state.scrollY);
+    }
+
+    highlightRow(panelId, ticker);
+}
+
+// ── Chart: close chart ──
+function closeChart(panelId) {
+    const state = chartState[panelId];
+    const viewer = document.getElementById('chart-viewer-' + panelId);
+    if (state.chart) {
+        state.chart.remove();
+        state.chart = null;
+        state.candleSeries = null;
+        state.volSeries = null;
+    }
+    viewer.style.display = 'none';
+    state.currentTicker = null;
+    state.scrollY = 0;
+    highlightRow(panelId, null);
+}
+
+// ── Chart: set time range ──
+function setChartRange(panelId, range, btn) {
+    const state = chartState[panelId];
+    state.currentRange = range;
+
+    // Update button active state
+    const viewer = document.getElementById('chart-viewer-' + panelId);
+    viewer.querySelectorAll('.chart-range-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    // Re-render if ticker is showing
+    if (state.currentTicker) {
+        const ticker = state.currentTicker;
+        state.currentTicker = null; // force re-render (not toggle)
+        showChart(panelId, ticker);
+    }
+}
+
+// ── Chart: highlight active row ──
+function highlightRow(panelId, ticker) {
+    const table = document.getElementById('table-' + panelId);
+    if (!table) return;
+    table.querySelectorAll('tbody tr.chart-row').forEach(tr => {
+        tr.classList.toggle('chart-active', tr.dataset.ticker === ticker);
+    });
+}
+
+// ── Row click handlers ──
+document.querySelectorAll('tbody tr.chart-row').forEach(tr => {
+    tr.addEventListener('click', function(e) {
+        // Don't trigger if clicking a th (sort)
+        if (e.target.closest('th')) return;
+        const ticker = this.dataset.ticker;
+        const table = this.closest('table');
+        const panelId = table.id.replace('table-', '');
+        showChart(panelId, ticker);
+    });
+});
+
+// ── Keyboard navigation ──
+document.addEventListener('keydown', function(e) {
+    // Find the active panel
+    let activePanel = null;
+    Object.keys(chartState).forEach(pid => {
+        if (chartState[pid].currentTicker) activePanel = pid;
+    });
+    if (!activePanel) return;
+
+    const state = chartState[activePanel];
+
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        closeChart(activePanel);
+        return;
+    }
+
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const tickers = getPanelTickers(activePanel);
+        const idx = tickers.indexOf(state.currentTicker);
+        if (idx === -1) return;
+        let newIdx;
+        if (e.key === 'ArrowLeft') {
+            newIdx = idx > 0 ? idx - 1 : tickers.length - 1;
+        } else {
+            newIdx = idx < tickers.length - 1 ? idx + 1 : 0;
+        }
+        state.currentTicker = null; // prevent toggle
+        showChart(activePanel, tickers[newIdx]);
+    }
+});
+
+// ── Resize handler ──
+window.addEventListener('resize', function() {
+    Object.keys(chartState).forEach(pid => {
+        const state = chartState[pid];
+        if (state.chart) {
+            const container = document.getElementById('chart-container-' + pid);
+            state.chart.applyOptions({ width: container.clientWidth });
+        }
+    });
+    ['index', 'sector'].forEach(g => {
+        if (perfCharts[g]) {
+            const c = document.getElementById('chart-container-perf-' + g);
+            if (c) perfCharts[g].chart.applyOptions({ width: c.clientWidth });
+        }
+    });
+});
+
+// ═══════════════════════════════════════════════
+// ── PERFORMANCE CHARTS ──
+// ═══════════════════════════════════════════════
+
+const PERF_TICKERS = {
+    index:  ['SPY', 'QQQ', 'IWM', 'DIA', 'RSP'],
+    sector: ['XLC', 'XLY', 'XLP', 'XLE', 'XLF', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLK', 'XLU'],
+};
+
+const PERF_COLORS = {
+    index:  ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#a855f7'],
+    sector: ['#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16',
+             '#06b6d4', '#e11d48', '#65a30d', '#d97706', '#7c3aed', '#db2777'],
+};
+
+// Per-section state
+const perfCharts = { index: null, sector: null };
+
+function perfFilterByRange(data, range) {
+    if (!data || !data.length) return data;
+    const lastDate = new Date(data[data.length - 1].time);
+    let startDate;
+    if (range === '6m') {
+        startDate = new Date(lastDate); startDate.setMonth(startDate.getMonth() - 6);
+    } else if (range === 'ytd') {
+        startDate = new Date(lastDate.getFullYear(), 0, 1);
+    }
+    if (!startDate) return data;
+    return data.filter(d => d.time >= startDate.toISOString().split('T')[0]);
+}
+
+function normalizePerformance(ticker, range) {
+    const data = CHART_DATA[ticker];
+    if (!data || !data.length) return null;
+    const filtered = perfFilterByRange(data, range);
+    if (!filtered.length) return null;
+    const baseClose = filtered[0].close;
+    if (!baseClose) return null;
+    return filtered.map(d => ({
+        time: d.time,
+        value: ((d.close / baseClose) - 1) * 100,
+    }));
+}
+
+function renderPerfSection(group) {
+    const container = document.getElementById('chart-container-perf-' + group);
+    if (!container) return;
+
+    if (!perfCharts[group]) {
+        perfCharts[group] = { chart: null, series: {}, hidden: new Set(), range: '6m' };
+    }
+    const state = perfCharts[group];
+
+    if (state.chart) { state.chart.remove(); state.chart = null; }
+    container.innerHTML = '';
+    state.series = {};
+
+    const tickers = PERF_TICKERS[group];
+    const colors = PERF_COLORS[group];
+    const dark = isDarkMode();
+
+    const normData = [];
+    tickers.forEach((t, i) => {
+        const norm = normalizePerformance(t, state.range);
+        if (norm && norm.length) normData.push({ ticker: t, data: norm, color: colors[i] });
+    });
+
+    if (!normData.length) {
+        container.innerHTML = '<div style="padding:60px;text-align:center;color:var(--text-muted)">No chart data available</div>';
+        buildPerfLegend(group, tickers, colors, []);
+        return;
+    }
+
+    const chart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: 350,
+        layout: {
+            background: { color: dark ? '#141820' : '#ffffff' },
+            textColor: dark ? '#a3adbc' : '#3d4f5f',
+            fontSize: 11,
+        },
+        grid: {
+            vertLines: { color: dark ? 'rgba(60,70,90,0.3)' : 'rgba(224,224,224,0.4)' },
+            horzLines: { color: dark ? 'rgba(60,70,90,0.3)' : 'rgba(224,224,224,0.4)' },
+        },
+        crosshair: { mode: 0 },
+        rightPriceScale: {
+            borderColor: dark ? 'rgba(60,70,90,0.5)' : 'rgba(224,224,224,0.6)',
+            scaleMargins: { top: 0.05, bottom: 0.05 },
+        },
+        timeScale: {
+            borderColor: dark ? 'rgba(60,70,90,0.5)' : 'rgba(224,224,224,0.6)',
+            timeVisible: false,
+        },
+    });
+
+    normData.forEach(({ ticker, data, color }) => {
+        const isHidden = state.hidden.has(ticker);
+        const series = chart.addLineSeries({
+            color: isHidden ? 'transparent' : color,
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: !isHidden,
+            title: ticker,
+        });
+        series.setData(data);
+        state.series[ticker] = series;
+    });
+
+    chart.timeScale().fitContent();
+    state.chart = chart;
+
+    buildPerfLegend(group, tickers, colors, normData);
+}
+
+function buildPerfLegend(group, tickers, colors, normDataArr) {
+    const legend = document.getElementById('perf-legend-' + group);
+    if (!legend) return;
+    const state = perfCharts[group];
+
+    legend.innerHTML = '';
+    tickers.forEach((t, i) => {
+        const color = colors[i];
+        const isHidden = state.hidden.has(t);
+        const name = DISPLAY_NAMES[t] || '';
+
+        let pctStr = '';
+        if (normDataArr) {
+            const entry = normDataArr.find(e => e.ticker === t);
+            if (entry && entry.data.length) {
+                const lastVal = entry.data[entry.data.length - 1].value;
+                pctStr = (lastVal >= 0 ? '+' : '') + lastVal.toFixed(1) + '%';
+            }
+        }
+
+        const item = document.createElement('div');
+        item.className = 'perf-legend-item' + (isHidden ? ' hidden' : '');
+        item.innerHTML = '<span class="perf-dot" style="background:' + color + '"></span>' +
+            '<span class="perf-ticker">' + t + '</span>' +
+            (name ? '<span class="perf-name">' + name + '</span>' : '') +
+            (pctStr ? '<span class="perf-pct" style="color:' + (isHidden ? '' : color) + '">' + pctStr + '</span>' : '');
+        item.onclick = () => togglePerfLegendItem(group, t);
+        legend.appendChild(item);
+    });
+}
+
+function togglePerfLegendItem(group, ticker) {
+    const state = perfCharts[group];
+    if (!state) return;
+
+    if (state.hidden.has(ticker)) {
+        state.hidden.delete(ticker);
+    } else {
+        state.hidden.add(ticker);
+    }
+
+    const series = state.series[ticker];
+    const colors = PERF_COLORS[group];
+    const tickers = PERF_TICKERS[group];
+    const i = tickers.indexOf(ticker);
+    const color = i >= 0 ? colors[i] : '#888';
+
+    if (series) {
+        const isHidden = state.hidden.has(ticker);
+        series.applyOptions({
+            color: isHidden ? 'transparent' : color,
+            crosshairMarkerVisible: !isHidden,
+        });
+    }
+
+    const normData = [];
+    tickers.forEach((t, ti) => {
+        const norm = normalizePerformance(t, state.range);
+        if (norm && norm.length) normData.push({ ticker: t, data: norm, color: colors[ti] });
+    });
+    buildPerfLegend(group, tickers, colors, normData);
+}
+
+function setPerfRange(group, range, btn) {
+    if (!perfCharts[group]) {
+        perfCharts[group] = { chart: null, series: {}, hidden: new Set(), range: '6m' };
+    }
+    perfCharts[group].range = range;
+
+    document.querySelectorAll('#perf-range-' + group + ' .chart-range-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    renderPerfSection(group);
+}
+
+</script>
+
+</body>
+</html>

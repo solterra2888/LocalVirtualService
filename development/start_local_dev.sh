@@ -70,26 +70,38 @@ echo -e "${BLUE}========================================${NC}"
 DEV_LOGS_DIR="$DEV_DIR/logs"
 mkdir -p "$DEV_LOGS_DIR"
 
-nohup bash "$SCRIPT_DIR/start_webapp_dev.sh" > "$DEV_LOGS_DIR/webapp.log" 2>&1 &
-WEBAPP_PID=$!
-echo "Web 应用进程 PID: $WEBAPP_PID"
-
-echo "等待 Web 应用启动..."
-# 与 backend/main.py 一致：健康检查在 /api/health（/health 会 404，导致本步骤一直打点）
+# 与 backend/main.py 一致：健康检查在 /api/health（/health 会 404）
 WEB_HEALTH_URL="http://localhost:8000/api/health"
-for i in {1..30}; do
-    if curl -s --connect-timeout 2 --max-time 5 "$WEB_HEALTH_URL" >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ Web 应用已启动 (http://localhost:8000)${NC}"
-        break
-    fi
-    sleep 2
-    echo -n "."
-done
+WEBAPP_PID=""
 
-if ! curl -s --connect-timeout 2 --max-time 5 "$WEB_HEALTH_URL" >/dev/null 2>&1; then
-    echo -e "${RED}❌ Web 应用启动失败${NC}"
-    echo "查看日志: tail -f $DEV_LOGS_DIR/webapp.log"
-    exit 1
+if curl -s --connect-timeout 2 --max-time 5 "$WEB_HEALTH_URL" >/dev/null 2>&1; then
+    echo -e "${GREEN}✅ Web 应用已在运行 (http://localhost:8000)${NC}"
+else
+    if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠️  端口 8000 被占用但健康检查失败，清理僵死进程后重启...${NC}"
+        dev_stop_by_port 8000 "Web 应用"
+        sleep 1
+    fi
+
+    nohup bash "$SCRIPT_DIR/start_webapp_dev.sh" > "$DEV_LOGS_DIR/webapp.log" 2>&1 &
+    WEBAPP_PID=$!
+    echo "Web 应用进程 PID: $WEBAPP_PID"
+
+    echo "等待 Web 应用启动..."
+    for i in {1..30}; do
+        if curl -s --connect-timeout 2 --max-time 5 "$WEB_HEALTH_URL" >/dev/null 2>&1; then
+            echo -e "${GREEN}✅ Web 应用已启动 (http://localhost:8000)${NC}"
+            break
+        fi
+        sleep 2
+        echo -n "."
+    done
+
+    if ! curl -s --connect-timeout 2 --max-time 5 "$WEB_HEALTH_URL" >/dev/null 2>&1; then
+        echo -e "${RED}❌ Web 应用启动失败${NC}"
+        echo "查看日志: tail -f $DEV_LOGS_DIR/webapp.log"
+        exit 1
+    fi
 fi
 
 sleep 3

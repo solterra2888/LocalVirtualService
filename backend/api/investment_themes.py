@@ -676,7 +676,7 @@ async def get_theme_associations(theme_id: str) -> ThemeAssociationsResponse:
 async def verify_ticker(
     theme_id: str,
     request: VerifyTickerRequest,
-    current_user=Depends(get_current_admin_user)
+    current_user=Depends(get_current_user)
 ) -> VerifyTickerResponse:
     """
     验证主题关联的ticker，如果数据库中不存在则从EODHD获取数据

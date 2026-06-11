@@ -64,6 +64,7 @@ class SchedulerService:
             'youtube_author_summary': self._execute_youtube_author_summary_task,
             'theme_report': self._execute_theme_report_task,
             'market_weekly_report': self._execute_market_weekly_report_task,
+            'daily_market_report': self._execute_daily_market_report_task,
         }
         
         # 添加事件监听器
@@ -1299,6 +1300,37 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"Market Weekly Report 任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_daily_market_report_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        生成 Daily Market Report（全局，从 finviz_screener 数据）。
+        应在 finviz_screener 刷新完成后调度。
+
+        Args:
+            params:
+                - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)
+        """
+        try:
+            logger.info("分发 Daily Market Report Celery 任务", params=params)
+
+            from backend.tasks.daily_market_report_tasks import generate_daily_market_report_task
+
+            report_date = params.get('report_date')
+
+            task = generate_daily_market_report_task.delay(report_date=report_date)
+
+            date_info = f", date={report_date}" if report_date else ", today"
+            message = (
+                f"✅ Daily Market Report: "
+                f"已提交 Celery 异步任务 {task.id}{date_info}"
+            )
+            logger.info(message)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"Daily Market Report 任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 
