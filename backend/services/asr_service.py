@@ -339,6 +339,12 @@ class ASRService:
                 else:
                     warning(f"ASR 子任务失败: {subtask}")
             
+            if not transcriptions:
+                result["error"] = "ASR 任务已完成但未获取到有效转写结果（子任务失败或结果为空）"
+                result["status"] = "EMPTY"
+                warning(f"{result['error']}, task_id={task_id}")
+                return result
+
             result["success"] = True
             result["status"] = "COMPLETED"
             result["transcriptions"] = transcriptions

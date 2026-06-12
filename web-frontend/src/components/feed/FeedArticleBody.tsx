@@ -270,10 +270,17 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     }
 
     const taskId = result.task_id;
-    const videoTitle = selectedContent.title || `YouTube: ${selectedContent.content_id || 'video'}`;
+    const displayTitle =
+      selectedContent.title ||
+      `${selectedContent.channel_type}: ${selectedContent.content_id || 'content'}`;
+    const taskFileType = selectedContent.channel_type === 'podcast' ? 'podcast' : 'youtube';
     setAsrTaskId(taskId);
-    addTask(taskId, videoTitle, 'youtube');
-    message.info('Transcript pipeline started — progress in the top bar; ASR may take several minutes.');
+    addTask(taskId, displayTitle, taskFileType);
+    message.info(
+      selectedContent.channel_type === 'podcast'
+        ? 'Transcript pipeline started — transcription may take 10–20+ minutes; please be patient.'
+        : 'Transcript pipeline started — progress in the top bar; ASR may take several minutes.',
+    );
   };
 
   useEffect(() => {
@@ -562,6 +569,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   }
 
   const channelType = selectedContent.channel_type;
+  const supportsFeedTranscript = channelType === 'youtube' || channelType === 'podcast';
   const showAiTagsPanel = AUTO_TAG_CHANNELS.has(channelType);
   const tagsHasContent = !!displayTags;
   const confidence = displayTags?.confidence ?? null;
@@ -957,8 +965,8 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
         />
       )}
 
-      {/* ── Transcript Tab (YouTube only) — embed/描述在 Original，字幕单独 Tab ── */}
-      {selectedContent.channel_type === 'youtube' && viewMode === 'transcript' && (
+      {/* ── Transcript Tab (YouTube / Podcast) — embed/描述在 Original，字幕单独 Tab ── */}
+      {supportsFeedTranscript && viewMode === 'transcript' && (
         <CollapsibleOriginalSection>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             {selectedContent.has_transcript ? (

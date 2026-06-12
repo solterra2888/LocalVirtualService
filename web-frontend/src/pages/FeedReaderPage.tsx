@@ -23,6 +23,7 @@ import {
   Tag,
   Checkbox,
   Segmented,
+  Alert,
 } from 'antd';
 import {
   PlusOutlined,
@@ -567,6 +568,20 @@ const FeedReaderPageInner: React.FC = () => {
           
           // 第一次检查在2秒后（可能是复用场景，内容立即可用）
           setTimeout(pollForContent, 2000);
+        } else if (newSubscription.channel_type === 'podcast') {
+          message.info({
+            content: (
+              <div>
+                <div>Podcast subscription created!</div>
+                <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.85 }}>
+                  Episodes are fetched and transcribed in the background. Each episode may take
+                  10–20+ minutes — please be patient. Transcripts will appear in the feed when ready.
+                </div>
+              </div>
+            ),
+            duration: 8,
+          });
+          await loadContents(newSubscription.id);
         } else {
           // 其他渠道暂不支持自动获取
           message.info({
@@ -2090,14 +2105,25 @@ const FeedReaderPageInner: React.FC = () => {
                             ]
                           : [{ required: true, message: 'Please input identifier' }];
                       return (
-                        <Form.Item
-                          name="channel_identifier"
-                          label={label}
-                          rules={rules}
-                          extra={extra}
-                        >
-                          <Input placeholder={placeholder} />
-                        </Form.Item>
+                        <>
+                          {channelType === 'podcast' && (
+                            <Alert
+                              type="warning"
+                              showIcon
+                              message="Transcription takes time"
+                              description="New episodes are transcribed automatically in the background. Each episode typically takes 10–20+ minutes depending on length. Transcripts will appear in the feed when ready — please be patient."
+                              style={{ marginBottom: 16 }}
+                            />
+                          )}
+                          <Form.Item
+                            name="channel_identifier"
+                            label={label}
+                            rules={rules}
+                            extra={extra}
+                          >
+                            <Input placeholder={placeholder} />
+                          </Form.Item>
+                        </>
                       );
                     }}
                   </Form.Item>

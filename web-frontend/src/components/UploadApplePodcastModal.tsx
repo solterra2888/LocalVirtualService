@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, Input, Button, message, notification, Space, ConfigProvider, theme as antdTheme, Alert, Typography } from 'antd';
-import { AppleOutlined, SoundOutlined, LockOutlined, GlobalOutlined } from '@ant-design/icons';
+import { AppleOutlined, SoundOutlined, LockOutlined, GlobalOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { filesAPI } from '../services/files';
 import { getErrorMessage } from '../utils/errorHandler';
 import { getModalStyles } from '../utils/modalStyles';
@@ -81,9 +81,18 @@ const UploadApplePodcastModal: React.FC<UploadApplePodcastModalProps> = ({
         logs: [],
       });
 
-      message.info(
-        'Apple Podcast processing started. Downloading and transcribing audio via Fun-ASR…',
-      );
+      message.info({
+        content: (
+          <div>
+            <div>Apple Podcast processing started.</div>
+            <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.85 }}>
+              Downloading and transcribing may take 10–20+ minutes depending on episode length.
+              Please be patient — track progress in the task panel.
+            </div>
+          </div>
+        ),
+        duration: 8,
+      });
 
       const pollInterval = setInterval(async () => {
         try {
@@ -225,6 +234,12 @@ const UploadApplePodcastModal: React.FC<UploadApplePodcastModalProps> = ({
                 <p style={{ margin: '0 0 6px' }}>
                   The episode audio will be downloaded and transcribed via Fun-ASR. Only episode
                   links containing <code>?i=&lt;episode_id&gt;</code> are supported.
+                </p>
+                <p style={{ margin: '0 0 6px', color: isDark ? '#faad14' : '#d48806' }}>
+                  <ClockCircleOutlined style={{ marginRight: 4 }} />
+                  <strong>Transcription takes time:</strong> Full-episode transcription typically
+                  takes 10–20+ minutes depending on length. You can close this dialog and track
+                  progress in the task panel — please be patient.
                 </p>
                 <p style={{ margin: 0, color: isDark ? '#faad14' : '#d48806' }}>
                   <LockOutlined style={{ marginRight: 4 }} />

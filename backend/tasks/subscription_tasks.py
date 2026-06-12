@@ -833,14 +833,32 @@ def podcast_transcribe_episode_task(
         asr_service = ASRService()
         asr_result = asr_service.transcribe_audio(signed_url)
 
-        if not asr_result:
-            raise RuntimeError(f"ASR 转写返回空结果, title='{episode_title}'")
+        if not asr_result or not asr_result.get("success"):
+            err = (asr_result or {}).get("error") or "unknown"
+            raise RuntimeError(f"ASR 转写失败, title='{episode_title}': {err}")
 
         logger.info("[3/5] ASR 转写完成: title='%s'", episode_title)
 
         # ── [4/5] 格式化结果并写回 DB ──
-        formatted_text = ASRService.format_transcription_result(asr_result)
+        formatted_texts = []
+        for trans_data in asr_result.get("transcriptions") or []:
+            formatted_texts.append(
+                asr_service.format_transcription_result(
+                    trans_data,
+                    include_timestamps=True,
+                    include_words=False,
+                    include_speaker=True,
+                    timestamped_only=True,
+                )
+            )
+        formatted_text = "\n".join(formatted_texts) if formatted_texts else (asr_result.get("text") or "")
         word_count = len(formatted_text) if formatted_text else 0
+
+        if word_count == 0:
+            raise RuntimeError(
+                f"ASR 转写结果为空, title='{episode_title}' "
+                f"(task_id={asr_result.get('task_id', '')})"
+            )
 
         from backend.services.subscription_content_service import SubscriptionContentService
         content_service = SubscriptionContentService()

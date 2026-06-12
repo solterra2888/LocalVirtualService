@@ -10,7 +10,12 @@ Podcast 订阅服务
     → requests.get() → feedparser.parse()
     → PodcastAdapter.normalize() 标准化每个 episode
     → SubscriptionContentService.save_content('podcast', ...)
-    → 对新 episode 派发 podcast_transcribe_episode_task（下载音频 → OSS → Fun-ASR）
+    → 对新 episode 且发布时间在 PODCAST_ASR_RECENT_HOURS 内者派发 ASR 转写
+
+抓取策略（env 可配）：
+  - PODCAST_FETCH_RECENT_DAYS：默认拉取最近 7 天 episode 入库
+  - PODCAST_FETCH_MAX_ITEMS：单日过滤后的数量上限（默认 100）
+  - PODCAST_ASR_RECENT_HOURS：仅对最近 48 小时内发布的 episode 自动 ASR
 
 与 YouTube 订阅的关键区别：
   - 音频 URL 是公网 CDN 链接，不需要 yt-dlp 或住宅 IP
@@ -18,13 +23,17 @@ Podcast 订阅服务
   - 转写使用 Fun-ASR（同 YouTube Feed ASR）
 """
 
+import os
 import time
 import traceback
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 import feedparser
 import requests
+from dateutil import parser as date_parser
 
+from backend.utils.datetime_utils import ensure_utc, utcnow
 from backend.utils.logger import info, error, warning
 
 
@@ -33,8 +42,86 @@ class PodcastSubscriptionService:
 
     # RSS Feed 请求超时（秒）
     _FEED_TIMEOUT = 30
-    # 默认获取的最大 episode 数量
+    # 兼容旧逻辑：subscription_list.max_items_per_fetch 为空时的条目上限兜底
     _DEFAULT_MAX_ITEMS = 50
+
+    @staticmethod
+    def _fetch_recent_days() -> int:
+        return max(1, int(os.getenv("PODCAST_FETCH_RECENT_DAYS", "7")))
+
+    @staticmethod
+    def _fetch_max_items_cap(max_items: Optional[int] = None) -> int:
+        env_cap = max(1, int(os.getenv("PODCAST_FETCH_MAX_ITEMS", "100")))
+        if max_items:
+            return min(max_items, env_cap)
+        return env_cap
+
+    @staticmethod
+    def _asr_recent_hours() -> int:
+        return max(1, int(os.getenv("PODCAST_ASR_RECENT_HOURS", "48")))
+
+    @staticmethod
+    def _parse_entry_published_at(entry: Dict[str, Any]) -> datetime:
+        published_parsed = entry.get("published_parsed")
+        if published_parsed:
+            return ensure_utc(datetime(*published_parsed[:6], tzinfo=timezone.utc))
+        for key in ("published", "pubDate", "updated"):
+            raw = entry.get(key)
+            if not raw:
+                continue
+            try:
+                return ensure_utc(date_parser.parse(str(raw)))
+            except (ValueError, TypeError, OverflowError):
+                continue
+        return utcnow()
+
+    @staticmethod
+    def _entry_within_asr_window(entry: Dict[str, Any]) -> bool:
+        cutoff = utcnow() - timedelta(hours=PodcastSubscriptionService._asr_recent_hours())
+        return PodcastSubscriptionService._parse_entry_published_at(entry) >= cutoff
+
+    @staticmethod
+    def _filter_entries_by_recency(
+        entries: List[Dict[str, Any]],
+        recent_days: int,
+        max_items: int,
+    ) -> List[Dict[str, Any]]:
+        """保留最近 recent_days 天内的 episode，最多 max_items 条（RSS 通常倒序）。"""
+        cutoff = utcnow() - timedelta(days=recent_days)
+        filtered: List[Dict[str, Any]] = []
+        for entry in entries:
+            if len(filtered) >= max_items:
+                break
+            published_at = PodcastSubscriptionService._parse_entry_published_at(entry)
+            if published_at >= cutoff:
+                filtered.append(entry)
+            elif filtered:
+                # 常见 Podcast RSS 按时间倒序；遇到更旧条目可提前结束
+                break
+        return filtered
+
+    @staticmethod
+    def _dispatch_asr_tasks(new_episode_items: List[Dict[str, Any]]) -> None:
+        if not new_episode_items:
+            return
+        try:
+            from backend.celery_app import app as celery_app
+
+            stagger_seconds = 60
+            for i, item in enumerate(new_episode_items):
+                celery_app.send_task(
+                    "podcast_transcribe_episode",
+                    args=[item],
+                    queue="data_fetching",
+                    countdown=i * stagger_seconds,
+                )
+            info(
+                f"Podcast 转写任务已派发: {len(new_episode_items)} 个 episode, "
+                f"stagger={stagger_seconds}s, asr_window={PodcastSubscriptionService._asr_recent_hours()}h",
+                source="podcast_subscription",
+            )
+        except Exception as e:
+            warning(f"派发转写任务失败: {str(e)}", source="podcast_subscription")
 
     # ── Feed 验证 ──────────────────────────────────────────────────────────
 
@@ -123,20 +210,26 @@ class PodcastSubscriptionService:
     @staticmethod
     def fetch_channel_episodes(
         feed_url: str,
-        max_items: int = 50,
+        max_items: Optional[int] = None,
+        recent_days: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         从 Podcast RSS Feed 获取 episode 列表。
 
         Args:
             feed_url: RSS Feed URL
-            max_items: 最大获取数量（默认 50）
+            max_items: 条目上限（默认读 PODCAST_FETCH_MAX_ITEMS，并与订阅配置取较小值）
+            recent_days: 仅保留最近 N 天（默认读 PODCAST_FETCH_RECENT_DAYS=7）
 
         Returns:
             原始 episode 列表（feedparser 解析后的 entry dict，注入了 _feed_url 和 _feed_title）
         """
-        info(f"获取 Podcast Feed: {feed_url}, max_items={max_items}",
-             source="podcast_subscription")
+        days = recent_days if recent_days is not None else PodcastSubscriptionService._fetch_recent_days()
+        cap = PodcastSubscriptionService._fetch_max_items_cap(max_items)
+        info(
+            f"获取 Podcast Feed: {feed_url}, recent_days={days}, max_items={cap}",
+            source="podcast_subscription",
+        )
 
         try:
             resp = requests.get(feed_url, timeout=PodcastSubscriptionService._FEED_TIMEOUT)
@@ -153,15 +246,22 @@ class PodcastSubscriptionService:
             return []
 
         feed_title = feed.feed.get('title', '')
-        entries = feed.entries[:max_items]
+        entries = PodcastSubscriptionService._filter_entries_by_recency(
+            list(feed.entries),
+            recent_days=days,
+            max_items=cap,
+        )
 
         # 注入 feed 级别信息到每个 entry，供 PodcastAdapter 使用
         for entry in entries:
             entry['_feed_url'] = feed_url
             entry['_feed_title'] = feed_title
 
-        info(f"获取到 {len(entries)} 个 episode (feed: '{feed_title}')",
-             source="podcast_subscription")
+        info(
+            f"获取到 {len(entries)} 个 episode (feed: '{feed_title}', "
+            f"window={days}d, cap={cap})",
+            source="podcast_subscription",
+        )
 
         return entries
 
@@ -231,16 +331,21 @@ class PodcastSubscriptionService:
             cursor.close()
             conn.close()
 
+            recent_days = PodcastSubscriptionService._fetch_recent_days()
+            max_cap = PodcastSubscriptionService._fetch_max_items_cap(
+                max_items or PodcastSubscriptionService._DEFAULT_MAX_ITEMS
+            )
             info(
                 f"开始获取 Podcast episode: subscription_id={subscription_id}, "
-                f"feed={channel_identifier}, max_items={max_items}",
+                f"feed={channel_identifier}, recent_days={recent_days}, max_items={max_cap}",
                 source="podcast_subscription",
             )
 
-            # 获取 episode 列表
+            # 获取 episode 列表（默认最近 7 天，条数上限见 PODCAST_FETCH_MAX_ITEMS）
             raw_episodes = PodcastSubscriptionService.fetch_channel_episodes(
                 feed_url=channel_identifier,
-                max_items=max_items or PodcastSubscriptionService._DEFAULT_MAX_ITEMS,
+                max_items=max_cap,
+                recent_days=recent_days,
             )
 
             if not raw_episodes:
@@ -260,6 +365,7 @@ class PodcastSubscriptionService:
             episodes_failed = 0
 
             new_episode_items = []
+            asr_skipped_old = 0
 
             for raw_episode in raw_episodes:
                 try:
@@ -271,22 +377,30 @@ class PodcastSubscriptionService:
 
                     if is_new:
                         episodes_new += 1
-                        # 提取音频 URL 用于后续转写
+                        # 提取音频 URL；仅最近 PODCAST_ASR_RECENT_HOURS 内发布者派发 ASR
                         audio_url = ''
                         enclosures = raw_episode.get('enclosures', [])
                         if enclosures:
                             audio_url = enclosures[0].get('href', '')
 
                         episode_title = raw_episode.get('title', 'unknown')
-                        if audio_url:
+                        if not audio_url:
+                            warning(
+                                f"Episode 无音频 URL，跳过转写: {episode_title}",
+                                source="podcast_subscription",
+                            )
+                        elif PodcastSubscriptionService._entry_within_asr_window(raw_episode):
                             new_episode_items.append({
                                 'content_db_id': content_db_id,
                                 'audio_url': audio_url,
                                 'episode_title': episode_title,
                             })
                         else:
-                            warning(f"Episode 无音频 URL，跳过转写: {episode_title}",
-                                    source="podcast_subscription")
+                            asr_skipped_old += 1
+                            info(
+                                f"Episode 超出 ASR 时间窗，仅入库不转写: {episode_title}",
+                                source="podcast_subscription",
+                            )
                     else:
                         episodes_existing += 1
 
@@ -297,25 +411,13 @@ class PodcastSubscriptionService:
                     episodes_failed += 1
                     continue
 
-            # 派发转写任务（错开派发避免 DashScope 限流）
-            if new_episode_items:
-                try:
-                    from backend.celery_app import app as celery_app
-                    stagger_seconds = 60  # 每个任务间隔 60 秒
-                    for i, item in enumerate(new_episode_items):
-                        celery_app.send_task(
-                            'podcast_transcribe_episode',
-                            args=[item],
-                            queue='data_fetching',
-                            countdown=i * stagger_seconds,
-                        )
-                    info(
-                        f"Podcast 转写任务已派发: {len(new_episode_items)} 个 episode, "
-                        f"stagger={stagger_seconds}s",
-                        source="podcast_subscription",
-                    )
-                except Exception as e:
-                    warning(f"派发转写任务失败: {str(e)}", source="podcast_subscription")
+            PodcastSubscriptionService._dispatch_asr_tasks(new_episode_items)
+            if asr_skipped_old:
+                info(
+                    f"ASR 跳过（超出 {PodcastSubscriptionService._asr_recent_hours()}h 窗口）: "
+                    f"{asr_skipped_old} 个 episode",
+                    source="podcast_subscription",
+                )
 
             execution_time = int((time.time() - start_time) * 1000)
 
@@ -455,7 +557,9 @@ class PodcastSubscriptionService:
                     feeds_map[feed_url] = {
                         'feed_url': feed_url,
                         'channel_name': sub['channel_name'],
-                        'max_items': sub['max_items_per_fetch'] or PodcastSubscriptionService._DEFAULT_MAX_ITEMS,
+                        'max_items': PodcastSubscriptionService._fetch_max_items_cap(
+                            sub['max_items_per_fetch'] or PodcastSubscriptionService._DEFAULT_MAX_ITEMS
+                        ),
                         'user_ids': [],
                         'subscription_ids': [],
                     }
@@ -473,6 +577,7 @@ class PodcastSubscriptionService:
                     raw_episodes = PodcastSubscriptionService.fetch_channel_episodes(
                         feed_url=feed_url,
                         max_items=feed_info['max_items'],
+                        recent_days=PodcastSubscriptionService._fetch_recent_days(),
                     )
 
                     if not raw_episodes:
@@ -480,6 +585,7 @@ class PodcastSubscriptionService:
                         continue
 
                     new_episode_items = []
+                    asr_skipped_old = 0
                     user_ids = feed_info['user_ids']
 
                     for raw_episode in raw_episodes:
@@ -497,12 +603,14 @@ class PodcastSubscriptionService:
                                 if enclosures:
                                     audio_url = enclosures[0].get('href', '')
                                 episode_title = raw_episode.get('title', 'unknown')
-                                if audio_url:
+                                if audio_url and PodcastSubscriptionService._entry_within_asr_window(raw_episode):
                                     new_episode_items.append({
                                         'content_db_id': content_db_id,
                                         'audio_url': audio_url,
                                         'episode_title': episode_title,
                                     })
+                                elif audio_url:
+                                    asr_skipped_old += 1
                             else:
                                 total_episodes_existing += 1
 
@@ -510,25 +618,13 @@ class PodcastSubscriptionService:
                             warning(f"保存 episode 失败: {str(e)}", source="podcast_subscription")
                             continue
 
-                    # 派发转写任务（错开派发避免 DashScope 限流）
-                    if new_episode_items:
-                        try:
-                            from celery import send_task
-                            stagger_seconds = 60
-                            for i, item in enumerate(new_episode_items):
-                                send_task(
-                                    'podcast_transcribe_episode',
-                                    args=[item],
-                                    queue='data_fetching',
-                                    countdown=i * stagger_seconds,
-                                )
-                            info(
-                                f"Feed '{feed_info['channel_name']}' ASR 派发: "
-                                f"{len(new_episode_items)} 个 episode, stagger={stagger_seconds}s",
-                                source="podcast_subscription",
-                            )
-                        except Exception as e:
-                            warning(f"派发转写任务失败: {str(e)}", source="podcast_subscription")
+                    PodcastSubscriptionService._dispatch_asr_tasks(new_episode_items)
+                    if new_episode_items or asr_skipped_old:
+                        info(
+                            f"Feed '{feed_info['channel_name']}' ASR: dispatched={len(new_episode_items)}, "
+                            f"skipped_old={asr_skipped_old}, window={PodcastSubscriptionService._asr_recent_hours()}h",
+                            source="podcast_subscription",
+                        )
 
                     # 更新该 Feed 下所有订阅的统计
                     try:

@@ -3,12 +3,12 @@
 Feeds 内容自动打标签 + 摘要服务
 
 对标 backend/services/content_tagging_service.py (ContentTaggingService),
-但绑定到 subscription_content (Twitter / YouTube / News feed 单条内容).
+但绑定到 subscription_content (Twitter / YouTube / Podcast / News feed 单条内容).
 
 Twitter 智能路由:
   - 长推 (>= TWEET_SIGNAL_HEAVY_THRESHOLD_CHARS) 或含 $cashtag → content_tag_feeds_v1
   - 其余短推/速报 (TWEET_SIGNAL_V1_ENABLED=true) → tweet_signal_v1
-  - YouTube → content_tag_feeds_v1
+  - YouTube / Podcast (RSS ASR transcript) → content_tag_feeds_v1
   - News (白名单来源, 如 CCTV) → content_tag_feeds_v1 (LLM 打标)
   - News (EODHD 等有 API tags 来源) → 轻量映射 map_api_tags() (零 LLM)
 
@@ -28,8 +28,7 @@ from backend.utils.logger import get_logger
 
 logger = get_logger("feed_content_tagging_service")
 
-# LLM 打标支持的渠道 (rss 暂不做)
-_SUPPORTED_CHANNELS = {"twitter", "youtube", "news", "zhishixingqiu"}
+_SUPPORTED_CHANNELS = {"twitter", "youtube", "podcast", "news", "zhishixingqiu"}
 
 FEEDS_TEMPLATE_CODE = "content_tag_feeds_v1"
 TWEET_SIGNAL_TEMPLATE_CODE = "tweet_signal_v1"
@@ -149,7 +148,7 @@ class FeedContentTaggingService:
         allowed = {
             c.strip()
             for c in os.getenv(
-                "AUTO_FEED_TAG_CHANNELS", "twitter,youtube,news,zhishixingqiu"
+                "AUTO_FEED_TAG_CHANNELS", "twitter,youtube,podcast,news,zhishixingqiu"
             ).split(",")
             if c.strip()
         }
@@ -192,8 +191,13 @@ class FeedContentTaggingService:
                 text = text[:max_chars]
             return text, "twitter"
 
-        if channel_type == "youtube":
-            min_len = int(os.getenv("AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE", "200"))
+        if channel_type in ("youtube", "podcast"):
+            min_len_key = (
+                "AUTO_FEED_TAG_MIN_LENGTH_PODCAST"
+                if channel_type == "podcast"
+                else "AUTO_FEED_TAG_MIN_LENGTH_YOUTUBE"
+            )
+            min_len = int(os.getenv(min_len_key, "200"))
             transcript = (row.get("transcript") or "").strip()
             if not transcript or len(transcript) < min_len:
                 return None
@@ -201,7 +205,7 @@ class FeedContentTaggingService:
             text = f"{title}\n\n{transcript}" if title else transcript
             if len(text) > max_chars:
                 text = text[:max_chars]
-            return text, "youtube"
+            return text, channel_type
 
         if channel_type == "zhishixingqiu":
             min_len = int(os.getenv("AUTO_FEED_TAG_MIN_LENGTH_ZSXQ", "30"))
@@ -222,7 +226,7 @@ class FeedContentTaggingService:
 
     def _pick_template_code(self, channel_type: str, text: str) -> str:
         """按渠道与内容特征选择打标模板."""
-        if channel_type in ("youtube", "news"):
+        if channel_type in ("youtube", "podcast", "news"):
             return FEEDS_TEMPLATE_CODE
         if channel_type != "twitter":
             return self.template_code or FEEDS_TEMPLATE_CODE
