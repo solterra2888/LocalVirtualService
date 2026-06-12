@@ -1383,11 +1383,11 @@ class SchedulerService:
     async def _execute_cnbc_closing_bell_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         生成 CNBC Closing Bell 每日 Stock News 摘要（全局）。
-        应在 YouTube 转录完成后调度（美东 ~18:00 = 北京 ~06:00+）。
+        应在 Podcast 转录完成后调度（美东收盘后 ~20:00 UTC = 北京次日清晨）。
 
         Args:
             params:
-                - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)
+                - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)，美东交易日
                 - window_end: 可选，ISO 时间字符串（UTC），内容窗口结束时间
                 - window_hours: 可选，回溯小时数（默认 24）
                 - force: 可选，是否强制重新生成（默认 False）
@@ -1396,20 +1396,33 @@ class SchedulerService:
             logger.info("分发 CNBC Closing Bell Celery 任务", params=params)
 
             from backend.tasks.cnbc_closing_bell_tasks import generate_cnbc_closing_bell_task
+            from backend.utils.datetime_utils import parse_iso_utc, parse_user_tz
 
-            report_date = params.get('report_date')
-            window_end = params.get('window_end')
             window_hours = int(params.get('window_hours', 24))
             force = params.get('force', False)
 
+            window_end = parse_iso_utc(params.get('window_end'))
+            if window_end is None:
+                window_end = utcnow()
+
+            report_date = params.get('report_date')
+            if not report_date:
+                # 美东 16:00 前取上一交易日；收盘后取当日（Closing Bell 对应交易日）
+                et_now = window_end.astimezone(parse_user_tz('America/New_York'))
+                if et_now.hour < 16:
+                    label_date = et_now.date() - timedelta(days=1)
+                else:
+                    label_date = et_now.date()
+                report_date = label_date.isoformat()
+
             task = generate_cnbc_closing_bell_task.delay(
                 report_date=report_date,
-                window_end=window_end,
+                window_end=window_end.isoformat(),
                 window_hours=window_hours,
                 force=force,
             )
 
-            date_info = f", date={report_date}" if report_date else ", today"
+            date_info = f", date={report_date}"
             force_info = "（强制重新生成）" if force else ""
             message = (
                 f"✅ CNBC Closing Bell: "
