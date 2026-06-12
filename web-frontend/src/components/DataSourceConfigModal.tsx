@@ -33,6 +33,7 @@ import {
   FileTextOutlined,
   StarOutlined,
   StockOutlined,
+  CustomerServiceOutlined,
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -59,7 +60,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
@@ -133,6 +134,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 * * * *',
       defaultName: 'YouTube Subscription Feed',
       description: 'Automatically fetch videos from all subscribed YouTube channels every hour (via RSS)'
+    },
+    podcast_subscription: {
+      icon: <CustomerServiceOutlined style={{ color: '#722ed1' }} />,
+      params: [],
+      defaultSchedule: '0 * * * *',
+      defaultName: 'Podcast Subscription Feed',
+      description: 'Automatically fetch episodes from all subscribed Podcast RSS feeds every hour; ASR for episodes published within the last 48 hours'
     },
     eodhd_events: {
       icon: <ScheduleOutlined style={{ color: '#52c41a' }} />,
@@ -533,6 +541,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                           dataSourceType === 'eodhd_macro' ? 'macro_indicators' :
                           dataSourceType === 'twitter_subscription' ? 'twitter_subscription' :
                           dataSourceType === 'youtube_subscription' ? 'youtube_subscription' :
+                          dataSourceType === 'podcast_subscription' ? 'podcast_subscription' :
                           dataSourceType === 'zhishixingqiu_subscription' ? 'zhishixingqiu_subscription' :
                           dataSourceType;
           
@@ -984,6 +993,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           );
 
         case 'youtube_subscription':
+          return null;
+
+        case 'podcast_subscription':
           return null;
 
         case 'zhishixingqiu_subscription':

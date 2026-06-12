@@ -117,7 +117,7 @@ type SchedulerCategory = 'data_fetch' | 'report_generation';
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'other';
   category: SchedulerCategory;
   description: string;
   enabled: boolean;
@@ -182,6 +182,25 @@ const SchedulerPage: React.FC = () => {
           name: 'Configure YouTube Fetch Schedule',
           description: 'Set up periodic YouTube subscription fetching (default: every 60 minutes)',
           endpoint: '/scheduler/tasks/youtube-subscription',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'podcast_subscription',
+      name: 'Podcast Subscription Feed',
+      type: 'podcast_subscription',
+      category: 'data_fetch',
+      description: 'Fetch episodes from subscribed Podcast RSS feeds and auto-transcribe recent episodes (supports multi-user subscriptions)',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_podcast_schedule',
+          name: 'Configure Podcast Fetch Schedule',
+          description: 'Set up periodic Podcast subscription fetching (default: every 60 minutes)',
+          endpoint: '/scheduler/tasks/podcast-subscription',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -592,6 +611,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
           (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
           (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+          (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
           (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
           (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
           (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
@@ -661,6 +681,7 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
         (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
         (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+        (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
         (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
         (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
         (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
@@ -877,6 +898,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
           (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
           (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+          (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
           (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
           (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
           (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
@@ -1001,7 +1023,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'cnbc_closing_bell' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'podcast_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'cnbc_closing_bell' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1236,6 +1258,7 @@ const SchedulerPage: React.FC = () => {
                         (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
                         (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
                         (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+                        (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
                         (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
                         (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
                         (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
@@ -1459,7 +1482,7 @@ const SchedulerPage: React.FC = () => {
               setSelectedDataSource(null);
             }}
             onSuccess={handleDataSourceConfigSuccess}
-            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell'}
+            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell'}
             dataSourceName={selectedDataSource.name}
             initialCronExpression={existingTask?.cron_expression}
             initialTimezone={existingTask?.timezone}
