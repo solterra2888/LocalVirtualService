@@ -6,8 +6,9 @@ CNBC Closing Bell Summary 服务 — CNBC "Closing Bell" 每日 PM Brief 摘要
 "Closing Bell" 节目转录，通过 LLM 生成八段式 PM Brief 摘要。
 
 与 TheCloseSummaryService 的区别：
-- 使用 author_identifier + title ILIKE 筛选（非 show_name）
-- 不同频道 ID 和节目标题模式
+- 使用 author_identifier + title/content 筛选（非 show_name）
+- CNBC YouTube 常在 description（入库为 content）写 joins 'Closing Bell'，标题本身未必含节目名
+- 同日可能有多段（嘉宾 clip、Overtime 等），转录按 published_at 升序合并后送 LLM
 """
 
 import time
@@ -27,15 +28,17 @@ CNBC_CHANNEL_ID = "UCrp_UI8XtuYfpiqluWLD7Lw"
 DEFAULT_TEMPLATE = "cnbc_closing_bell_pm_brief"
 # 转录文本截断阈值（字符数，约 ~20,000 英文单词的 4 倍估算）
 MAX_TRANSCRIPT_CHARS = 80000
-# 标题匹配：CNBC 频道内含 "Closing Bell" 的视频
-CLOSING_BELL_TITLE_PATTERN = "%Closing Bell%"
+# 匹配：CNBC 频道 title 或 YouTube description（content 列）含 Closing Bell
+CLOSING_BELL_MATCH_PATTERN = "%Closing Bell%"
 
 
-def is_cnbc_closing_bell_video(title: Optional[str]) -> bool:
-    """判断是否为 CNBC Closing Bell 节目视频。"""
-    if not title:
-        return False
-    return "Closing Bell" in title
+def is_cnbc_closing_bell_video(
+    title: Optional[str],
+    content: Optional[str] = None,
+) -> bool:
+    """判断是否为 CNBC Closing Bell 相关视频（标题或 description）。"""
+    haystacks = [title, content]
+    return any(h and "Closing Bell" in h for h in haystacks)
 
 
 class CNBCClosingBellService:
@@ -111,19 +114,23 @@ class CNBCClosingBellService:
                     "skipped": False,
                 }
 
-            # 取最新视频（同日可能有多段，取 published_at 最晚的）
-            video = videos[-1]
-            transcript, word_count = self._prepare_transcript(video)
+            # 同日可能有多段（主节目 clip + Overtime 等），按 published_at 合并转录
+            transcript, word_count, used_videos = self._prepare_merged_transcript(videos)
+            primary = used_videos[-1] if used_videos else videos[-1]
 
             if not transcript:
                 self._update_summary(
                     summary_id,
                     status="completed",
-                    video_id=video.get("content_id"),
-                    video_title=video.get("title"),
-                    video_url=video.get("url"),
+                    video_id=primary.get("content_id"),
+                    video_title=primary.get("title"),
+                    video_url=primary.get("url"),
                     summary_content="当日 Closing Bell 节目无可用转录文本。",
-                    metadata={"reason": "no_transcript", "video_id": video.get("content_id")},
+                    metadata={
+                        "reason": "no_transcript",
+                        "video_id": primary.get("content_id"),
+                        "video_count": len(videos),
+                    },
                 )
                 return {
                     "success": True,
@@ -134,16 +141,32 @@ class CNBCClosingBellService:
                 }
 
             # LLM 生成摘要
-            video_title = video.get("title") or "Closing Bell"
+            video_title = self._format_video_title_for_llm(used_videos)
             summary_text = await self._call_llm(transcript, video_title, report_date)
 
             elapsed = round(time.time() - start_time, 2)
+            video_refs = [
+                {
+                    "content_id": v.get("content_id"),
+                    "title": v.get("title"),
+                    "url": v.get("url"),
+                    "published_at": (
+                        ensure_utc(v["published_at"]).isoformat()
+                        if v.get("published_at")
+                        else None
+                    ),
+                }
+                for v in used_videos
+            ]
             metadata = {
                 "generation_time_seconds": elapsed,
                 "transcript_word_count": word_count,
                 "transcript_char_count": len(transcript),
-                "video_id": video.get("content_id"),
+                "video_id": primary.get("content_id"),
+                "video_ids": [v.get("content_id") for v in used_videos],
+                "videos": video_refs,
                 "video_count": len(videos),
+                "transcript_segment_count": len(used_videos),
                 "template_code": DEFAULT_TEMPLATE,
                 "window_start": ensure_utc(window_start).isoformat(),
                 "window_end": ensure_utc(resolved_end).isoformat(),
@@ -152,9 +175,9 @@ class CNBCClosingBellService:
             self._update_summary(
                 summary_id,
                 status="completed",
-                video_id=video.get("content_id"),
+                video_id=primary.get("content_id"),
                 video_title=video_title,
-                video_url=video.get("url"),
+                video_url=primary.get("url"),
                 transcript_word_count=word_count,
                 summary_content=summary_text,
                 metadata=metadata,
@@ -162,6 +185,7 @@ class CNBCClosingBellService:
 
             logger.info(
                 f"Closing Bell 摘要完成: {len(videos)} 个视频, "
+                f"{len(used_videos)} 段转录, "
                 f"transcript {word_count} words, "
                 f"summary {len(summary_text)} chars, "
                 f"耗时 {elapsed}s"
@@ -196,7 +220,8 @@ class CNBCClosingBellService:
         """查询 subscription_content 中 CNBC Closing Bell 的视频。
 
         匹配策略（限定 CNBC 频道）：
-        author_identifier = CNBC channel ID AND title ILIKE '%Closing Bell%'
+        1. title ILIKE '%Closing Bell%'（整集上传等）
+        2. content ILIKE '%Closing Bell%'（嘉宾 clip 的 description 常见 joins 'Closing Bell'）
         """
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
@@ -204,24 +229,28 @@ class CNBCClosingBellService:
             cursor.execute(
                 """
                 SELECT id, content_id, title, url, published_at,
-                       transcript, transcript_cleaned, metadata
+                       transcript, transcript_cleaned, metadata, content
                 FROM subscription_content
                 WHERE channel_type = 'youtube'
                   AND author_identifier = %s
                   AND published_at >= %s AND published_at < %s
-                  AND title ILIKE %s
+                  AND (
+                    title ILIKE %s
+                    OR content ILIKE %s
+                  )
                 ORDER BY published_at ASC
                 """,
                 (
                     CNBC_CHANNEL_ID,
                     window_start,
                     window_end,
-                    CLOSING_BELL_TITLE_PATTERN,
+                    CLOSING_BELL_MATCH_PATTERN,
+                    CLOSING_BELL_MATCH_PATTERN,
                 ),
             )
             columns = [
                 "id", "content_id", "title", "url", "published_at",
-                "transcript", "transcript_cleaned", "metadata",
+                "transcript", "transcript_cleaned", "metadata", "content",
             ]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
         finally:
@@ -229,33 +258,74 @@ class CNBCClosingBellService:
 
     # ── Transcript preparation ─────────────────────────────────────────────
 
-    def _prepare_transcript(self, video: Dict[str, Any]) -> tuple:
-        """
-        从视频记录中准备转录文本。
-
-        Returns:
-            (transcript_text, word_count) — 文本可能为空字符串
-        """
-        # 优先 transcript_cleaned，fallback transcript
+    @staticmethod
+    def _extract_video_transcript(video: Dict[str, Any]) -> str:
+        """优先 transcript_cleaned，fallback transcript。"""
         cleaned = (video.get("transcript_cleaned") or "").strip()
         raw = (video.get("transcript") or "").strip()
-        transcript = cleaned or raw
+        return cleaned or raw
 
-        if not transcript:
-            return "", 0
+    def _prepare_merged_transcript(
+        self, videos: List[Dict[str, Any]]
+    ) -> tuple:
+        """
+        合并同日多段 Closing Bell 转录（按 published_at 升序）。
 
-        # 估算英文字数（按空格分词）
-        word_count = len(transcript.split())
+        Returns:
+            (merged_transcript, total_word_count, videos_with_transcript)
+        """
+        segments: List[str] = []
+        used_videos: List[Dict[str, Any]] = []
+        total_words = 0
 
-        # 超长截断
-        if len(transcript) > MAX_TRANSCRIPT_CHARS:
-            logger.warning(
-                f"转录过长 ({len(transcript)} chars), "
-                f"截断至 {MAX_TRANSCRIPT_CHARS} chars"
+        videos_with_text = [
+            v for v in videos if self._extract_video_transcript(v)
+        ]
+        segment_total = len(videos_with_text)
+
+        for idx, video in enumerate(videos_with_text, start=1):
+            text = self._extract_video_transcript(video)
+            title = (video.get("title") or "Closing Bell").strip()
+            published = video.get("published_at")
+            published_label = (
+                ensure_utc(published).strftime("%Y-%m-%d %H:%M UTC")
+                if published
+                else "unknown time"
             )
-            transcript = transcript[:MAX_TRANSCRIPT_CHARS] + "\n\n...(转录过长，已截断)"
+            header = (
+                f"=== Segment {idx}/{segment_total}: {title} "
+                f"({published_label}) ==="
+            )
+            segments.append(f"{header}\n\n{text}")
+            used_videos.append(video)
+            total_words += len(text.split())
 
-        return transcript, word_count
+        if not segments:
+            return "", 0, []
+
+        merged = "\n\n---\n\n".join(segments)
+
+        if len(merged) > MAX_TRANSCRIPT_CHARS:
+            logger.warning(
+                f"合并转录过长 ({len(merged)} chars), "
+                f"截断至 {MAX_TRANSCRIPT_CHARS} chars "
+                f"({segment_total} segments)"
+            )
+            merged = merged[:MAX_TRANSCRIPT_CHARS] + "\n\n...(转录过长，已截断)"
+
+        return merged, total_words, used_videos
+
+    @staticmethod
+    def _format_video_title_for_llm(videos: List[Dict[str, Any]]) -> str:
+        """为多段转录生成 LLM 可见的节目标题。"""
+        if not videos:
+            return "Closing Bell"
+        if len(videos) == 1:
+            return videos[0].get("title") or "Closing Bell"
+        titles = [v.get("title") or "Closing Bell" for v in videos]
+        return f"Closing Bell — {len(videos)} segments:\n" + "\n".join(
+            f"{i}. {t}" for i, t in enumerate(titles, start=1)
+        )
 
     # ── LLM call ──────────────────────────────────────────────────────────
 
