@@ -26,12 +26,25 @@ logger = get_logger("the_close_summary_service")
 BLOOMBERG_TV_CHANNEL_ID = "UCIALMKvObZNtJ6AmdCLP7Lg"
 # 经 _TRANSCRIPTA_CANONICAL 标准化后的 show_name
 THE_CLOSE_SHOW_NAME = "Bloomberg The Close"
-# LLM 模板
+# LLM 模板（max_tokens / provider / model 由 llm_prompt_templates 配置，经 ConfigResolver 解析）
 DEFAULT_TEMPLATE = "the_close_pm_brief"
-# LLM 最大输出 token
-MAX_TOKENS_OUTPUT = 4000
 # 转录文本截断阈值（字符数，约 ~20,000 英文单词的 4 倍估算）
 MAX_TRANSCRIPT_CHARS = 80000
+# 标题匹配：Bloomberg TV 频道内 "| The Close" / "The Close M/D/..." 均为该节目；
+# 已限定 author_identifier，不会误匹配其他频道。
+THE_CLOSE_TITLE_PATTERN = "%The Close%"
+
+
+def is_bloomberg_the_close_video(
+    title: Optional[str],
+    show_name: Optional[str] = None,
+) -> bool:
+    """判断是否为 Bloomberg Television The Close 节目视频。"""
+    if show_name == THE_CLOSE_SHOW_NAME:
+        return True
+    if not title:
+        return False
+    return "The Close" in title
 
 
 class TheCloseSummaryService:
@@ -189,7 +202,12 @@ class TheCloseSummaryService:
     def _fetch_the_close_videos(
         self, window_start: datetime, window_end: datetime
     ) -> List[Dict[str, Any]]:
-        """查询 subscription_content 中 Bloomberg The Close 的视频。"""
+        """查询 subscription_content 中 Bloomberg The Close 的视频。
+
+        匹配策略（限定 Bloomberg Television 频道）：
+        1. metadata.show_name = 'Bloomberg The Close'（入库时由 YouTubeAdapter 解析）
+        2. title ILIKE '%The Close%'（兼容 show_name 缺失的历史/未回填记录）
+        """
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
         try:
@@ -200,11 +218,20 @@ class TheCloseSummaryService:
                 FROM subscription_content
                 WHERE channel_type = 'youtube'
                   AND author_identifier = %s
-                  AND metadata->>'show_name' = %s
                   AND published_at >= %s AND published_at < %s
+                  AND (
+                    metadata->>'show_name' = %s
+                    OR title ILIKE %s
+                  )
                 ORDER BY published_at ASC
                 """,
-                (BLOOMBERG_TV_CHANNEL_ID, THE_CLOSE_SHOW_NAME, window_start, window_end),
+                (
+                    BLOOMBERG_TV_CHANNEL_ID,
+                    window_start,
+                    window_end,
+                    THE_CLOSE_SHOW_NAME,
+                    THE_CLOSE_TITLE_PATTERN,
+                ),
             )
             columns = [
                 "id", "content_id", "title", "url", "published_at",
@@ -263,7 +290,7 @@ class TheCloseSummaryService:
             for k, v in variables.items()
         }
         logger.info(
-            f"[LLM 调用] 模板={DEFAULT_TEMPLATE}, max_tokens={MAX_TOKENS_OUTPUT}, "
+            f"[LLM 调用] 模板={DEFAULT_TEMPLATE} (max_tokens 由模板配置), "
             f"变量预览={var_preview}"
         )
 
@@ -271,7 +298,6 @@ class TheCloseSummaryService:
         response = await llm_service.chat_completion_with_template(
             template_code=DEFAULT_TEMPLATE,
             variables=variables,
-            max_tokens=MAX_TOKENS_OUTPUT,
         )
         llm_elapsed = round(time.time() - llm_start, 2)
 

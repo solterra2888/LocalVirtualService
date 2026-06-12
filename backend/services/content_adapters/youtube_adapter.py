@@ -93,6 +93,7 @@ _CHANNEL_CONFIGS: Dict[str, Dict] = {
             'Bloomberg Surveillance', 'Bloomberg Brief', 'Bloomberg Businessweek Daily',
             'Bloomberg Deals', 'Bloomberg Crypto', 'ETF IQ',
             'Bloomberg Technology', 'Bloomberg Tech',
+            'The Close',
         },
     },
     # Bloomberg Podcasts – format: "Topic | Show [Date]"
