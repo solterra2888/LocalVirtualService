@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-CNBC Closing Bell Summary 服务 — CNBC "Closing Bell" 每日 PM Brief 摘要
+CNBC Closing Bell Summary 服务 — CNBC "Closing Bell" 每日 Stock News 摘要
 
-独立管线，从 subscription_content 中筛选 CNBC 频道的
-"Closing Bell" 节目转录，通过 LLM 生成八段式 PM Brief 摘要。
+独立管线，从 subscription_content 中筛选 CNBC podcast 频道的
+"Closing Bell" 节目转录，通过 LLM 生成六段式 Stock News 摘要。
 
-与 TheCloseSummaryService 的区别：
-- 使用 author_identifier + title/content 筛选（非 show_name）
-- CNBC YouTube 常在 description（入库为 content）写 joins 'Closing Bell'，标题本身未必含节目名
-- 同日可能有多段（嘉宾 clip、Overtime 等），转录按 published_at 升序合并后送 LLM
+数据源：Podcast RSS Feed（channel_type = 'podcast'）
+筛选条件：author_name + content ILIKE '%Closing Bell%'
+同日可能有多段 episode，转录按 published_at 升序合并后送 LLM。
 """
 
 import time
@@ -22,13 +21,13 @@ from backend.utils.logger import get_logger
 
 logger = get_logger("cnbc_closing_bell_service")
 
-# CNBC YouTube channel_id
-CNBC_CHANNEL_ID = "UCrp_UI8XtuYfpiqluWLD7Lw"
+# CNBC Podcast author_name（对应 subscription_content.author_name）
+CNBC_PODCAST_AUTHOR_NAME = "UCrp_UI8XtuYfpiqluWLD7Lw"
 # LLM 模板（max_tokens / provider / model 由 llm_prompt_templates 配置，经 ConfigResolver 解析）
 DEFAULT_TEMPLATE = "cnbc_closing_bell_pm_brief"
 # 转录文本截断阈值（字符数，约 ~20,000 英文单词的 4 倍估算）
 MAX_TRANSCRIPT_CHARS = 80000
-# 匹配：CNBC 频道 title 或 YouTube description（content 列）含 Closing Bell
+# 匹配：content ILIKE '%Closing Bell%'
 CLOSING_BELL_MATCH_PATTERN = "%Closing Bell%"
 
 
@@ -217,11 +216,11 @@ class CNBCClosingBellService:
     def _fetch_closing_bell_videos(
         self, window_start: datetime, window_end: datetime
     ) -> List[Dict[str, Any]]:
-        """查询 subscription_content 中 CNBC Closing Bell 的视频。
+        """查询 subscription_content 中 CNBC Closing Bell 的 podcast episode。
 
-        匹配策略（限定 CNBC 频道）：
-        1. title ILIKE '%Closing Bell%'（整集上传等）
-        2. content ILIKE '%Closing Bell%'（嘉宾 clip 的 description 常见 joins 'Closing Bell'）
+        匹配策略（限定 CNBC Podcast）：
+        channel_type = 'podcast' AND author_name = CNBC identifier
+        AND content ILIKE '%Closing Bell%'
         """
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
@@ -231,20 +230,16 @@ class CNBCClosingBellService:
                 SELECT id, content_id, title, url, published_at,
                        transcript, transcript_cleaned, metadata, content
                 FROM subscription_content
-                WHERE channel_type = 'youtube'
-                  AND author_identifier = %s
+                WHERE channel_type = 'podcast'
+                  AND author_name = %s
                   AND published_at >= %s AND published_at < %s
-                  AND (
-                    title ILIKE %s
-                    OR content ILIKE %s
-                  )
+                  AND content ILIKE %s
                 ORDER BY published_at ASC
                 """,
                 (
-                    CNBC_CHANNEL_ID,
+                    CNBC_PODCAST_AUTHOR_NAME,
                     window_start,
                     window_end,
-                    CLOSING_BELL_MATCH_PATTERN,
                     CLOSING_BELL_MATCH_PATTERN,
                 ),
             )
