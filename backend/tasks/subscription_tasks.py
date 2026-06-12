@@ -618,3 +618,292 @@ def fetch_zhishixingqiu_subscription_task(
             from backend.utils.lark_notifier import send_zsxq_scheduler_report
             send_zsxq_scheduler_report(failure_result)
         return failure_result
+
+
+# ── Podcast 订阅任务 ────────────────────────────────────────────────────────
+
+
+@app.task(
+    name='fetch_podcast_subscription',
+    bind=True,
+    max_retries=2,
+    default_retry_delay=60,
+    time_limit=600,        # 10 分钟
+    soft_time_limit=540,
+)
+def fetch_podcast_subscription_task(
+    self,
+    subscription_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    force_fetch: bool = False,
+) -> Dict[str, Any]:
+    """
+    异步获取 Podcast 订阅的 episode（Celery 任务）。
+
+    路由到 data_fetching 队列，Podcast RSS Feed 无需住宅 IP。
+    """
+    try:
+        logger.info(
+            "[Celery Task] fetch_podcast_subscription 开始: "
+            "subscription_id=%s user_id=%s force_fetch=%s",
+            subscription_id, user_id, force_fetch,
+        )
+
+        from backend.services.podcast_subscription_service import PodcastSubscriptionService
+
+        result = PodcastSubscriptionService.fetch_and_store_episodes(
+            subscription_id=subscription_id,
+            user_id=user_id,
+            force_fetch=force_fetch,
+        )
+
+        logger.info(
+            "[Celery Task] fetch_podcast_subscription 完成: "
+            "new=%s existing=%s failed=%s",
+            result.get('episodes_new', 0),
+            result.get('episodes_existing', 0),
+            result.get('episodes_failed', 0),
+        )
+        return result
+
+    except Exception as exc:
+        logger.error(
+            "[Celery Task] fetch_podcast_subscription 失败: %s",
+            exc, exc_info=True,
+        )
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+        return {
+            'success': False,
+            'message': str(exc),
+            'episodes_new': 0,
+            'episodes_existing': 0,
+        }
+
+
+@app.task(
+    name='fetch_all_podcast_subscriptions',
+    bind=True,
+    max_retries=2,
+    default_retry_delay=120,
+    time_limit=1800,       # 30 分钟
+    soft_time_limit=1500,
+)
+def fetch_all_podcast_subscriptions_task(self) -> Dict[str, Any]:
+    """
+    批量获取所有 Podcast 订阅的最新 episode（Scheduler 定时调用）。
+    """
+    try:
+        logger.info("[Celery Task] fetch_all_podcast_subscriptions 开始")
+
+        from backend.services.podcast_subscription_service import PodcastSubscriptionService
+
+        result = PodcastSubscriptionService.fetch_all_subscriptions()
+
+        logger.info(
+            "[Celery Task] fetch_all_podcast_subscriptions 完成: "
+            "feeds=%s new=%s existing=%s",
+            result.get('feeds_count', 0),
+            result.get('episodes_new', 0),
+            result.get('episodes_existing', 0),
+        )
+        return result
+
+    except Exception as exc:
+        logger.error(
+            "[Celery Task] fetch_all_podcast_subscriptions 失败: %s",
+            exc, exc_info=True,
+        )
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+        return {
+            'success': False,
+            'message': str(exc),
+            'episodes_new': 0,
+            'episodes_existing': 0,
+        }
+
+
+@app.task(
+    name='podcast_transcribe_episode',
+    bind=True,
+    max_retries=2,
+    default_retry_delay=120,
+    time_limit=1200,       # 20 分钟（含下载 ~40MB + ASR 转写）
+    soft_time_limit=1080,
+)
+def podcast_transcribe_episode_task(
+    self,
+    episode_item: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    单个 Podcast episode ASR 转写任务。
+
+    Args:
+        episode_item: {
+            'content_db_id': int,
+            'audio_url': str,
+            'episode_title': str,
+        }
+
+    流程:
+        1. HTTP 流式下载音频到临时文件（CDN 直连，无需 yt-dlp）
+        2. 上传到 OSS（获取公网 URL 供 Fun-ASR 下载）
+        3. 提交 Fun-ASR 转写（DashScope 异步轮询）
+        4. 写回 subscription_content.transcript
+        5. 触发 auto-feed-tagging（AI 自动打标 + 摘要）
+        6. 清理临时文件
+    """
+    import os
+    import tempfile
+
+    import requests
+
+    content_db_id = episode_item['content_db_id']
+    audio_url = episode_item['audio_url']
+    episode_title = episode_item.get('episode_title', 'unknown')
+
+    temp_path = None
+
+    try:
+        logger.info(
+            "── Podcast ASR 开始: content=%d title='%s' ──",
+            content_db_id, episode_title,
+        )
+
+        # ── [1/5] 下载音频到临时文件 ──
+        logger.info("[1/5] 下载音频: %s", audio_url[:100])
+        temp_dir = tempfile.mkdtemp(prefix='podcast_asr_')
+        safe_title = "".join(c for c in episode_title[:80] if c.isalnum() or c in ' _-').strip()
+        temp_path = os.path.join(temp_dir, f"{safe_title or 'episode'}.mp3")
+
+        try:
+            with requests.get(audio_url, stream=True, timeout=600) as r:
+                r.raise_for_status()
+                with open(temp_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=65536):
+                        f.write(chunk)
+        except requests.HTTPError as e:
+            status = e.response.status_code if e.response is not None else 0
+            if status in (403, 404, 410):
+                # CDN 链接过期/失效，属于永久性错误，不重试
+                logger.error(
+                    "── Podcast ASR 永久失败[下载]: content=%d status=%d url=%s ──",
+                    content_db_id, status, audio_url[:80],
+                )
+                return {
+                    'success': False,
+                    'content_db_id': content_db_id,
+                    'episode_title': episode_title,
+                    'error': f'audio_download_permanent_{status}',
+                }
+            raise  # 5xx 等瞬时错误，走重试
+
+        file_size = os.path.getsize(temp_path)
+        if file_size < 1024:  # < 1KB，下载异常
+            logger.error(
+                "── Podcast ASR 失败[下载]: content=%d file_too_small=%dB ──",
+                content_db_id, file_size,
+            )
+            return {
+                'success': False,
+                'content_db_id': content_db_id,
+                'episode_title': episode_title,
+                'error': f'audio_file_too_small_{file_size}B',
+            }
+
+        logger.info("[1/5] 下载完成: %.1f MB", file_size / 1024 / 1024)
+
+        # ── [2/5] 上传到 OSS ──
+        from backend.services.oss_service import OSSService
+
+        oss_service = OSSService()
+        upload_filename = os.path.basename(temp_path)
+        upload_result = oss_service.upload_audio_file(temp_path, upload_filename)
+        signed_url = upload_result.get('signed_url') or upload_result.get('public_url')
+
+        if not signed_url:
+            raise RuntimeError(f"OSS 上传失败: 无法获取音频 URL, title='{episode_title}'")
+
+        logger.info("[2/5] OSS 上传完成: %s", upload_result.get('object_name', ''))
+
+        # ── [3/5] 提交 Fun-ASR 转写 ──
+        from backend.services.asr_service import ASRService
+
+        asr_service = ASRService()
+        asr_result = asr_service.transcribe_audio(signed_url)
+
+        if not asr_result:
+            raise RuntimeError(f"ASR 转写返回空结果, title='{episode_title}'")
+
+        logger.info("[3/5] ASR 转写完成: title='%s'", episode_title)
+
+        # ── [4/5] 格式化结果并写回 DB ──
+        formatted_text = ASRService.format_transcription_result(asr_result)
+        word_count = len(formatted_text) if formatted_text else 0
+
+        from backend.services.subscription_content_service import SubscriptionContentService
+        content_service = SubscriptionContentService()
+        content_service.update_transcript(
+            content_db_id=content_db_id,
+            transcript=formatted_text,
+            transcript_data={'source': 'podcast_asr', 'episode_title': episode_title},
+        )
+
+        logger.info(
+            "[4/5] 转写结果已写入 DB: content=%d 字数=%d", content_db_id, word_count,
+        )
+
+        # ── [5/5] 触发 auto-feed-tagging（AI 自动打标 + 摘要）──
+        try:
+            from backend.tasks.subscription_tasks import finalize_youtube_feed_task
+            finalize_youtube_feed_task.apply_async(
+                args=[content_db_id],
+                queue='file_processing',
+            )
+        except Exception as tag_err:
+            # 打标是增值能力，不阻断 ASR 主流程
+            logger.warning(
+                "[5/5] signal_feed_transcript_ready 派发失败 (不阻断主流程): "
+                "content=%d error=%s", content_db_id, tag_err,
+            )
+
+        logger.info(
+            "── Podcast ASR 完成: content=%d title='%s' 字数=%d ──",
+            content_db_id, episode_title, word_count,
+        )
+
+        return {
+            'success': True,
+            'content_db_id': content_db_id,
+            'episode_title': episode_title,
+            'word_count': word_count,
+        }
+
+    except Exception as exc:
+        logger.error(
+            "── Podcast ASR 失败[可重试]: content=%d title='%s' "
+            "error=%s (attempt %d/%d) ──",
+            content_db_id, episode_title, exc,
+            self.request.retries + 1, self.max_retries + 1,
+            exc_info=True,
+        )
+        if self.request.retries < self.max_retries:
+            logger.info("→ 120s 后重试: content=%d", content_db_id)
+            raise self.retry(exc=exc)
+        return {
+            'success': False,
+            'content_db_id': content_db_id,
+            'episode_title': episode_title,
+            'error': str(exc),
+        }
+
+    finally:
+        # 清理临时文件
+        if temp_path and os.path.exists(temp_path):
+            try:
+                temp_dir = os.path.dirname(temp_path)
+                os.remove(temp_path)
+                os.rmdir(temp_dir)
+            except OSError:
+                pass

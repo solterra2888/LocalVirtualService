@@ -88,7 +88,7 @@ export interface FeedArticleBodyProps {
  * - News 打标路由: CCTV → LLM (NEWS_LLM_TAG_SOURCES); EODHD → 轻量映射 (map_news_tags).
  * - 知识星球: 入库后 trigger_auto_feed_tagging，使用 content_tag_feeds_v1 模板。
  */
-const AUTO_TAG_CHANNELS = new Set(['twitter', 'youtube', 'news', 'zhishixingqiu']);
+const AUTO_TAG_CHANNELS = new Set(['twitter', 'youtube', 'news', 'zhishixingqiu', 'podcast']);
 
 interface CeleryTaskStatusResponse {
   task_id: string;
@@ -1073,7 +1073,56 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             />
           )}
 
-          {selectedContent.channel_type !== 'youtube' && selectedContent.channel_type !== 'news' && (
+          {selectedContent.channel_type === 'podcast' && (
+            <div style={{ marginTop: 12 }}>
+              {/* Episode description */}
+              {selectedContent.content && selectedContent.content !== selectedContent.title && (
+                <div style={{
+                  color: themeColors.textSecondary,
+                  fontSize: 13,
+                  lineHeight: 1.7,
+                  marginBottom: 16,
+                  whiteSpace: 'pre-wrap',
+                }}>
+                  {selectedContent.content.length > 600
+                    ? `${selectedContent.content.slice(0, 600)}…`
+                    : selectedContent.content}
+                </div>
+              )}
+              {/* Audio player */}
+              {selectedContent.metadata?.audio_url && (
+                <div style={{
+                  background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
+                  borderRadius: 12,
+                  padding: '12px 16px',
+                  marginBottom: 12,
+                }}>
+                  <audio
+                    controls
+                    style={{ width: '100%', height: 40 }}
+                    src={selectedContent.metadata.audio_url}
+                    preload="metadata"
+                  >
+                    Your browser does not support the audio element.
+                  </audio>
+                  {selectedContent.metadata.itunes_duration_raw && (
+                    <div style={{
+                      fontSize: 11,
+                      color: themeColors.textMuted,
+                      marginTop: 6,
+                    }}>
+                      Duration: {selectedContent.metadata.itunes_duration_raw}
+                      {selectedContent.metadata.audio_size_bytes && (
+                        <> · {(selectedContent.metadata.audio_size_bytes / 1024 / 1024).toFixed(1)} MB</>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {selectedContent.channel_type !== 'youtube' && selectedContent.channel_type !== 'news' && selectedContent.channel_type !== 'podcast' && (
             <FeedTweetContent
               content={selectedContent}
               themeColors={themeColors}
@@ -1084,7 +1133,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             />
           )}
 
-          {selectedContent.channel_type !== 'youtube' && selectedContent.media_urls && selectedContent.media_urls.length > 0 && (
+          {selectedContent.channel_type !== 'youtube' && selectedContent.channel_type !== 'podcast' && selectedContent.media_urls && selectedContent.media_urls.length > 0 && (
             <div>
               {selectedContent.media_urls.map((url, idx) => (
                 <img key={idx} src={url} alt="" style={{ width: '100%', borderRadius: 12, marginBottom: 12 }} />

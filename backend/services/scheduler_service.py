@@ -67,6 +67,7 @@ class SchedulerService:
             'daily_market_report': self._execute_daily_market_report_task,
             'the_close_summary': self._execute_the_close_summary_task,
             'cnbc_closing_bell': self._execute_cnbc_closing_bell_task,
+            'podcast_subscription': self._execute_podcast_subscription_task,
         }
         
         # 添加事件监听器
@@ -1419,6 +1420,49 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"CNBC Closing Bell 任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_podcast_subscription_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行 Podcast 订阅抓取任务。
+
+        Args:
+            params:
+                - subscription_id: 可选，指定单个订阅 ID
+                - user_id: 可选，用户 ID
+                - force_fetch: 可选，是否强制获取（默认 False）
+        """
+        try:
+            subscription_id = params.get('subscription_id')
+            user_id = params.get('user_id')
+            force_fetch = params.get('force_fetch', False)
+
+            if subscription_id or user_id:
+                logger.info(
+                    "分发 Podcast 单订阅 Celery 任务: subscription_id=%s, user_id=%s",
+                    subscription_id, user_id,
+                )
+                from celery import send_task
+                task = send_task(
+                    'fetch_podcast_subscription',
+                    args=[subscription_id, user_id, force_fetch],
+                    queue='data_fetching',
+                )
+            else:
+                logger.info("分发 Podcast 批量订阅 Celery 任务")
+                from celery import send_task
+                task = send_task(
+                    'fetch_all_podcast_subscriptions',
+                    queue='data_fetching',
+                )
+
+            message = f"✅ Podcast 订阅抓取任务已提交: {task.id}"
+            logger.info(message)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"Podcast 订阅任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

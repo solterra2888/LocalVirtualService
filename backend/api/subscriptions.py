@@ -25,7 +25,7 @@ router = APIRouter()
 # Pydantic模型
 class CreateSubscriptionRequest(BaseModel):
     """创建订阅请求模型"""
-    channel_type: str = Field(..., description="频道类型: twitter, youtube, zhishixingqiu, rss, news")
+    channel_type: str = Field(..., description="频道类型: twitter, youtube, zhishixingqiu, rss, news, podcast")
     channel_identifier: str = Field(..., description="频道唯一标识: Twitter用户名、YouTube频道ID等")
     channel_name: Optional[str] = Field(None, description="频道显示名称（可选，Twitter 等会从 API 自动填充）")
     channel_description: Optional[str] = Field(None, description="频道描述")
@@ -390,6 +390,47 @@ async def create_subscription(
 
             logger.info(f"YouTube频道验证成功 | identifier={clean_identifier} | name={request.channel_name} | channel_id={channel_id}")
 
+        # 🔥 如果是 Podcast 订阅，验证 RSS Feed URL 是否有效
+        elif request.channel_type == 'podcast':
+            from backend.services.podcast_subscription_service import PodcastSubscriptionService
+
+            feed_url = request.channel_identifier.strip()
+
+            # 基础 URL 格式校验
+            if not feed_url.startswith(('http://', 'https://')):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Podcast channel_identifier 必须是有效的 RSS Feed URL（以 http:// 或 https:// 开头）"
+                )
+
+            logger.info(f"验证 Podcast RSS Feed | url={feed_url}")
+            validation_result = PodcastSubscriptionService.validate_podcast_feed(feed_url)
+
+            if not validation_result.get('valid'):
+                error_msg = validation_result.get('error', 'Invalid RSS Feed')
+                logger.warning(f"Podcast Feed 验证失败 | url={feed_url} | error={error_msg}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Podcast RSS Feed 验证失败: {error_msg}"
+                )
+
+            # 自动填充频道名称
+            if not request.channel_name and validation_result.get('channel_name'):
+                request.channel_name = validation_result['channel_name']
+
+            if not request.channel_description and validation_result.get('description'):
+                request.channel_description = validation_result['description']
+
+            if not request.metadata:
+                request.metadata = {}
+            request.metadata['episode_count'] = validation_result.get('episode_count', 0)
+            request.metadata['has_audio'] = validation_result.get('has_audio', False)
+
+            logger.info(
+                f"Podcast Feed 验证成功 | name={request.channel_name} | "
+                f"episodes={validation_result.get('episode_count', 0)}"
+            )
+
         # 🔥 如果是知识星球订阅，校验 group_id 是否在 zsxq_groups 中
         elif request.channel_type == 'zhishixingqiu':
             from backend.services.zsxq_credential_service import ZsxqCredentialService
@@ -622,7 +663,36 @@ async def create_subscription(
                         f"Remote legacy task scheduled: fetch_youtube_subscription "
                         f"(task_id={task.id})"
                     )
-        
+
+        # 🎙️ Podcast 订阅：已有内容时复用，否则触发首次抓取
+        elif request.enabled and request.channel_type == 'podcast':
+            from backend.tasks.subscription_tasks import (
+                add_user_to_existing_content_task,
+            )
+
+            if has_existing_content:
+                logger.info(
+                    f"Reusing existing Podcast content for {request.channel_identifier}: "
+                    f"{existing_content_count} episodes found."
+                )
+                task = add_user_to_existing_content_task.apply_async(
+                    args=[user_id, request.channel_type, request.channel_identifier],
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(f"Celery task scheduled: add_user_to_existing_content (task_id={task.id})")
+
+            else:
+                logger.info(f"Triggering first Podcast fetch for feed={request.channel_identifier}")
+                from celery import current_app as _celery_app
+                task = _celery_app.send_task(
+                    'fetch_podcast_subscription',
+                    args=[subscription_id, None, True],
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(f"Celery task scheduled: fetch_podcast_subscription (task_id={task.id})")
+
         # 🌟 知识星球：已有内容时把新用户并入 user_ids；否则触发首抓 backfill
         elif request.enabled and request.channel_type == 'zhishixingqiu':
             from backend.tasks.subscription_tasks import (
@@ -1583,8 +1653,8 @@ async def get_subscription_content_transcript(
 
         channel_type, transcript_raw, transcript_cleaned = row[0], row[1], row[2]
 
-        if channel_type != "youtube":
-            raise HTTPException(status_code=400, detail="Transcript is only available for YouTube content")
+        if channel_type not in ("youtube", "podcast"):
+            raise HTTPException(status_code=400, detail="Transcript is only available for YouTube and Podcast content")
 
         # 优先使用清洗后版本，回退到原始版本
         cleaned_text = (transcript_cleaned or "").strip()
@@ -1750,15 +1820,60 @@ async def trigger_youtube_asr_transcription(
         if not row:
             raise HTTPException(status_code=404, detail="Content not found")
 
-        _, channel_type, video_id, _ = row
+        _, channel_type, content_id_str, _ = row
+
+        if channel_type == 'podcast':
+            # Podcast: 直接从 metadata 获取音频 URL，派发 podcast_transcribe_episode
+            conn = db_manager.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT metadata->>'audio_url', title
+                FROM subscription_content
+                WHERE id = %s
+            """, (content_db_id,))
+            meta_row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if not meta_row or not meta_row[0]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Podcast episode has no audio URL, cannot transcribe"
+                )
+
+            audio_url = meta_row[0]
+            episode_title = meta_row[1] or 'unknown'
+
+            from celery import current_app as _celery_app
+            task = _celery_app.send_task(
+                "podcast_transcribe_episode",
+                args=[{
+                    'content_db_id': content_db_id,
+                    'audio_url': audio_url,
+                    'episode_title': episode_title,
+                }],
+                countdown=0,
+                queue='data_fetching',
+            )
+
+            logger.info(
+                f"Podcast ASR pipeline dispatched: "
+                f"content_db_id={content_db_id}, task_id={task.id}, user_id={user_id}"
+            )
+
+            return {
+                "task_id": task.id,
+                "content_db_id": content_db_id,
+                "message": "Podcast ASR pipeline started. Poll GET /api/files/tasks/{task_id}/status.",
+            }
 
         if channel_type != 'youtube':
             raise HTTPException(
                 status_code=400,
-                detail="Only YouTube content can be transcribed via ASR"
+                detail="Only YouTube and Podcast content can be transcribed via ASR"
             )
 
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        video_url = f"https://www.youtube.com/watch?v={content_id_str}"
 
         # 与 youtube_subscription_service 新视频补字幕、Upload Sources 一致：派发到本地
         # `fetch_youtube_transcripts_batch`（路由 youtube_fetching），禁止 queue=file_processing
@@ -1768,7 +1883,7 @@ async def trigger_youtube_asr_transcription(
         video_items = [
             {
                 "content_db_id": content_db_id,
-                "video_id": video_id,
+                "video_id": content_id_str,
                 "video_url": video_url,
             }
         ]
@@ -1780,12 +1895,12 @@ async def trigger_youtube_asr_transcription(
 
         logger.info(
             f"YouTube feed transcript pipeline dispatched (local batch): "
-            f"content_db_id={content_db_id}, video_id={video_id}, task_id={task.id}, user_id={user_id}"
+            f"content_db_id={content_db_id}, video_id={content_id_str}, task_id={task.id}, user_id={user_id}"
         )
 
         return {
             "task_id": task.id,
-            "video_id": video_id,
+            "video_id": content_id_str,
             "content_db_id": content_db_id,
             "message": (
                 "YouTube caption/ASR pipeline started on local worker. "

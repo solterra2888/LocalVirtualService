@@ -228,7 +228,7 @@ const FeedReaderPageInner: React.FC = () => {
     return result;
   }, [contents, contentSearchQuery, selectedShowFilter]);
 
-  const showTranscriptTabInFeeds = selectedContent?.channel_type === 'youtube';
+  const showTranscriptTabInFeeds = selectedContent?.channel_type === 'youtube' || selectedContent?.channel_type === 'podcast';
 
   const feedSegmentedOptions = useMemo(() => {
     const opts: { label: string; value: FeedArticleViewMode }[] = [
@@ -2039,47 +2039,64 @@ const FeedReaderPageInner: React.FC = () => {
                   >
                     {({ getFieldValue }) => {
                       const rawChannelType = getFieldValue('channel_type') || '';
-                      if (rawChannelType !== 'twitter' && rawChannelType !== 'youtube') {
+                      if (rawChannelType !== 'twitter' && rawChannelType !== 'youtube' && rawChannelType !== 'podcast') {
                         return null;
                       }
                       const channelType = rawChannelType;
+                      const label = channelType === 'twitter'
+                        ? 'Twitter Username'
+                        : channelType === 'podcast'
+                          ? 'Podcast RSS Feed URL'
+                          : 'YouTube Channel';
+                      const placeholder = channelType === 'twitter'
+                        ? '@elonmusk or elonmusk'
+                        : channelType === 'podcast'
+                          ? 'https://feeds.simplecast.com/Nh1wIaXT'
+                          : '@markets or UCIALMKvObZNtJ6AmdCLP7Lg';
+                      const extra = channelType === 'twitter'
+                        ? 'With or without @ (e.g. @elonmusk or elonmusk)'
+                        : channelType === 'podcast'
+                          ? 'Paste the RSS Feed URL of the podcast (e.g. from Apple Podcasts or Spotify)'
+                          : 'Recommended: paste the @handle from youtube.com/@xxx (e.g., @markets → Bloomberg Television). You can also paste a UC… channel ID. Bare names without @ use the legacy username and may resolve to a different channel.';
+                      const rules = channelType === 'twitter'
+                        ? [
+                            { required: true, message: 'Please input identifier' },
+                            {
+                              validator: (_: unknown, value: string) => {
+                                const n = normalizeTwitterUsername(value || '');
+                                if (!n) {
+                                  return Promise.reject(
+                                    new Error('Please enter a username')
+                                  );
+                                }
+                                return Promise.resolve();
+                              },
+                            },
+                          ]
+                        : channelType === 'podcast'
+                          ? [
+                              { required: true, message: 'Please input RSS Feed URL' },
+                              {
+                                validator: (_: unknown, value: string) => {
+                                  const v = (value || '').trim();
+                                  if (v && !v.startsWith('http://') && !v.startsWith('https://')) {
+                                    return Promise.reject(
+                                      new Error('Must be a valid URL starting with http:// or https://')
+                                    );
+                                  }
+                                  return Promise.resolve();
+                                },
+                              },
+                            ]
+                          : [{ required: true, message: 'Please input identifier' }];
                       return (
                         <Form.Item
                           name="channel_identifier"
-                          label={
-                            channelType === 'twitter' ? 'Twitter Username' : 'YouTube Channel'
-                          }
-                          rules={
-                            channelType === 'twitter'
-                              ? [
-                                  { required: true, message: 'Please input identifier' },
-                                  {
-                                    validator: (_: unknown, value: string) => {
-                                      const n = normalizeTwitterUsername(value || '');
-                                      if (!n) {
-                                        return Promise.reject(
-                                          new Error('Please enter a username')
-                                        );
-                                      }
-                                      return Promise.resolve();
-                                    },
-                                  },
-                                ]
-                              : [{ required: true, message: 'Please input identifier' }]
-                          }
-                          extra={
-                            channelType === 'twitter'
-                              ? 'With or without @ (e.g. @elonmusk or elonmusk)'
-                              : 'Recommended: paste the @handle from youtube.com/@xxx (e.g., @markets → Bloomberg Television). You can also paste a UC… channel ID. Bare names without @ use the legacy username and may resolve to a different channel.'
-                          }
+                          label={label}
+                          rules={rules}
+                          extra={extra}
                         >
-                          <Input
-                            placeholder={
-                              channelType === 'twitter'
-                                ? '@elonmusk or elonmusk'
-                                : '@markets or UCIALMKvObZNtJ6AmdCLP7Lg'
-                            }
-                          />
+                          <Input placeholder={placeholder} />
                         </Form.Item>
                       );
                     }}

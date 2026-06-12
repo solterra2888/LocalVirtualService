@@ -106,6 +106,10 @@ task_routes = {
     'generate_the_close_summary': {'queue': 'ai_processing'},
     # CNBC Closing Bell — CNBC Closing Bell 每日 Stock News
     'generate_cnbc_closing_bell_summary': {'queue': 'ai_processing'},
+    # Podcast 订阅抓取（公网 CDN，无需住宅 IP）
+    'fetch_podcast_subscription': {'queue': 'data_fetching'},
+    'fetch_all_podcast_subscriptions': {'queue': 'data_fetching'},
+    'podcast_transcribe_episode': {'queue': 'data_fetching'},
 }
 
 # Worker配置

@@ -927,6 +927,7 @@ class DatabaseManager:
                 'market_weekly_report',
                 'the_close_summary',
                 'cnbc_closing_bell',
+                'podcast_subscription',
                 # legacy rows in some deployments
                 'cctv_news',
                 'eodhd_news',

@@ -6,11 +6,13 @@ import {
   GlobalOutlined,
   ReadOutlined,
   StarOutlined,
+  CustomerServiceOutlined,
 } from '@ant-design/icons';
 
 export const CHANNEL_TYPES = [
   { value: 'twitter', label: 'Twitter', icon: <TwitterOutlined />, color: '#1DA1F2' },
   { value: 'youtube', label: 'YouTube', icon: <YoutubeOutlined />, color: '#FF0000', disabled: false },
+  { value: 'podcast', label: 'Podcast', icon: <CustomerServiceOutlined />, color: '#8B5CF6', disabled: false },
   { value: 'zhishixingqiu', label: '知识星球', icon: <StarOutlined />, color: '#FF6B00', disabled: false },
   { value: 'rss', label: 'RSS Feed', icon: <GlobalOutlined />, color: '#orange', disabled: true },
 ];
@@ -68,7 +70,7 @@ export function getNewsSourceFaviconUrl(identifier: string): string | undefined 
 }
 
 /** My Feeds 侧栏：与 Sources 文件类型栏一致的频道类型筛选 */
-export type FeedChannelTypeFilterKey = 'all' | 'twitter' | 'youtube' | 'news' | 'zhishixingqiu';
+export type FeedChannelTypeFilterKey = 'all' | 'twitter' | 'youtube' | 'podcast' | 'news' | 'zhishixingqiu';
 
 export const FEED_CHANNEL_TYPE_FILTER_TABS: {
   key: FeedChannelTypeFilterKey;
@@ -78,6 +80,7 @@ export const FEED_CHANNEL_TYPE_FILTER_TABS: {
   { key: 'all', label: 'All types', icon: <AppstoreOutlined /> },
   { key: 'twitter', label: 'Twitter', icon: <TwitterOutlined /> },
   { key: 'youtube', label: 'YouTube', icon: <YoutubeOutlined /> },
+  { key: 'podcast', label: 'Podcast', icon: <CustomerServiceOutlined /> },
   { key: 'news', label: 'News', icon: <ReadOutlined /> },
   { key: 'zhishixingqiu', label: '知识星球', icon: <StarOutlined /> },
 ];
@@ -95,6 +98,7 @@ export function getChannelIcon(channelType: string) {
   if (config) return config.icon;
   if (channelType === 'news') return <ReadOutlined />;
   if (channelType === 'zhishixingqiu') return <StarOutlined />;
+  if (channelType === 'podcast') return <CustomerServiceOutlined />;
   return <GlobalOutlined />;
 }
 
@@ -103,6 +107,7 @@ export function getChannelColor(channelType: string): string {
   const config = CHANNEL_TYPES.find((c) => c.value === channelType);
   if (config) return config.color;
   if (channelType === 'news') return '#8c8c8c';
+  if (channelType === 'podcast') return '#8B5CF6';
   return '#8c8c8c';
 }
 

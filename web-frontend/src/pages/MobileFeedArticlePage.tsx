@@ -127,9 +127,9 @@ const MobileFeedArticlePage: React.FC = () => {
   };
 
   const showFeedViewModeTabs =
-    !!content && (content.channel_type === 'twitter' || content.channel_type === 'youtube');
+    !!content && (content.channel_type === 'twitter' || content.channel_type === 'youtube' || content.channel_type === 'podcast');
 
-  const showTranscriptTabMobile = content?.channel_type === 'youtube';
+  const showTranscriptTabMobile = content?.channel_type === 'youtube' || content?.channel_type === 'podcast';
 
   const mobileFeedSegmentedOptions = useMemo(() => {
     const opts: { label: string; value: FeedArticleViewMode }[] = [
