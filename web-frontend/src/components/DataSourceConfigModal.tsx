@@ -59,7 +59,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
@@ -259,6 +259,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 7 * * 2-6',
       defaultName: 'Bloomberg The Close Summary',
       description: 'Generate daily PM Brief summary from Bloomberg "The Close" transcript (weekdays 7 AM Beijing / 7 PM ET)'
+    },
+    cnbc_closing_bell: {
+      icon: <StockOutlined style={{ color: '#1890ff' }} />,
+      params: [],
+      defaultSchedule: '0 7 * * 2-6',
+      defaultName: 'CNBC Closing Bell Summary',
+      description: 'Generate daily Stock News summary from CNBC "Closing Bell" transcript (weekdays 7 AM Beijing / 7 PM ET)'
     },
   };
 
@@ -497,6 +504,17 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           result = await schedulerAPI.createCronTask({
             task_type: 'the_close_summary',
             ...theCloseSummaryParams,
+          });
+        } else if (dataSourceType === 'cnbc_closing_bell') {
+          const cnbcClosingBellParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+          };
+          result = await schedulerAPI.createCronTask({
+            task_type: 'cnbc_closing_bell',
+            ...cnbcClosingBellParams,
           });
         } else if (dataSourceType === 'watchlist_fundamentals') {
           // Watchlist Fundamentals 任务的专用创建逻辑
@@ -2180,6 +2198,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           return null;
 
         case 'the_close_summary':
+          return null;
+
+        case 'cnbc_closing_bell':
           return null;
 
         default:

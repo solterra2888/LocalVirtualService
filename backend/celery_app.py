@@ -132,6 +132,12 @@ except ImportError as e:
     print(f"❌ 导入 The Close Summary 任务模块失败: {e}")
 
 try:
+    from backend.tasks import cnbc_closing_bell_tasks
+    print(f"✅ 成功导入 CNBC Closing Bell 任务模块: {cnbc_closing_bell_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入 CNBC Closing Bell 任务模块失败: {e}")
+
+try:
     from backend.tasks import theme_matching_tasks
     print(f"✅ 成功导入内容主题匹配任务模块: {theme_matching_tasks.__name__}")
 except ImportError as e:

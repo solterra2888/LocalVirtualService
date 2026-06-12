@@ -104,6 +104,8 @@ task_routes = {
     'ebook_map_reduce': {'queue': 'ai_processing'},
     # The Close Summary — Bloomberg The Close 每日 PM Brief
     'generate_the_close_summary': {'queue': 'ai_processing'},
+    # CNBC Closing Bell — CNBC Closing Bell 每日 Stock News
+    'generate_cnbc_closing_bell_summary': {'queue': 'ai_processing'},
 }
 
 # Worker配置

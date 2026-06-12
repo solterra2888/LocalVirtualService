@@ -117,7 +117,7 @@ type SchedulerCategory = 'data_fetch' | 'report_generation';
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'other';
   category: SchedulerCategory;
   description: string;
   enabled: boolean;
@@ -315,6 +315,25 @@ const SchedulerPage: React.FC = () => {
           name: 'Configure The Close Summary Schedule',
           description: 'Set up periodic The Close PM Brief generation (default: weekdays 7 AM Beijing / 7 PM ET)',
           endpoint: '/scheduler/tasks/the-close-summary',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'cnbc_closing_bell',
+      name: 'CNBC Closing Bell Summary',
+      type: 'cnbc_closing_bell',
+      category: 'report_generation',
+      description: 'Generate daily Stock News summary from CNBC "Closing Bell" episode transcript (6-section structured markdown).',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_cnbc_closing_bell_schedule',
+          name: 'Configure CNBC Closing Bell Schedule',
+          description: 'Set up periodic Closing Bell Stock News generation (default: weekdays 7 AM Beijing / 7 PM ET)',
+          endpoint: '/scheduler/tasks/cnbc-closing-bell',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -580,6 +599,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
           (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
           (sourceIdLower === 'the_close_summary' && taskType === 'the_close_summary') ||
+          (sourceIdLower === 'cnbc_closing_bell' && taskType === 'cnbc_closing_bell') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -593,7 +613,7 @@ const SchedulerPage: React.FC = () => {
         const hasEnabledTask = relatedTasks.some(task => task.enabled);
         return { ...source, enabled: hasEnabledTask };
       }
-      
+
       // No related tasks, maintain original status (Coming soon data sources)
       return source;
     }));
@@ -648,6 +668,7 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
         (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
         (sourceIdLower === 'the_close_summary' && taskType === 'the_close_summary') ||
+        (sourceIdLower === 'cnbc_closing_bell' && taskType === 'cnbc_closing_bell') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -863,6 +884,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
           (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
           (sourceIdLower === 'the_close_summary' && taskType === 'the_close_summary') ||
+          (sourceIdLower === 'cnbc_closing_bell' && taskType === 'cnbc_closing_bell') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
@@ -979,7 +1001,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'cnbc_closing_bell' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1221,6 +1243,7 @@ const SchedulerPage: React.FC = () => {
                         (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
                         (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
                         (sourceIdLower === 'the_close_summary' && taskType === 'the_close_summary') ||
+                        (sourceIdLower === 'cnbc_closing_bell' && taskType === 'cnbc_closing_bell') ||
                         (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                         (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                         (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -1436,7 +1459,7 @@ const SchedulerPage: React.FC = () => {
               setSelectedDataSource(null);
             }}
             onSuccess={handleDataSourceConfigSuccess}
-            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary'}
+            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell'}
             dataSourceName={selectedDataSource.name}
             initialCronExpression={existingTask?.cron_expression}
             initialTimezone={existingTask?.timezone}
