@@ -979,7 +979,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1219,6 +1219,8 @@ const SchedulerPage: React.FC = () => {
                         (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
                         (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
                         (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
+                        (sourceIdLower === 'market_weekly_report' && taskType === 'market_weekly_report') ||
+                        (sourceIdLower === 'the_close_summary' && taskType === 'the_close_summary') ||
                         (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                         (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                         (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -1434,7 +1436,7 @@ const SchedulerPage: React.FC = () => {
               setSelectedDataSource(null);
             }}
             onSuccess={handleDataSourceConfigSuccess}
-            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report'}
+            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary'}
             dataSourceName={selectedDataSource.name}
             initialCronExpression={existingTask?.cron_expression}
             initialTimezone={existingTask?.timezone}

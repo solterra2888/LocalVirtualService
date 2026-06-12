@@ -925,6 +925,7 @@ class DatabaseManager:
                 'youtube_author_summary',
                 'theme_report',
                 'market_weekly_report',
+                'the_close_summary',
                 # legacy rows in some deployments
                 'cctv_news',
                 'eodhd_news',

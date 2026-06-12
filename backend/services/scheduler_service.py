@@ -1377,6 +1377,8 @@ class SchedulerService:
             error_msg = f"The Close Summary 任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_economic_events_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行经济事件获取任务
         
