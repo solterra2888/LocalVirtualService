@@ -2,9 +2,9 @@
 """
 Twitter Daily Report 服务 — AI Agent 定期为每个用户生成 Twitter 数据总结报告
 
-优化后的两阶段解耦架构：
+两阶段解耦架构：
   阶段 A（全局）: TwitterAuthorSummaryService 按作者预生成摘要，同一作者同一天只调 LLM 一次
-  阶段 B（本服务）: 读取预计算的作者摘要 → 全局引用重编号 → Phase 2 综合报告
+  阶段 B（本服务）: 读取预计算的作者摘要 → 全局引用重编号 → 机械拼接最终报告（不调 LLM）
 
 如果预计算摘要缺失，会自动 fallback 到即时生成并缓存。
 """
@@ -18,13 +18,9 @@ from zoneinfo import ZoneInfo
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
-from backend.core.llm_framework import llm_service
 from backend.utils.datetime_utils import ensure_utc, resolve_report_content_window
 
 logger = get_logger("twitter_daily_report_service")
-
-DEFAULT_PHASE2_TEMPLATE = "twitter_daily_phase2_default"
-MAX_TOKENS_OUTPUT_PHASE2 = 4000
 
 _REF_PATTERN = re.compile(r'\[T-(\d{3,})\]')
 
@@ -49,23 +45,11 @@ def _build_generation_time_display(generated_at_utc: datetime) -> Dict[str, str]
 
 
 class TwitterDailyReportService:
-    """Twitter Daily Report 生成服务（阶段 B：组装用户报告）"""
+    """Twitter Daily Report 生成服务（阶段 B：机械拼接用户报告，不调 LLM）"""
 
     def __init__(self):
         db_params = get_database_config()
         self.db_manager = DatabaseManager(db_params)
-
-    def _get_template_updated_at(self, template_code: str) -> Optional[datetime]:
-        """获取模板的最近更新时间，用于检测模板变更后自动重新生成。"""
-        try:
-            from backend.services.llm_prompt_template_service import LLMPromptTemplateService
-            svc = LLMPromptTemplateService()
-            tpl = svc.get_template_by_code(template_code)
-            if tpl and tpl.get('updated_at'):
-                return datetime.fromisoformat(tpl['updated_at'])
-        except Exception as e:
-            logger.warning(f"获取模板更新时间失败: {template_code}, {e}")
-        return None
 
     # ── Public API ─────────────────────────────────────────────────────────
 
@@ -81,6 +65,7 @@ class TwitterDailyReportService:
         为指定用户生成指定日期的 Twitter Daily Report。
         优先从 twitter_author_daily_summaries 读取预计算摘要（阶段 A），
         缺失时自动 fallback 到即时生成。
+        Phase 2 机械拼接各作者摘要，不调 LLM。
 
         Returns:
             {'success': bool, 'report_id': int | None, 'message': str, ...}
@@ -101,49 +86,23 @@ class TwitterDailyReportService:
             window_end=window_metadata['window_end'],
         )
 
-        # 解析用户 Phase 2 模板偏好
-        from backend.services.template_preference_service import TemplatePreferenceService
-        pref_service = TemplatePreferenceService()
-        phase2_template = pref_service.resolve_template_code(user_id, 'twitter_phase2')
-        logger.info(f"Phase2 模板解析完成: {phase2_template}", user_id=user_id)
-
         if not force:
             existing = self._get_existing_report(user_id, report_date)
             if existing and existing.get('status') == 'completed':
-                tpl_updated = self._get_template_updated_at(phase2_template)
-                report_updated = existing.get('updated_at')
-                if tpl_updated and report_updated:
-                    if isinstance(report_updated, str):
-                        report_updated = datetime.fromisoformat(report_updated)
-                    if tpl_updated > report_updated:
-                        logger.info(
-                            f"Phase2 模板已更新 (模板={tpl_updated}, 报告={report_updated}), "
-                            f"自动重新生成",
-                            user_id=user_id, report_date=str(report_date)
-                        )
-                    else:
-                        logger.info("报告已存在，跳过生成", user_id=user_id, report_date=str(report_date))
-                        return {
-                            'success': True,
-                            'report_id': existing['id'],
-                            'message': '报告已存在',
-                            'skipped': True,
-                        }
-                else:
-                    logger.info("报告已存在，跳过生成", user_id=user_id, report_date=str(report_date))
-                    return {
-                        'success': True,
-                        'report_id': existing['id'],
-                        'message': '报告已存在',
-                        'skipped': True,
-                    }
+                logger.info("报告已存在，跳过生成", user_id=user_id, report_date=str(report_date))
+                return {
+                    'success': True,
+                    'report_id': existing['id'],
+                    'message': '报告已存在',
+                    'skipped': True,
+                }
 
         report_id = self._upsert_report_status(user_id, report_date, 'generating')
 
         try:
             # 1) 获取用户订阅的 Twitter 作者列表
             user_authors = self._get_user_subscribed_authors(user_id)
-            logger.info(f"[Step 1/6] 用户订阅作者: {len(user_authors)} 位",
+            logger.info(f"[Step 1/5] 用户订阅作者: {len(user_authors)} 位",
                         user_id=user_id)
             if not user_authors:
                 self._update_report(report_id, status='completed',
@@ -164,7 +123,7 @@ class TwitterDailyReportService:
             cached_summaries = author_summary_service.get_author_summaries_for_date(
                 author_ids, report_date
             )
-            logger.info(f"[Step 2/6] 缓存摘要命中: {len(cached_summaries)}/{len(author_ids)}",
+            logger.info(f"[Step 2/5] 缓存摘要命中: {len(cached_summaries)}/{len(author_ids)}",
                         user_id=user_id)
 
             # 3) 补生成缺失的摘要（fallback）
@@ -173,7 +132,7 @@ class TwitterDailyReportService:
                 if aid not in cached_summaries
             ]
             if missing_authors:
-                logger.info(f"[Step 3/6] Fallback: 需即时生成 {len(missing_authors)} 位作者摘要",
+                logger.info(f"[Step 3/5] Fallback: 需即时生成 {len(missing_authors)} 位作者摘要",
                             user_id=user_id)
                 for aid, aname in missing_authors:
                     result = await author_summary_service.generate_author_summary(
@@ -187,7 +146,7 @@ class TwitterDailyReportService:
                         )
                         cached_summaries.update(fresh)
             else:
-                logger.info(f"[Step 3/6] 所有作者摘要均已缓存，无需 fallback",
+                logger.info(f"[Step 3/5] 所有作者摘要均已缓存，无需 fallback",
                             user_id=user_id)
 
             # 过滤掉无推文数据的作者
@@ -212,24 +171,16 @@ class TwitterDailyReportService:
                 active_summaries
             )
             total_tweet_count = sum(s.get('tweet_count', 0) for s in active_summaries.values())
-            top_tweets_text = self._merge_top_tweets(active_summaries, global_ref_map)
-            logger.info(f"[Step 4/6] 组装完成: {len(renumbered_summaries)} 位作者, "
+            logger.info(f"[Step 4/5] 组装完成: {len(renumbered_summaries)} 位作者, "
                         f"{total_tweet_count} 条推文, {len(global_ref_map)} 引用",
                         user_id=user_id)
 
-            # 5) Phase 2 — 综合报告
-            logger.info(f"[Step 5/6] Phase 2 开始 — 综合分析报告生成...",
+            # 5) Phase 2 — 机械拼接（不调 LLM）
+            logger.info(f"[Step 5/5] Phase 2: 机械拼接 {len(renumbered_summaries)} 位作者摘要",
                         user_id=user_id)
-            phase2_start = time.time()
-            report_content, _ = await self._phase2_synthesize(
-                renumbered_summaries, global_ref_map, top_tweets_text,
-                report_date, total_tweet_count,
-                template_code=phase2_template,
+            report_content = self._assemble_final_report(
+                renumbered_summaries, active_summaries, author_display_map
             )
-            # 不再拼接作者摘要附录
-            phase2_elapsed = round(time.time() - phase2_start, 2)
-            logger.info(f"[Step 5/6] Phase 2 完成: 报告 {len(report_content)} 字符, "
-                        f"耗时 {phase2_elapsed}s", user_id=user_id)
 
             # 6) 保存
             elapsed = round(time.time() - start_time, 2)
@@ -248,6 +199,7 @@ class TwitterDailyReportService:
                 ],
                 'used_cached_summaries': len(cached_summaries) - len(missing_authors),
                 'fallback_generated': len(missing_authors),
+                'phase2_mode': 'mechanical_concat',
                 **window_metadata,
             }
             self._update_report(report_id, status='completed',
@@ -267,9 +219,9 @@ class TwitterDailyReportService:
                 share_token = None
                 logger.warning(f"HTML 渲染/上传失败，share_token 未生成: {html_result.get('error')}")
 
-            logger.info(f"[Step 6/6] Twitter Daily Report 生成完成: "
+            logger.info(f"Twitter Daily Report 生成完成: "
                         f"{total_tweet_count} 条推文, {len(renumbered_summaries)} 位作者, "
-                        f"Phase2={phase2_elapsed}s, 总计={elapsed}s",
+                        f"phase2=mechanical_concat, 总计={elapsed}s",
                         user_id=user_id, report_date=str(report_date))
 
             return {
@@ -327,19 +279,16 @@ class TwitterDailyReportService:
             cursor.close()
 
     def _get_enabled_twitter_user_ids(self) -> List[int]:
-        """获取所有有活跃 Twitter 订阅且未关闭自动生成的用户 ID。"""
+        """获取所有有活跃 Twitter 订阅的用户 ID。"""
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                SELECT DISTINCT sl.user_id
-                FROM subscription_list sl
-                LEFT JOIN user_daily_report_auto_settings udras
-                    ON udras.user_id = sl.user_id
-                WHERE sl.channel_type = 'twitter'
-                  AND sl.enabled = true
-                  AND COALESCE(udras.twitter_auto_enabled, false) = true
-                ORDER BY sl.user_id
+                SELECT DISTINCT user_id
+                FROM subscription_list
+                WHERE channel_type = 'twitter'
+                  AND enabled = true
+                ORDER BY user_id
             """)
             return [row[0] for row in cursor.fetchall()]
         finally:
@@ -354,14 +303,8 @@ class TwitterDailyReportService:
         合并各作者的 ref_map 为全局 T-001…T-m；若摘要正文含 [T-xxx] 则替换为全局编号。
         以 URL 为要点的 Phase1 输出通常不含 [T-xxx]，此时仅更新元数据用的 global_ref_map。
 
-        Args:
-            author_summaries: {author_id: {summary_content, ref_map, ...}}
-
         Returns:
             (renumbered_text_dict, global_ref_map, author_display_map)
-            renumbered_text_dict: {author_id: renumbered_summary_text}
-            global_ref_map: {T-001: {url, content, author, ...}} (globally unique)
-            author_display_map: {author_id: display_name}
         """
         global_ref_map: Dict[str, Dict] = {}
         renumbered: Dict[str, str] = {}
@@ -393,126 +336,39 @@ class TwitterDailyReportService:
 
         return renumbered, global_ref_map, author_display_map
 
-    def _merge_top_tweets(
-        self, author_summaries: Dict[str, Dict], global_ref_map: Dict
-    ) -> str:
-        """
-        合并各作者的 top_tweets，按互动量排序取 Top 5，
-        用全局 ref_map 中的 ref_id 输出格式化文本。
-        """
-        all_top = []
-        for author_id, data in author_summaries.items():
-            local_ref_map = data.get('ref_map') or {}
-            for tw in (data.get('top_tweets') or []):
-                local_ref = tw.get('ref_id', '')
-                global_ref = None
-                for gref, ginfo in global_ref_map.items():
-                    if ginfo.get('url') == tw.get('url') and ginfo.get('url'):
-                        global_ref = gref
-                        break
-                all_top.append({
-                    **tw,
-                    'global_ref': global_ref or local_ref,
-                })
+    # ── Phase 2: Mechanical assembly ──────────────────────────────────────
 
-        all_top.sort(key=lambda t: t.get('engagement', 0), reverse=True)
-        lines = []
-        for tw in all_top[:5]:
-            ref = tw.get('global_ref', '')
-            author = tw.get('author', '')
-            engagement = tw.get('engagement', 0)
-            preview = tw.get('content_preview', '')
-            url = tw.get('url', '')
-            lines.append(f"[{ref}] @{author} | 互动:{engagement} | \"{preview}\" | {url}")
-        return '\n'.join(lines)
-
-    # ── Phase 2: Synthesis ─────────────────────────────────────────────────
-
-    async def _phase2_synthesize(
+    def _assemble_final_report(
         self,
-        author_summaries: Dict[str, str],
-        ref_map: Dict,
-        top_tweets: str,
-        report_date: date,
-        tweet_count: int,
-        template_code: str = DEFAULT_PHASE2_TEMPLATE,
-    ) -> Tuple[str, Dict]:
-        """Phase 2: 合成最终报告。返回 (report_markdown, usage_info)。"""
-        all_summaries = '\n\n---\n\n'.join(
-            f"{summary}" for author, summary in author_summaries.items()
-        )
-
-        variables = {
-            'report_date': str(report_date),
-            'author_count': str(len(author_summaries)),
-            'tweet_count': str(tweet_count),
-            'author_summaries': all_summaries,
-            'top_tweets': top_tweets,
-            'report_language': 'zh',
-            'focus_topics_instruction': '',
-            'custom_instructions': '',
-        }
-
-        logger.info(f"[Phase 2] 输入: {len(author_summaries)} 位作者摘要 "
-                    f"({len(all_summaries)} 字符), top_tweets={len(top_tweets)} 字符, "
-                    f"模板={template_code}")
-
-        report_content = await self._call_llm(
-            template_code=template_code,
-            variables=variables,
-            max_tokens=MAX_TOKENS_OUTPUT_PHASE2,
-        )
-
-        logger.info(f"[Phase 2] 最终报告: {len(report_content)} 字符")
-        return report_content, {}
-
-    def _append_author_summaries_appendix(
-        self,
-        report_body: str,
-        author_summaries: Dict[str, str],
+        renumbered_summaries: Dict[str, str],
+        active_summaries: Dict[str, Dict],
         author_display_map: Dict[str, str],
     ) -> str:
         """
-        在 Phase 2 主文下方追加附录：按作者顺序编号 S1…SN，对应各作者的 Phase 1 摘要全文。
+        Phase 2: 机械拼接各作者 Phase 1 摘要（不调 LLM）。
+
+        按推文数量降序排序作者，每个作者单独一节。
         """
-        if not author_summaries:
-            return report_body
-        parts: List[str] = [report_body.rstrip(), "\n\n---\n\n"]
-        n = len(author_summaries)
-        parts.append(f"## 附录：各作者摘要（S1–S{n}）\n\n")
-        for idx, author in enumerate(author_summaries.keys(), start=1):
-            display = author_display_map.get(author, author)
-            summary = (author_summaries.get(author) or "").strip()
-            parts.append(f"### S{idx} — @{display}\n\n")
-            parts.append(summary)
-            parts.append("\n\n")
-        return "".join(parts).rstrip() + "\n"
+        total_tweet_count = sum(s.get('tweet_count', 0) for s in active_summaries.values())
+        n_authors = len(renumbered_summaries)
 
-    # ── LLM call helper ───────────────────────────────────────────────────
-
-    async def _call_llm(
-        self,
-        template_code: str,
-        variables: Dict[str, Any],
-        max_tokens: int = 2000,
-    ) -> str:
-        """通过 DB 模板调用 LLM。模板必须已在 llm_prompt_templates 中配置。"""
-        var_preview = {k: (f"{str(v)[:200]}..." if len(str(v)) > 200 else str(v))
-                       for k, v in variables.items()}
-        logger.info(f"[LLM 调用] 模板={template_code}, max_tokens={max_tokens}, 变量预览={var_preview}")
-
-        llm_start = time.time()
-        response = await llm_service.chat_completion_with_template(
-            template_code=template_code,
-            variables=variables,
-            max_tokens=max_tokens,
+        sorted_authors = sorted(
+            renumbered_summaries.keys(),
+            key=lambda aid: active_summaries.get(aid, {}).get('tweet_count', 0),
+            reverse=True,
         )
-        llm_elapsed = round(time.time() - llm_start, 2)
 
-        content_preview = response.content[:300] if response.content else "(empty)"
-        logger.info(f"[LLM 响应] 模板={template_code}, 耗时={llm_elapsed}s, "
-                    f"响应长度={len(response.content)}字符, 预览: {content_preview}")
-        return response.content
+        sections = []
+        for author_id in sorted_authors:
+            display_name = author_display_map.get(author_id) or author_id
+            content = (renumbered_summaries.get(author_id) or '').strip()
+            sections.append(f"## @{display_name}\n\n{content}")
+
+        header = (
+            f"# Twitter 每日摘要\n\n"
+            f"共 {n_authors} 位作者 · {total_tweet_count} 条推文\n\n---\n\n"
+        )
+        return header + "\n\n---\n\n".join(sections)
 
     # ── Report persistence ─────────────────────────────────────────────────
 
@@ -665,7 +521,6 @@ class TwitterDailyReportService:
                 if report.get(ts_field):
                     report[ts_field] = report[ts_field].isoformat()
 
-            # Add generation time display (New York and Beijing)
             if report.get('updated_at'):
                 try:
                     gen_time = datetime.fromisoformat(report['updated_at'])
@@ -684,7 +539,6 @@ class TwitterDailyReportService:
     def _markdown_to_html(self, markdown_content: str) -> str:
         """
         使用 mistune 库将 Markdown 转换为 HTML。
-        相比手写正则更稳定，支持完整 Markdown 语法。
         """
         import html
 
@@ -694,8 +548,7 @@ class TwitterDailyReportService:
         # 预处理：删除首行主标题（避免与 Header 日期重复）
         lines = markdown_content.split('\n')
         if lines and lines[0].startswith('# ') and ('Twitter' in lines[0] or 'Daily Report' in lines[0]):
-            lines = lines[1:]  # 删除第一行标题
-            # 同时删除标题后的空行（如果有）
+            lines = lines[1:]
             if lines and lines[0].strip() == '':
                 lines = lines[1:]
         markdown_content = '\n'.join(lines)
@@ -704,22 +557,18 @@ class TwitterDailyReportService:
             import mistune
             import mistune.plugins.table as table_plugin
 
-            # 创建 mistune 解析器，启用表格插件
             renderer = mistune.HTMLRenderer()
             markdown_parser = mistune.Markdown(renderer, plugins=[table_plugin.table])
             rendered = markdown_parser(markdown_content)
             return self._ensure_links_open_in_new_tab(rendered)
         except ModuleNotFoundError:
-            # 兜底：当运行环境缺少 mistune 时，退化为安全渲染，同时保留 Markdown 链接可点击能力。
             logger.warning("mistune 未安装，使用降级 HTML 渲染")
             escaped = html.escape(markdown_content)
-            # 先处理 Markdown 链接 [text](url)
             escaped = re.sub(
                 r'\[([^\]]+)\]\((https?://[^\s)]+)\)',
                 r'<a href="\2">\1</a>',
                 escaped
             )
-            # 再处理裸 URL（避免重复替换已在 href 中的 URL）
             escaped = re.sub(
                 r'(?<!href=")(https?://[^\s<]+)',
                 r'<a href="\1">\1</a>',
@@ -752,7 +601,6 @@ class TwitterDailyReportService:
         if not content or not tweet_refs:
             return content
 
-        # 构建 ref_id -> url 映射
         ref_map = {}
         for ref in tweet_refs:
             ref_id = ref.get('ref_id', '')
@@ -773,7 +621,7 @@ class TwitterDailyReportService:
         return re.sub(pattern, replace_ref, content)
 
     def _render_html(self, report_content: str, metadata: Dict) -> str:
-        """使用 Jinja2 模板渲染 HTML。简化版：直接渲染 Markdown 内容，不做结构解析。"""
+        """使用 Jinja2 模板渲染 HTML。"""
         from jinja2 import Environment, FileSystemLoader, select_autoescape
         import os
 
@@ -782,7 +630,6 @@ class TwitterDailyReportService:
             loader=FileSystemLoader(os.path.abspath(template_dir)),
             autoescape=select_autoescape(["html"]),
         )
-        # 使用简化模板
         template = env.get_template("twitter_report_simple.html.j2")
 
         report_date = metadata.get('report_date', '')
@@ -794,15 +641,12 @@ class TwitterDailyReportService:
             except:
                 pass
 
-        # 计算生成时间（不同时区）
         gen_time_utc = datetime.now(timezone.utc)
         time_display = _build_generation_time_display(gen_time_utc)
 
-        # 1. 先替换引用链接 [T-xxx]（在 mistune 渲染之前）
         tweet_refs = metadata.get('tweet_references', [])
         report_content = self._inject_tweet_links(report_content, tweet_refs)
 
-        # 2. 然后 Markdown 转 HTML（使用 mistune）
         content_html = self._markdown_to_html(report_content)
 
         html = template.render(
@@ -826,7 +670,6 @@ class TwitterDailyReportService:
     ) -> Dict[str, Any]:
         """
         渲染 HTML 报告并上传到 OSS，生成 share_token。
-        简化版：直接渲染 Markdown，不做复杂解析。
 
         Returns:
             {'success': bool, 'oss_object_name': str, 'share_token': str, 'html_content': str}
@@ -835,17 +678,12 @@ class TwitterDailyReportService:
         from backend.services.oss_service import OSSService
 
         try:
-            # 确保 report_date 在 metadata 中
             metadata['report_date'] = report_date
 
-            # 1. 渲染 HTML（直接 Markdown → HTML）
             html_content = self._render_html(report_content, metadata)
 
-            # 2. 生成新的 share_token，并先落库 html_content/share_token
-            # 这样即使 OSS 临时失败，前端仍可通过 shared 接口读到数据库中的最新 HTML。
             share_token = uuid4().hex
 
-            # 3. 更新数据库（先写 html_content + share_token）
             date_str = report_date.strftime("%Y%m%d")
             oss_object_name = f"reports/Twitter/{user_id}/report_{date_str}.html"
             conn = self.db_manager.get_connection()
@@ -862,7 +700,6 @@ class TwitterDailyReportService:
             finally:
                 cursor.close()
 
-            # 4. 尝试上传 OSS（失败不阻断主流程）
             oss_uploaded = False
             try:
                 oss_service = OSSService()
@@ -928,11 +765,9 @@ class TwitterDailyReportService:
                 return None
             obj_name, html_content = row
 
-            # Primary: 直接从数据库读取（无需 OSS 调用）
             if html_content:
                 return html_content.encode("utf-8")
 
-            # Fallback: 从 OSS 获取
             if obj_name:
                 from backend.services.oss_service import OSSService
                 oss_service = OSSService()

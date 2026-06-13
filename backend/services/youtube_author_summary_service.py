@@ -7,6 +7,7 @@ YouTube Author Daily Summary 服务 — 全局频道摘要预生成
 所有订阅该频道的用户在生成 Daily Report 时直接复用。
 """
 
+import asyncio
 import time
 from datetime import date, datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
@@ -22,6 +23,12 @@ logger = get_logger("youtube_author_summary_service")
 DEFAULT_PHASE1_TEMPLATE = "youtube_daily_phase1_default"
 MAX_VIDEOS_PER_CHANNEL_CHUNK = 10
 MAX_TOKENS_OUTPUT_PHASE1 = 3000
+
+# 批量生成时的并发与超时控制
+# 最多 N 个频道同时处理，防止因某一频道 LLM 超时阻塞整个批次
+BATCH_CONCURRENT_CHANNELS = 4
+# 单频道摘要的最长等待时间（秒），超出后直接标 failed 并继续下一个
+PER_CHANNEL_TIMEOUT_SEC = 180
 
 
 class YouTubeAuthorSummaryService:
@@ -86,37 +93,72 @@ class YouTubeAuthorSummaryService:
             f"window=[{window_start.isoformat()}, {resolved_end.isoformat()})"
         )
 
+        total = len(authors)
+        semaphore = asyncio.Semaphore(BATCH_CONCURRENT_CHANNELS)
+
+        async def _process_one(idx: int, author_id: str, author_name: Optional[str]):
+            async with semaphore:
+                author_start = time.time()
+                try:
+                    result = await asyncio.wait_for(
+                        self.generate_author_summary(
+                            author_id,
+                            author_name,
+                            summary_date,
+                            force=force,
+                            window_end=window_end,
+                            window_hours=window_hours,
+                        ),
+                        timeout=PER_CHANNEL_TIMEOUT_SEC,
+                    )
+                except asyncio.TimeoutError:
+                    author_elapsed = round(time.time() - author_start, 2)
+                    logger.warning(
+                        f"[{idx}/{total}] {author_name or author_id} — TIMEOUT "
+                        f"after {author_elapsed}s，标记 failed 并继续"
+                    )
+                    try:
+                        existing = self._get_existing_summary(author_id, summary_date)
+                        if existing:
+                            self._update_summary(
+                                existing['id'],
+                                status='failed',
+                                error_message=f"单频道超时（>{PER_CHANNEL_TIMEOUT_SEC}s）",
+                            )
+                    except Exception:
+                        pass
+                    return idx, author_id, {
+                        'success': False,
+                        'message': f'per-channel timeout (>{PER_CHANNEL_TIMEOUT_SEC}s)',
+                        'skipped': False,
+                    }, author_elapsed
+
+                author_elapsed = round(time.time() - author_start, 2)
+                return idx, author_id, result, author_elapsed
+
+        raw_results = await asyncio.gather(
+            *[_process_one(idx, aid, aname) for idx, (aid, aname) in enumerate(authors, 1)]
+        )
+
         results = []
         succeeded = 0
         skipped = 0
-        total = len(authors)
-        for idx, (author_id, author_name) in enumerate(authors, 1):
-            author_start = time.time()
-            result = await self.generate_author_summary(
-                author_id,
-                author_name,
-                summary_date,
-                force=force,
-                window_end=window_end,
-                window_hours=window_hours,
-            )
-            author_elapsed = round(time.time() - author_start, 2)
+        for idx, author_id, result, author_elapsed in raw_results:
             results.append({'author': author_id, **result})
-
             if result.get('skipped'):
                 skipped += 1
                 logger.info(
-                    f"[{idx}/{total}] {author_name or author_id} — skipped (already completed), {author_elapsed}s"
+                    f"[{idx}/{total}] {author_id} — skipped (already completed), {author_elapsed}s"
                 )
             elif result.get('success'):
                 succeeded += 1
                 video_count = result.get('video_count', 0)
                 logger.info(
-                    f"[{idx}/{total}] {author_name or author_id} — OK, {video_count} videos, {author_elapsed}s"
+                    f"[{idx}/{total}] {author_id} — OK, {video_count} videos, {author_elapsed}s"
                 )
             else:
                 logger.warning(
-                    f"[{idx}/{total}] {author_name or author_id} — FAILED: {result.get('message', '')}, {author_elapsed}s"
+                    f"[{idx}/{total}] {author_id} — FAILED: {result.get('message', '')}, {author_elapsed}s"
                 )
 
         elapsed = round(time.time() - start_time, 2)
@@ -566,7 +608,7 @@ class YouTubeAuthorSummaryService:
                 FROM youtube_author_daily_summaries
                 WHERE author_identifier = ANY(%s)
                   AND summary_date = %s
-                  AND status = 'completed'
+                  AND status IN ('completed', 'failed')
             """, (author_identifiers, summary_date))
             result = {}
             for row in cursor.fetchall():

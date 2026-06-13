@@ -7,6 +7,7 @@ Twitter Author Daily Summary 服务 — 全局作者摘要预生成
 所有订阅该作者的用户在生成 Daily Report 时直接复用。
 """
 
+import asyncio
 import time
 from datetime import date, datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
@@ -22,6 +23,10 @@ logger = get_logger("twitter_author_summary_service")
 DEFAULT_PHASE1_TEMPLATE = "twitter_daily_phase1_default"
 MAX_TWEETS_PER_AUTHOR_CHUNK = 30
 MAX_TOKENS_OUTPUT_PHASE1 = 2000
+
+# 批量生成时的并发与超时控制
+BATCH_CONCURRENT_AUTHORS = 4
+PER_AUTHOR_TIMEOUT_SEC = 180
 
 
 class TwitterAuthorSummaryService:
@@ -86,23 +91,58 @@ class TwitterAuthorSummaryService:
             f"window=[{window_start.isoformat()}, {resolved_end.isoformat()})"
         )
 
+        total = len(authors)
+        semaphore = asyncio.Semaphore(BATCH_CONCURRENT_AUTHORS)
+
+        async def _process_one(idx: int, author_id: str, author_name: Optional[str]):
+            async with semaphore:
+                author_start = time.time()
+                try:
+                    result = await asyncio.wait_for(
+                        self.generate_author_summary(
+                            author_id,
+                            author_name,
+                            summary_date,
+                            force=force,
+                            window_end=window_end,
+                            window_hours=window_hours,
+                        ),
+                        timeout=PER_AUTHOR_TIMEOUT_SEC,
+                    )
+                except asyncio.TimeoutError:
+                    author_elapsed = round(time.time() - author_start, 2)
+                    logger.warning(
+                        f"[{idx}/{total}] @{author_id} — TIMEOUT "
+                        f"after {author_elapsed}s，标记 failed 并继续"
+                    )
+                    try:
+                        existing = self._get_existing_summary(author_id, summary_date)
+                        if existing:
+                            self._update_summary(
+                                existing['id'],
+                                status='failed',
+                                error_message=f"单作者超时（>{PER_AUTHOR_TIMEOUT_SEC}s）",
+                            )
+                    except Exception:
+                        pass
+                    return idx, author_id, {
+                        'success': False,
+                        'message': f'per-author timeout (>{PER_AUTHOR_TIMEOUT_SEC}s)',
+                        'skipped': False,
+                    }, author_elapsed
+
+                author_elapsed = round(time.time() - author_start, 2)
+                return idx, author_id, result, author_elapsed
+
+        raw_results = await asyncio.gather(
+            *[_process_one(idx, aid, aname) for idx, (aid, aname) in enumerate(authors, 1)]
+        )
+
         results = []
         succeeded = 0
         skipped = 0
-        total = len(authors)
-        for idx, (author_id, author_name) in enumerate(authors, 1):
-            author_start = time.time()
-            result = await self.generate_author_summary(
-                author_id,
-                author_name,
-                summary_date,
-                force=force,
-                window_end=window_end,
-                window_hours=window_hours,
-            )
-            author_elapsed = round(time.time() - author_start, 2)
+        for idx, author_id, result, author_elapsed in raw_results:
             results.append({'author': author_id, **result})
-
             if result.get('skipped'):
                 skipped += 1
                 logger.info(
@@ -542,7 +582,7 @@ class TwitterAuthorSummaryService:
                 FROM twitter_author_daily_summaries
                 WHERE author_identifier = ANY(%s)
                   AND summary_date = %s
-                  AND status = 'completed'
+                  AND status IN ('completed', 'failed')
             """, (author_identifiers, summary_date))
             result = {}
             for row in cursor.fetchall():

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-用户 Daily Report 自动生成设置服务
+用户 Daily Report 自动生成设置服务（已弃用）
 
-管理 user_daily_report_auto_settings 表，提供用户级别的 Twitter / YouTube
-Daily Report 自动生成开关。关闭后系统定时任务不再为该用户自动生成报告，
-但用户仍可在页面手动触发生成。
+Phase 2 改为机械拼接后，Twitter/YouTube 报告对所有有订阅的用户自动生成，
+不再使用 twitter_auto_enabled / youtube_auto_enabled 门控。
+表 user_daily_report_auto_settings 保留以兼容历史数据。
 """
 
 from typing import Dict, Any

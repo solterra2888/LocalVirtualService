@@ -9,7 +9,6 @@ import {
   List,
   Space,
   Spin,
-  Switch,
   Tooltip,
   Typography,
   theme as antdTheme,
@@ -51,37 +50,11 @@ const MobileYouTubeReportsPageInner: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<dayjs.Dayjs>(() => dayjs().subtract(1, 'day'));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [autoEnabled, setAutoEnabled] = useState(false);
-  const [autoToggling, setAutoToggling] = useState(false);
 
   const selectedReportDateRef = useRef<string | null>(null);
   selectedReportDateRef.current = selectedReport?.report_date ?? null;
   const { startPoll, clearPoll, startLatestWatch, clearLatestWatch, syncLatestSnapshot } =
     useDailyReportStatusPoll();
-
-  const loadAutoSettings = useCallback(async () => {
-    try {
-      const res = await youtubeDailyReportsAPI.getAutoSettings();
-      if (res.success && res.data) setAutoEnabled(res.data.auto_enabled);
-    } catch { /* ignore */ }
-  }, []);
-
-  const handleAutoToggle = useCallback(async (checked: boolean) => {
-    setAutoToggling(true);
-    try {
-      const res = await youtubeDailyReportsAPI.updateAutoSettings(checked);
-      if (res.success && res.data) {
-        setAutoEnabled(res.data.auto_enabled);
-        message.success(checked ? 'Auto-generation enabled' : 'Auto-generation disabled');
-      } else {
-        message.error(res.error || 'Failed to update setting');
-      }
-    } catch {
-      message.error('Failed to update setting');
-    } finally {
-      setAutoToggling(false);
-    }
-  }, [message]);
 
   const loadReportDetail = useCallback(async (dateStr: string) => {
     setDetailLoading(true);
@@ -176,10 +149,6 @@ const MobileYouTubeReportsPageInner: React.FC = () => {
   }, [message, syncLatestSnapshot]);
 
   useEffect(() => {
-    loadAutoSettings();
-  }, [loadAutoSettings]);
-
-  useEffect(() => {
     startLatestWatch({
       fetchLatest: youtubeDailyReportsAPI.getLatestReport,
       onUpdate: (r) => {
@@ -257,17 +226,6 @@ const MobileYouTubeReportsPageInner: React.FC = () => {
             flexShrink: 0,
           }}
         >
-          <Tooltip title={autoEnabled ? 'Auto-generation ON — tap to disable' : 'Auto-generation OFF — tap to enable'}>
-            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <Switch
-                size="small"
-                checked={autoEnabled}
-                loading={autoToggling}
-                onChange={handleAutoToggle}
-                aria-label="Auto-generate daily reports"
-              />
-            </span>
-          </Tooltip>
           <button
             type="button"
             className="feed-toolbar-icon-btn"

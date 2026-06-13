@@ -60,7 +60,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
@@ -274,6 +274,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 7 * * 2-6',
       defaultName: 'CNBC Closing Bell Summary',
       description: 'Generate daily Stock News summary from CNBC "Closing Bell" transcript (weekdays 7 AM Beijing / 7 PM ET)'
+    },
+    zhishixingqiu_summary: {
+      icon: <StockOutlined style={{ color: '#52c41a' }} />,
+      params: [],
+      defaultSchedule: '0 22 * * *',
+      defaultName: 'Zhishixingqiu Daily Summary',
+      description: 'Generate daily aggregated summary from all Zhishixingqiu groups (default: 10 PM Beijing)'
     },
   };
 
@@ -523,6 +530,17 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           result = await schedulerAPI.createCronTask({
             task_type: 'cnbc_closing_bell',
             ...cnbcClosingBellParams,
+          });
+        } else if (dataSourceType === 'zhishixingqiu_summary') {
+          const zhishixingqiuSummaryParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+          };
+          result = await schedulerAPI.createCronTask({
+            task_type: 'zhishixingqiu_summary',
+            ...zhishixingqiuSummaryParams,
           });
         } else if (dataSourceType === 'watchlist_fundamentals') {
           // Watchlist Fundamentals 任务的专用创建逻辑
@@ -2213,6 +2231,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           return null;
 
         case 'cnbc_closing_bell':
+          return null;
+
+        case 'zhishixingqiu_summary':
           return null;
 
         default:

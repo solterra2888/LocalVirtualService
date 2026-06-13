@@ -7,14 +7,12 @@ import {
   ConfigProvider,
   theme as antdTheme,
   App,
-  Switch,
 } from 'antd';
 import {
   ReloadOutlined,
   LinkOutlined,
   ThunderboltOutlined,
   ShareAltOutlined,
-  RobotOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { FEED_THEME_COLORS } from '../components/feed/feedTheme';
@@ -35,38 +33,11 @@ const YouTubeDailyReportPageInner: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
-  const [autoEnabled, setAutoEnabled] = useState<boolean>(false);
-  const [autoToggling, setAutoToggling] = useState(false);
 
   const reportDateRef = useRef<string | null>(null);
   reportDateRef.current = latest?.report_date ?? null;
   const { startPoll, clearPoll, startLatestWatch, clearLatestWatch, syncLatestSnapshot } =
     useDailyReportStatusPoll();
-
-  // ── Auto settings ──────────────────────────────────────────────────────
-  const loadAutoSettings = useCallback(async () => {
-    try {
-      const res = await youtubeDailyReportsAPI.getAutoSettings();
-      if (res.success && res.data) setAutoEnabled(res.data.auto_enabled);
-    } catch { /* silently ignore */ }
-  }, []);
-
-  const handleAutoToggle = useCallback(async (checked: boolean) => {
-    setAutoToggling(true);
-    try {
-      const res = await youtubeDailyReportsAPI.updateAutoSettings(checked);
-      if (res.success && res.data) {
-        setAutoEnabled(res.data.auto_enabled);
-        message.success(checked ? 'Auto-generation enabled' : 'Auto-generation disabled');
-      } else {
-        message.error(res.error || 'Failed to update setting');
-      }
-    } catch {
-      message.error('Failed to update setting');
-    } finally {
-      setAutoToggling(false);
-    }
-  }, [message]);
 
   // ── Load latest report ───────────────────────────────────────────────────
   const loadData = useCallback(async (options?: { quiet?: boolean }) => {
@@ -91,8 +62,7 @@ const YouTubeDailyReportPageInner: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    loadAutoSettings();
-  }, [loadData, loadAutoSettings]);
+  }, [loadData]);
 
   useEffect(() => {
     startLatestWatch({
@@ -191,23 +161,6 @@ const YouTubeDailyReportPageInner: React.FC = () => {
           borderRadius: 6,
           boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.1)',
         }}>
-          {/* Auto-generate Switch */}
-          <Tooltip title={autoEnabled ? 'Auto-generation ON — click to disable' : 'Auto-generation OFF — click to enable'}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-            }}>
-              <RobotOutlined style={{ color: autoEnabled ? '#FF5C5C' : themeColors.textSecondary, fontSize: 12 }} />
-              <Switch
-                size="small"
-                checked={autoEnabled}
-                loading={autoToggling}
-                onChange={handleAutoToggle}
-              />
-            </div>
-          </Tooltip>
-
           <Tooltip title="Generate report for the past 24 hours">
             <Button
               type="primary"

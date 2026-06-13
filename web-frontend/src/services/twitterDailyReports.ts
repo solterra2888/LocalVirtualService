@@ -114,29 +114,4 @@ export const twitterDailyReportsAPI = {
       return { success: false, error: error.message || 'Failed to generate report' };
     }
   },
-
-  async getAutoSettings(): Promise<ApiResponse<{ auto_enabled: boolean }>> {
-    try {
-      const data = await api.get<ApiResponse<{ auto_enabled: boolean }>>(
-        '/reports/twitter-daily/settings/auto'
-      );
-      return data;
-    } catch (error: any) {
-      console.error('Failed to get auto settings:', error);
-      return { success: false, error: error.message || 'Failed to get settings' };
-    }
-  },
-
-  async updateAutoSettings(autoEnabled: boolean): Promise<ApiResponse<{ auto_enabled: boolean }>> {
-    try {
-      const data = await api.put<ApiResponse<{ auto_enabled: boolean }>>(
-        '/reports/twitter-daily/settings/auto',
-        { auto_enabled: autoEnabled }
-      );
-      return data;
-    } catch (error: any) {
-      console.error('Failed to update auto settings:', error);
-      return { success: false, error: error.message || 'Failed to update settings' };
-    }
-  },
 };

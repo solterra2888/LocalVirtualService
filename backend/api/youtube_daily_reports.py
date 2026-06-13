@@ -5,8 +5,6 @@ YouTube Daily Report API
 端点:
   GET   /reports/youtube-daily              — 报告列表（分页）
   GET   /reports/youtube-daily/latest       — 最新已完成报告
-  GET   /reports/youtube-daily/settings/auto — 获取自动生成开关
-  PUT   /reports/youtube-daily/settings/auto — 更新自动生成开关
   POST  /reports/youtube-daily/generate     — 手动触发生成（异步 Celery）
   GET   /reports/youtube-daily/{date}       — 指定日期报告
   GET   /reports/youtube-daily/shared/{token} — 公开分享报告（无需认证）
@@ -34,11 +32,6 @@ router = APIRouter(prefix="/reports/youtube-daily", tags=["YouTube Daily Report"
 def _get_service():
     from backend.services.youtube_daily_report_service import YouTubeDailyReportService
     return YouTubeDailyReportService()
-
-
-def _get_settings_service():
-    from backend.services.user_daily_report_settings_service import UserDailyReportSettingsService
-    return UserDailyReportSettingsService()
 
 
 def _parse_date(date_str: Optional[str], tz: Optional[str] = None) -> date:
@@ -91,44 +84,6 @@ async def get_latest_report(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── Auto-generation settings (must be before /{report_date}) ───────────────
-
-@router.get("/settings/auto", summary="获取 YouTube Daily Report 自动生成设置")
-async def get_auto_settings(
-    current_user: TokenData = Depends(get_current_user),
-):
-    """获取当前用户的 YouTube Daily Report 自动生成开关状态。"""
-    try:
-        svc = _get_settings_service()
-        settings = svc.get_settings(current_user.user_id)
-        return {"success": True, "data": {"auto_enabled": settings["youtube_auto_enabled"]}}
-    except Exception as e:
-        logger.error(f"获取自动生成设置失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-class AutoSettingsRequest(BaseModel):
-    auto_enabled: bool = Field(..., description="是否开启 YouTube Daily Report 自动生成")
-
-
-@router.put("/settings/auto", summary="更新 YouTube Daily Report 自动生成设置")
-async def update_auto_settings(
-    body: AutoSettingsRequest,
-    current_user: TokenData = Depends(get_current_user),
-):
-    """更新当前用户的 YouTube Daily Report 自动生成开关。关闭后系统定时任务不再自动生成，但可手动触发。"""
-    try:
-        svc = _get_settings_service()
-        updated = svc.update_settings(current_user.user_id, youtube_auto_enabled=body.auto_enabled)
-        logger.info(
-            f"用户 {current_user.username} 更新 YouTube 自动生成设置: auto_enabled={body.auto_enabled}"
-        )
-        return {"success": True, "data": {"auto_enabled": updated["youtube_auto_enabled"]}}
-    except Exception as e:
-        logger.error(f"更新自动生成设置失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 class GenerateReportRequest(BaseModel):
     report_date: Optional[str] = Field(
         None,
@@ -158,7 +113,6 @@ async def generate_report(
             user_id=current_user.user_id,
             report_date=str(parsed_date),
             force=body.force,
-            skip_auto_check=True,
             window_end=window_end_iso,
         )
         logger.info(

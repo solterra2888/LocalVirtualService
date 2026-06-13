@@ -67,6 +67,7 @@ class SchedulerService:
             'daily_market_report': self._execute_daily_market_report_task,
             'the_close_summary': self._execute_the_close_summary_task,
             'cnbc_closing_bell': self._execute_cnbc_closing_bell_task,
+            'zhishixingqiu_summary': self._execute_zhishixingqiu_summary_task,
             'podcast_subscription': self._execute_podcast_subscription_task,
         }
         
@@ -1433,6 +1434,53 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"CNBC Closing Bell 任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_zhishixingqiu_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        生成知识星球每日摘要（全局，按星球聚合当天话题观点）。
+        应在知识星球抓取完成后调度（默认每日 22:00 北京时间）。
+
+        Args:
+            params:
+                - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)，北京自然日
+                - window_end: 可选，ISO 时间字符串（UTC），内容窗口结束时间
+                - window_hours: 可选，回溯小时数（默认 24）
+                - force: 可选，是否强制重新生成（默认 False）
+        """
+        try:
+            logger.info("分发知识星球摘要 Celery 任务", params=params)
+
+            from backend.tasks.zhishixingqiu_summary_tasks import (
+                generate_zhishixingqiu_summary_task,
+            )
+
+            report_date = params.get('report_date')
+            window_end = params.get('window_end')
+            window_hours = int(params.get('window_hours', 24))
+            force = params.get('force', False)
+            chain_user_reports = params.get('chain_user_reports', True)
+
+            task = generate_zhishixingqiu_summary_task.delay(
+                report_date=report_date,
+                window_end=window_end,
+                window_hours=window_hours,
+                force=force,
+                chain_user_reports=chain_user_reports,
+            )
+
+            date_info = f", date={report_date}" if report_date else ", today"
+            force_info = "（强制重新生成）" if force else ""
+            message = (
+                f"✅ 知识星球摘要: "
+                f"已提交 Celery 异步任务 {task.id}{date_info}{force_info}"
+            )
+            logger.info(message)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"知识星球摘要任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 
