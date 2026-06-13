@@ -1087,6 +1087,53 @@ export class SchedulerAPI {
     }
   }
 
+  /**
+   * 创建 Daily Market Report 定时任务
+   */
+  async createDailyMarketReportTask(params: {
+    name?: string;
+    cron_expression?: string;
+    timezone?: string;
+    enabled?: boolean;
+    report_date?: string;
+    user_id?: string;
+  }): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/daily-market-report', params);
+      return {
+        success: true,
+        message: response.data?.message || '创建 Daily Market Report 定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建 Daily Market Report 定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建 Daily Market Report 定时任务失败'
+      };
+    }
+  }
+
+  /**
+   * 创建默认 Daily Market Report 定时任务
+   */
+  async createDefaultDailyMarketReportTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/daily-market-report/default');
+      return {
+        success: true,
+        message: response.data?.message || '创建默认 Daily Market Report 定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建默认 Daily Market Report 定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建默认 Daily Market Report 定时任务失败'
+      };
+    }
+  }
+
   // ============ 预设配置API ============
 
   /**

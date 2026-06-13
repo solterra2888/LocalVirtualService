@@ -100,6 +100,9 @@ task_routes = {
     'backfill_theme_report_eod_history': {'queue': 'data_fetching'}, # Theme Report EOD 历史回填
     'generate_all_market_weekly_reports': {'queue': 'data_fetching'},  # Market Weekly Report 批量静态 HTML 生成
     'generate_market_weekly_report': {'queue': 'data_fetching'},       # Market Weekly Report 单用户静态 HTML 生成
+    # Daily Market Report — 批量 fan-out（所有用户）+ 单用户（手动/API）
+    'generate_all_daily_market_reports': {'queue': 'data_fetching'},
+    'generate_daily_market_report': {'queue': 'data_fetching'},
     # Ebook Map-Reduce 章节摘要任务
     'ebook_map_reduce': {'queue': 'ai_processing'},
     # The Close Summary — Bloomberg The Close 每日 PM Brief

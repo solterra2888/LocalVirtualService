@@ -60,7 +60,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
@@ -260,6 +260,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 17 * * 5',
       defaultName: 'Market Weekly Report',
       description: 'Pre-generate Market Weekly Report static HTML for all users with Market Weekly tagged themes (weekly Friday 5 PM ET)'
+    },
+    daily_market_report: {
+      icon: <LineChartOutlined style={{ color: '#13c2c2' }} />,
+      params: [],
+      defaultSchedule: '0 8 * * 2-6',
+      defaultName: 'Daily Market Report',
+      description: 'Pre-generate Daily Market Report (Home/Stockview/My Subscription/Market Overview) for all users (weekdays-next-day 8 AM Beijing, after Bloomberg/CNBC close summaries)'
     },
     the_close_summary: {
       icon: <StockOutlined style={{ color: '#722ed1' }} />,
@@ -509,6 +516,14 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             enabled: true,
           };
           result = await schedulerAPI.createMarketWeeklyReportTask(marketWeeklyReportParams);
+        } else if (dataSourceType === 'daily_market_report') {
+          const dailyMarketReportParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+          };
+          result = await schedulerAPI.createDailyMarketReportTask(dailyMarketReportParams);
         } else if (dataSourceType === 'the_close_summary') {
           const theCloseSummaryParams = {
             name: currentConfig.defaultName,

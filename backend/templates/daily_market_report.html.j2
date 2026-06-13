@@ -105,6 +105,129 @@ body {
     letter-spacing: 0.02em;
 }
 
+/* === TAB NAVIGATION === */
+.tab-nav {
+    background: var(--bg-header);
+    padding: 0 28px;
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.tab-btn {
+    background: none;
+    border: none;
+    color: var(--text-tab);
+    padding: 10px 20px;
+    font-size: 0.88rem;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+.tab-btn:hover {
+    color: var(--text-tab-active);
+    background: var(--tab-hover-bg);
+}
+.tab-btn.active {
+    color: var(--text-tab-active);
+    border-bottom-color: var(--tab-active-border);
+    font-weight: 600;
+}
+
+/* === SUMMARY CONTENT (rendered Markdown) === */
+.summary-content {
+    background: var(--bg-card);
+    border-radius: 8px;
+    box-shadow: var(--shadow-card);
+    padding: 28px 32px;
+    line-height: 1.75;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+.summary-content h1 {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 24px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.summary-content h1:first-child { margin-top: 0; }
+.summary-content h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 20px 0 10px;
+}
+.summary-content h3 {
+    font-size: 0.98rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin: 16px 0 8px;
+}
+.summary-content p {
+    margin: 8px 0;
+    color: var(--text-secondary);
+}
+.summary-content ul, .summary-content ol {
+    margin: 8px 0;
+    padding-left: 24px;
+    color: var(--text-secondary);
+}
+.summary-content li { margin: 4px 0; }
+.summary-content strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+.summary-content blockquote {
+    border-left: 3px solid var(--border);
+    margin: 12px 0;
+    padding: 8px 16px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+.summary-content table {
+    margin: 12px 0;
+    font-size: 13px;
+}
+.summary-content th, .summary-content td {
+    padding: 8px 12px;
+}
+.summary-content code {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    background: var(--bg-hover);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.88em;
+}
+.summary-content hr {
+    border: none;
+    border-top: 1px solid var(--border-subtle);
+    margin: 20px 0;
+}
+
+/* === EMPTY STATE === */
+.summary-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+}
+.summary-empty .empty-icon {
+    font-size: 2.5rem;
+    margin-bottom: 12px;
+    opacity: 0.4;
+}
+.summary-empty .empty-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+.summary-empty .empty-desc {
+    font-size: 0.85rem;
+}
+
 /* === MARKET SECTIONS === */
 .market-section { margin-bottom: 32px; }
 
@@ -413,6 +536,9 @@ tbody tr.chart-active { background: var(--bg-hover); }
     .content { padding: 16px; }
     table { font-size: 11px; }
     th, td { padding: 7px 8px; }
+    .tab-nav { padding: 0 12px; }
+    .tab-btn { padding: 8px 12px; font-size: 0.82rem; }
+    .summary-content { padding: 16px 18px; }
 }
 </style>
 </head>
@@ -426,9 +552,62 @@ tbody tr.chart-active { background: var(--bg-hover); }
     </div>
 </div>
 
-<div class="section-bar">Market Overview</div>
+<div class="tab-nav">
+    <button class="tab-btn active" data-tab="home" onclick="switchTab('home')">Home</button>
+    <button class="tab-btn" data-tab="stockview" onclick="switchTab('stockview')">Stockview</button>
+    <button class="tab-btn" data-tab="my-subscription" onclick="switchTab('my-subscription')">My Subscription</button>
+    <button class="tab-btn" data-tab="market-overview" onclick="switchTab('market-overview')">Market Overview</button>
+</div>
 
 <div class="content">
+
+{# ── Home Tab: Bloomberg The Close Summary ── #}
+<div class="tab-panel active" id="panel-home">
+{% if the_close_html %}
+    <div class="summary-content">
+        {{ the_close_html | safe }}
+    </div>
+{% else %}
+    <div class="summary-empty">
+        <div class="empty-icon">📊</div>
+        <div class="empty-title">Bloomberg The Close 摘要暂未生成</div>
+        <div class="empty-desc">当日 PM Brief 尚未生成，可能是非交易日或数据管线尚未完成。</div>
+    </div>
+{% endif %}
+</div>
+
+{# ── Stockview Tab: CNBC Closing Bell Summary ── #}
+<div class="tab-panel" id="panel-stockview">
+{% if closing_bell_html %}
+    <div class="summary-content">
+        {{ closing_bell_html | safe }}
+    </div>
+{% else %}
+    <div class="summary-empty">
+        <div class="empty-icon">📰</div>
+        <div class="empty-title">CNBC Closing Bell 摘要暂未生成</div>
+        <div class="empty-desc">当日 Stock News 摘要尚未生成，可能是非交易日或数据管线尚未完成。</div>
+    </div>
+{% endif %}
+</div>
+
+{# ── My Subscription Tab: 知识星球 + Twitter + YouTube 每日摘要 ── #}
+<div class="tab-panel" id="panel-my-subscription">
+{% if my_subscriptions_html %}
+    <div class="summary-content">
+        {{ my_subscriptions_html | safe }}
+    </div>
+{% else %}
+    <div class="summary-empty">
+        <div class="empty-icon">📬</div>
+        <div class="empty-title">暂无订阅摘要</div>
+        <div class="empty-desc">当日知识星球、Twitter、YouTube 摘要尚未生成，或该用户无订阅数据。</div>
+    </div>
+{% endif %}
+</div>
+
+{# ── Market Overview Tab: US Assets / Sector / Thematic tables ── #}
+<div class="tab-panel" id="panel-market-overview">
 
 {# ── US Assets Section ── #}
 <div class="market-section" id="section-us-assets">
@@ -743,7 +922,9 @@ tbody tr.chart-active { background: var(--bg-hover); }
 
 </div>
 
-</div>
+</div>{# end panel-market-overview #}
+
+</div>{# end content #}
 
 <div class="footer">
     <p>Generated: {{ generated_at_utc }} | {{ generated_at_new_york }} | {{ generated_at_beijing }}</p>
@@ -765,12 +946,37 @@ const chartState = {
     'thematic':  { chart: null, candleSeries: null, volSeries: null, maSeries: {}, currentTicker: null, currentRange: '3m', scrollY: 0, maEnabled: {20: true, 50: true, 200: false} },
 };
 
-// ── All sections visible (no tab switching needed) ──
+// ── Tab switching ──
+function switchTab(tabId) {
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabId);
+    });
+    // Update tab panels
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.id === 'panel-' + tabId);
+    });
+    // Re-render performance charts when switching to Market Overview
+    // (Lightweight Charts needs visible container to calculate width)
+    if (tabId === 'market-overview') {
+        setTimeout(() => {
+            renderPerfSection('index');
+            renderPerfSection('sector');
+            // Resize any open candlestick charts
+            Object.keys(chartState).forEach(pid => {
+                if (chartState[pid].chart) {
+                    const c = document.getElementById('chart-container-' + pid);
+                    if (c) chartState[pid].chart.applyOptions({ width: c.clientWidth });
+                }
+            });
+        }, 50);
+    }
+}
 
 // ── Auto-render performance charts on load ──
 window.addEventListener('load', () => {
-    renderPerfSection('index');
-    renderPerfSection('sector');
+    // Performance charts render on tab switch to avoid hidden-container sizing issues.
+    // The Overview tab is the default, so no chart rendering needed on load.
 });
 
 // ── Sortable columns ──

@@ -329,6 +329,76 @@
     color: var(--text-secondary);
   }
 
+  /* ── Author Navigation (left sidebar) ── */
+  .report-shell {
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+  .author-nav {
+    position: sticky;
+    top: 24px;
+    flex: 0 0 200px;
+    align-self: flex-start;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 10px;
+    box-shadow: var(--card-shadow);
+  }
+  .author-nav.hidden { display: none; }
+  .author-nav-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin: 0 6px 10px;
+  }
+  .author-nav-list { display: flex; flex-direction: column; gap: 1px; }
+  .author-nav-item {
+    display: block;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .author-nav-item:hover {
+    background: var(--surface2);
+    color: var(--text);
+    text-decoration: none;
+  }
+  .author-nav-item.active {
+    background: var(--primary);
+    color: #fff;
+    font-weight: 500;
+  }
+  /* 两栏布局下，container 作为主列（取消自身居中/padding，交给 shell） */
+  .report-shell > .container {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    width: auto;
+    margin: 0;
+    padding: 0;
+  }
+  @media (max-width: 640px) {
+    .report-shell { flex-direction: column; padding: 20px 16px; gap: 0; }
+    .author-nav { display: none; }
+    .report-shell > .container { padding: 0; }
+  }
+
   /* ── Responsive ── */
   @media (max-width: 640px) {
     .container {
@@ -356,6 +426,12 @@
 </style>
 </head>
 <body>
+
+<div class="report-shell">
+  <aside class="author-nav" id="authorNav" aria-label="Authors navigation">
+    <div class="author-nav-title">作者</div>
+    <nav class="author-nav-list" id="authorNavList"></nav>
+  </aside>
 
 <div class="container">
 
@@ -389,6 +465,7 @@
   </div>
 
 </div>
+</div><!-- /.report-shell -->
 
 <script>
 function initThemeToggle() {
@@ -402,8 +479,75 @@ function initThemeToggle() {
   if (typeof window.__updateThemeToggleUI === 'function') window.__updateThemeToggleUI();
 }
 
+function initAuthorNav() {
+  var nav = document.getElementById('authorNav');
+  var list = document.getElementById('authorNavList');
+  if (!nav || !list) return;
+
+  var headings = Array.prototype.slice.call(
+    document.querySelectorAll('.markdown-content h2')
+  ).filter(function(h) {
+    // 只把以 @ 开头的标题当作作者（兼容早期非"按作者分节"的报告格式，
+    // 避免把"核心主线/市场情绪"等主题标题误当作作者）
+    return /^@/.test((h.textContent || '').trim());
+  });
+  // 少于 2 位作者时无需导航，隐藏侧栏，正文回退全宽
+  if (headings.length < 2) {
+    nav.classList.add('hidden');
+    return;
+  }
+
+  function slugify(name, idx) {
+    var s = String(name).toLowerCase()
+      .replace(/^@+/, '')
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9一-鿿_-]/g, '')
+      .replace(/_+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    return 'author-' + (s || ('idx-' + idx));
+  }
+
+  var used = {};
+  var items = [];
+  headings.forEach(function(h, i) {
+    var name = (h.textContent || '').trim() || ('Author ' + (i + 1));
+    var id = slugify(name, i);
+    if (used[id]) { id = id + '-' + (++used[id]); } else { used[id] = 1; }
+    h.id = id;
+
+    var a = document.createElement('a');
+    a.className = 'author-nav-item';
+    a.href = '#' + id;
+    a.textContent = name;
+    a.setAttribute('data-target', id);
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      var el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    list.appendChild(a);
+    items.push({ link: a, heading: h });
+  });
+
+  // scrollspy: 高亮当前可见的作者节
+  if (window.IntersectionObserver) {
+    var io = new IntersectionObserver(function(entries) {
+      entries.forEach(function(en) {
+        if (en.isIntersecting) {
+          items.forEach(function(it) {
+            it.link.classList.toggle('active', it.heading === en.target);
+          });
+        }
+      });
+    }, { rootMargin: '-15% 0px -75% 0px', threshold: 0 });
+    headings.forEach(function(h) { io.observe(h); });
+  }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   initThemeToggle();
+  initAuthorNav();
 });
 </script>
 

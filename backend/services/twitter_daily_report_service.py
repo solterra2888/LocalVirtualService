@@ -362,6 +362,15 @@ class TwitterDailyReportService:
         for author_id in sorted_authors:
             display_name = author_display_map.get(author_id) or author_id
             content = (renumbered_summaries.get(author_id) or '').strip()
+            # 去除正文里重复的"作者标题行"(每个 Phase 1 chunk 都会输出
+            # '### @<作者名> 摘要'),只保留下方 '## @{display_name}' 总标题，
+            # 避免 @WalterBloomberg 这类作者名在拼接后一节内出现多次。
+            author_keys = [
+                display_name,
+                author_id,
+                active_summaries.get(author_id, {}).get('author_name'),
+            ]
+            content = self._strip_redundant_author_headings(content, author_keys)
             sections.append(f"## @{display_name}\n\n{content}")
 
         header = (
@@ -369,6 +378,37 @@ class TwitterDailyReportService:
             f"共 {n_authors} 位作者 · {total_tweet_count} 条推文\n\n---\n\n"
         )
         return header + "\n\n---\n\n".join(sections)
+
+    @staticmethod
+    def _strip_redundant_author_headings(content: str, author_keys: List[str]) -> str:
+        """
+        删除摘要正文里重复的"作者标题行"。
+
+        Phase 1 按推文 chunk 调用 LLM，每个 chunk 的输出都会带一行
+        '### @<作者名> 摘要'；多个 chunk 拼接后该标题重复多次，再叠加阶段 B
+        的 '## @<作者名>' 总标题，会让同一作者名在一节内出现 4+ 次。
+
+        本方法仅删除"行首的 Markdown 标题行 / 纯作者名行"，保留正文要点与
+        推文 URL（https://x.com/<作者名>/status/... 不受影响）。
+        """
+        if not content or not author_keys:
+            return content or ''
+        keys = sorted(
+            {k.strip() for k in author_keys if k and k.strip()},
+            key=len, reverse=True,
+        )
+        if not keys:
+            return content
+        name_alt = '|'.join(re.escape(k) for k in keys)
+        heading_re = re.compile(
+            rf'^(?:#{{1,6}}\s+@?(?:{name_alt})(?:\s.*)?$|@?(?:{name_alt})\s*$)',
+            re.IGNORECASE,
+        )
+        kept = [
+            ln for ln in content.split('\n')
+            if not heading_re.match(ln.strip())
+        ]
+        return re.sub(r'\n{3,}', '\n\n', '\n'.join(kept)).strip()
 
     # ── Report persistence ─────────────────────────────────────────────────
 

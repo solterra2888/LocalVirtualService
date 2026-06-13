@@ -2042,6 +2042,134 @@ async def create_default_market_weekly_report_task(
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
+# ── Daily Market Report 定时任务 ────────────────────────────────────────
+
+
+class CreateDailyMarketReportTaskRequest(BaseModel):
+    """创建 Daily Market Report 定时任务请求模型"""
+    name: str = Field(default="Daily Market Report", description="任务名称")
+    cron_expression: str = Field(
+        default="0 8 * * 2-6",
+        description="Cron表达式（默认周二至周六 08:00 北京时间，即美股交易日收盘次日）",
+    )
+    timezone: str = Field(default="Asia/Shanghai", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    user_id: Optional[str] = Field(
+        default=None,
+        description="仅生成指定用户；为空则为所有用户 fan-out 生成",
+    )
+    report_date: Optional[str] = Field(
+        default=None,
+        description="报告日期 (YYYY-MM-DD)，为空则每次执行使用前一 UTC 日（对齐上游摘要）",
+    )
+
+
+@router.post("/tasks/daily-market-report", summary="创建 Daily Market Report 定时任务")
+async def create_daily_market_report_task(
+    request: CreateDailyMarketReportTaskRequest,
+    current_user=Depends(get_current_user),
+):
+    """
+    定时为所有（或指定）用户生成 Daily Market Report 静态 HTML。
+    """
+    try:
+        logger.info(
+            "创建 Daily Market Report 定时任务请求",
+            user=current_user.username,
+            task_name=request.name,
+            cron_expression=request.cron_expression,
+            target_user_id=request.user_id or "all users",
+        )
+
+        scheduler_service = await get_scheduler_service()
+
+        task_params: Dict[str, Any] = {}
+        if request.report_date:
+            task_params["report_date"] = request.report_date
+        if request.user_id:
+            task_params["user_id"] = request.user_id
+
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="daily_market_report",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username,
+        )
+
+        if result["success"]:
+            return {
+                "success": True,
+                "message": result["message"],
+                "data": {
+                    "task_id": result["task_id"],
+                    "task_config": result["task_config"],
+                },
+            }
+        raise HTTPException(
+            status_code=400, detail=result.get("message", "创建任务失败")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "创建 Daily Market Report 定时任务失败",
+            exception=str(e),
+            user=current_user.username,
+        )
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+@router.post("/tasks/daily-market-report/default", summary="创建默认 Daily Market Report 定时任务")
+async def create_default_daily_market_report_task(
+    current_user=Depends(get_current_user),
+):
+    """创建默认 Daily Market Report 定时任务（周二至周六 08:00 北京时间，覆盖所有用户）"""
+    try:
+        logger.info(
+            "创建默认 Daily Market Report 定时任务请求",
+            user=current_user.username,
+        )
+
+        scheduler_service = await get_scheduler_service()
+
+        result = await scheduler_service.create_cron_task(
+            task_name="Daily Market Report",
+            task_type="daily_market_report",
+            cron_expression="0 8 * * 2-6",
+            timezone="Asia/Shanghai",
+            enabled=True,
+            task_params={},
+            created_by=current_user.username,
+        )
+
+        if result["success"]:
+            return {
+                "success": True,
+                "message": result["message"],
+                "data": {
+                    "task_id": result["task_id"],
+                    "task_config": result["task_config"],
+                },
+            }
+        raise HTTPException(
+            status_code=400, detail=result.get("message", "创建任务失败")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "创建默认 Daily Market Report 定时任务失败",
+            exception=str(e),
+            user=current_user.username,
+        )
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
 @router.post("/tasks/eodhd-news/default", summary="创建默认EODHD新闻定时任务")
 async def create_default_eodhd_news_task(
     current_user=Depends(get_current_user)

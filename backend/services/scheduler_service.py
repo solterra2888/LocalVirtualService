@@ -1309,26 +1309,32 @@ class SchedulerService:
 
     async def _execute_daily_market_report_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        生成 Daily Market Report（全局，从 finviz_screener 数据）。
+        生成 Daily Market Report（按用户维度，从 finviz_screener 数据）。
         应在 finviz_screener 刷新完成后调度。
 
         Args:
             params:
                 - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)
+                - user_id: 可选，用户 ID（字符串）。为 None 时为所有用户 fan-out 生成。
         """
         try:
             logger.info("分发 Daily Market Report Celery 任务", params=params)
 
-            from backend.tasks.daily_market_report_tasks import generate_daily_market_report_task
+            from backend.tasks.daily_market_report_tasks import generate_all_daily_market_reports_task
 
             report_date = params.get('report_date')
+            user_id = params.get('user_id')
 
-            task = generate_daily_market_report_task.delay(report_date=report_date)
+            task = generate_all_daily_market_reports_task.delay(
+                user_id=user_id,
+                report_date=report_date,
+            )
 
-            date_info = f", date={report_date}" if report_date else ", today"
+            scope_info = f", user={user_id}" if user_id else ", all users"
+            date_info = f", date={report_date}" if report_date else ", previous-day"
             message = (
                 f"✅ Daily Market Report: "
-                f"已提交 Celery 异步任务 {task.id}{date_info}"
+                f"已提交 Celery 异步任务 {task.id}{scope_info}{date_info}"
             )
             logger.info(message)
             return {'success': True, 'message': message, 'celery_task_id': task.id}
@@ -1397,7 +1403,7 @@ class SchedulerService:
             logger.info("分发 CNBC Closing Bell Celery 任务", params=params)
 
             from backend.tasks.cnbc_closing_bell_tasks import generate_cnbc_closing_bell_task
-            from backend.utils.datetime_utils import parse_iso_utc, parse_user_tz
+            from backend.utils.datetime_utils import parse_iso_utc
 
             window_hours = int(params.get('window_hours', 24))
             force = params.get('force', False)
@@ -1408,13 +1414,10 @@ class SchedulerService:
 
             report_date = params.get('report_date')
             if not report_date:
-                # 美东 16:00 前取上一交易日；收盘后取当日（Closing Bell 对应交易日）
-                et_now = window_end.astimezone(parse_user_tz('America/New_York'))
-                if et_now.hour < 16:
-                    label_date = et_now.date() - timedelta(days=1)
-                else:
-                    label_date = et_now.date()
-                report_date = label_date.isoformat()
+                # 与其他上游（The Close / Twitter / YouTube / 知识星球）统一为「北京自然日」，
+                # 保证 Daily Market Report 用单一 report_date 能同时命中所有上游摘要。
+                from datetime import date as _date
+                report_date = _date.today().isoformat()
 
             task = generate_cnbc_closing_bell_task.delay(
                 report_date=report_date,

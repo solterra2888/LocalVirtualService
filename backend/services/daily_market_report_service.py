@@ -2,13 +2,16 @@
 """
 Daily Market Report Service
 
-从 finviz_screener 表生成每日市场报告：
-- US Assets / US Sector / Thematic ETFs 三个表现表
-- 渲染为自包含 HTML，保存到本地文件和数据库
-- 全局报告，无 user_id 维度
+从 finviz_screener 表生成每日市场报告（per-user，按 user_id + report_date 维度）：
+- Home 标签页：Bloomberg The Close Summary（全局）
+- Stockview 标签页：CNBC Closing Bell Summary（全局）
+- My Subscription 标签页：知识星球 / Twitter / YouTube 三份用户每日摘要拼接（per-user）
+- Market Overview 标签页：US Assets / US Sector / Thematic ETFs 三个表现表 + 图表（全局）
+- 渲染为自包含 HTML，保存到本地文件（reports/daily/{user_id}/）和数据库
 """
 
 import json
+import mistune
 import os
 import time
 from datetime import date, datetime, timezone
@@ -537,9 +540,13 @@ class DailyMarketReportService:
     # 主入口
     # ──────────────────────────────────────────
 
-    def generate(self, report_date: Optional[date] = None) -> Dict[str, Any]:
+    def generate(self, user_id: str, report_date: Optional[date] = None) -> Dict[str, Any]:
         """
-        生成 Daily Market Report，保存到本地和数据库。
+        生成 Daily Market Report（per-user），保存到本地和数据库。
+
+        Args:
+            user_id: 用户 ID（字符串形式，如 "123"）。
+            report_date: 报告日期，默认今天（UTC）。
 
         Returns:
             dict with keys: success, report_date, file_path, share_token, metadata
@@ -556,13 +563,13 @@ class DailyMarketReportService:
         cursor.execute(
             """
             INSERT INTO daily_market_reports
-                (report_date, status, created_at, updated_at)
-            VALUES (%s, 'generating', NOW(), NOW())
-            ON CONFLICT (report_date)
+                (user_id, report_date, status, created_at, updated_at)
+            VALUES (%s, %s, 'generating', NOW(), NOW())
+            ON CONFLICT (user_id, report_date)
             DO UPDATE SET status='generating', updated_at=NOW(), error_message=NULL
             RETURNING id
             """,
-            (report_date,),
+            (user_id, report_date),
         )
         report_id = cursor.fetchone()[0]
         conn.commit()
@@ -615,6 +622,97 @@ class DailyMarketReportService:
             chart_tickers_found = sum(1 for v in chart_data.values() if v)
             logger.info(f"Chart data: {chart_tickers_found}/{len(ALL_TICKERS)} tickers have OHLCV data")
 
+            # 4b. 查询 Bloomberg The Close Summary
+            cursor.execute(
+                """
+                SELECT summary_content
+                FROM the_close_summaries
+                WHERE report_date = %s AND status = 'completed'
+                """,
+                (report_date,),
+            )
+            tc_row = cursor.fetchone()
+            the_close_html = self._render_markdown_to_html(tc_row[0]) if tc_row else ""
+
+            # 4c. 查询 CNBC Closing Bell Summary
+            cursor.execute(
+                """
+                SELECT summary_content
+                FROM cnbc_closing_bell_summaries
+                WHERE report_date = %s AND status = 'completed'
+                """,
+                (report_date,),
+            )
+            cb_row = cursor.fetchone()
+            closing_bell_html = self._render_markdown_to_html(cb_row[0]) if cb_row else ""
+
+            # 4d. 查询 My Subscription 摘要（知识星球 / Twitter / YouTube）
+            #     这三个表 user_id 是 INTEGER，将 VARCHAR user_id 转 int；
+            #     非数字 user_id（如 'system'）跳过订阅查询，显示空状态。
+            try:
+                user_id_int = int(user_id)
+            except (ValueError, TypeError):
+                user_id_int = None
+
+            subscription_markdowns = []
+            if user_id_int is not None:
+                # 知识星球
+                cursor.execute(
+                    """
+                    SELECT report_content
+                    FROM zhishixingqiu_user_reports
+                    WHERE user_id = %s AND report_date = %s AND status = 'completed'
+                    """,
+                    (user_id_int, report_date),
+                )
+                zsxq_row = cursor.fetchone()
+                if zsxq_row and zsxq_row[0]:
+                    subscription_markdowns.append(zsxq_row[0])
+
+                # Twitter
+                cursor.execute(
+                    """
+                    SELECT report_content
+                    FROM twitter_daily_reports
+                    WHERE user_id = %s AND report_date = %s AND status = 'completed'
+                    """,
+                    (user_id_int, report_date),
+                )
+                twitter_row = cursor.fetchone()
+                if twitter_row and twitter_row[0]:
+                    subscription_markdowns.append(twitter_row[0])
+
+                # YouTube
+                cursor.execute(
+                    """
+                    SELECT report_content
+                    FROM youtube_daily_reports
+                    WHERE user_id = %s AND report_date = %s AND status = 'completed'
+                    """,
+                    (user_id_int, report_date),
+                )
+                youtube_row = cursor.fetchone()
+                if youtube_row and youtube_row[0]:
+                    subscription_markdowns.append(youtube_row[0])
+            else:
+                zsxq_row = twitter_row = youtube_row = None
+
+            # 拼接三份 Markdown，用分隔线隔开，渲染一次
+            if subscription_markdowns:
+                combined_markdown = "\n\n---\n\n".join(subscription_markdowns)
+                my_subscriptions_html = self._render_markdown_to_html(combined_markdown)
+            else:
+                my_subscriptions_html = ""
+
+            logger.info(
+                f"Summaries: the_close={'✓' if the_close_html else '✗'}, "
+                f"closing_bell={'✓' if closing_bell_html else '✗'}, "
+                f"subscriptions(zsxq/tw/yt)="
+                f"{'✓' if zsxq_row and zsxq_row[0] else '✗'}/"
+                f"{'✓' if twitter_row and twitter_row[0] else '✗'}/"
+                f"{'✓' if youtube_row and youtube_row[0] else '✗'}"
+            )
+
             # 5. 渲染 HTML
             gen_at_ny = generated_at_utc.astimezone(ZoneInfo("America/New_York"))
             gen_at_bj = generated_at_utc.astimezone(ZoneInfo("Asia/Shanghai"))
@@ -628,10 +726,13 @@ class DailyMarketReportService:
                 us_sector=us_sector,
                 thematic=thematic,
                 chart_data=chart_data,
+                the_close_html=the_close_html,
+                closing_bell_html=closing_bell_html,
+                my_subscriptions_html=my_subscriptions_html,
             )
 
             # 6. 保存到本地文件
-            file_path = self._save_to_local_file(html, report_date)
+            file_path = self._save_to_local_file(html, report_date, user_id)
 
             # 7. 统计元数据
             elapsed = round(time.time() - start_ts, 1)
@@ -644,6 +745,9 @@ class DailyMarketReportService:
                 "missing_tickers": sorted(set(ALL_TICKERS) - seen_tickers),
                 "chart_tickers_with_data": chart_tickers_found,
                 "generated_at_utc": generated_at_utc.isoformat(),
+                "has_the_close_summary": bool(the_close_html),
+                "has_closing_bell_summary": bool(closing_bell_html),
+                "has_my_subscriptions": bool(my_subscriptions_html),
             }
 
             share_token = uuid4().hex
@@ -712,6 +816,9 @@ class DailyMarketReportService:
         us_sector: List[Dict],
         thematic: List[Dict],
         chart_data: Dict[str, List[Dict[str, Any]]],
+        the_close_html: str = "",
+        closing_bell_html: str = "",
+        my_subscriptions_html: str = "",
     ) -> str:
         """通过 Jinja2 渲染自包含 HTML。"""
         from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -759,29 +866,60 @@ class DailyMarketReportService:
             us_assets_notes=US_ASSETS_NOTES,
             chart_data_json=json.dumps(chart_data),
             display_names_json=json.dumps(DISPLAY_NAMES),
+            the_close_html=the_close_html,
+            closing_bell_html=closing_bell_html,
+            my_subscriptions_html=my_subscriptions_html,
         )
         return html
+
+    @staticmethod
+    def _render_markdown_to_html(md_text: str) -> str:
+        """将 Markdown 转换为 HTML，用于嵌入报告模板。"""
+        if not md_text:
+            return ""
+        md = mistune.create_markdown()
+        return md(md_text)
 
     # ──────────────────────────────────────────
     # 本地文件保存
     # ──────────────────────────────────────────
 
-    def _save_to_local_file(self, html: str, report_date: date) -> str:
-        """保存 HTML 到 reports/daily/YYYYMMDD.html。"""
-        os.makedirs(REPORTS_DIR, exist_ok=True)
+    def _save_to_local_file(self, html: str, report_date: date, user_id: str) -> str:
+        """保存 HTML 到 reports/daily/{user_id}/YYYYMMDD.html。"""
+        user_dir = os.path.join(REPORTS_DIR, user_id)
+        os.makedirs(user_dir, exist_ok=True)
         filename = f"{report_date.strftime('%Y%m%d')}.html"
-        file_path = os.path.join(REPORTS_DIR, filename)
+        file_path = os.path.join(user_dir, filename)
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(html)
         logger.info(f"Report saved to {file_path}")
         return file_path
 
     # ──────────────────────────────────────────
+    # 用户枚举（fan-out 用）
+    # ──────────────────────────────────────────
+
+    def get_eligible_users(self) -> List[str]:
+        """返回需要生成 Daily Market Report 的全部用户 ID（字符串形式）。
+
+        Home/Stockview/Market Overview 是通用市场内容，所有用户都可查看；
+        My Subscription 按用户填充（无订阅则显示空状态）。因此 fan-out 覆盖
+        users 表所有用户。
+        """
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT id FROM users ORDER BY id")
+            return [str(row[0]) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    # ──────────────────────────────────────────
     # 查询接口
     # ──────────────────────────────────────────
 
-    def get_latest_report(self) -> Optional[Dict[str, Any]]:
-        """返回最新已完成的报告。"""
+    def get_latest_report(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """返回指定用户最新已完成的报告。"""
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
         try:
@@ -790,10 +928,11 @@ class DailyMarketReportService:
                 SELECT id, report_date, file_path, metadata, status,
                        error_message, created_at, share_token
                 FROM daily_market_reports
-                WHERE status = 'completed'
+                WHERE user_id = %s AND status = 'completed'
                 ORDER BY report_date DESC
                 LIMIT 1
-                """
+                """,
+                (user_id,),
             )
             row = cursor.fetchone()
             if not row:
@@ -802,8 +941,8 @@ class DailyMarketReportService:
         finally:
             conn.close()
 
-    def list_reports(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """返回最近的报告列表。"""
+    def list_reports(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """返回指定用户最近的报告列表。"""
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
         try:
@@ -812,10 +951,11 @@ class DailyMarketReportService:
                 SELECT id, report_date, file_path, metadata, status,
                        error_message, created_at, share_token
                 FROM daily_market_reports
+                WHERE user_id = %s
                 ORDER BY report_date DESC
                 LIMIT %s
                 """,
-                (limit,),
+                (user_id, limit),
             )
             return [self._row_to_dict(row) for row in cursor.fetchall()]
         finally:

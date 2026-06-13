@@ -41,11 +41,14 @@ import {
   Typography,
 } from 'antd';
 import {
+  AppstoreOutlined,
   ArrowDownOutlined,
   ArrowUpOutlined,
+  BranchesOutlined,
   BulbOutlined,
   CloseOutlined,
   GlobalOutlined,
+  StockOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
 import {
@@ -426,7 +429,7 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
               }}
             >
               <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-                Tickers:
+                <StockOutlined /> Tickers:
               </Text>
               <ReportTickerTags
                 tickers={tickers}
@@ -523,7 +526,7 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
               }}
             >
               <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-                Themes:
+                <AppstoreOutlined /> Themes:
               </Text>
               {dedupedThemes.slice(0, 6).map((theme) => (
                 <Tooltip
@@ -560,7 +563,7 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
               }}
             >
               <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-                Sub-Themes:
+                <BranchesOutlined /> Sub-Themes:
               </Text>
               {subThemes.slice(0, 6).map((cat) => (
                 <Tag key={cat} bordered={false} style={aiTagChipStyle('concept', themeMode)}>

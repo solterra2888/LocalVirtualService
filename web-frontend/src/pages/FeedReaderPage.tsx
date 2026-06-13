@@ -20,7 +20,6 @@ import {
   Spin,
   Dropdown,
   Switch,
-  Tag,
   Checkbox,
   Segmented,
   Alert,
@@ -57,7 +56,6 @@ import {
   SubscriptionContent,
 } from '../services/subscriptions';
 import { FEED_THEME_COLORS as THEME_COLORS } from '../components/feed/feedTheme';
-import { aiTagChipStyle } from '../components/shared/aiTagChipStyles';
 import {
   getFeedListHeadline,
   getHeatLevelConfig,
@@ -1727,111 +1725,7 @@ const FeedReaderPageInner: React.FC = () => {
                             )}
                           </Space>
 
-                          {/* Phase 3: AI 标签 chips (仅有 tags 且非"未分类"时渲染, 节省视觉空间) */}
-                          {content.tags
-                            && content.tags.sector !== '未分类'
-                            && content.tags.sector_en !== 'Uncategorized'
-                            && (content.tags.tickers?.length || content.tags.sector || content.matched_themes?.length) && (
-                              <Space size={[8, 8]} wrap style={{ marginTop: 4 }}>
-                                {content.tags.sector && (
-                                  <Tag
-                                    bordered={false}
-                                    style={aiTagChipStyle('sector', themeMode)}
-                                  >
-                                    {content.tags.sector}
-                                  </Tag>
-                                )}
-                                {content.tags.tickers && content.tags.tickers.length > 0 && (
-                                  <>
-                                    {content.tags.tickers.slice(0, 2).map((t) => (
-                                      <Tag
-                                        key={t}
-                                        bordered={false}
-                                        style={aiTagChipStyle('ticker', themeMode)}
-                                      >
-                                        {t}
-                                      </Tag>
-                                    ))}
-                                    {content.tags.tickers.length > 2 && (
-                                      <Tooltip title={content.tags.tickers.slice(2).join(', ')}>
-                                        <Tag
-                                          bordered={false}
-                                          style={{
-                                            ...aiTagChipStyle('overflow', themeMode),
-                                            cursor: 'default',
-                                          }}
-                                        >
-                                          +{content.tags.tickers.length - 2}
-                                        </Tag>
-                                      </Tooltip>
-                                    )}
-                                  </>
-                                )}
-                                {content.matched_themes && content.matched_themes.length > 0 && (() => {
-                                  const all = content.matched_themes!;
-                                  const seen = new Set<string>();
-                                  const deduped = all.filter(t => {
-                                    if (seen.has(t.theme_name)) return false;
-                                    seen.add(t.theme_name);
-                                    return true;
-                                  });
-                                  const subThemes = Array.from(new Set(all.map(t => t.category).filter(Boolean) as string[]));
-                                  return (
-                                    <>
-                                      {deduped.slice(0, 2).map((theme) => (
-                                        <Tooltip
-                                          key={theme.theme_id || theme.theme_name}
-                                          title={theme.confidence ? `${(theme.confidence * 100).toFixed(0)}%` : undefined}
-                                          mouseEnterDelay={0.4}
-                                        >
-                                          <Tag
-                                            bordered={false}
-                                            style={aiTagChipStyle('theme', themeMode)}
-                                          >
-                                            {theme.theme_name}
-                                          </Tag>
-                                        </Tooltip>
-                                      ))}
-                                      {deduped.length > 2 && (
-                                        <Tooltip title={deduped.slice(2).map(t => t.theme_name).join(', ')}>
-                                          <Tag
-                                            bordered={false}
-                                            style={{
-                                              ...aiTagChipStyle('overflow', themeMode),
-                                              cursor: 'default',
-                                            }}
-                                          >
-                                            +{deduped.length - 2}
-                                          </Tag>
-                                        </Tooltip>
-                                      )}
-                                      {subThemes.slice(0, 2).map((cat) => (
-                                        <Tag
-                                          key={`st-${cat}`}
-                                          bordered={false}
-                                          style={aiTagChipStyle('concept', themeMode)}
-                                        >
-                                          {cat}
-                                        </Tag>
-                                      ))}
-                                      {subThemes.length > 2 && (
-                                        <Tooltip title={subThemes.slice(2).join(', ')}>
-                                          <Tag
-                                            bordered={false}
-                                            style={{
-                                              ...aiTagChipStyle('overflow', themeMode),
-                                              cursor: 'default',
-                                            }}
-                                          >
-                                            +{subThemes.length - 2}
-                                          </Tag>
-                                        </Tooltip>
-                                      )}
-                                    </>
-                                  );
-                                })()}
-                              </Space>
-                            )}
+                          {/* AI 标签 chips 已隐藏 — 标签仅在详情面板中显示 */}
                         </div>
                       </List.Item>
                     );

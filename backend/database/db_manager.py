@@ -925,6 +925,7 @@ class DatabaseManager:
                 'youtube_author_summary',
                 'theme_report',
                 'market_weekly_report',
+                'daily_market_report',
                 'the_close_summary',
                 'cnbc_closing_bell',
                 'zhishixingqiu_summary',

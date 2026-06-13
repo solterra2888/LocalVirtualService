@@ -27,7 +27,7 @@ class GenerateReportRequest(BaseModel):
 async def get_latest_report(current_user: TokenData = Depends(get_current_user)):
     """获取最新的 Daily Market Report。"""
     svc = DailyMarketReportService()
-    report = svc.get_latest_report()
+    report = svc.get_latest_report(user_id=str(current_user.user_id))
     if not report:
         raise HTTPException(status_code=404, detail="No completed report found")
     return report
@@ -40,7 +40,7 @@ async def list_reports(
 ):
     """获取报告历史列表。"""
     svc = DailyMarketReportService()
-    return svc.list_reports(limit=limit)
+    return svc.list_reports(user_id=str(current_user.user_id), limit=limit)
 
 
 @router.post("/generate")
@@ -51,11 +51,16 @@ async def generate_report(
     """触发 Daily Market Report 生成（异步 Celery 任务）。"""
     from backend.tasks.daily_market_report_tasks import generate_daily_market_report_task
 
-    task = generate_daily_market_report_task.delay(report_date=request.report_date)
+    user_id = str(current_user.user_id)
+    task = generate_daily_market_report_task.delay(
+        user_id=user_id,
+        report_date=request.report_date,
+    )
     return {
         "success": True,
         "message": "Report generation queued",
         "celery_task_id": task.id,
+        "user_id": user_id,
     }
 
 

@@ -13,7 +13,9 @@ import {
 import dayjs from 'dayjs';
 import {
   AlignLeftOutlined,
+  AppstoreOutlined,
   BulbOutlined,
+  BranchesOutlined,
   CommentOutlined,
   GlobalOutlined,
   LikeOutlined,
@@ -21,6 +23,7 @@ import {
   MessageOutlined,
   RetweetOutlined,
   RobotOutlined,
+  StockOutlined,
   SyncOutlined,
   TeamOutlined,
   ClockCircleOutlined,
@@ -756,7 +759,9 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
               {/* Tickers (复用 ReportTickerTags 组件) */}
               {displayTags && displayTags.tickers && displayTags.tickers.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>Tickers:</Text>
+                  <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
+                    <StockOutlined /> Tickers:
+                  </Text>
                   <ReportTickerTags
                     tickers={displayTags.tickers}
                     tagStyle={aiTagChipStyle('ticker', themeMode)}
@@ -835,7 +840,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                   <>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-                        Themes:
+                        <AppstoreOutlined /> Themes:
                       </Text>
                       {deduped.slice(0, 6).map((theme) => (
                         <Tooltip
@@ -862,7 +867,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                     {subThemes.length > 0 && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-                          Sub-Themes:
+                          <BranchesOutlined /> Sub-Themes:
                         </Text>
                         {subThemes.slice(0, 6).map((cat) => (
                           <Tag key={cat} bordered={false} style={aiTagChipStyle('concept', themeMode)}>
