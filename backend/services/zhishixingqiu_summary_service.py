@@ -27,6 +27,15 @@ from backend.utils.datetime_utils import (
     rolling_window_utc,
 )
 from backend.utils.logger import get_logger
+from backend.services.summary_common import (
+    BATCH_CONCURRENT,
+    PER_ITEM_TIMEOUT_SEC,
+    CHUNK_LLM_TIMEOUT_SEC,
+    CHUNK_LLM_RETRY,
+    ORPHAN_THRESHOLD_MINUTES,
+    SUMMARY_LLM_READ_TIMEOUT_SEC,
+    orphan_cutoff_dt,
+)
 
 logger = get_logger("zhishixingqiu_summary_service")
 
@@ -38,9 +47,9 @@ MAX_INPUT_CHARS = 80000
 TOPIC_CONTENT_PREVIEW_CHARS = 2000
 MAX_TOKENS_OUTPUT_PHASE1 = 2000
 
-# 批量生成时的并发与超时控制
-BATCH_CONCURRENT_GROUPS = 4
-PER_GROUP_TIMEOUT_SEC = 180
+# 批量生成时的并发与超时控制（常量来自 summary_common）
+BATCH_CONCURRENT_GROUPS = BATCH_CONCURRENT
+PER_GROUP_TIMEOUT_SEC = PER_ITEM_TIMEOUT_SEC  # 600s
 
 
 def resolve_zhishixingqiu_content_window(
@@ -81,6 +90,7 @@ class ZhishixingqiuSummaryService:
             {'success': bool, 'message': str, 'total': int, 'succeeded': int, ...}
         """
         start_time = time.time()
+        self._reset_orphan_generating_records(report_date)
         window_start, resolved_end = resolve_zhishixingqiu_content_window(
             report_date, window_end, window_hours
         )
@@ -301,14 +311,30 @@ class ZhishixingqiuSummaryService:
             }
 
             if not active_summaries:
+                # 区分"真无内容"与"上游 Phase A 失败"
+                failed_groups = self.get_failed_group_ids_for_date(group_ids, report_date)
+                is_partial = len(failed_groups) > 0
+                if is_partial:
+                    content_msg = (
+                        f"当天有 {len(failed_groups)} 个星球摘要生成失败，无有效话题数据可组装报告。\n"
+                        f"失败星球: {', '.join(failed_groups)}"
+                    )
+                    logger.warning(
+                        f"[ZhiXingQiu Report] 无有效摘要，{len(failed_groups)} 个星球失败",
+                        user_id=user_id, failed_groups=failed_groups,
+                    )
+                else:
+                    content_msg = "当天订阅的知识星球无可用摘要。"
                 self._update_user_report(
                     report_id,
                     status="completed",
-                    content="当天订阅的知识星球无可用摘要。",
+                    content=content_msg,
                     topic_count=0,
                     group_count=0,
                     metadata={
                         "reason": "no_active_summaries",
+                        "is_partial": is_partial,
+                        "failed_groups": failed_groups,
                         "subscribed_group_count": len(group_ids),
                         **window_metadata,
                     },
@@ -316,9 +342,10 @@ class ZhishixingqiuSummaryService:
                 return {
                     "success": True,
                     "report_id": report_id,
-                    "message": "当天无可用星球摘要",
+                    "message": content_msg,
                     "topic_count": 0,
                     "group_count": 0,
+                    "is_partial": is_partial,
                 }
 
             logger.info(
@@ -475,7 +502,7 @@ class ZhishixingqiuSummaryService:
                     "skipped": False,
                 }
 
-            summary_text = await self._run_phase1(
+            summary_text, is_degraded = await self._run_phase1(
                 topics_text=topics_text,
                 group_name=group_name,
                 report_date=summary_date,
@@ -488,6 +515,7 @@ class ZhishixingqiuSummaryService:
                 "template_code": DEFAULT_PHASE1_TEMPLATE,
                 "input_char_count": len(topics_text),
                 "input_truncated": truncated,
+                "degraded": is_degraded,
                 "window_start": ensure_utc(window_start).isoformat(),
                 "window_end": ensure_utc(window_end).isoformat(),
             }
@@ -743,19 +771,46 @@ class ZhishixingqiuSummaryService:
         group_name: str,
         report_date: date,
         topic_count: int,
-    ) -> str:
-        """执行 Phase 1 LLM 调用。"""
+    ) -> Tuple[str, bool]:
+        """执行 Phase 1 LLM 调用，带超时与重试。
+
+        Returns:
+            (summary_text, degraded) — degraded=True 表示 LLM 失败，返回降级摘要。
+        """
         variables = {
             "group_name": group_name,
             "report_date": str(report_date),
             "topic_count": str(topic_count),
             "topics_text": topics_text,
         }
-        return await self._call_llm(
-            template_code=DEFAULT_PHASE1_TEMPLATE,
-            variables=variables,
-            max_tokens=MAX_TOKENS_OUTPUT_PHASE1,
-        )
+        for attempt in range(CHUNK_LLM_RETRY + 1):
+            try:
+                result = await asyncio.wait_for(
+                    self._call_llm(
+                        template_code=DEFAULT_PHASE1_TEMPLATE,
+                        variables=variables,
+                        max_tokens=MAX_TOKENS_OUTPUT_PHASE1,
+                    ),
+                    timeout=CHUNK_LLM_TIMEOUT_SEC,
+                )
+                return result, False
+            except asyncio.TimeoutError:
+                if attempt < CHUNK_LLM_RETRY:
+                    logger.warning(
+                        f"[Phase 1] {group_name} LLM 超时 "
+                        f"(attempt {attempt+1}/{CHUNK_LLM_RETRY+1}), retrying"
+                    )
+                    continue
+                logger.warning(f"[Phase 1] {group_name} 全部超时, 降级为话题标题列表")
+            except Exception as exc:
+                if attempt < CHUNK_LLM_RETRY:
+                    logger.warning(
+                        f"[Phase 1] {group_name} 错误 (attempt {attempt+1}): {exc}, retrying"
+                    )
+                    continue
+                logger.warning(f"[Phase 1] {group_name} 全部失败: {exc}, 降级")
+
+        return f"[摘要降级：LLM 生成超时，共 {topic_count} 条话题]", True
 
     async def _call_llm(
         self,
@@ -780,6 +835,7 @@ class ZhishixingqiuSummaryService:
             template_code=template_code,
             variables=variables,
             max_tokens=max_tokens,
+            timeout=SUMMARY_LLM_READ_TIMEOUT_SEC,
         )
         llm_elapsed = round(time.time() - llm_start, 2)
 
@@ -904,12 +960,7 @@ class ZhishixingqiuSummaryService:
     def get_group_summaries_for_date(
         self, group_ids: List[str], summary_date: date
     ) -> Dict[str, Dict[str, Any]]:
-        """
-        批量获取指定星球列表在某天的已完成摘要。
-
-        Returns:
-            {group_id: {group_name, summary_content, topic_count, ...}}
-        """
+        """批量获取指定星球列表在某天的已完成（completed）摘要。"""
         if not group_ids:
             return {}
         conn = self.db_manager.get_connection()
@@ -934,6 +985,62 @@ class ZhishixingqiuSummaryService:
                     "topic_count": row[3] or 0,
                 }
             return result
+        finally:
+            cursor.close()
+
+    def get_failed_group_ids_for_date(
+        self, group_ids: List[str], summary_date: date
+    ) -> List[str]:
+        """返回指定星球列表中当天 Phase A 状态为 failed 的 group_id 列表。"""
+        if not group_ids:
+            return []
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT group_id
+                FROM zhishixingqiu_group_daily_summaries
+                WHERE group_id = ANY(%s)
+                  AND summary_date = %s
+                  AND status = 'failed'
+                """,
+                (group_ids, summary_date),
+            )
+            return [row[0] for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+    def _reset_orphan_generating_records(self, target_date: date) -> int:
+        """将当天超过 ORPHAN_THRESHOLD_MINUTES 仍处于 'generating' 的记录重置为 'failed'。"""
+        cutoff = orphan_cutoff_dt()
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                UPDATE zhishixingqiu_group_daily_summaries
+                SET status = 'failed',
+                    error_message = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE summary_date = %s
+                  AND status = 'generating'
+                  AND updated_at < %s
+                """,
+                (
+                    f"orphan reset: stuck generating > {ORPHAN_THRESHOLD_MINUTES}min",
+                    target_date,
+                    cutoff,
+                ),
+            )
+            count = cursor.rowcount
+            conn.commit()
+            if count > 0:
+                logger.warning(
+                    f"Orphan reaper: {count} 条 'generating' 记录已重置为 'failed' "
+                    f"(date={target_date}, cutoff={cutoff.isoformat()})"
+                )
+            return count
         finally:
             cursor.close()
 
@@ -1069,6 +1176,7 @@ class ZhishixingqiuSummaryService:
             cursor.close()
 
     def get_latest_report(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """获取用户最新已完成报告，附带 is_empty / is_partial 派生字段。"""
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
         try:
@@ -1085,7 +1193,13 @@ class ZhishixingqiuSummaryService:
                 (user_id,),
             )
             row = cursor.fetchone()
-            return self._row_to_dict(row) if row else None
+            if not row:
+                return None
+            report = self._row_to_dict(row)
+            meta = report.get("metadata") or {}
+            report["is_empty"] = (report.get("topic_count") or 0) == 0
+            report["is_partial"] = bool(meta.get("is_partial", False))
+            return report
         finally:
             cursor.close()
 

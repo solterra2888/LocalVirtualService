@@ -52,7 +52,11 @@ def generate_cnbc_closing_bell_task(
     try:
         svc = CNBCClosingBellService()
 
-        as_of = _date.fromisoformat(report_date) if report_date else _date.today()
+        if report_date:
+            as_of = _date.fromisoformat(report_date)
+        else:
+            from backend.utils.datetime_utils import utcnow, window_label_date
+            as_of = window_label_date(utcnow(), 'Asia/Shanghai')
         we = _datetime.fromisoformat(window_end) if window_end else None
 
         result = _run_async(

@@ -156,14 +156,41 @@ class TwitterDailyReportService:
             }
 
             if not active_summaries:
-                self._update_report(report_id, status='completed',
-                                    content='当天无推文数据。',
-                                    metadata={'tweet_count': 0, 'author_count': 0, **window_metadata})
+                # 区分"真无内容"与"上游 Phase A 失败"
+                author_ids = [a[0] for a in user_authors]
+                failed_authors = author_summary_service.get_failed_author_ids_for_date(
+                    author_ids, report_date
+                )
+                is_partial = len(failed_authors) > 0
+                if is_partial:
+                    content_msg = (
+                        f"当天有 {len(failed_authors)} 位作者摘要生成失败，无有效推文数据可组装报告。\n"
+                        f"失败作者: {', '.join(failed_authors)}"
+                    )
+                    logger.warning(
+                        f"[Twitter Report] 无有效摘要，{len(failed_authors)} 位作者失败",
+                        user_id=user_id, failed_authors=failed_authors
+                    )
+                else:
+                    content_msg = '当天无推文数据。'
+                self._update_report(
+                    report_id,
+                    status='completed',
+                    content=content_msg,
+                    metadata={
+                        'tweet_count': 0,
+                        'author_count': 0,
+                        'is_partial': is_partial,
+                        'failed_authors': failed_authors,
+                        **window_metadata,
+                    },
+                )
                 return {
                     'success': True,
                     'report_id': report_id,
-                    'message': '当天无推文数据',
+                    'message': content_msg,
                     'tweet_count': 0,
+                    'is_partial': is_partial,
                 }
 
             # 4) 全局引用重编号 + 组装
@@ -535,7 +562,7 @@ class TwitterDailyReportService:
             cursor.close()
 
     def get_latest_report(self, user_id: int) -> Optional[Dict]:
-        """获取用户最新的已完成报告。"""
+        """获取用户最新的已完成报告，附带 is_empty / is_partial 派生字段。"""
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
         try:
@@ -560,6 +587,10 @@ class TwitterDailyReportService:
             for ts_field in ('created_at', 'updated_at'):
                 if report.get(ts_field):
                     report[ts_field] = report[ts_field].isoformat()
+
+            meta = report.get('metadata') or {}
+            report['is_empty'] = (meta.get('tweet_count', -1) == 0)
+            report['is_partial'] = bool(meta.get('is_partial', False))
 
             if report.get('updated_at'):
                 try:

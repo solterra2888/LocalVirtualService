@@ -404,8 +404,8 @@ def generate_all_yt_author_summaries_task(
     bind=True,
     name='generate_youtube_daily_report',
     queue='ai_processing',
-    soft_time_limit=600,
-    time_limit=900,
+    soft_time_limit=1800,
+    time_limit=2100,
 )
 def generate_youtube_daily_report_task(
     self,

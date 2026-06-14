@@ -152,6 +152,7 @@ All config via `.env` file (see `example.env`). Key variables:
 - `docs/instructions/LLM_ARCHITECTURE_OVERVIEW.md`: LLM calling patterns, template system
 - `docs/instructions/DAILY_MODULE.md`: Daily feed aggregation architecture
 - `docs/instructions/SCHEDULER_DEVELOPMENT_GUIDE.md`: Scheduler service internals
+- `docs/instructions/SUMMARY_SCHEDULER_DEVELOPMENT_GUIDE.md`: Periodic Summarize schedulers (YouTube/Twitter/Zhishixingqiu/The Close/CNBC) unified contract
 - `docs/instructions/FEEDS_MODULE.md`: Twitter/YouTube subscription system
 - `docs/instructions/VECTOR_RAG_SYSTEM.md`: Semantic search implementation
 - `deployment/DEPLOY_GUIDE.md`: Production deployment guide

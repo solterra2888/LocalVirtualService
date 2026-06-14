@@ -14,6 +14,7 @@ import { twitterDailyReportsAPI } from '../services/twitterDailyReports';
 import { youtubeDailyReportsAPI } from '../services/youtubeDailyReports';
 import { marketWeeklyReportAPI } from '../services/marketWeeklyReport';
 import { themeReportAPI } from '../services/themeReport';
+import { dailyMarketReportAPI } from '../services/dailyMarketReport';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -224,6 +225,7 @@ interface ReportDatesState {
   youtube: string | null;
   marketWeekly: string | null;
   theme: string | null;
+  dailyMarket: string | null;
 }
 
 const ReportsOverviewPage: React.FC = () => {
@@ -238,6 +240,7 @@ const ReportsOverviewPage: React.FC = () => {
     youtube: null,
     marketWeekly: null,
     theme: null,
+    dailyMarket: null,
   });
 
   // 加载状态
@@ -246,11 +249,22 @@ const ReportsOverviewPage: React.FC = () => {
     youtube: true,
     marketWeekly: true,
     theme: true,
+    dailyMarket: true,
   });
 
   // 加载各报告的最新日期
   useEffect(() => {
     const loadReportDates = async () => {
+      // Daily Market Report
+      setLoading(prev => ({ ...prev, dailyMarket: true }));
+      try {
+        const dmrRes = await dailyMarketReportAPI.getLatest();
+        if (dmrRes && dmrRes.report_date) {
+          setReportDates(prev => ({ ...prev, dailyMarket: dmrRes.report_date }));
+        }
+      } catch { /* ignore */ }
+      setLoading(prev => ({ ...prev, dailyMarket: false }));
+
       // Twitter
       setLoading(prev => ({ ...prev, twitter: true }));
       try {
@@ -303,7 +317,8 @@ const ReportsOverviewPage: React.FC = () => {
       icon: <LineChartOutlined />,
       path: '/reports/daily-market',
       color: '#1890ff',
-      disabled: true, // 暂时占位
+      latestDate: reportDates.dailyMarket,
+      loading: loading.dailyMarket,
     },
     {
       title: 'Weekly Market Report',

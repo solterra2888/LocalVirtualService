@@ -10,6 +10,7 @@ YouTube Daily Report 服务 — 定期为每个用户生成 YouTube 数据总结
 """
 
 import re
+import asyncio
 import time
 from datetime import date, datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
@@ -19,6 +20,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
 from backend.utils.datetime_utils import ensure_utc, resolve_report_content_window
+from backend.services.summary_common import PER_ITEM_TIMEOUT_SEC
 
 logger = get_logger("youtube_daily_report_service")
 
@@ -127,19 +129,35 @@ class YouTubeDailyReportService:
                         user_id=user_id)
 
             # 3) 补生成缺失的摘要（fallback）
-            missing_authors = [
-                (aid, aname) for aid, aname in user_authors
-                if aid not in cached_summaries
-            ]
+            if force:
+                # force 时重新生成所有订阅频道摘要（含 failed / generating / 已完成）
+                missing_authors = list(user_authors)
+            else:
+                missing_authors = [
+                    (aid, aname) for aid, aname in user_authors
+                    if aid not in cached_summaries
+                ]
             if missing_authors:
                 logger.info(f"[Step 3/5] Fallback: 需即时生成 {len(missing_authors)} 个频道摘要",
-                            user_id=user_id)
+                            user_id=user_id, force=force)
                 for aid, aname in missing_authors:
-                    result = await author_summary_service.generate_author_summary(
-                        aid, aname, report_date,
-                        window_end=window_end,
-                        window_hours=window_hours,
-                    )
+                    try:
+                        result = await asyncio.wait_for(
+                            author_summary_service.generate_author_summary(
+                                aid, aname, report_date,
+                                force=force,
+                                window_end=window_end,
+                                window_hours=window_hours,
+                            ),
+                            timeout=PER_ITEM_TIMEOUT_SEC,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            f"[Step 3/5] Fallback 频道超时 (>{PER_ITEM_TIMEOUT_SEC}s): "
+                            f"{aname or aid}",
+                            user_id=user_id,
+                        )
+                        continue
                     if result.get('success'):
                         fresh = author_summary_service.get_author_summaries_for_date(
                             [aid], report_date
@@ -156,14 +174,41 @@ class YouTubeDailyReportService:
             }
 
             if not active_summaries:
-                self._update_report(report_id, status='completed',
-                                    content='当天无视频数据。',
-                                    metadata={'video_count': 0, 'channel_count': 0, **window_metadata})
+                # 区分"真无内容"与"上游 Phase A 失败"
+                author_ids = [a[0] for a in user_authors]
+                failed_channels = author_summary_service.get_failed_author_ids_for_date(
+                    author_ids, report_date
+                )
+                is_partial = len(failed_channels) > 0
+                if is_partial:
+                    content_msg = (
+                        f"当天有 {len(failed_channels)} 个频道摘要生成失败，无有效视频数据可组装报告。\n"
+                        f"失败频道: {', '.join(failed_channels)}"
+                    )
+                    logger.warning(
+                        f"[YouTube Report] 无有效摘要，{len(failed_channels)} 个频道失败",
+                        user_id=user_id, failed_channels=failed_channels
+                    )
+                else:
+                    content_msg = '当天无视频数据。'
+                self._update_report(
+                    report_id,
+                    status='completed',
+                    content=content_msg,
+                    metadata={
+                        'video_count': 0,
+                        'channel_count': 0,
+                        'is_partial': is_partial,
+                        'failed_channels': failed_channels,
+                        **window_metadata,
+                    },
+                )
                 return {
                     'success': True,
                     'report_id': report_id,
-                    'message': '当天无视频数据',
+                    'message': content_msg,
                     'video_count': 0,
+                    'is_partial': is_partial,
                 }
 
             # 4) 全局引用重编号 + 组装
@@ -494,7 +539,7 @@ class YouTubeDailyReportService:
             cursor.close()
 
     def get_latest_report(self, user_id: int) -> Optional[Dict]:
-        """获取用户最新的已完成报告。"""
+        """获取用户最新的已完成报告，附带 is_empty / is_partial 派生字段。"""
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
         try:
@@ -519,6 +564,10 @@ class YouTubeDailyReportService:
             for ts_field in ('created_at', 'updated_at'):
                 if report.get(ts_field):
                     report[ts_field] = report[ts_field].isoformat()
+
+            meta = report.get('metadata') or {}
+            report['is_empty'] = (meta.get('video_count', -1) == 0)
+            report['is_partial'] = bool(meta.get('is_partial', False))
 
             if report.get('updated_at'):
                 try:

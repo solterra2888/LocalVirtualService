@@ -316,5 +316,6 @@ rg "def _execute_" backend/services/scheduler_service.py
 ## 延伸阅读
 
 - [SCHEDULER_DEVELOPMENT_GUIDE.md](./SCHEDULER_DEVELOPMENT_GUIDE.md) — 完整开发流程与架构
+- [SUMMARY_SCHEDULER_DEVELOPMENT_GUIDE.md](./SUMMARY_SCHEDULER_DEVELOPMENT_GUIDE.md) — **定期 Summarize 类任务**（YouTube/Twitter/星球/The Close/CNBC）统一契约与实现标准
 - [TIMEZONE_OPTIMIZATION.md](./TIMEZONE_OPTIMIZATION.md) — 报告日期与内容窗口时区约定
 - [DAILY_REPORT_ARCHITECTURE.md](./DAILY_REPORT_ARCHITECTURE.md) — The Close / Daily Report 类报告架构

@@ -1361,10 +1361,16 @@ class SchedulerService:
 
             from backend.tasks.the_close_summary_tasks import generate_the_close_summary_task
 
-            report_date = params.get('report_date')
-            window_end = params.get('window_end')
             window_hours = int(params.get('window_hours', 24))
             force = params.get('force', False)
+
+            # 与 Twitter / YouTube / 知识星球上游统一使用「北京自然日」作为 report_date，
+            # 保证 Daily Market Report 用单一 report_date 能同时命中所有上游摘要。
+            # 不能使用 _date.today()（UTC 服务器时钟）：调度在美东 17:30 = 北京 05:30，
+            # 此时 UTC 日期仍为美东当日，而北京日期已是次日。
+            from backend.utils.datetime_utils import window_label_date
+            report_date = params.get('report_date') or window_label_date(utcnow(), 'Asia/Shanghai').isoformat()
+            window_end = params.get('window_end')
 
             task = generate_the_close_summary_task.delay(
                 report_date=report_date,
@@ -1373,7 +1379,7 @@ class SchedulerService:
                 force=force,
             )
 
-            date_info = f", date={report_date}" if report_date else ", today"
+            date_info = f", date={report_date}"
             force_info = "（强制重新生成）" if force else ""
             message = (
                 f"✅ The Close Summary: "
@@ -1416,8 +1422,10 @@ class SchedulerService:
             if not report_date:
                 # 与其他上游（The Close / Twitter / YouTube / 知识星球）统一为「北京自然日」，
                 # 保证 Daily Market Report 用单一 report_date 能同时命中所有上游摘要。
-                from datetime import date as _date
-                report_date = _date.today().isoformat()
+                # 注：不能用 _date.today()（UTC 服务器时钟）：调度在美东 17:15 = 北京 05:15，
+                # UTC 日期仍为美东当日，而北京日期已是次日，导致与 Twitter/YouTube 摘要日期错位。
+                from backend.utils.datetime_utils import window_label_date
+                report_date = window_label_date(utcnow(), 'Asia/Shanghai').isoformat()
 
             task = generate_cnbc_closing_bell_task.delay(
                 report_date=report_date,

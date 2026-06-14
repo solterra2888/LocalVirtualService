@@ -11,6 +11,7 @@ The Close Summary 服务 — Bloomberg "The Close" 每日 PM Brief 摘要
 - 仅处理 Bloomberg The Close 单一节目
 """
 
+import asyncio
 import time
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
@@ -19,6 +20,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.datetime_utils import ensure_utc, resolve_report_content_window
 from backend.utils.logger import get_logger
+from backend.services.summary_common import SINGLE_LLM_TIMEOUT_SEC, SINGLE_LLM_RETRY
 
 logger = get_logger("the_close_summary_service")
 
@@ -122,7 +124,7 @@ class TheCloseSummaryService:
 
             # 取最新视频（同日可能有多段，取 published_at 最晚的）
             video = videos[-1]
-            transcript, word_count = self._prepare_transcript(video)
+            transcript, word_count, transcript_truncated = self._prepare_transcript(video)
 
             if not transcript:
                 self._update_summary(
@@ -142,15 +144,16 @@ class TheCloseSummaryService:
                     "skipped": False,
                 }
 
-            # LLM 生成摘要
+            # LLM 生成摘要（带超时与重试）
             video_title = video.get("title") or "The Close"
-            summary_text = await self._call_llm(transcript, video_title, report_date)
+            summary_text = await self._call_llm_with_retry(transcript, video_title, report_date)
 
             elapsed = round(time.time() - start_time, 2)
             metadata = {
                 "generation_time_seconds": elapsed,
                 "transcript_word_count": word_count,
                 "transcript_char_count": len(transcript),
+                "transcript_truncated": transcript_truncated,
                 "video_id": video.get("content_id"),
                 "video_count": len(videos),
                 "template_code": DEFAULT_TEMPLATE,
@@ -256,22 +259,49 @@ class TheCloseSummaryService:
         transcript = cleaned or raw
 
         if not transcript:
-            return "", 0
+            return "", 0, False
 
         # 估算英文字数（按空格分词）
         word_count = len(transcript.split())
 
         # 超长截断
+        truncated = False
         if len(transcript) > MAX_TRANSCRIPT_CHARS:
             logger.warning(
                 f"转录过长 ({len(transcript)} chars), "
                 f"截断至 {MAX_TRANSCRIPT_CHARS} chars"
             )
             transcript = transcript[:MAX_TRANSCRIPT_CHARS] + "\n\n...(转录过长，已截断)"
+            truncated = True
 
-        return transcript, word_count
+        return transcript, word_count, truncated
 
     # ── LLM call ──────────────────────────────────────────────────────────
+
+    async def _call_llm_with_retry(
+        self, transcript: str, video_title: str, report_date: date
+    ) -> str:
+        """带超时与重试的 LLM 调用入口。"""
+        last_exc: BaseException | None = None
+        for attempt in range(SINGLE_LLM_RETRY + 1):
+            try:
+                return await asyncio.wait_for(
+                    self._call_llm(transcript, video_title, report_date),
+                    timeout=SINGLE_LLM_TIMEOUT_SEC,
+                )
+            except asyncio.TimeoutError as exc:
+                last_exc = exc
+                if attempt < SINGLE_LLM_RETRY:
+                    logger.warning(
+                        f"[The Close] LLM 超时 (attempt {attempt+1}/{SINGLE_LLM_RETRY+1}), retrying"
+                    )
+            except Exception as exc:
+                last_exc = exc
+                if attempt < SINGLE_LLM_RETRY:
+                    logger.warning(
+                        f"[The Close] LLM 错误 (attempt {attempt+1}): {exc}, retrying"
+                    )
+        raise last_exc  # type: ignore[misc]
 
     async def _call_llm(
         self, transcript: str, video_title: str, report_date: date
@@ -298,6 +328,7 @@ class TheCloseSummaryService:
         response = await llm_service.chat_completion_with_template(
             template_code=DEFAULT_TEMPLATE,
             variables=variables,
+            timeout=SINGLE_LLM_TIMEOUT_SEC,
         )
         llm_elapsed = round(time.time() - llm_start, 2)
 

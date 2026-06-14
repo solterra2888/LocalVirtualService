@@ -10,6 +10,7 @@ CNBC Closing Bell Summary 服务 — CNBC "Closing Bell" 每日 Stock News 摘�
 同日可能有多段 episode，转录按 published_at 升序合并后送 LLM。
 """
 
+import asyncio
 import time
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
@@ -18,6 +19,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.datetime_utils import ensure_utc, resolve_report_content_window
 from backend.utils.logger import get_logger
+from backend.services.summary_common import SINGLE_LLM_TIMEOUT_SEC, SINGLE_LLM_RETRY
 
 logger = get_logger("cnbc_closing_bell_service")
 
@@ -112,7 +114,7 @@ class CNBCClosingBellService:
                 }
 
             # 同日可能有多段（主节目 clip + Overtime 等），按 published_at 合并转录
-            transcript, word_count, used_videos = self._prepare_merged_transcript(videos)
+            transcript, word_count, used_videos, transcript_truncated = self._prepare_merged_transcript(videos)
             primary = used_videos[-1] if used_videos else videos[-1]
 
             if not transcript:
@@ -137,9 +139,9 @@ class CNBCClosingBellService:
                     "skipped": False,
                 }
 
-            # LLM 生成摘要
+            # LLM 生成摘要（带超时与重试）
             video_title = self._format_video_title_for_llm(used_videos)
-            summary_text = await self._call_llm(transcript, video_title, report_date)
+            summary_text = await self._call_llm_with_retry(transcript, video_title, report_date)
 
             elapsed = round(time.time() - start_time, 2)
             video_refs = [
@@ -159,6 +161,7 @@ class CNBCClosingBellService:
                 "generation_time_seconds": elapsed,
                 "transcript_word_count": word_count,
                 "transcript_char_count": len(transcript),
+                "transcript_truncated": transcript_truncated,
                 "video_id": primary.get("content_id"),
                 "video_ids": [v.get("content_id") for v in used_videos],
                 "videos": video_refs,
@@ -298,10 +301,11 @@ class CNBCClosingBellService:
             total_words += len(text.split())
 
         if not segments:
-            return "", 0, []
+            return "", 0, [], False
 
         merged = "\n\n---\n\n".join(segments)
 
+        truncated = False
         if len(merged) > MAX_TRANSCRIPT_CHARS:
             logger.warning(
                 f"合并转录过长 ({len(merged)} chars), "
@@ -309,8 +313,9 @@ class CNBCClosingBellService:
                 f"({segment_total} segments)"
             )
             merged = merged[:MAX_TRANSCRIPT_CHARS] + "\n\n...(转录过长，已截断)"
+            truncated = True
 
-        return merged, total_words, used_videos
+        return merged, total_words, used_videos, truncated
 
     @staticmethod
     def _format_video_title_for_llm(videos: List[Dict[str, Any]]) -> str:
@@ -325,6 +330,31 @@ class CNBCClosingBellService:
         )
 
     # ── LLM call ──────────────────────────────────────────────────────────
+
+    async def _call_llm_with_retry(
+        self, transcript: str, video_title: str, report_date: date
+    ) -> str:
+        """带超时与重试的 LLM 调用入口。"""
+        last_exc: BaseException | None = None
+        for attempt in range(SINGLE_LLM_RETRY + 1):
+            try:
+                return await asyncio.wait_for(
+                    self._call_llm(transcript, video_title, report_date),
+                    timeout=SINGLE_LLM_TIMEOUT_SEC,
+                )
+            except asyncio.TimeoutError as exc:
+                last_exc = exc
+                if attempt < SINGLE_LLM_RETRY:
+                    logger.warning(
+                        f"[CNBC] LLM 超时 (attempt {attempt+1}/{SINGLE_LLM_RETRY+1}), retrying"
+                    )
+            except Exception as exc:
+                last_exc = exc
+                if attempt < SINGLE_LLM_RETRY:
+                    logger.warning(
+                        f"[CNBC] LLM 错误 (attempt {attempt+1}): {exc}, retrying"
+                    )
+        raise last_exc  # type: ignore[misc]
 
     async def _call_llm(
         self, transcript: str, video_title: str, report_date: date
@@ -351,6 +381,7 @@ class CNBCClosingBellService:
         response = await llm_service.chat_completion_with_template(
             template_code=DEFAULT_TEMPLATE,
             variables=variables,
+            timeout=SINGLE_LLM_TIMEOUT_SEC,
         )
         llm_elapsed = round(time.time() - llm_start, 2)
 

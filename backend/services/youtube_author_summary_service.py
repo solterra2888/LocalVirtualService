@@ -17,6 +17,17 @@ from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
 from backend.core.llm_framework import llm_service
 from backend.utils.datetime_utils import ensure_utc, resolve_report_content_window
+from backend.services.summary_common import (
+    BATCH_CONCURRENT,
+    PER_ITEM_TIMEOUT_SEC,
+    CHUNK_CONCURRENT,
+    CHUNK_LLM_TIMEOUT_SEC,
+    CHUNK_LLM_RETRY,
+    MAX_VIDEO_INPUT_CHARS,
+    ORPHAN_THRESHOLD_MINUTES,
+    SUMMARY_LLM_READ_TIMEOUT_SEC,
+    orphan_cutoff_dt,
+)
 
 logger = get_logger("youtube_author_summary_service")
 
@@ -24,11 +35,9 @@ DEFAULT_PHASE1_TEMPLATE = "youtube_daily_phase1_default"
 MAX_VIDEOS_PER_CHANNEL_CHUNK = 10
 MAX_TOKENS_OUTPUT_PHASE1 = 3000
 
-# 批量生成时的并发与超时控制
-# 最多 N 个频道同时处理，防止因某一频道 LLM 超时阻塞整个批次
-BATCH_CONCURRENT_CHANNELS = 4
-# 单频道摘要的最长等待时间（秒），超出后直接标 failed 并继续下一个
-PER_CHANNEL_TIMEOUT_SEC = 180
+# 批量生成时的并发与超时控制（常量来自 summary_common）
+BATCH_CONCURRENT_CHANNELS = BATCH_CONCURRENT
+PER_CHANNEL_TIMEOUT_SEC = PER_ITEM_TIMEOUT_SEC  # 600s，允许多 chunk 并发完成
 
 
 class YouTubeAuthorSummaryService:
@@ -81,6 +90,7 @@ class YouTubeAuthorSummaryService:
             {'success': bool, 'message': str, 'results': [...]}
         """
         start_time = time.time()
+        self._reset_orphan_generating_records(summary_date)
         authors = self._get_distinct_enabled_authors()
         if not authors:
             return {'success': True, 'message': '没有启用的 YouTube 订阅频道', 'results': []}
@@ -143,6 +153,7 @@ class YouTubeAuthorSummaryService:
         results = []
         succeeded = 0
         skipped = 0
+        degraded = 0
         for idx, author_id, result, author_elapsed in raw_results:
             results.append({'author': author_id, **result})
             if result.get('skipped'):
@@ -153,24 +164,36 @@ class YouTubeAuthorSummaryService:
             elif result.get('success'):
                 succeeded += 1
                 video_count = result.get('video_count', 0)
+                dc = result.get('degraded_chunks', 0)
+                if dc > 0:
+                    degraded += 1
                 logger.info(
-                    f"[{idx}/{total}] {author_id} — OK, {video_count} videos, {author_elapsed}s"
+                    f"[{idx}/{total}] {author_id} — OK, {video_count} videos, "
+                    f"degraded_chunks={dc}, {author_elapsed}s"
                 )
             else:
                 logger.warning(
                     f"[{idx}/{total}] {author_id} — FAILED: {result.get('message', '')}, {author_elapsed}s"
                 )
 
+        failed_count = len(authors) - succeeded - skipped
         elapsed = round(time.time() - start_time, 2)
-        logger.info(f"批量频道摘要完成: {succeeded} 成功, {skipped} 跳过, "
-                    f"{len(authors) - succeeded - skipped} 失败, 耗时 {elapsed}s")
+        logger.info(
+            f"批量频道摘要完成: succeeded={succeeded}, skipped={skipped}, "
+            f"failed={failed_count}, degraded={degraded}, 耗时={elapsed}s"
+        )
 
         return {
             'success': True,
-            'message': f'{len(authors)} 个频道: {succeeded} 成功, {skipped} 跳过, 耗时 {elapsed}s',
+            'message': (
+                f'{len(authors)} 个频道: {succeeded} 成功 ({degraded} 降级), '
+                f'{skipped} 跳过, {failed_count} 失败, 耗时 {elapsed}s'
+            ),
             'total': len(authors),
             'succeeded': succeeded,
             'skipped': skipped,
+            'failed': failed_count,
+            'degraded': degraded,
             'generation_time_seconds': elapsed,
             'results': results,
         }
@@ -248,17 +271,19 @@ class YouTubeAuthorSummaryService:
                 }
 
             ref_map = self._prepare_author_refs(videos)
-            summary_text = await self._run_phase1(
+            summary_text, degraded_count = await self._run_phase1(
                 videos, ref_map, author_identifier, display_name, summary_date
             )
             top_videos = self._get_author_top_videos(videos, ref_map, top_n=5)
 
             videos_with_transcript = sum(1 for v in videos if v.get('_has_transcript'))
             elapsed = round(time.time() - start_time, 2)
+            chunk_count = max(1, (len(videos) - 1) // MAX_VIDEOS_PER_CHANNEL_CHUNK + 1)
             tpl_model_info = self._get_template_model_info(DEFAULT_PHASE1_TEMPLATE)
             metadata = {
                 'generation_time_seconds': elapsed,
-                'chunk_count': max(1, (len(videos) - 1) // MAX_VIDEOS_PER_CHANNEL_CHUNK + 1),
+                'chunk_count': chunk_count,
+                'degraded_chunks': degraded_count,
                 'videos_with_transcript': videos_with_transcript,
                 'videos_without_transcript': len(videos) - videos_with_transcript,
                 'template_code': DEFAULT_PHASE1_TEMPLATE,
@@ -288,6 +313,7 @@ class YouTubeAuthorSummaryService:
                 'message': f'摘要生成成功（{len(videos)} 个视频，{elapsed}s）',
                 'video_count': len(videos),
                 'generation_time_seconds': elapsed,
+                'degraded_chunks': degraded_count,
                 'skipped': False,
             }
 
@@ -407,9 +433,8 @@ class YouTubeAuthorSummaryService:
             source_tag = "字幕" if has_transcript else "标题+描述"
             url = v.get('url', '')
 
-            # Truncate very long transcripts to ~4000 chars per video
-            if len(llm_content) > 4000:
-                llm_content = llm_content[:4000] + "\n...(字幕过长，已截断)"
+            if len(llm_content) > MAX_VIDEO_INPUT_CHARS:
+                llm_content = llm_content[:MAX_VIDEO_INPUT_CHARS] + "\n...(字幕过长，已截断)"
 
             entry = (
                 f"[{time_str}] 「{title}」\n"
@@ -452,40 +477,101 @@ class YouTubeAuthorSummaryService:
         author_identifier: str,
         author_display_name: str,
         summary_date: date,
-    ) -> str:
-        """执行 Phase 1 LLM 调用，支持多 chunk 切分。"""
+    ) -> Tuple[str, int]:
+        """执行 Phase 1 LLM 调用，支持多 chunk 有界并发 + per-chunk 超时重试。
+
+        Returns:
+            (summary_text, degraded_chunk_count) —
+            degraded_chunk_count > 0 表示有 chunk LLM 失败并降级为 title-only 摘要。
+        """
         chunks = [
             videos[i:i + MAX_VIDEOS_PER_CHANNEL_CHUNK]
             for i in range(0, len(videos), MAX_VIDEOS_PER_CHANNEL_CHUNK)
         ]
+        logger.info(
+            f"[Phase 1] {author_display_name}: "
+            f"{len(videos)} 个视频, {len(chunks)} 个 chunk, "
+            f"并发={CHUNK_CONCURRENT}, chunk超时={CHUNK_LLM_TIMEOUT_SEC}s"
+        )
 
-        logger.info(f"[Phase 1] {author_display_name}: "
-                    f"{len(videos)} 个视频, {len(chunks)} 个 chunk")
+        semaphore = asyncio.Semaphore(CHUNK_CONCURRENT)
 
-        chunk_summaries = []
-        for chunk_idx, chunk in enumerate(chunks):
-            videos_text = self._format_author_videos(chunk, ref_map)
+        async def _run_one_chunk(chunk_idx: int, chunk: list) -> Tuple[int, str, bool]:
+            async with semaphore:
+                videos_text = self._format_author_videos(chunk, ref_map)
+                variables = {
+                    'author_name': author_display_name,
+                    'report_date': str(summary_date),
+                    'video_count': str(len(chunk)),
+                    'videos_text': videos_text,
+                    'report_language': 'zh',
+                    'custom_instructions': '',
+                }
+                logger.info(
+                    f"[Phase 1] {author_display_name} chunk {chunk_idx+1}/{len(chunks)}: "
+                    f"{len(chunk)} 个视频, input={len(videos_text)} 字符"
+                )
+                for attempt in range(CHUNK_LLM_RETRY + 1):
+                    try:
+                        result = await asyncio.wait_for(
+                            self._call_llm(
+                                template_code=DEFAULT_PHASE1_TEMPLATE,
+                                variables=variables,
+                                max_tokens=MAX_TOKENS_OUTPUT_PHASE1,
+                            ),
+                            timeout=CHUNK_LLM_TIMEOUT_SEC,
+                        )
+                        return chunk_idx, result, False
+                    except asyncio.TimeoutError:
+                        if attempt < CHUNK_LLM_RETRY:
+                            logger.warning(
+                                f"[Phase 1] {author_display_name} chunk {chunk_idx+1} "
+                                f"超时 (attempt {attempt+1}/{CHUNK_LLM_RETRY+1}), retrying"
+                            )
+                            continue
+                        logger.warning(
+                            f"[Phase 1] {author_display_name} chunk {chunk_idx+1} "
+                            f"全部超时, 降级为 title-only"
+                        )
+                        return chunk_idx, self._build_degraded_chunk_summary(chunk, author_display_name), True
+                    except Exception as exc:
+                        if attempt < CHUNK_LLM_RETRY:
+                            logger.warning(
+                                f"[Phase 1] {author_display_name} chunk {chunk_idx+1} "
+                                f"错误 (attempt {attempt+1}): {exc}, retrying"
+                            )
+                            continue
+                        logger.warning(
+                            f"[Phase 1] {author_display_name} chunk {chunk_idx+1} "
+                            f"全部失败: {exc}, 降级为 title-only"
+                        )
+                        return chunk_idx, self._build_degraded_chunk_summary(chunk, author_display_name), True
+            # unreachable but keeps type-checker happy
+            return chunk_idx, "", True
 
-            variables = {
-                'author_name': author_display_name,
-                'report_date': str(summary_date),
-                'video_count': str(len(chunk)),
-                'videos_text': videos_text,
-                'report_language': 'zh',
-                'custom_instructions': '',
-            }
+        raw_results = await asyncio.gather(
+            *[_run_one_chunk(i, chunk) for i, chunk in enumerate(chunks)]
+        )
+        raw_results = sorted(raw_results, key=lambda x: x[0])
 
-            logger.info(f"[Phase 1] {author_display_name} chunk {chunk_idx+1}/{len(chunks)}: "
-                        f"{len(chunk)} 个视频, videos_text={len(videos_text)} 字符")
-
-            summary = await self._call_llm(
-                template_code=DEFAULT_PHASE1_TEMPLATE,
-                variables=variables,
-                max_tokens=MAX_TOKENS_OUTPUT_PHASE1,
+        chunk_summaries = [r[1] for r in raw_results]
+        degraded_count = sum(1 for r in raw_results if r[2])
+        if degraded_count:
+            logger.warning(
+                f"[Phase 1] {author_display_name}: {degraded_count}/{len(chunks)} 个 chunk 降级"
             )
-            chunk_summaries.append(summary)
 
-        return '\n\n'.join(chunk_summaries)
+        return '\n\n'.join(chunk_summaries), degraded_count
+
+    def _build_degraded_chunk_summary(self, videos: List[Dict], author_display_name: str) -> str:
+        """LLM chunk 全部失败时的 title-only 降级摘要。"""
+        lines = ["[摘要降级：LLM 生成超时，仅列出视频标题]"]
+        for v in videos:
+            title = (v.get('title') or '').strip()
+            url = v.get('url', '')
+            time_str = v['published_at'].strftime('%H:%M') if v.get('published_at') else ''
+            lines.append(f"- [{time_str}] {title}  {url}")
+        return '\n'.join(lines)
 
     async def _call_llm(
         self, template_code: str, variables: Dict[str, Any], max_tokens: int = 3000
@@ -500,6 +586,7 @@ class YouTubeAuthorSummaryService:
             template_code=template_code,
             variables=variables,
             max_tokens=max_tokens,
+            timeout=SUMMARY_LLM_READ_TIMEOUT_SEC,
         )
         llm_elapsed = round(time.time() - llm_start, 2)
 
@@ -596,7 +683,8 @@ class YouTubeAuthorSummaryService:
     def get_author_summaries_for_date(
         self, author_identifiers: List[str], summary_date: date
     ) -> Dict[str, Dict]:
-        """批量获取指定频道列表在某天的已完成摘要。"""
+        """批量获取指定频道列表在某天的已完成（completed）摘要。
+        不包含 failed 记录，使其进入 Phase B fallback 重试。"""
         if not author_identifiers:
             return {}
         conn = self.db_manager.get_connection()
@@ -608,7 +696,7 @@ class YouTubeAuthorSummaryService:
                 FROM youtube_author_daily_summaries
                 WHERE author_identifier = ANY(%s)
                   AND summary_date = %s
-                  AND status IN ('completed', 'failed')
+                  AND status = 'completed'
             """, (author_identifiers, summary_date))
             result = {}
             for row in cursor.fetchall():
@@ -621,5 +709,55 @@ class YouTubeAuthorSummaryService:
                     'video_count': row[5] or 0,
                 }
             return result
+        finally:
+            cursor.close()
+
+    def get_failed_author_ids_for_date(
+        self, author_identifiers: List[str], summary_date: date
+    ) -> List[str]:
+        """返回指定频道列表中当天 Phase A 状态为 failed 的 author_identifier 列表。"""
+        if not author_identifiers:
+            return []
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT author_identifier
+                FROM youtube_author_daily_summaries
+                WHERE author_identifier = ANY(%s)
+                  AND summary_date = %s
+                  AND status = 'failed'
+            """, (author_identifiers, summary_date))
+            return [row[0] for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+    def _reset_orphan_generating_records(self, target_date: date) -> int:
+        """将当天超过 ORPHAN_THRESHOLD_MINUTES 仍处于 'generating' 的记录重置为 'failed'。"""
+        cutoff = orphan_cutoff_dt()
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                UPDATE youtube_author_daily_summaries
+                SET status = 'failed',
+                    error_message = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE summary_date = %s
+                  AND status = 'generating'
+                  AND updated_at < %s
+            """, (
+                f"orphan reset: stuck generating > {ORPHAN_THRESHOLD_MINUTES}min",
+                target_date,
+                cutoff,
+            ))
+            count = cursor.rowcount
+            conn.commit()
+            if count > 0:
+                logger.warning(
+                    f"Orphan reaper: {count} 条 'generating' 记录已重置为 'failed' "
+                    f"(date={target_date}, cutoff={cutoff.isoformat()})"
+                )
+            return count
         finally:
             cursor.close()
