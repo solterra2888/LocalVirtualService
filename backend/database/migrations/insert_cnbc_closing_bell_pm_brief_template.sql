@@ -42,7 +42,13 @@ Closing Bell 是 CNBC 在美股收盘前后播出的旗舰节目, 嘉宾包括�
 3. 覆盖节目中讨论的所有重要 ticker — 涨幅榜, 跌幅榜, 盘后, 私有/Pre-IPO 公司 (如有讨论)
 4. 不要写宏观 PM Brief (跨资产 regime, Resolution Framework 等) — 那是另一条管线
 5. 若转录中未提及某数据, 写 "未讨论" 或 "涨跌幅未提及" — 不要编造数字
-6. 若同日提供了多集转录 (主节目 + Overtime), 合并为一份统一报告, ticker 去重$SP$,
+6. 若同日提供了多集转录 (主节目 + Overtime), 合并为一份统一报告, ticker 去重
+
+格式硬性要求:
+7. 全部 ## / ### 章节标题必须使用英文 (如 Stock Movers, Winners), 禁止翻译为中文
+8. Stock Movers 下的 Winners / Losers / After-Hours Movers 必须使用 Markdown pipe 表格, 禁止 bullet list
+9. 表格中每个 ticker 独占一行, 禁止将多个 ticker 合并到同一行或按板块分组
+10. 直接以 ## Stock Movers 开头输出 Markdown 正文, 不要添加前言或结语$SP$,
 
     -- user_prompt_template
     $UP$请基于以下 CNBC "Closing Bell" 节目转录生成当日 Stock News 复盘.
@@ -58,15 +64,30 @@ Closing Bell 是 CNBC 在美股收盘前后播出的旗舰节目, 嘉宾包括�
 ## Stock Movers
 
 ### Winners
-列出节目中讨论的所有重要涨幅股. 每行一条:
-- **$TICKER** (公司名) | +/-X% | Catalyst: 一句话原因
+列出节目中讨论的所有重要涨幅股. **必须使用标准 Markdown 表格** (禁止 bullet list), 每个 ticker 独立一行:
+
+| Ticker | Company | Change | Catalyst |
+| --- | --- | --- | --- |
+| $INTC | Intel Corp. | +40% | 双升级至买入, Agentic AI 芯片需求上升 |
+| $KLAC | KLA Corp. | +12% | 半导体设备反弹, AI 支出预期提振 |
+
+- Change 列: 具体 +/-X%; 未提及则写 "未提及"
+- Catalyst 列: 一句话中文原因
+- 每行只放一个 ticker, 禁止合并多个 ticker
 
 ### Losers
-格式同 Winners.
+格式同 Winners, 使用相同四列表格 (Ticker | Company | Change | Catalyst).
 
 ### After-Hours Movers
-盘前/盘后/即将有催化的标的 (当晚财报, IPO 簿记截止, 私有公司申报等).
-若方向未知, 写 "direction TBD".
+盘前/盘后/即将有催化的标的 (当晚财报, IPO 簿记截止, 私有公司申报等). **必须使用 Markdown 表格**:
+
+| Ticker | Company | Move | Catalyst |
+| --- | --- | --- | --- |
+| $ADBE | Adobe Inc. | AH -5% | 财报超预期但 CFO 离职引发担忧 |
+| Pre-IPO | SpaceX | AH TBD | 明日纳斯达克挂牌, 定价 $135 |
+
+- Move 列: "AH +3%", "Pre-market TBD", "direction TBD" 等; 方向未知写 "direction TBD"
+- 无私有 ticker 时 Ticker 列写 "Pre-IPO" 或 "Private"
 
 ---
 

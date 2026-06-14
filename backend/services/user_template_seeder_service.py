@@ -29,7 +29,9 @@ UserTemplateSeederService — Phase 2 双态模型用户模板初始化与重置
     - PR-C: My Templates 页 "Reset to default" 按钮调 reset_module
     - LLMTemplateResolver: 解析时若用户私有模板缺失则调 ensure_user_template
 """
+import json
 from typing import Any, Dict, List, Optional
+import json
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
@@ -161,15 +163,8 @@ class UserTemplateSeederService:
             self._ensure_one(user_id, module_code)
             return self._find_user_template(user_id, module_code)  # type: ignore[return-value]
 
-        # 复用 LLMPromptTemplateService.update_template 走标准白名单字段
-        updates: Dict[str, Any] = {field: sys_tpl[field] for field in self._CLONE_FIELDS if field in sys_tpl}
-        # 重置时同步把 parent_template_id 指向 system 模板 (如果将来 system 默认换了, 重置仍能找到正确来源)
-        # NOTE: parent_template_id 不在 update_template 白名单, 直接 SQL 同步
-        ok = self.tpl.update_template(existing["id"], updates, user_id=user_id)
-        if not ok:
-            raise SeederError(f"reset_module update failed for template {existing['id']}")
-
-        self._update_parent_template_id(existing["id"], sys_tpl["id"])
+        # 直接 SQL 覆盖全部 clone 字段 + parent_template_id, 避免 update_template 白名单遗漏
+        self._overwrite_user_template_from_system(existing["id"], sys_tpl)
 
         logger.info(
             "reset_module success",
@@ -283,6 +278,56 @@ class UserTemplateSeederService:
         if not default_code:
             return None
         return self.tpl.get_template_by_code(default_code)
+
+    def _overwrite_user_template_from_system(
+        self, template_id: int, sys_tpl: Dict[str, Any]
+    ) -> None:
+        """用 system default 全量覆盖 user-scope 模板内容 (含 LLM 配置)."""
+        conn = self.db_manager.get_connection()
+        if not conn:
+            raise SeederError("DB connection failed")
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE llm_prompt_templates SET
+                    system_prompt = %s,
+                    user_prompt_template = %s,
+                    variables = %s,
+                    output_format = %s,
+                    recommended_provider = %s,
+                    recommended_model = %s,
+                    temperature = %s,
+                    max_tokens = %s,
+                    tags = %s,
+                    category_id = %s,
+                    parent_template_id = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (
+                    sys_tpl.get("system_prompt"),
+                    sys_tpl.get("user_prompt_template"),
+                    json.dumps(sys_tpl.get("variables") or {}),
+                    json.dumps(sys_tpl.get("output_format") or {}),
+                    sys_tpl.get("recommended_provider"),
+                    sys_tpl.get("recommended_model"),
+                    sys_tpl.get("temperature"),
+                    sys_tpl.get("max_tokens"),
+                    json.dumps(sys_tpl.get("tags") or []),
+                    sys_tpl.get("category_id"),
+                    sys_tpl["id"],
+                    template_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise SeederError(
+                    f"overwrite user template failed for template_id={template_id}"
+                )
+            conn.commit()
+            cursor.close()
+        finally:
+            conn.close()
 
     def _update_parent_template_id(self, template_id: int, parent_id: int) -> None:
         """直接写 parent_template_id 字段 (update_template 白名单未含)."""

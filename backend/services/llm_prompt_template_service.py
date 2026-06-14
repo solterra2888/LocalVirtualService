@@ -565,6 +565,7 @@ class LLMPromptTemplateService:
             field_mapping = {
                 'template_name': 'template_name',
                 'module_code': 'module_code',
+                'category_id': 'category_id',
                 'system_prompt': 'system_prompt',
                 'user_prompt_template': 'user_prompt_template',
                 'description': 'description',

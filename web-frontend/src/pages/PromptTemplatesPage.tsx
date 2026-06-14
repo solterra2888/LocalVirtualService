@@ -245,8 +245,7 @@ const PromptTemplatesPageContent: React.FC = () => {
   };
 
   // ── Edit My Template ───────────────────────────────────────────────────
-  const openEditMy = (item: MyTemplateItem) => {
-    setEditing({ kind: 'my', item });
+  const applyItemToForm = (item: MyTemplateItem) => {
     form.setFieldsValue({
       system_prompt: item.system_prompt || '',
       user_prompt_template: item.user_prompt_template || '',
@@ -255,6 +254,11 @@ const PromptTemplatesPageContent: React.FC = () => {
       temperature: item.temperature ?? 0.7,
       max_tokens: item.max_tokens ?? 2000,
     });
+  };
+
+  const openEditMy = (item: MyTemplateItem) => {
+    setEditing({ kind: 'my', item });
+    applyItemToForm(item);
     setDrawerVisible(true);
   };
 
@@ -311,15 +315,25 @@ const PromptTemplatesPageContent: React.FC = () => {
   const handleReset = (item: MyTemplateItem) => {
     modal.confirm({
       title: '重置为系统默认?',
-      content: `这会用系统默认模板覆盖你在 "${item.module_name}" 的当前内容. 此操作不可恢复.`,
+      content: `这会用 Seed 模板覆盖你在 "${item.module_name}" 的 prompt 与 LLM 配置（Provider / Model / Temperature / Max Tokens）。此操作不可恢复。`,
       okText: '确认重置',
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
         try {
-          await promptTemplateService.resetMyTemplate(item.module_code);
+          const { item: refreshed } = await promptTemplateService.resetMyTemplate(item.module_code);
           appMessage.success(`"${item.module_name}" 已重置为系统默认`);
-          await loadMyTemplates();
+          setMyItems((prev) =>
+            prev.map((x) => (x.module_code === refreshed.module_code ? refreshed : x)),
+          );
+          if (
+            drawerVisible &&
+            editing?.kind === 'my' &&
+            editing.item.module_code === refreshed.module_code
+          ) {
+            setEditing({ kind: 'my', item: refreshed });
+            applyItemToForm(refreshed);
+          }
         } catch (err: any) {
           appMessage.error(`重置失败: ${err?.response?.data?.detail || err?.message || ''}`);
         }
@@ -743,6 +757,15 @@ const PromptTemplatesPageContent: React.FC = () => {
       }
       footer={
         <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+          {editing?.kind === 'my' && (
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => handleReset(editing.item)}
+              style={{ marginRight: 'auto' }}
+            >
+              重置为默认
+            </Button>
+          )}
           <Button onClick={() => setDrawerVisible(false)}>取消</Button>
           <Button type="primary" onClick={() => form.submit()} loading={saving}>
             保存

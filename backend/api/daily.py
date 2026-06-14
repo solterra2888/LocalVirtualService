@@ -562,7 +562,14 @@ def _build_filter_clauses(
         # 用 ?| 操作符判断"任一存在"
         params["ticker_arr"] = tickers
         upload_parts.append("AND ft.ticker ?| %(ticker_arr)s")
-        feed_parts.append("AND sct.ticker ?| %(ticker_arr)s")
+        # Feed 部分同时匹配 subscription_content_tags.ticker (Twitter/YouTube 等
+        # LLM 打标) 与 subscription_content.metadata->'symbols' (EODHD news 的
+        # ticker 位置)。后者约占 feed 内容 92%，不覆盖会导致 Watchlist News 几乎
+        # 为空。metadata / symbols 可能为 NULL，?| 对 NULL 返回 NULL (视为 false)。
+        feed_parts.append(
+            "AND (sct.ticker ?| %(ticker_arr)s"
+            " OR sc.metadata->'symbols' ?| %(ticker_arr)s)"
+        )
 
     if tags:
         params["tag_arr"] = tags

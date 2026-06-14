@@ -436,7 +436,7 @@ const UploadAnalysisTemplatePicker: React.FC<UploadAnalysisTemplatePickerProps> 
         onClose={() => setDrawerOpen(false)}
         destroyOnClose
         extra={
-          <Tooltip title="Reset prompt content to the system default (overwrites current content; cannot be undone)">
+          <Tooltip title="Reset prompt and LLM settings to the system default (overwrites current content; cannot be undone)">
             <Button
               icon={<ReloadOutlined />}
               size="small"

@@ -42,29 +42,9 @@ import {
 } from 'antd';
 import { theme as antdTheme } from 'antd';
 import type { MenuProps } from 'antd';
-import MarkdownRenderer from './MarkdownRenderer';
-import WatchlistResearchReportCards from './watchlist/WatchlistResearchReportCards';
-import { getPreferredAnalysisContent, hasAnalysisForTemplate, getAnalysisContent, getAllAnalysisResults } from '../utils/newsAnalysisHelper';
-import { MODAL_DARK_BG, MODAL_DARK_BORDER } from '../utils/modalStyles';
-import { 
-  getClassificationFromAnalysis, 
-  getClassificationTags, 
-  hasValidClassification,
-  getClassificationSummary,
-  getRelatedSectors,
-  getRelatedCountries,
-  COUNTRIES_MAP
-} from '../utils/newsClassificationHelper';
-import {
-  hasValidUnifiedThemes,
-  groupThemesByCanonicalName,
-  getBestThemeDisplay,
-  getSourceTypeConfig,
-  formatQualityScore,
-  getQualityScoreColor
-} from '../utils/unifiedThemeHelper';
 import {
   SearchOutlined, 
+  QuestionCircleOutlined,
   FileTextOutlined,
   CalendarOutlined,
   PlusOutlined,
@@ -88,12 +68,17 @@ import {
   HolderOutlined,
   UnorderedListOutlined
 } from '@ant-design/icons';
+import DailyCard from './daily/DailyCard';
+import DailyTimelineItem from './daily/DailyTimelineItem';
+import DailyPreviewDrawer from './daily/DailyPreviewDrawer';
+import { listDailyFeed, type DailyFeedItem } from '../services/daily';
+import { dateKeyInTz, formatDateLabel } from '../utils/datetime';
+import { expandTickerForDaily } from '../utils/tickerFormat';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { useScrollingClass, useScrollingClassOnElement } from '../hooks/useScrollingClass';
 import '../styles/subtleScrollbar.css';
-import { dashboardAPI, type DashboardNewsItem, type WatchlistGroup, type WatchlistItem, type ResearchReport, type StockPriceData, type CustomGroup } from '../services/dashboard';
+import { dashboardAPI, type WatchlistGroup, type WatchlistItem, type StockPriceData, type CustomGroup } from '../services/dashboard';
 import { fundamentalsAPI, fundamentalsUtils, type CompanyFundamentalsResponse } from '../services/fundamentals';
-import type { NewsTheme, NewsUnifiedTheme } from '../types/news';
 import AddToWatchlistModal from './AddToWatchlistModal';
 import EditWatchlistItemModal from './EditWatchlistItemModal';
 import AddToCustomGroupModal from './AddToCustomGroupModal';
@@ -423,8 +408,31 @@ const restrictToVerticalAxis: Modifier = ({ transform }) => {
   };
 };
 
+// ─── news tab 日期分组 (复刻 DailyPage.groupByDate) ───────────────
+interface NewsDateGroup {
+  dateKey: string;   // YYYY-MM-DD (用户时区)
+  dateLabel: string; // April 25, 2026
+  items: DailyFeedItem[];
+}
+
+const groupNewsByDate = (items: DailyFeedItem[], tz: string): NewsDateGroup[] => {
+  const groups: NewsDateGroup[] = [];
+  const map = new Map<string, NewsDateGroup>();
+  for (const it of items) {
+    const key = dateKeyInTz(it.published_at, tz);
+    let g = map.get(key);
+    if (!g) {
+      g = { dateKey: key, dateLabel: formatDateLabel(it.published_at, tz), items: [] };
+      map.set(key, g);
+      groups.push(g);
+    }
+    g.items.push(it);
+  }
+  return groups;
+};
+
 const FinvizDashboard: React.FC = () => {
-  const { themeMode } = useDashboardSettings();
+  const { themeMode, userTimezone } = useDashboardSettings();
   const liveHeadlinesScrollRef = useScrollingClass<HTMLDivElement>();
   const panelScrollbarClass =
     themeMode === 'dark'
@@ -444,8 +452,7 @@ const FinvizDashboard: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   
   // 右侧内容数据
-  const [newsData, setNewsData] = useState<DashboardNewsItem[]>([]);
-  const [researchReports, setResearchReports] = useState<ResearchReport[]>([]);
+  const [newsData, setNewsData] = useState<DailyFeedItem[]>([]);
   const [contentLoading, setContentLoading] = useState<boolean>(false);
   const [overviewData, setOverviewData] = useState<CompanyFundamentalsResponse | null>(null);
   const [overviewLoading, setOverviewLoading] = useState<boolean>(false);
@@ -458,6 +465,7 @@ const FinvizDashboard: React.FC = () => {
   const [hasMoreNews, setHasMoreNews] = useState<boolean>(true);
   const [loadingMoreNews, setLoadingMoreNews] = useState<boolean>(false);
   const NEWS_PAGE_SIZE = 20; // 每页加载20条新闻
+  const NEWS_SEARCH_DEBOUNCE_MS = 400; // news 搜索输入防抖
 const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度，切换 tab 时尺寸与位置保持一致
   
   // 价格数据
@@ -474,222 +482,33 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
   // 自动刷新相关状态
   const [isPageVisible, setIsPageVisible] = useState<boolean>(true);
   
-  // 缓存机制
-  const [newsCache, setNewsCache] = useState<Map<string, DashboardNewsItem[]>>(new Map());
-  const [cacheTimestamps, setCacheTimestamps] = useState<Map<string, number>>(new Map());
+  // news 请求竞态保护 + 当前 ticker 缓存 (避免 loadMore 重算)
+  const newsRequestSeqRef = useRef(0);
+  const currentTickersRef = useRef<string[]>([]);
+  // news 搜索: 输入框值(实时) / 防抖后查询值 / ref(供 loadStockNews 读取避免改签名)
+  const [newsSearchInput, setNewsSearchInput] = useState('');
+  const [newsSearchQuery, setNewsSearchQuery] = useState('');
+  const newsSearchQueryRef = useRef('');
   
-  // 新闻展开状态管理
-  const [expandedNewsItems, setExpandedNewsItems] = useState<Set<number>>(new Set());
   // 新闻列表最后更新时间（用于 "Updated HH:MM:SS PM"）
   const [lastNewsUpdate, setLastNewsUpdate] = useState<Date | null>(null);
   
-  // 鼠标悬停显示AI分析的状态
-  const [hoveredNewsId, setHoveredNewsId] = useState<number | null>(null);
-  const [mousePosition, setMousePosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const hideTooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
-  // 主题关键词数据（用于高亮）
-  const [themes, setThemes] = useState<NewsTheme[]>([]);
-  
-  // 新闻展开/收缩功能
-  const toggleNewsExpansion = (newsId: number) => {
-    setExpandedNewsItems(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(newsId)) {
-        newSet.delete(newsId);
-      } else {
-        newSet.add(newsId);
-      }
-      return newSet;
-    });
-  };
-  
-  const isNewsExpanded = (newsId: number) => expandedNewsItems.has(newsId);
-  
-  // 关键词高亮函数
-  const highlightKeywords = (text: string): React.ReactNode => {
-    if (!text || themes.length === 0) {
-      return text;
-    }
-
-    // 收集所有关键词及其对应的主题颜色
-    interface KeywordMatch {
-      keyword: string;
-      color: string;
-      themeName: string;
-    }
-    
-    const keywordMatches: KeywordMatch[] = [];
-    
-    themes.forEach(theme => {
-      if (theme.keywords && theme.keywords.length > 0) {
-        theme.keywords.forEach(keyword => {
-          keywordMatches.push({
-            keyword: keyword.trim(),
-            color: theme.color || '#1890ff',
-            themeName: theme.topic_name
-          });
-        });
-      }
-    });
-
-    // 如果没有关键词，直接返回原文本
-    if (keywordMatches.length === 0) {
-      return text;
-    }
-
-    // 按关键词长度排序（长的优先），避免短词先匹配导致长词无法匹配
-    keywordMatches.sort((a, b) => b.keyword.length - a.keyword.length);
-
-    // 存储所有匹配位置和对应的主题信息
-    interface MatchPosition {
-      start: number;
-      end: number;
-      color: string;
-      keyword: string;
-      themeName: string;
-    }
-
-    const positions: MatchPosition[] = [];
-
-    // 查找所有匹配位置
-    keywordMatches.forEach(({ keyword, color, themeName }) => {
-      if (!keyword) return;
-      
-      // 转义特殊字符，并使用单词边界 \b 进行精确匹配
-      // \b 确保匹配的是完整的单词，不会匹配单词的一部分
-      const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`\\b${escapedKeyword}\\b`, 'gi');
-      let match;
-      
-      while ((match = regex.exec(text)) !== null) {
-        const start = match.index;
-        const end = start + match[0].length;
-        
-        // 检查是否与已有位置重叠
-        const isOverlapping = positions.some(pos => 
-          (start >= pos.start && start < pos.end) || 
-          (end > pos.start && end <= pos.end) ||
-          (start <= pos.start && end >= pos.end)
-        );
-        
-        if (!isOverlapping) {
-          positions.push({ start, end, color, keyword: match[0], themeName });
-        }
-      }
-    });
-
-    // 如果没有匹配，返回原文本
-    if (positions.length === 0) {
-      return text;
-    }
-
-    // 按开始位置排序
-    positions.sort((a, b) => a.start - b.start);
-
-    // 构建带高亮的文本
-    const elements: React.ReactNode[] = [];
-    let lastIndex = 0;
-
-    positions.forEach((pos, index) => {
-      // 添加高亮前的普通文本
-      if (pos.start > lastIndex) {
-        elements.push(
-          <span key={`text-${index}`}>
-            {text.substring(lastIndex, pos.start)}
-          </span>
-        );
-      }
-
-      // 添加高亮文本
-      elements.push(
-        <span
-          key={`highlight-${index}`}
-          style={{
-            backgroundColor: pos.color,
-            color: '#fff',
-            padding: '2px 4px',
-            borderRadius: '2px',
-            fontWeight: 'bold'
-          }}
-          title={`Theme: ${pos.themeName}`}
-        >
-          {pos.keyword}
-        </span>
-      );
-
-      lastIndex = pos.end;
-    });
-
-    // 添加剩余的文本
-    if (lastIndex < text.length) {
-      elements.push(
-        <span key="text-end">
-          {text.substring(lastIndex)}
-        </span>
-      );
-    }
-
-    return <>{elements}</>;
-  };
   
   
-  // 缓存工具函数
-  const getCacheKey = (type: 'stock' | 'group', identifier: string) => {
-    return `${type}:${identifier}`;
-  };
+
   
-  const isCacheValid = (cacheKey: string): boolean => {
-    const timestamp = cacheTimestamps.get(cacheKey);
-    if (!timestamp) return false;
-    return Date.now() - timestamp < CACHE_DURATION;
-  };
+
   
-  const getCachedNews = (cacheKey: string): DashboardNewsItem[] | null => {
-    if (isCacheValid(cacheKey)) {
-      return newsCache.get(cacheKey) || null;
-    }
-    return null;
-  };
   
-  const setCachedNews = useCallback((cacheKey: string, news: DashboardNewsItem[]) => {
-    setNewsCache(prev => new Map(prev).set(cacheKey, news));
-    setCacheTimestamps(prev => new Map(prev).set(cacheKey, Date.now()));
-  }, []);
-  
-  // 清理过期缓存
-  const cleanupExpiredCache = () => {
-    const now = Date.now();
-    setCacheTimestamps(prev => {
-      const newTimestamps = new Map();
-      prev.forEach((timestamp, key) => {
-        if (now - timestamp < CACHE_DURATION) {
-          newTimestamps.set(key, timestamp);
-        }
-      });
-      return newTimestamps;
-    });
-    
-    setNewsCache(prev => {
-      const newCache = new Map();
-      prev.forEach((news, key) => {
-        const timestamp = cacheTimestamps.get(key);
-        if (timestamp && now - timestamp < CACHE_DURATION) {
-          newCache.set(key, news);
-        }
-      });
-      return newCache;
-    });
-  };
+
   
   // 模态框状态
   const [addModalVisible, setAddModalVisible] = useState<boolean>(false);
   const [editModalVisible, setEditModalVisible] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<WatchlistItem | null>(null);
   
-  // 右键菜单状态
-  const [analysisModalVisible, setAnalysisModalVisible] = useState<boolean>(false);
-  const [selectedNewsForAnalysis, setSelectedNewsForAnalysis] = useState<DashboardNewsItem | null>(null);
+  // Daily 卡片预览抽屉 (news tab 点击卡片打开; null = 关闭)
+  const [previewDailyItem, setPreviewDailyItem] = useState<DailyFeedItem | null>(null);
   
   // 错误状态跟踪，防止重复显示相同的错误消息
   const [lastError, setLastError] = useState<string | null>(null);
@@ -708,17 +527,11 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
   // 初始化数据
   useEffect(() => {
     loadUserWatchlist();
-    loadThemes();
     loadCustomGroups();
-    
-    // 定期清理过期缓存
-    const cleanupInterval = setInterval(cleanupExpiredCache, 60000); // 每分钟清理一次
-    
-    return () => clearInterval(cleanupInterval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Overview / Sources Tab 面板滚动时显示弱化滚动条 */
+  /** Overview Tab 面板滚动时显示弱化滚动条 */
   useEffect(() => {
     const root = document.querySelector(
       '.watchlist-page-layout .watchlist-detail-panel'
@@ -838,7 +651,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
         const firstStock = firstGroup.items[0] as WatchlistStockInfo;
 
         setSelectedStock(firstStock);
-        setResearchReports([]);
         setNewsData([]);
         setActiveTab('news');
 
@@ -868,17 +680,21 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     }
   }, [watchlistGroups, loading, selectedStock, overviewCache]);
 
+  // news 搜索防抖: 输入停止后写入 searchQuery + ref, 触发下方 reload effect
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const q = newsSearchInput.trim();
+      newsSearchQueryRef.current = q;
+      setNewsSearchQuery(q);
+    }, NEWS_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [newsSearchInput]);
+
   // 当选择改变时加载相关内容（添加防抖）
   useEffect(() => {
     if (selectedStock && activeTab === 'news') {
       const timer = setTimeout(() => {
         loadRelatedNews();
-      }, 300); // 300ms 防抖
-      
-      return () => clearTimeout(timer);
-    } else if (selectedStock && activeTab === 'reports') {
-      const timer = setTimeout(() => {
-        loadResearchReports(selectedStock.symbol);
       }, 300); // 300ms 防抖
       
       return () => clearTimeout(timer);
@@ -890,7 +706,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
       return () => clearTimeout(timer);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStock, activeTab]);
+  }, [selectedStock, activeTab, newsSearchQuery]);
 
   const loadUserWatchlist = async () => {
     setLoading(true);
@@ -921,10 +737,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     }
     return groupName;
   }, []);
-
-  const loadThemes = async () => {
-    // 旧 news/themes 端点已移除，关键词高亮功能停用
-  };
 
   const loadWatchlistPrices = async () => {
     setPricesLoading(true);
@@ -1101,7 +913,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     if (!stock) {
       setSelectedStock(null);
       setNewsData([]);
-      setResearchReports([]);
       setOverviewData(null);
       setOverviewError(null);
       setOverviewLoading(false);
@@ -1110,7 +921,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     }
 
     setSelectedStock(stock);
-    setResearchReports([]);
 
     const query = getOverviewQueryForStock(stock);
     if (query) {
@@ -1165,23 +975,14 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
 
   const loadRelatedNews = async () => {
     if (!selectedStock) return;
-    
+
     setNewsOffset(0);
     setHasMoreNews(true);
-    
-    const cacheKey = getCacheKey('stock', selectedStock.symbol);
-    const cachedNews = getCachedNews(cacheKey);
-    
-    if (cachedNews) {
-      setNewsData(cachedNews);
-      setNewsOffset(NEWS_PAGE_SIZE);
-      setHasMoreNews(cachedNews.length === NEWS_PAGE_SIZE);
-      return;
-    }
-    
     setContentLoading(true);
     try {
-      await loadStockNews(selectedStock.symbol, cacheKey, true);
+      const tickers = expandTickerForDaily(selectedStock.symbol, selectedStock.exchange);
+      currentTickersRef.current = tickers;
+      await loadStockNews(tickers, true);
     } catch (error) {
       message.error('Failed to load related news');
     } finally {
@@ -1189,57 +990,54 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     }
   };
 
-  const loadStockNews = useCallback(async (ticker: string, cacheKey?: string | null, reset: boolean = true) => {
+  const loadStockNews = useCallback(async (tickers: string[], reset: boolean = true) => {
+    const seq = ++newsRequestSeqRef.current;
     try {
       const offset = reset ? 0 : newsOffset;
-      const news = await dashboardAPI.getCompanyNews(ticker, { 
-        limit: NEWS_PAGE_SIZE, 
-        offset: offset 
+      const resp = await listDailyFeed({
+        tickers,
+        q: newsSearchQueryRef.current || undefined,
+        limit: NEWS_PAGE_SIZE,
+        offset,
       });
-      
+      // 丢弃过期响应 (切股竞态保护)
+      if (seq !== newsRequestSeqRef.current) return;
+
       if (reset) {
-        setNewsData(news);
-        setNewsOffset(NEWS_PAGE_SIZE);
+        setNewsData(resp.items);
+        setNewsOffset(resp.items.length);
         setLastNewsUpdate(new Date());
       } else {
-        setNewsData(prev => [...prev, ...news]);
-        setNewsOffset(prev => prev + NEWS_PAGE_SIZE);
+        setNewsData(prev => [...prev, ...resp.items]);
+        setNewsOffset(prev => prev + resp.items.length);
       }
-      
-      // 检查是否还有更多数据
-      setHasMoreNews(news.length === NEWS_PAGE_SIZE);
-      
-      // 缓存数据（仅在重置时缓存）
-      if (cacheKey && reset) {
-        setCachedNews(cacheKey, news);
-      }
-      
+      setHasMoreNews(resp.has_more);
     } catch (error) {
-      if (reset) {
+      if (reset && seq === newsRequestSeqRef.current) {
         setNewsData([]);
       }
     }
-  }, [newsOffset, NEWS_PAGE_SIZE, setCachedNews]);
+  }, [newsOffset, NEWS_PAGE_SIZE]);
 
   // 加载更多新闻
   const loadMoreNews = useCallback(async () => {
-    if (!hasMoreNews || loadingMoreNews || !selectedStock) return;
-    
+    if (!hasMoreNews || loadingMoreNews || contentLoading || !selectedStock) return;
+
     setLoadingMoreNews(true);
     try {
-      await loadStockNews(selectedStock.symbol, null, false);
+      await loadStockNews(currentTickersRef.current, false);
     } catch (error) {
       message.error('Failed to load more news');
     } finally {
       setLoadingMoreNews(false);
     }
-  }, [hasMoreNews, loadingMoreNews, selectedStock, loadStockNews]);
+  }, [hasMoreNews, loadingMoreNews, contentLoading, selectedStock, loadStockNews]);
 
   // 滚动检测和自动加载更多新闻（使用右侧 Tab 内容区作为滚动容器）
   useEffect(() => {
     const handleScroll = () => {
       if (!hasMoreNews || loadingMoreNews || activeTab !== 'news') return;
-      const scrollContainer = document.querySelector('.watchlist-detail-panel .ant-tabs-tabpane.ant-tabs-tabpane-active');
+      const scrollContainer = document.querySelector('.watchlist-detail-panel .watchlist-tab-scroll');
       if (!scrollContainer) return;
       const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
       const threshold = 200;
@@ -1247,26 +1045,12 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
         loadMoreNews();
       }
     };
-    const scrollContainer = document.querySelector('.watchlist-detail-panel .ant-tabs-tabpane.ant-tabs-tabpane-active');
+    const scrollContainer = document.querySelector('.watchlist-detail-panel .watchlist-tab-scroll');
     if (scrollContainer) {
       scrollContainer.addEventListener('scroll', handleScroll);
       return () => scrollContainer.removeEventListener('scroll', handleScroll);
     }
   }, [hasMoreNews, loadingMoreNews, activeTab, loadMoreNews]);
-
-  // 加载研究报告
-  const loadResearchReports = async (ticker: string) => {
-    try {
-      setContentLoading(true);
-      const result = await dashboardAPI.getTickerResearchReports(ticker);
-      setResearchReports(result.reports);
-    } catch (error) {
-      setResearchReports([]);
-      message.error('加载研究报告失败');
-    } finally {
-      setContentLoading(false);
-    }
-  };
 
   // 下载文件
   // 删除watchlist项
@@ -1281,7 +1065,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
       // 如果删除的是当前选中的股票，清空选择
       if (selectedStock?.watchlist_id === watchlistId) {
         setSelectedStock(null);
-        setResearchReports([]);
         setNewsData([]);
         setOverviewData(null);
         setOverviewError(null);
@@ -1602,506 +1385,124 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     setSelectedWatchlistIds(new Set());
   };
 
-  const getSentimentColor = (polarity?: number) => {
-    if (!polarity) return 'default';
-    if (polarity > 0.1) return 'green';
-    if (polarity < -0.1) return 'red';
-    return 'orange';
-  };
-
-  const getSentimentText = (polarity?: number) => {
-    if (!polarity) return 'Neutral';
-    if (polarity > 0.1) return 'Positive';
-    if (polarity < -0.1) return 'Negative';
-    return 'Neutral';
-  };
-
-  // Live Headlines / Finviz News 样式用：相对时间
-  const formatTimeAgo = (dateStr?: string): string => {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffM = Math.floor(diffMs / 60000);
-    const diffH = Math.floor(diffMs / 3600000);
-    const diffD = Math.floor(diffMs / 86400000);
-    if (diffM < 60) return `${diffM}m ago`;
-    if (diffH < 24) return `${diffH}h ago`;
-    return `${diffD}d ago`;
-  };
-
-  // 从 AI 分析中提取"一句话总结"（第一段，在核心要点之前的内容）
-  const getOneSentenceSummary = (analysisResult: any, maxLength: number = 80): string | null => {
-    const summaryResult = getAnalysisContent(analysisResult, 'news_summary_v1');
-    if (!summaryResult || typeof summaryResult.content !== 'string') {
-      return null;
-    }
-    
-    const content = summaryResult.content.trim();
-    // 找到第一个编号列表项（如 "1. **核心要点**"）之前的内容
-    const firstListMatch = content.match(/^([\s\S]*?)(?=\n\s*1\.\s*\*\*)/);
-    let summary = firstListMatch ? firstListMatch[1].trim() : '';
-    
-    // 如果没找到编号格式，尝试取第一段（到第一个双换行为止）
-    if (!summary) {
-      const firstParagraph = content.split(/\n\n/)[0];
-      summary = firstParagraph?.trim() || '';
-    }
-    
-    // 如果还是没有内容，返回 null
-    if (!summary) return null;
-    
-    // 截断并添加省略号
-    if (summary.length > maxLength) {
-      summary = summary.substring(0, maxLength).trim() + '...';
-    }
-    
-    return summary;
-  };
-
-  // 从 AI 分析中提取"市场影响评估"（方向和评分）
-  interface MarketImpact {
-    direction: string;  // 正面、中性偏正面、中性、中性偏负面、负面
-    score: number;      // 1-5
-  }
-  
-  const getMarketImpact = (analysisResult: any): MarketImpact | null => {
-    const summaryResult = getAnalysisContent(analysisResult, 'news_summary_v1');
-    if (!summaryResult || typeof summaryResult.content !== 'string') {
-      return null;
-    }
-    
-    const content = summaryResult.content;
-    
-    // 查找"市场影响评估"部分（支持中英文标题）
-    const impactMatch = content.match(/\*\*(?:市场影响评估|Market Impact Assessment)\*\*([\s\S]*?)(?=\n\s*\d+\.\s*\*\*|$)/i);
-    if (!impactMatch) return null;
-    
-    const impactText = impactMatch[1];
-    
-    // 提取方向 - 支持多种格式（中英文）
-    let direction = '中性';
-    // 中文格式1: "- 方向：中性偏正面"
-    const directionMatch1 = impactText.match(/方向[：:]\s*(正面|中性偏正面|中性|中性偏负面|负面)/);
-    // 中文格式2: "- 中性；影响程度" 或 "- 中性｜4分｜" (分号或竖线分隔)
-    const directionMatch2 = impactText.match(/[-\s]*(正面|中性偏正面|中性偏负面|负面|中性)[；;｜|]/);
-    // 中文格式3: 单独一行 "- 正面" 或 "- 负面"
-    const directionMatch3 = impactText.match(/[-\s]*(正面|中性偏正面|中性偏负面|负面|中性)\s*[\n\r]/);
-    // 英文格式: "Direction: Neutral" 或 "Direction: Positive" 或 "Direction: Mixed"
-    const directionMatchEn = impactText.match(/Direction[：:]\s*(Positive|Slightly Positive|Neutral|Mixed|Slightly Negative|Negative)(?:\s*\(|[\s\n\r])/i);
-    
-    if (directionMatch1) {
-      direction = directionMatch1[1];
-    } else if (directionMatch2) {
-      direction = directionMatch2[1];
-    } else if (directionMatch3) {
-      direction = directionMatch3[1];
-    } else if (directionMatchEn) {
-      // 英文转中文
-      const enDirection = directionMatchEn[1].toLowerCase();
-      if (enDirection === 'positive') direction = '正面';
-      else if (enDirection === 'slightly positive') direction = '中性偏正面';
-      else if (enDirection === 'neutral') direction = '中性';
-      else if (enDirection === 'mixed') direction = '中性';
-      else if (enDirection === 'slightly negative') direction = '中性偏负面';
-      else if (enDirection === 'negative') direction = '负面';
-    }
-    
-    // 提取评分 - 支持多种格式（中英文）
-    let score = 0;
-    // 中文格式1: "影响程度：3分" 或 "影响程度：3/5" 或 "影响程度：3"（纯数字）或 "程度：3分"
-    const scoreMatch1 = impactText.match(/(?:影响)?程度[：:]\s*(\d)(?:[分\/]|\s*[；;｜|]|\s*[\n\r]|\s*$)/);
-    // 中文格式2: "正面；4分；" 或 "正面｜4分｜" (分号或竖线分隔)
-    const scoreMatch2 = impactText.match(/[；;｜|]\s*(\d)\s*分[；;｜|]/);
-    // 中文格式3: 单独一行 "- 4分" 或 "- 4 分"
-    const scoreMatch3 = impactText.match(/[-\s]+(\d)\s*分\s*[\n\r]/);
-    // 英文格式: "Impact degree: 3/5" 或 "Impact: 3/5" 或 "Severity: 4/5"
-    const scoreMatchEn = impactText.match(/(?:Impact(?:\s+degree)?|Severity)[：:]\s*(\d)\s*[\/of]\s*5/i);
-    
-    if (scoreMatch1) {
-      score = parseInt(scoreMatch1[1], 10);
-    } else if (scoreMatch2) {
-      score = parseInt(scoreMatch2[1], 10);
-    } else if (scoreMatch3) {
-      score = parseInt(scoreMatch3[1], 10);
-    } else if (scoreMatchEn) {
-      score = parseInt(scoreMatchEn[1], 10);
-    }
-    
-    if (score === 0) return null;
-    
-    return { direction, score };
-  };
-
-  // 根据市场影响方向获取颜色
-  const getMarketImpactColor = (direction: string): { bg: string; text: string; border: string } => {
-    const isDark = themeMode === 'dark';
-    
-    if (direction.includes('正面') && !direction.includes('负面')) {
-      // 正面 / 中性偏正面 → 绿色系
-      return isDark 
-        ? { bg: 'rgba(16, 185, 129, 0.15)', text: '#34d399', border: 'rgba(16, 185, 129, 0.3)' }
-        : { bg: 'rgba(16, 185, 129, 0.1)', text: '#059669', border: 'rgba(16, 185, 129, 0.3)' };
-    } else if (direction.includes('负面')) {
-      // 负面 / 中性偏负面 → 红色系
-      return isDark
-        ? { bg: 'rgba(239, 68, 68, 0.15)', text: '#f87171', border: 'rgba(239, 68, 68, 0.3)' }
-        : { bg: 'rgba(239, 68, 68, 0.1)', text: '#dc2626', border: 'rgba(239, 68, 68, 0.3)' };
-    } else {
-      // 中性 → 灰色系
-      return isDark
-        ? { bg: 'rgba(107, 114, 128, 0.2)', text: '#9ca3af', border: 'rgba(107, 114, 128, 0.3)' }
-        : { bg: 'rgba(107, 114, 128, 0.1)', text: '#6b7280', border: 'rgba(107, 114, 128, 0.3)' };
-    }
-  };
-
-  // 新闻来源颜色（CNBC 浅蓝，Bloomberg 橙黄；dark 模式下其余来源也使用可见色）
-  const getSourceColor = (source?: string): string => {
-    if (!source) return themeMode === 'dark' ? '#94a3b8' : colors.textSecondary;
-    const s = source.toLowerCase();
-    if (s.includes('cnbc')) return '#5dade2';
-    if (s.includes('bloomberg')) return '#f5b041';
-    if (s.includes('reuters')) return '#7dd3fc';
-    if (s.includes('yahoo') || s.includes('finance')) return themeMode === 'dark' ? '#64748b' : colors.textSecondary;
-    if (s.includes('marketwatch')) return '#fcd34d';
-    if (s.includes('zero') || s.includes('hedge')) return '#f472b6';
-    if (s.includes('fox')) return '#a78bfa';
-    return themeMode === 'dark' ? '#94a3b8' : colors.textSecondary;
-  };
-
-  // 新闻列表骨架屏
-  const renderNewsSkeleton = () => (
-    <div>
-      {Array.from({ length: 5 }).map((_, index) => (
-        <Card key={index} style={{ marginBottom: '16px' }}>
-          <Skeleton active paragraph={{ rows: 2 }} />
-          <div style={{ marginTop: '12px' }}>
-            <Skeleton.Input style={{ width: '60%' }} size="small" />
-          </div>
-        </Card>
-      ))}
-    </div>
-  );
-
-  // 获取AI Analysis的完整内容用于Tooltip显示
-  const getAIAnalysisForTooltip = (analysisResult: any): string | null => {
-    if (!analysisResult) return null;
-    const summaryResult = getAnalysisContent(analysisResult, 'news_summary_v1');
-    if (!summaryResult) return null;
-    
-    // 返回完整的AI分析内容
-    return summaryResult.content || null;
-  };
-
   const renderNewsTab = () => {
-    const isDark = themeMode === 'dark';
-    const liveHeadlinesHeaderBg = isDark ? '#1e3a5f' : '#b8d4e8';
-    const liveHeadlinesHeaderFg = isDark ? '#fff' : '#1a3a5c';
-    const liveHeadlinesHeaderFgMuted = isDark ? 'rgba(255,255,255,0.65)' : 'rgba(26,58,92,0.7)';
-    const updateTimeStr = lastNewsUpdate
-      ? lastNewsUpdate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })
-      : '--:--:-- --';
+    const searchBar = (
+      <div style={{ flexShrink: 0, padding: '12px 12px 8px' }}>
+        <Input
+          allowClear
+          prefix={<SearchOutlined style={{ color: colors.textSecondary, fontSize: 14 }} />}
+          suffix={
+            <Tooltip
+              title={
+                <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>搜索语法</div>
+                  <div><span style={{ opacity: 0.6 }}>空格</span> → AND，每个词都要出现</div>
+                  <div><span style={{ opacity: 0.6 }}>OR（大写）</span> → 任一词命中即可</div>
+                  <div><span style={{ opacity: 0.6 }}>「短语」</span> → 精确子串匹配</div>
+                </div>
+              }
+              placement="bottomRight"
+            >
+              <QuestionCircleOutlined style={{ color: colors.textSecondary, cursor: 'pointer', fontSize: 14 }} />
+            </Tooltip>
+          }
+          placeholder={`Search within ${selectedStock?.symbol ?? ''} (space=AND, OR=any, "phrase")`}
+          value={newsSearchInput}
+          onChange={(e) => setNewsSearchInput(e.target.value)}
+          style={{
+            background: colors.cardBg,
+            borderColor: colors.cardBorder,
+            color: colors.text,
+            fontSize: 13,
+          }}
+        />
+      </div>
+    );
 
     if (contentLoading) {
-      return <div style={{ minHeight: 400 }}>{renderNewsSkeleton()}</div>;
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+          {searchBar}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Spin size="large" />
+          </div>
+        </div>
+      );
     }
 
+    const grouped = groupNewsByDate(newsData, userTimezone);
+    const dateAnchorStyle: React.CSSProperties = {
+      position: 'sticky',
+      top: 0,
+      zIndex: 2,
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: 8,
+      padding: '8px 4px',
+      marginBottom: 8,
+      background: colors.cardBg,
+      borderBottom: `1px solid ${colors.cardBorder}`,
+    };
+
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 500 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+        {searchBar}
         <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            flex: 1,
-            minWidth: 0,
-            background: isDark ? colors.cardBg : '#fff',
-            border: `1px solid ${colors.cardBorder}`,
-            borderRadius: 8,
-            overflow: 'hidden',
-          }}
+          ref={liveHeadlinesScrollRef}
+          className={`watchlist-tab-scroll ${panelScrollbarClass}`}
+          style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 12px 12px' }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '10px 14px',
-              background: liveHeadlinesHeaderBg,
-              flexShrink: 0,
-            }}
-          >
-            <Space>
-              <UnorderedListOutlined style={{ color: liveHeadlinesHeaderFg, fontSize: 16 }} />
-              <span style={{ color: liveHeadlinesHeaderFg, fontWeight: 600, fontSize: 14 }}>Live Headlines</span>
-            </Space>
-            <Text style={{ color: liveHeadlinesHeaderFgMuted, fontSize: 12 }}>
-              Updated {updateTimeStr}
-            </Text>
-          </div>
-          <div
-            ref={liveHeadlinesScrollRef}
-            className={`watchlist-tab-scroll ${panelScrollbarClass}`}
-            style={{ flex: 1, minHeight: 0, padding: '12px' }}
-          >
-            {newsData.length === 0 ? (
-              <Empty description="No related news" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ marginTop: 24 }} />
-            ) : (
-              <>
-                {newsData.map((item) => {
-                  const aiAnalysisContent = getAIAnalysisForTooltip(item.analysis_result);
-                  
-                  return (
-                    <div
-                      key={item.id}
-                      className="live-headlines-card"
-                      style={{
-                        padding: '10px 12px',
-                        marginBottom: '4px',
-                        borderRadius: '8px',
-                        borderBottom: `1px solid ${colors.cardBorder}`,
-                        cursor: 'pointer',
-                        transition: 'background-color 0.2s ease',
-                        position: 'relative',
-                      }}
-                      onClick={() => {
-                        setSelectedNewsForAnalysis(item);
-                        setAnalysisModalVisible(true);
-                      }}
-                    >
-                      <div style={{ fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
-                        {item.link ? (
-                          <a
-                            href={item.link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="live-headlines-title"
-                            style={{ color: colors.text, textDecoration: 'none' }}
-                            onClick={(e) => e.stopPropagation()}
-                            onMouseEnter={(e) => {
-                              if (aiAnalysisContent) {
-                                if (hideTooltipTimeoutRef.current) {
-                                  clearTimeout(hideTooltipTimeoutRef.current);
-                                  hideTooltipTimeoutRef.current = null;
-                                }
-                                setHoveredNewsId(item.id);
-                                setMousePosition({ x: e.clientX, y: e.clientY });
-                              }
-                            }}
-                            onMouseMove={(e) => {
-                              if (aiAnalysisContent && hoveredNewsId === item.id) {
-                                setMousePosition({ x: e.clientX, y: e.clientY });
-                              }
-                            }}
-                            onMouseLeave={() => {
-                              if (hideTooltipTimeoutRef.current) {
-                                clearTimeout(hideTooltipTimeoutRef.current);
-                              }
-                              hideTooltipTimeoutRef.current = setTimeout(() => {
-                                setHoveredNewsId(null);
-                                hideTooltipTimeoutRef.current = null;
-                              }, 300);
-                            }}
-                          >
-                            {item.title}
-                          </a>
-                        ) : (
-                          <span 
-                            className="live-headlines-title" 
-                            style={{ color: colors.text }}
-                            onMouseEnter={(e) => {
-                              if (aiAnalysisContent) {
-                                if (hideTooltipTimeoutRef.current) {
-                                  clearTimeout(hideTooltipTimeoutRef.current);
-                                  hideTooltipTimeoutRef.current = null;
-                                }
-                                setHoveredNewsId(item.id);
-                                setMousePosition({ x: e.clientX, y: e.clientY });
-                              }
-                            }}
-                            onMouseMove={(e) => {
-                              if (aiAnalysisContent && hoveredNewsId === item.id) {
-                                setMousePosition({ x: e.clientX, y: e.clientY });
-                              }
-                            }}
-                            onMouseLeave={() => {
-                              if (hideTooltipTimeoutRef.current) {
-                                clearTimeout(hideTooltipTimeoutRef.current);
-                              }
-                              hideTooltipTimeoutRef.current = setTimeout(() => {
-                                setHoveredNewsId(null);
-                                hideTooltipTimeoutRef.current = null;
-                              }, 300);
-                            }}
-                          >
-                            {item.title}
-                          </span>
-                        )}
-                      </div>
-                      {/* 一句话总结 - 仅有 AI 分析时显示 */}
-                      {(() => {
-                        const summary = getOneSentenceSummary(item.analysis_result);
-                        if (!summary) return null;
-                        return (
-                          <div 
-                            style={{ 
-                              fontSize: 12, 
-                              color: themeMode === 'dark' ? '#94a3b8' : '#64748b',
-                              marginBottom: 6,
-                              lineHeight: 1.5,
-                              paddingLeft: 2,
-                            }}
-                          >
-                            {summary}
-                          </div>
-                        );
-                      })()}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span style={{ color: getSourceColor(item.source), fontSize: 12 }}>{item.source || '—'}</span>
-                        <span style={{ color: colors.textSecondary, fontSize: 12 }}>{formatTimeAgo(item.date)}</span>
-                        {/* AI 分析标识 */}
-                        {item.analysis_result && getAnalysisContent(item.analysis_result, 'news_summary_v1') && (
-                          <span
-                            style={{
-                              fontSize: 8,
-                              fontWeight: 600,
-                              padding: '0 3px',
-                              borderRadius: 2,
-                              background: themeMode === 'dark' ? 'rgba(93, 173, 226, 0.08)' : 'rgba(24, 144, 255, 0.06)',
-                              color: themeMode === 'dark' ? 'rgba(93, 173, 226, 0.75)' : 'rgba(24, 144, 255, 0.75)',
-                              border: `1px solid ${themeMode === 'dark' ? 'rgba(93, 173, 226, 0.35)' : 'rgba(24, 144, 255, 0.35)'}`,
-                            }}
-                          >
-                            AI
-                          </span>
-                        )}
-                        {/* 市场影响评估徽章 */}
-                        {(() => {
-                          const impact = getMarketImpact(item.analysis_result);
-                          if (!impact) return null;
-                          const impactColor = getMarketImpactColor(impact.direction);
-                          // 简化方向显示
-                          const shortDirection = impact.direction
-                            .replace('中性偏正面', '偏正面')
-                            .replace('中性偏负面', '偏负面');
-                          return (
-                            <span
-                              style={{
-                                fontSize: 8,
-                                padding: '0 3px',
-                                borderRadius: 2,
-                                backgroundColor: impactColor.bg,
-                                color: impactColor.text,
-                                border: `1px solid ${impactColor.border}`,
-                                fontWeight: 500,
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {shortDirection} {impact.score}/5
-                            </span>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  );
-                })}
-                
-                {/* 鼠标跟随的AI分析提示框 */}
-                {hoveredNewsId && (() => {
-                  const hoveredItem = newsData.find(item => item.id === hoveredNewsId);
-                  const aiAnalysisContent = hoveredItem ? getAIAnalysisForTooltip(hoveredItem.analysis_result) : null;
-                  
-                  if (!aiAnalysisContent) return null;
-                  
-                  // 智能定位计算
-                  const tooltipWidth = 650;
-                  const tooltipMaxHeight = 450;
-                  const offset = 20;
-                  const viewportWidth = window.innerWidth;
-                  const viewportHeight = window.innerHeight;
-                  
-                  // 计算水平位置：优先显示在鼠标右侧，如果空间不够则显示在左侧
-                  let left = mousePosition.x + offset;
-                  if (left + tooltipWidth > viewportWidth - 20) {
-                    // 右侧空间不够，显示在左侧
-                    left = mousePosition.x - tooltipWidth - offset;
-                    // 如果左侧也不够，则贴近右边缘
-                    if (left < 20) {
-                      left = viewportWidth - tooltipWidth - 20;
-                    }
-                  }
-                  
-                  // 计算垂直位置：优先显示在鼠标下方，如果空间不够则显示在上方
-                  let top = mousePosition.y + 10;
-                  if (top + tooltipMaxHeight > viewportHeight - 20) {
-                    // 下方空间不够，显示在上方
-                    top = mousePosition.y - tooltipMaxHeight - 10;
-                    // 如果上方也不够，则贴近底部
-                    if (top < 20) {
-                      top = viewportHeight - tooltipMaxHeight - 20;
-                    }
-                  }
-                  
-                  return (
-                    <div
-                      style={{
-                        position: 'fixed',
-                        left: Math.max(20, left),
-                        top: Math.max(20, top),
-                        width: tooltipWidth,
-                        maxHeight: tooltipMaxHeight,
-                        overflow: 'auto',
-                        backgroundColor: isDark ? '#1e293b' : '#ffffff',
-                        border: `1px solid ${isDark ? 'rgba(255,255,255,0.2)' : '#e5e7eb'}`,
-                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-                        padding: '12px 16px',
-                        borderRadius: 8,
-                        zIndex: 9999,
-                        pointerEvents: 'auto',
-                        fontSize: '9pt',
-                      }}
-                      onMouseEnter={() => {
-                        if (hideTooltipTimeoutRef.current) {
-                          clearTimeout(hideTooltipTimeoutRef.current);
-                          hideTooltipTimeoutRef.current = null;
-                        }
-                      }}
-                      onMouseLeave={() => {
-                        if (hideTooltipTimeoutRef.current) {
-                          clearTimeout(hideTooltipTimeoutRef.current);
-                          hideTooltipTimeoutRef.current = null;
-                        }
-                        setHoveredNewsId(null);
-                      }}
-                    >
-                      <div style={{ 
-                        fontWeight: 600, 
-                        marginBottom: 8, 
-                        fontSize: '10pt',
-                        color: isDark ? '#e0e6f1' : '#1f2937',
-                        borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.2)' : '#e5e7eb'}`,
-                        paddingBottom: 6
-                      }}>
-                        AI Analysis
-                      </div>
-                      <div style={{ fontSize: '9pt', lineHeight: '1.6' }}>
-                        <MarkdownRenderer 
-                          content={aiAnalysisContent} 
-                          variant={isDark ? 'dark' : 'light'}
+          {newsData.length === 0 ? (
+            <Empty
+              description={newsSearchQuery
+                ? `No results for "${newsSearchQuery}" within ${selectedStock?.symbol ?? ''}`
+                : selectedStock
+                ? `No items for ${selectedStock.symbol}`
+                : 'No items'}
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              style={{ marginTop: 40 }}
+            />
+          ) : (
+            <>
+              {grouped.map((g) => (
+                <div key={g.dateKey} style={{ marginBottom: 20 }}>
+                  <div style={dateAnchorStyle}>
+                    <Text strong>{g.dateLabel}</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {g.items.length} {g.items.length === 1 ? 'article' : 'articles'}
+                    </Text>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {g.items.map((it, idx) => (
+                      <DailyTimelineItem
+                        key={it.id}
+                        themeMode={themeMode}
+                        publishedAt={it.published_at}
+                        isFirst={idx === 0}
+                        isLast={idx === g.items.length - 1}
+                      >
+                        <DailyCard
+                          item={it}
+                          themeMode={themeMode}
+                          onClick={(item) => setPreviewDailyItem(item)}
                         />
-                      </div>
-                    </div>
-                  );
-                })()}
-              </>
-            )}
-            {hasMoreNews && newsData.length > 0 && (
-              <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                <Button type="primary" size="small" loading={loadingMoreNews} onClick={loadMoreNews} disabled={loadingMoreNews}>
-                  {loadingMoreNews ? 'Loading...' : 'Load More News'}
-                </Button>
-              </div>
-            )}
-          </div>
+                      </DailyTimelineItem>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {loadingMoreNews && (
+                <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                  <Spin />
+                </div>
+              )}
+              {!hasMoreNews && newsData.length > 0 && (
+                <div style={{ textAlign: 'center', color: colors.textSecondary, fontSize: 12, padding: '16px 0 32px' }}>
+                  — End of feed —
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
     );
@@ -2683,27 +2084,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     );
   };
 
-  const renderResearchReportsTab = () => (
-    <div>
-      {contentLoading ? (
-        <WatchlistResearchReportCards
-          loading
-          themeColors={THEME_COLORS[themeMode]}
-        />
-      ) : researchReports.length === 0 ? (
-        <Empty 
-          description="No research reports found for this ticker"
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        />
-      ) : (
-        <WatchlistResearchReportCards
-          reports={researchReports}
-          themeColors={THEME_COLORS[themeMode]}
-        />
-      )}
-    </div>
-  );
-
   const renderStockDetails = () => {
     if (!selectedStock) return null;
 
@@ -3070,9 +2450,7 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
                 activeKey={activeTab}
                 onChange={(key) => {
                   setActiveTab(key);
-                  if (key === 'reports' && selectedStock) {
-                    loadResearchReports(selectedStock.symbol);
-                  } else if (key === 'news') {
+                  if (key === 'news') {
                     loadRelatedNews();
                   } else if (key === 'overview' && selectedStock) {
                     loadStockOverview(selectedStock);
@@ -3088,6 +2466,8 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
                     </span>
                   } 
                   key="news"
+                  className={panelScrollbarClass}
+                  style={{ height: '100%', overflow: 'hidden' }}
                 >
                   {renderNewsTab()}
                 </TabPane>
@@ -3102,18 +2482,6 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
                   className={`watchlist-tab-pane-scroll ${panelScrollbarClass}`}
                 >
                   {renderOverviewTab()}
-                </TabPane>
-                <TabPane 
-                  tab={
-                    <span>
-                      <FileTextOutlined />
-                      Sources
-                    </span>
-                  } 
-                  key="reports"
-                  className={`watchlist-tab-pane-scroll ${panelScrollbarClass}`}
-                >
-                  {renderResearchReportsTab()}
                 </TabPane>
               </Tabs>
             ) : (
@@ -3174,501 +2542,15 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
         onUpdate={loadCustomGroups}
       />
 
-      {/* AI分析详情模态框 */}
-      <Modal
-        title={
-          <Space>
-            {selectedNewsForAnalysis?.analysis_result && (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  padding: '1px 4px',
-                  borderRadius: 2,
-                  background: themeMode === 'dark' ? 'rgba(93, 173, 226, 0.08)' : 'rgba(24, 144, 255, 0.06)',
-                  color: themeMode === 'dark' ? 'rgba(93, 173, 226, 0.75)' : 'rgba(24, 144, 255, 0.75)',
-                  border: `1px solid ${themeMode === 'dark' ? 'rgba(93, 173, 226, 0.35)' : 'rgba(24, 144, 255, 0.35)'}`,
-                }}
-              >
-                AI
-              </span>
-            )}
-            <span style={{ color: themeMode === 'dark' ? colors.text : undefined }}>
-              {selectedNewsForAnalysis?.analysis_result ? 'AI Analysis Details' : 'News Details'}
-            </span>
-          </Space>
-        }
-        open={analysisModalVisible}
-        centered
-        onCancel={() => {
-          setAnalysisModalVisible(false);
-          setSelectedNewsForAnalysis(null);
-        }}
-        footer={[
-          <Button key="close" onClick={() => {
-            setAnalysisModalVisible(false);
-            setSelectedNewsForAnalysis(null);
-          }}>
-            Close
-          </Button>,
-          selectedNewsForAnalysis?.link && (
-            <Button 
-              key="original" 
-              type="primary"
-              onClick={() => window.open(selectedNewsForAnalysis.link, '_blank')}
-            >
-              View Original
-            </Button>
-          )
-        ]}
-        width={800}
-        className="analysis-details-modal"
-        styles={{
-          body: {
-            height: ANALYSIS_MODAL_BODY_HEIGHT,
-            minHeight: '480px',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            ...(themeMode === 'dark' ? { backgroundColor: MODAL_DARK_BG } : {}),
-          },
-          ...(themeMode === 'dark' ? {
-            wrapper: { backdropFilter: 'brightness(0.7)' },
-            content: {
-              backgroundColor: MODAL_DARK_BG,
-              border: `1px solid ${MODAL_DARK_BORDER}`,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)',
-            },
-            header: {
-              backgroundColor: MODAL_DARK_BG,
-              borderBottomColor: MODAL_DARK_BORDER,
-            },
-          } : {}),
-        }}
-      >
-        {selectedNewsForAnalysis && (() => {
-          const isDarkModal = themeMode === 'dark';
-          const modalCardBg = isDarkModal ? colors.cardBg : '#f5f5f5';
-          const modalHeadBg = isDarkModal ? 'rgba(22, 119, 255, 0.2)' : '#e6f7ff';
-          const modalHeadBgAlt = isDarkModal ? colors.siderBg : '#f5f5f5';
-          const modalHeadBgAlt2 = isDarkModal ? colors.siderBg : '#f0f5ff';
-          const modalText = colors.text;
-          const modalTextSecondary = colors.textSecondary;
-          const modalSectionBg = isDarkModal ? colors.siderBg : '#fafafa';
-          const modalBoxBg = isDarkModal ? colors.cardBg : '#fff';
-          const modalBorder = colors.cardBorder;
-          const modalLabelColor = isDarkModal ? 'rgba(255,255,255,0.65)' : '#595959';
-          const modalMetaColor = isDarkModal ? 'rgba(255,255,255,0.45)' : '#999';
-          const modalContentColor = isDarkModal ? 'rgba(255,255,255,0.85)' : '#666';
-          const tabContentStyle = { padding: '4px 0', height: '100%', overflow: 'auto' as const };
-          return (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <Card size="small" style={{ flexShrink: 0, marginBottom: '16px', backgroundColor: modalCardBg, borderColor: modalBorder }}>
-              <Typography.Title level={5} style={{ marginBottom: '12px', color: modalText }}>
-                {selectedNewsForAnalysis.title}
-              </Typography.Title>
-              <Space size="small" wrap>
-                <Text style={{ fontSize: '12px', color: modalTextSecondary }}>
-                  <CalendarOutlined /> {selectedNewsForAnalysis.date ? new Date(selectedNewsForAnalysis.date).toLocaleString() : 'N/A'}
-                </Text>
-                <Text style={{ fontSize: '12px', color: modalTextSecondary }}>
-                  Source: {selectedNewsForAnalysis.source || 'N/A'}
-                </Text>
-              </Space>
-            </Card>
-
-            {(() => {
-              const allResults = getAllAnalysisResults(selectedNewsForAnalysis.analysis_result);
-              const hasAnyAnalysis = Object.keys(allResults).length > 0;
-              const summaryResult = getAnalysisContent(selectedNewsForAnalysis.analysis_result, 'news_summary_v1');
-
-              if (hasAnyAnalysis) {
-                const tagLabelStyle = { fontSize: '11px', color: modalLabelColor, display: 'block' as const, marginBottom: '10px', fontWeight: 500 };
-                const tagBoxStyle = { padding: '12px', backgroundColor: modalBoxBg, borderRadius: '6px', border: `1px solid ${modalBorder}` };
-                const tagItemStyle = { fontSize: '11px', padding: '4px 10px', borderRadius: '4px', fontWeight: 500, border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' };
-
-                return (
-                  <Tabs
-                    defaultActiveKey="ai"
-                    size="small"
-                    style={{ marginTop: '4px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
-                    items={[
-                      {
-                        key: 'ai',
-                        label: 'AI Analysis',
-                        children: summaryResult && typeof summaryResult.content === 'string' ? (
-                          <div style={tabContentStyle}>
-                            <MarkdownRenderer
-                              content={summaryResult.content}
-                              variant={isDarkModal ? 'dark' : 'light'}
-                              style={{ fontSize: '12px', lineHeight: '1.6', color: modalText }}
-                            />
-                          </div>
-                        ) : (
-                          <Empty description="No AI analysis" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                        ),
-                      },
-                      {
-                        key: 'original',
-                        label: 'Original Content',
-                        children: selectedNewsForAnalysis.content ? (
-                          <div style={{ fontSize: '13px', color: modalContentColor, lineHeight: '1.8', ...tabContentStyle }}>
-                            {highlightKeywords(selectedNewsForAnalysis.content)}
-                          </div>
-                        ) : (
-                          <Empty description="No content" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                        ),
-                      },
-                      {
-                        key: 'tags',
-                        label: 'Tags',
-                        children: (
-                          <div style={tabContentStyle}>
-                            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                              {selectedNewsForAnalysis.symbols && selectedNewsForAnalysis.symbols.length > 0 && (
-                                <div style={tagBoxStyle}>
-                                  <Text strong style={tagLabelStyle}>Related Tickers</Text>
-                                  <Space size={[6, 6]} wrap>
-                                    {selectedNewsForAnalysis.symbols.map(symbol => (
-                                      <Tag key={symbol} color="blue" style={tagItemStyle}>{symbol}</Tag>
-                                    ))}
-                                  </Space>
-                                </div>
-                              )}
-                              {/* Classification Tags */}
-                            {(() => {
-                              const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
-                              if (!classification || !hasValidClassification(classification)) {
-                                return null;
-                              }
-
-                              const tags = getClassificationTags(classification);
-                              const relatedSectors = getRelatedSectors(classification);
-                              const relatedCountries = getRelatedCountries(classification);
-
-                              return (
-                                <>
-                                  {/* 主要分类标签 */}
-                                  {tags.length > 0 && (
-                                    <div style={{ 
-                                      padding: '12px',
-                                      backgroundColor: modalBoxBg,
-                                      borderRadius: '6px',
-                                      border: `1px solid ${modalBorder}`
-                                    }}>
-                                      <Text strong style={{ 
-                                        fontSize: '11px', 
-                                        color: modalLabelColor,
-                                        display: 'block',
-                                        marginBottom: '10px',
-                                        fontWeight: 500
-                                      }}>
-                                        Classification Tags
-                                      </Text>
-                                      <Space size={[6, 6]} wrap>
-                                        {tags.map(({ key, config, value, displayValue }) => (
-                                          <Tag 
-                                            key={key} 
-                                            color={config.color} 
-                                            style={{ 
-                                              fontSize: '11px',
-                                              padding: '4px 10px',
-                                              borderRadius: '4px',
-                                              fontWeight: 500,
-                                              border: 'none',
-                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                            }}
-                                            title={`${config.label}: ${displayValue}`}
-                                          >
-                                            {displayValue}
-                                          </Tag>
-                                        ))}
-                                      </Space>
-                                    </div>
-                                  )}
-
-                                  {/* 相关行业 */}
-                                  {relatedSectors.length > 0 && (
-                                    <div style={{ 
-                                      padding: '12px',
-                                      backgroundColor: modalBoxBg,
-                                      borderRadius: '6px',
-                                      border: `1px solid ${modalBorder}`
-                                    }}>
-                                      <Text strong style={{ 
-                                        fontSize: '11px', 
-                                        color: modalLabelColor,
-                                        display: 'block',
-                                        marginBottom: '10px',
-                                        fontWeight: 500
-                                      }}>
-                                        Related Sectors
-                                      </Text>
-                                      <Space size={[6, 6]} wrap>
-                                        {relatedSectors.map(sector => (
-                                          <Tag 
-                                            key={sector} 
-                                            color="purple" 
-                                            style={{ 
-                                              fontSize: '11px',
-                                              padding: '4px 10px',
-                                              borderRadius: '4px',
-                                              fontWeight: 500,
-                                              border: 'none',
-                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                            }}
-                                          >
-                                            {sector}
-                                          </Tag>
-                                        ))}
-                                      </Space>
-                                    </div>
-                                  )}
-
-                                  {/* 相关国家/地区 */}
-                                  {relatedCountries.length > 0 && (
-                                    <div style={{ 
-                                      padding: '12px',
-                                      backgroundColor: modalBoxBg,
-                                      borderRadius: '6px',
-                                      border: `1px solid ${modalBorder}`
-                                    }}>
-                                      <Text strong style={{ 
-                                        fontSize: '11px', 
-                                        color: modalLabelColor,
-                                        display: 'block',
-                                        marginBottom: '10px',
-                                        fontWeight: 500
-                                      }}>
-                                        Related Countries
-                                      </Text>
-                                      <Space size={[6, 6]} wrap>
-                                        {relatedCountries.map(country => (
-                                          <Tag 
-                                            key={country} 
-                                            color="geekblue" 
-                                            style={{ 
-                                              fontSize: '11px',
-                                              padding: '4px 10px',
-                                              borderRadius: '4px',
-                                              fontWeight: 500,
-                                              border: 'none',
-                                              boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                                            }}
-                                            title={country}
-                                          >
-                                            {COUNTRIES_MAP[country] || country}
-                                          </Tag>
-                                        ))}
-                                      </Space>
-                                    </div>
-                                  )}
-                                </>
-                              );
-                            })()}
-
-                            {/* Unified Themes (统一主题) */}
-                            {(() => {
-                              if (!hasValidUnifiedThemes(selectedNewsForAnalysis.unified_themes)) {
-                                return null;
-                              }
-
-                              const groupedThemes = groupThemesByCanonicalName(selectedNewsForAnalysis.unified_themes || []);
-                              
-                              if (groupedThemes.size === 0) {
-                                return null;
-                              }
-
-                              return (
-                                <div style={{ 
-                                  padding: '12px',
-                                  backgroundColor: modalBoxBg,
-                                  borderRadius: '6px',
-                                  border: `1px solid ${modalBorder}`
-                                }}>
-                                  <div style={{ marginBottom: '10px' }}>
-                                    <Text strong style={{ 
-                                      fontSize: '11px', 
-                                      color: modalLabelColor,
-                                      fontWeight: 500,
-                                      marginRight: '8px'
-                                    }}>
-                                      Unified Themes
-                                    </Text>
-                                    <Tag 
-                                      color="cyan" 
-                                      style={{ 
-                                        fontSize: '10px',
-                                        padding: '2px 8px',
-                                        borderRadius: '4px',
-                                        fontWeight: 500,
-                                        border: 'none'
-                                      }}
-                                    >
-                                      Multi-Source
-                                    </Tag>
-                                  </div>
-                                  <Space size={[6, 6]} wrap>
-                                    {Array.from(groupedThemes.entries()).map(([canonicalName, themes]) => {
-                                      const displayInfo = getBestThemeDisplay(themes);
-                                      const qualityColor = getQualityScoreColor(displayInfo.maxQualityScore);
-                                      
-                                      return (
-                                        <Tag 
-                                          key={canonicalName}
-                                          color={qualityColor}
-                                          style={{ 
-                                            fontSize: '11px',
-                                            padding: '4px 10px',
-                                            borderRadius: '4px',
-                                            fontWeight: 500,
-                                            border: 'none',
-                                            boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-                                            cursor: 'help'
-                                          }}
-                                          title={`${displayInfo.displayName}${displayInfo.description ? '\n' + displayInfo.description : ''}\n\nQuality: ${formatQualityScore(displayInfo.maxQualityScore)}\nConfidence: ${formatQualityScore(displayInfo.avgConfidence)}\nSources: ${displayInfo.sources.map(s => getSourceTypeConfig(s).label).join(', ')}${displayInfo.markets.length > 0 ? '\nMarkets: ' + displayInfo.markets.join(', ') : ''}${displayInfo.isVerified ? '\n✓ Verified' : ''}${displayInfo.isPrimary ? '\n⭐ Primary' : ''}`}
-                                        >
-                                          {displayInfo.displayName}
-                                          {displayInfo.isVerified && <span style={{ marginLeft: '4px' }}>✓</span>}
-                                          {displayInfo.isPrimary && <span style={{ marginLeft: '4px' }}>⭐</span>}
-                                          {displayInfo.sources.length > 1 && (
-                                            <Badge 
-                                              count={displayInfo.sources.length} 
-                                              style={{ 
-                                                backgroundColor: '#52c41a', 
-                                                fontSize: '8px',
-                                                height: '14px',
-                                                lineHeight: '14px',
-                                                minWidth: '14px',
-                                                marginLeft: '4px'
-                                              }}
-                                            />
-                                          )}
-                                        </Tag>
-                                      );
-                                    })}
-                                  </Space>
-                                  {/* 来源统计 */}
-                                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${modalBorder}` }}>
-                                    <Text style={{ fontSize: '10px', color: modalMetaColor, marginRight: '8px' }}>
-                                      Sources:
-                                    </Text>
-                                    <Space size={[4, 4]} wrap>
-                                      {Array.from(new Set(selectedNewsForAnalysis.unified_themes?.map((t: NewsUnifiedTheme) => t.source_type) || [])).map((sourceType: string) => {
-                                        const config = getSourceTypeConfig(sourceType);
-                                        return (
-                                          <Tag 
-                                            key={sourceType} 
-                                            color={config.color} 
-                                            style={{ 
-                                              fontSize: '10px',
-                                              padding: '2px 8px',
-                                              borderRadius: '4px',
-                                              border: 'none'
-                                            }}
-                                          >
-                                            {config.icon} {config.label}
-                                          </Tag>
-                                        );
-                                      })}
-                                    </Space>
-                                  </div>
-                                </div>
-                              );
-                            })()}
-                            </Space>
-                          </div>
-                        ),
-                      },
-                      {
-                        key: 'meta',
-                        label: 'Metadata',
-                        children: (
-                          <div style={tabContentStyle}>
-                            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                              {summaryResult && (
-                                <div style={tagBoxStyle}>
-                                  <Text strong style={tagLabelStyle}>AI 模型信息</Text>
-                                  <Space size="small" style={{ fontSize: '12px', color: modalMetaColor }} wrap>
-                                    {summaryResult.provider && <span>Provider: {summaryResult.provider}</span>}
-                                    {summaryResult.model && <span>Model: {summaryResult.model}</span>}
-                                    {summaryResult.tokens && <span>Tokens: {summaryResult.tokens.toLocaleString()}</span>}
-                                    {summaryResult.temperature && <span>Temperature: {summaryResult.temperature}</span>}
-                                  </Space>
-                                </div>
-                              )}
-                              {(() => {
-                                const classification = getClassificationFromAnalysis(selectedNewsForAnalysis.analysis_result);
-                                if (!classification || !hasValidClassification(classification)) return null;
-                                const summary = getClassificationSummary(classification);
-                                if (!summary || (summary.confidence.theme === 0 && summary.confidence.event === 0)) return null;
-                                return (
-                                  <div style={tagBoxStyle}>
-                                    <Text strong style={tagLabelStyle}>Confidence</Text>
-                                    <Space size="middle" wrap>
-                                      {summary.confidence.theme > 0 && <Tag color="orange" style={tagItemStyle}>Theme: {(summary.confidence.theme * 100).toFixed(0)}%</Tag>}
-                                      {summary.confidence.event > 0 && <Tag color="orange" style={tagItemStyle}>Event: {(summary.confidence.event * 100).toFixed(0)}%</Tag>}
-                                    </Space>
-                                  </div>
-                                );
-                              })()}
-                              {Object.keys(allResults).length > 0 && (
-                                <div style={tagBoxStyle}>
-                                  <Text strong style={tagLabelStyle}>Analysis Template</Text>
-                                  <Space size={[6, 6]} wrap>
-                                    {Object.keys(allResults).map(templateCode => (
-                                      <Tag key={templateCode} color="green" style={tagItemStyle}>{templateCode}</Tag>
-                                    ))}
-                                  </Space>
-                                </div>
-                              )}
-                              {Object.entries(allResults).map(([templateCode, result]) => {
-                                if (templateCode === 'news_summary_v1' && typeof result.content === 'string') return null;
-                                if (templateCode === 'news_classification') return null;
-                                return (
-                                  <Card key={templateCode} title={`${templateCode}`} size="small" style={{ marginTop: '8px', borderColor: modalBorder }} headStyle={{ backgroundColor: modalHeadBgAlt2, fontWeight: 'bold', color: modalText, borderColor: modalBorder }}>
-                                    <pre style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, color: modalText }}>
-                                      {typeof result.content === 'string' ? result.content : JSON.stringify(result.content, null, 2)}
-                                    </pre>
-                                    <div style={{ marginTop: '12px', fontSize: '10px', color: modalMetaColor }}>
-                                      <Space size="small" wrap>
-                                        {result.provider && <span>Provider: {result.provider}</span>}
-                                        {result.model && <span>Model: {result.model}</span>}
-                                        {result.tokens && <span>Tokens: {result.tokens.toLocaleString()}</span>}
-                                        {result.temperature && <span>Temperature: {result.temperature}</span>}
-                                      </Space>
-                                    </div>
-                                  </Card>
-                                );
-                              })}
-                            </Space>
-                          </div>
-                        ),
-                      },
-                    ]}
-                  />
-                );
-              } else {
-                return (
-                  <Card 
-                    title="News Content" 
-                    size="small"
-                    style={{ borderColor: modalBorder }}
-                    headStyle={{ backgroundColor: modalHeadBgAlt, fontWeight: 'bold', color: modalText, borderColor: modalBorder }}
-                  >
-                    <div style={{ fontSize: '14px', lineHeight: '1.8', color: modalText }}>
-                      {selectedNewsForAnalysis.content 
-                        ? highlightKeywords(selectedNewsForAnalysis.content)
-                        : 'No content available'}
-                    </div>
-                  </Card>
-                );
-              }
-            })()}
-          </div>
-          );
-        })()}
-      </Modal>
+      {/* Daily 卡片预览抽屉 (news tab 点击卡片打开; item=null 时关闭) */}
+      <DailyPreviewDrawer
+        item={previewDailyItem}
+        items={newsData}
+        themeMode={themeMode}
+        placement="right"
+        onClose={() => setPreviewDailyItem(null)}
+        onNavigate={(next) => setPreviewDailyItem(next)}
+      />
     </ConfigProvider>
   );
 };

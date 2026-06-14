@@ -877,8 +877,11 @@ class DailyMarketReportService:
         """将 Markdown 转换为 HTML，用于嵌入报告模板。"""
         if not md_text:
             return ""
-        md = mistune.create_markdown()
-        return md(md_text)
+        import mistune.plugins.table as table_plugin
+
+        renderer = mistune.HTMLRenderer()
+        markdown_parser = mistune.Markdown(renderer, plugins=[table_plugin.table])
+        return markdown_parser(md_text)
 
     # ──────────────────────────────────────────
     # 本地文件保存
