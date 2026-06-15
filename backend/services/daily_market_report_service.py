@@ -392,11 +392,12 @@ _QUERY_COLUMNS = """
     sma_20_day, sma_50_day, sma_200_day, rsi_14
 """
 
-# Index Performers 配置：(模板 key, 显示名, finviz_screener.index_name 取值)
-# finviz 的 Index 列对道指使用 "DJIA"（非 "Dow Jones"）。
+# Index Performers 配置：(模板 key, 显示名, finviz index_name 中的匹配 token)
+# 注意：finviz 的 Index 列是「逗号分隔的多指数归属」字符串，例如 "NDX, S&P 500"，
+# 即一只股票可同时属于多个指数。token 用子串匹配：S&P 500 / NDX(=Nasdaq 100) / DJIA(=道指)。
 INDEX_PERFORMERS_SPEC = [
     ("sp500", "S&P 500", "S&P 500"),
-    ("ndx", "Nasdaq 100", "NASDAQ 100"),
+    ("ndx", "Nasdaq 100", "NDX"),
     ("djia", "Dow Jones", "DJIA"),
 ]
 _INDEX_PERIOD_KEYS = ("day", "week", "year")
@@ -475,38 +476,43 @@ def _compute_index_performers(cursor) -> Dict[str, Any]:
                         day_contrib, week_contrib, year_contrib, finviz_url}
     无数据时 panels 为空列表，模板会渲染兜底提示。
     """
-    finviz_index_names = [s[2] for s in INDEX_PERFORMERS_SPEC]
+    finviz_tokens = [s[2] for s in INDEX_PERFORMERS_SPEC]
+    # finviz 的 index_name 是逗号分隔的多指数归属串（如 "NDX, S&P 500"），
+    # 故用正则子串匹配命中任一目标指数；后续在 Python 里按 token 归类到各指数桶。
     cursor.execute(
         """
         SELECT ticker, index_name, market_cap,
                change_percent, performance_week, performance_year
         FROM finviz_screener
-        WHERE index_name = ANY(%s)
+        WHERE index_name ~ %s
           AND market_cap IS NOT NULL
         """,
-        (finviz_index_names,),
+        ("(" + "|".join(finviz_tokens) + ")",),
     )
     raw = cursor.fetchall()
 
-    # 按 finviz index_name 分组并解析数值
-    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    # 按 token 子串归类（一只股票可归入多个指数桶），并解析数值
+    grouped: Dict[str, List[Dict[str, Any]]] = {token: [] for token in finviz_tokens}
     for r in raw:
         ticker, idx_name, mc, chg, wk, yr = r
         market_cap = _parse_decimal(mc)
         if not market_cap or market_cap <= 0:
             continue
-        grouped.setdefault(idx_name, []).append({
+        member = {
             "ticker": ticker,
             "market_cap": market_cap,
             "day": _parse_pct(chg),
             "week": _parse_pct(wk),
             "year": _parse_pct(yr),
-        })
+        }
+        for token in finviz_tokens:
+            if idx_name and token in idx_name:
+                grouped[token].append(member)
 
     # 为每个指数计算权重与各周期贡献
     enriched_by_index: Dict[str, List[Dict[str, Any]]] = {}
-    for _key, _label, finviz_idx in INDEX_PERFORMERS_SPEC:
-        members = grouped.get(finviz_idx, [])
+    for _key, _label, token in INDEX_PERFORMERS_SPEC:
+        members = grouped.get(token, [])
         total_mc = sum(m["market_cap"] for m in members) or 1.0
         enriched = []
         for m in members:
@@ -523,7 +529,7 @@ def _compute_index_performers(cursor) -> Dict[str, Any]:
                 "year_contrib": (weight * year) if year is not None else None,
                 "finviz_url": f"https://elite.finviz.com/quote.ashx?t={m['ticker']}",
             })
-        enriched_by_index[finviz_idx] = enriched
+        enriched_by_index[token] = enriched
 
     # 构建 6 个 panel（period x mode）
     panels = []
@@ -533,9 +539,9 @@ def _compute_index_performers(cursor) -> Dict[str, Any]:
         for mode in _INDEX_MODES:
             sort_key = sort_key_return if mode == "return" else sort_key_contrib
             cols = []
-            for key, label, finviz_idx in INDEX_PERFORMERS_SPEC:
+            for key, label, token in INDEX_PERFORMERS_SPEC:
                 members = [
-                    e for e in enriched_by_index.get(finviz_idx, [])
+                    e for e in enriched_by_index.get(token, [])
                     if e.get(sort_key) is not None
                 ]
                 # Top: 降序取前 10；Bottom: 升序取前 10（最大跌幅/负贡献）
