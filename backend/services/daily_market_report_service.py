@@ -392,6 +392,16 @@ _QUERY_COLUMNS = """
     sma_20_day, sma_50_day, sma_200_day, rsi_14
 """
 
+# Index Performers 配置：(模板 key, 显示名, finviz_screener.index_name 取值)
+# finviz 的 Index 列对道指使用 "DJIA"（非 "Dow Jones"）。
+INDEX_PERFORMERS_SPEC = [
+    ("sp500", "S&P 500", "S&P 500"),
+    ("ndx", "Nasdaq 100", "NASDAQ 100"),
+    ("djia", "Dow Jones", "DJIA"),
+]
+_INDEX_PERIOD_KEYS = ("day", "week", "year")
+_INDEX_MODES = ("return", "weight")
+
 # 报告输出目录
 REPORTS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -443,6 +453,110 @@ def _build_row(raw: tuple) -> Dict[str, Any]:
         "sma50": _parse_decimal(raw[9]),
         "sma200": _parse_decimal(raw[10]),
         "rsi": _parse_decimal(raw[11]),
+    }
+
+
+def _compute_index_performers(cursor) -> Dict[str, Any]:
+    """
+    计算 Index Performers 区段数据：S&P 500 / Nasdaq 100 / Dow Jones 三个指数
+    的 Top/Bottom 成分股，按 return（涨跌幅）或 weight contribution
+    （权重 × 收益）排名，覆盖 Day/Week/Year 三个周期。数据全部来自 finviz_screener。
+
+    返回结构:
+      {
+        "indices": [{"key","label"}, ...],
+        "panels": [
+          {"period","mode","sort_key","cols":[
+              {"index_key","index_label","top":[...],"bottom":[...]}, ... 3 个指数
+          ]}, ... 6 个 panel (period x mode)
+        ]
+      }
+    每个 performer 行: {ticker, weight, day, week, year,
+                        day_contrib, week_contrib, year_contrib, finviz_url}
+    无数据时 panels 为空列表，模板会渲染兜底提示。
+    """
+    finviz_index_names = [s[2] for s in INDEX_PERFORMERS_SPEC]
+    cursor.execute(
+        """
+        SELECT ticker, index_name, market_cap,
+               change_percent, performance_week, performance_year
+        FROM finviz_screener
+        WHERE index_name = ANY(%s)
+          AND market_cap IS NOT NULL
+        """,
+        (finviz_index_names,),
+    )
+    raw = cursor.fetchall()
+
+    # 按 finviz index_name 分组并解析数值
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for r in raw:
+        ticker, idx_name, mc, chg, wk, yr = r
+        market_cap = _parse_decimal(mc)
+        if not market_cap or market_cap <= 0:
+            continue
+        grouped.setdefault(idx_name, []).append({
+            "ticker": ticker,
+            "market_cap": market_cap,
+            "day": _parse_pct(chg),
+            "week": _parse_pct(wk),
+            "year": _parse_pct(yr),
+        })
+
+    # 为每个指数计算权重与各周期贡献
+    enriched_by_index: Dict[str, List[Dict[str, Any]]] = {}
+    for _key, _label, finviz_idx in INDEX_PERFORMERS_SPEC:
+        members = grouped.get(finviz_idx, [])
+        total_mc = sum(m["market_cap"] for m in members) or 1.0
+        enriched = []
+        for m in members:
+            weight = m["market_cap"] / total_mc
+            day, week, year = m["day"], m["week"], m["year"]
+            enriched.append({
+                "ticker": m["ticker"],
+                "weight": weight,
+                "day": day,
+                "week": week,
+                "year": year,
+                "day_contrib": (weight * day) if day is not None else None,
+                "week_contrib": (weight * week) if week is not None else None,
+                "year_contrib": (weight * year) if year is not None else None,
+                "finviz_url": f"https://elite.finviz.com/quote.ashx?t={m['ticker']}",
+            })
+        enriched_by_index[finviz_idx] = enriched
+
+    # 构建 6 个 panel（period x mode）
+    panels = []
+    for period in _INDEX_PERIOD_KEYS:
+        sort_key_return = period                 # return 模式：按该周期收益排名
+        sort_key_contrib = f"{period}_contrib"   # weight 模式：按该周期贡献排名
+        for mode in _INDEX_MODES:
+            sort_key = sort_key_return if mode == "return" else sort_key_contrib
+            cols = []
+            for key, label, finviz_idx in INDEX_PERFORMERS_SPEC:
+                members = [
+                    e for e in enriched_by_index.get(finviz_idx, [])
+                    if e.get(sort_key) is not None
+                ]
+                # Top: 降序取前 10；Bottom: 升序取前 10（最大跌幅/负贡献）
+                top = sorted(members, key=lambda e: e[sort_key], reverse=True)[:10]
+                bottom = sorted(members, key=lambda e: e[sort_key])[:10]
+                cols.append({
+                    "index_key": key,
+                    "index_label": label,
+                    "top": top,
+                    "bottom": bottom,
+                })
+            panels.append({
+                "period": period,
+                "mode": mode,
+                "sort_key": sort_key,
+                "cols": cols,
+            })
+
+    return {
+        "indices": [{"key": k, "label": l} for k, l, _ in INDEX_PERFORMERS_SPEC],
+        "panels": panels,
     }
 
 
@@ -622,6 +736,11 @@ class DailyMarketReportService:
             chart_tickers_found = sum(1 for v in chart_data.values() if v)
             logger.info(f"Chart data: {chart_tickers_found}/{len(ALL_TICKERS)} tickers have OHLCV data")
 
+            # 4a. 计算 Index Performers（S&P 500 / Nasdaq 100 / Dow Jones Top/Bottom）
+            index_performers = _compute_index_performers(cursor)
+            _ip_found = len(index_performers["panels"][0]["cols"][0]["top"]) if index_performers["panels"] else 0
+            logger.info(f"Index Performers: S&P 500 day/return top={_ip_found}")
+
             # 4b. 查询 Bloomberg The Close Summary
             cursor.execute(
                 """
@@ -726,6 +845,7 @@ class DailyMarketReportService:
                 us_sector=us_sector,
                 thematic=thematic,
                 chart_data=chart_data,
+                index_performers=index_performers,
                 the_close_html=the_close_html,
                 closing_bell_html=closing_bell_html,
                 my_subscriptions_html=my_subscriptions_html,
@@ -816,6 +936,7 @@ class DailyMarketReportService:
         us_sector: List[Dict],
         thematic: List[Dict],
         chart_data: Dict[str, List[Dict[str, Any]]],
+        index_performers: Dict[str, Any],
         the_close_html: str = "",
         closing_bell_html: str = "",
         my_subscriptions_html: str = "",
@@ -837,6 +958,14 @@ class DailyMarketReportService:
             cls = "val-pos" if v > 0 else ("val-neg" if v < 0 else "val-neutral")
             return Markup(f'<span class="{cls}">{sign}{v:.2f}%</span>')
 
+        def _fmt_pct3(v):
+            # 3 位小数版本，用于 Index Performers 的 contribution 列（量级常 < 0.1%）
+            if v is None:
+                return Markup('<span class="val-na">N/A</span>')
+            sign = "+" if v >= 0 else ""
+            cls = "val-pos" if v > 0 else ("val-neg" if v < 0 else "val-neutral")
+            return Markup(f'<span class="{cls}">{sign}{v:.3f}%</span>')
+
         def _fmt_price(v):
             if v is None:
                 return Markup('<span class="val-na">N/A</span>')
@@ -848,6 +977,7 @@ class DailyMarketReportService:
             return f"{v:.1f}"
 
         env.filters["fmt_pct"] = _fmt_pct
+        env.filters["fmt_pct3"] = _fmt_pct3
         env.filters["fmt_price"] = _fmt_price
         env.filters["fmt_rsi"] = _fmt_rsi
 
@@ -866,6 +996,7 @@ class DailyMarketReportService:
             us_assets_notes=US_ASSETS_NOTES,
             chart_data_json=json.dumps(chart_data),
             display_names_json=json.dumps(DISPLAY_NAMES),
+            index_performers=index_performers,
             the_close_html=the_close_html,
             closing_bell_html=closing_bell_html,
             my_subscriptions_html=my_subscriptions_html,

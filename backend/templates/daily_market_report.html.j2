@@ -390,6 +390,95 @@ tbody tr:hover { background: var(--bg-hover); }
 tbody tr.chart-row { cursor: pointer; }
 tbody tr.chart-active { background: var(--bg-hover); }
 
+/* === INDEX PERFORMERS === */
+.contrib-controls {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.contrib-btn-group { display: flex; gap: 4px; }
+.contrib-controls .chart-range-btn { padding: 3px 10px; font-size: 0.72rem; }
+.contrib-panel { margin-top: 14px; }
+.contrib-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+}
+.contrib-column {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 10px 12px 12px;
+    box-shadow: var(--shadow-card);
+}
+.contrib-column-header {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: center;
+    padding-bottom: 8px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.contrib-table-title {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    margin: 10px 0 4px;
+}
+.contrib-table-title.top { color: var(--color-pos); }
+.contrib-table-title.bottom { color: var(--color-neg); }
+.contrib-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
+.contrib-table thead tr { background: transparent; }
+.contrib-table th {
+    padding: 5px 6px;
+    text-align: right;
+    font-size: 0.66rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: default;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-hover);
+}
+.contrib-table th:first-child { text-align: left; }
+.contrib-table th:hover { background: var(--bg-hover); }
+.contrib-table td {
+    padding: 5px 6px;
+    text-align: right;
+    font-size: 11px;
+    border-bottom: 1px solid var(--border-subtle);
+    white-space: nowrap;
+}
+.contrib-table td.col-ticker {
+    text-align: left;
+    font-weight: 600;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+.contrib-table td.col-ticker a { color: var(--text-primary); text-decoration: none; }
+.contrib-table td.col-ticker a:hover { text-decoration: underline; }
+.contrib-row-data.hide-count { display: none; }
+.ip-empty {
+    padding: 18px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+}
+@media (max-width: 900px) {
+    .contrib-row { grid-template-columns: 1fr; }
+}
+
 /* === PERFORMANCE CHARTS TAB === */
 .perf-section { margin-bottom: 24px; }
 .perf-section:last-child { margin-bottom: 0; }
@@ -853,6 +942,77 @@ tbody tr.chart-active { background: var(--bg-hover); }
         {% endfor %}
         </div>
     </div>
+</div>
+
+{# ── Index Performers Section ── #}
+<div class="market-section" id="section-index-performers">
+    <div class="perf-section-header">
+        <span class="perf-section-title">Index Performers</span>
+        <div class="contrib-controls">
+            <div class="contrib-btn-group" id="contrib-mode">
+                <button type="button" class="chart-range-btn active" onclick="setContribMode('return',this)">Return</button>
+                <button type="button" class="chart-range-btn" onclick="setContribMode('weight',this)">Weight</button>
+            </div>
+            <div class="contrib-btn-group" id="contrib-period">
+                <button type="button" class="chart-range-btn active" onclick="setContribPeriod('day',this)">Day</button>
+                <button type="button" class="chart-range-btn" onclick="setContribPeriod('week',this)">Week</button>
+                <button type="button" class="chart-range-btn" onclick="setContribPeriod('year',this)">Year</button>
+            </div>
+            <div class="contrib-btn-group" id="contrib-count">
+                <button type="button" class="chart-range-btn active" onclick="setContribCount(5,this)">Top 5</button>
+                <button type="button" class="chart-range-btn" onclick="setContribCount(10,this)">Top 10</button>
+            </div>
+        </div>
+    </div>
+
+    {% macro ip_table(rows, mode) %}
+    <table class="contrib-table">
+        {% if mode == 'return' %}
+        <thead><tr><th>Ticker</th><th>Return</th><th>Week</th><th>Year</th></tr></thead>
+        {% else %}
+        <thead><tr><th>Ticker</th><th>Weight</th><th>Return</th><th>Contrib</th><th>Week</th><th>W.Contrib</th></tr></thead>
+        {% endif %}
+        <tbody>
+        {% for r in rows %}
+            <tr class="contrib-row-data{% if loop.index0 >= 5 %} hide-count{% endif %}">
+                <td class="col-ticker"><a href="{{ r.finviz_url }}" target="_blank" rel="noopener">{{ r.ticker }}</a></td>
+                {% if mode == 'return' %}
+                    <td data-val="{{ r.day }}">{{ r.day|fmt_pct }}</td>
+                    <td data-val="{{ r.week }}">{{ r.week|fmt_pct }}</td>
+                    <td data-val="{{ r.year }}">{{ r.year|fmt_pct }}</td>
+                {% else %}
+                    <td>{{ "%.2f"|format(r.weight * 100) }}%</td>
+                    <td data-val="{{ r.day }}">{{ r.day|fmt_pct }}</td>
+                    <td data-val="{{ r.day_contrib }}">{{ r.day_contrib|fmt_pct3 }}</td>
+                    <td data-val="{{ r.week }}">{{ r.week|fmt_pct }}</td>
+                    <td data-val="{{ r.week_contrib }}">{{ r.week_contrib|fmt_pct3 }}</td>
+                {% endif %}
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endmacro %}
+
+    {% set _ip_has_data = index_performers and index_performers.panels and index_performers.panels[0].cols and index_performers.panels[0].cols[0].top %}
+    {% if not _ip_has_data %}
+        <div class="ip-empty">Index membership data not yet available — pending Finviz data refresh.</div>
+    {% else %}
+    {% for panel in index_performers.panels %}
+    <div class="contrib-panel" data-period="{{ panel.period }}" data-mode="{{ panel.mode }}"{% if not (panel.period == 'day' and panel.mode == 'return') %} style="display:none;"{% endif %}>
+        <div class="contrib-row">
+            {% for col in panel.cols %}
+            <div class="contrib-column">
+                <div class="contrib-column-header">{{ col.index_label }}</div>
+                <div class="contrib-table-title top">Top <span class="contrib-count">5</span> {{ 'Contributors' if panel.mode == 'weight' else 'Performers' }}</div>
+                {{ ip_table(col.top, panel.mode) }}
+                <div class="contrib-table-title bottom">Bottom <span class="contrib-count">5</span> {{ 'Contributors' if panel.mode == 'weight' else 'Performers' }}</div>
+                {{ ip_table(col.bottom, panel.mode) }}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+    {% endif %}
 </div>
 
 {# ── Performance Charts Section ── #}
@@ -1534,6 +1694,42 @@ function setPerfRange(group, range, btn) {
 
     renderPerfSection(group);
 }
+
+// === Index Performers toggles ===
+const contribState = { period: 'day', mode: 'return', count: 5 };
+
+function setContribMode(mode, btn) {
+    contribState.mode = mode;
+    document.querySelectorAll('#contrib-mode .chart-range-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderContrib();
+}
+function setContribPeriod(period, btn) {
+    contribState.period = period;
+    document.querySelectorAll('#contrib-period .chart-range-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderContrib();
+}
+function setContribCount(count, btn) {
+    contribState.count = count;
+    document.querySelectorAll('#contrib-count .chart-range-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderContrib();
+}
+function renderContrib() {
+    const section = document.getElementById('section-index-performers');
+    if (!section) return;
+    section.querySelectorAll('.contrib-panel').forEach(p => {
+        const show = (p.dataset.period === contribState.period && p.dataset.mode === contribState.mode);
+        p.style.display = show ? '' : 'none';
+    });
+    section.querySelectorAll('.contrib-row-data.hide-count').forEach(r => {
+        r.style.display = contribState.count === 10 ? '' : 'none';
+    });
+    section.querySelectorAll('.contrib-count').forEach(el => { el.textContent = contribState.count; });
+}
+// 初始化：使默认 panel 显隐与计数一致
+renderContrib();
 
 </script>
 
