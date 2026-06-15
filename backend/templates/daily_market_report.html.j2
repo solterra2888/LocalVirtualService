@@ -944,6 +944,73 @@ tbody tr.chart-active { background: var(--bg-hover); }
     </div>
 </div>
 
+{# ── Performance Charts Section ── #}
+<div class="market-section" id="section-performance">
+
+    <div class="perf-section">
+        <div class="perf-section-header">
+            <span class="perf-section-title">US Index ETFs</span>
+            <div class="perf-range-btns" id="perf-range-index">
+                <button class="chart-range-btn active" data-range="6m" onclick="setPerfRange('index','6m',this)">6M</button>
+                <button class="chart-range-btn" data-range="ytd" onclick="setPerfRange('index','ytd',this)">YTD</button>
+            </div>
+        </div>
+        <div class="perf-viewer">
+            <div class="chart-container" id="chart-container-perf-index"></div>
+        </div>
+        <div class="perf-legend" id="perf-legend-index"></div>
+        <div class="notes-section">
+            <div class="notes-toggle" onclick="toggleNotes('perf-notes-index')">
+                <span>📖 ETF 说明（点击展开）</span>
+                <span class="toggle-arrow">▼</span>
+            </div>
+            <div class="notes-content" id="perf-notes-index">
+            {% for ticker in ['SPY', 'QQQ', 'IWM', 'DIA', 'RSP'] %}
+            {% set note = us_assets_notes.get(ticker) %}
+            {% if note %}
+                <div class="note-item">
+                    <div class="note-title"><span class="note-ticker">{{ ticker }}</span>（{{ note.name }}）：代表"{{ note.represents }}"</div>
+                    <div class="note-detail"><strong>跟踪标的：</strong>{{ note.index }}<br><strong>特点：</strong>{{ note.description }}</div>
+                </div>
+            {% endif %}
+            {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="perf-section">
+        <div class="perf-section-header">
+            <span class="perf-section-title">US Sector ETFs</span>
+            <div class="perf-range-btns" id="perf-range-sector">
+                <button class="chart-range-btn active" data-range="6m" onclick="setPerfRange('sector','6m',this)">6M</button>
+                <button class="chart-range-btn" data-range="ytd" onclick="setPerfRange('sector','ytd',this)">YTD</button>
+            </div>
+        </div>
+        <div class="perf-viewer">
+            <div class="chart-container" id="chart-container-perf-sector"></div>
+        </div>
+        <div class="perf-legend" id="perf-legend-sector"></div>
+        <div class="notes-section">
+            <div class="notes-toggle" onclick="toggleNotes('perf-notes-sector')">
+                <span>📖 ETF 说明（点击展开）</span>
+                <span class="toggle-arrow">▼</span>
+            </div>
+            <div class="notes-content" id="perf-notes-sector">
+            {% for ticker in ['XLC', 'XLY', 'XLP', 'XLE', 'XLF', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLK', 'XLU'] %}
+            {% set note = sector_notes.get(ticker) %}
+            {% if note %}
+                <div class="note-item">
+                    <div class="note-title"><span class="note-ticker">{{ ticker }}</span>（{{ note.name }} ETF）：代表"{{ note.represents }}"</div>
+                    <div class="note-detail"><strong>追踪指数：</strong>{{ note.index }}<br><strong>特点：</strong>{{ note.description }}</div>
+                </div>
+            {% endif %}
+            {% endfor %}
+            </div>
+        </div>
+    </div>
+
+</div>
+
 {# ── Index Performers Section ── #}
 <div class="market-section" id="section-index-performers">
     <div class="perf-section-header">
@@ -1013,73 +1080,6 @@ tbody tr.chart-active { background: var(--bg-hover); }
     </div>
     {% endfor %}
     {% endif %}
-</div>
-
-{# ── Performance Charts Section ── #}
-<div class="market-section" id="section-performance">
-
-    <div class="perf-section">
-        <div class="perf-section-header">
-            <span class="perf-section-title">US Index ETFs</span>
-            <div class="perf-range-btns" id="perf-range-index">
-                <button class="chart-range-btn active" data-range="6m" onclick="setPerfRange('index','6m',this)">6M</button>
-                <button class="chart-range-btn" data-range="ytd" onclick="setPerfRange('index','ytd',this)">YTD</button>
-            </div>
-        </div>
-        <div class="perf-viewer">
-            <div class="chart-container" id="chart-container-perf-index"></div>
-        </div>
-        <div class="perf-legend" id="perf-legend-index"></div>
-        <div class="notes-section">
-            <div class="notes-toggle" onclick="toggleNotes('perf-notes-index')">
-                <span>📖 ETF 说明（点击展开）</span>
-                <span class="toggle-arrow">▼</span>
-            </div>
-            <div class="notes-content" id="perf-notes-index">
-            {% for ticker in ['SPY', 'QQQ', 'IWM', 'DIA', 'RSP'] %}
-            {% set note = us_assets_notes.get(ticker) %}
-            {% if note %}
-                <div class="note-item">
-                    <div class="note-title"><span class="note-ticker">{{ ticker }}</span>（{{ note.name }}）：代表"{{ note.represents }}"</div>
-                    <div class="note-detail"><strong>跟踪标的：</strong>{{ note.index }}<br><strong>特点：</strong>{{ note.description }}</div>
-                </div>
-            {% endif %}
-            {% endfor %}
-            </div>
-        </div>
-    </div>
-
-    <div class="perf-section">
-        <div class="perf-section-header">
-            <span class="perf-section-title">US Sector ETFs</span>
-            <div class="perf-range-btns" id="perf-range-sector">
-                <button class="chart-range-btn active" data-range="6m" onclick="setPerfRange('sector','6m',this)">6M</button>
-                <button class="chart-range-btn" data-range="ytd" onclick="setPerfRange('sector','ytd',this)">YTD</button>
-            </div>
-        </div>
-        <div class="perf-viewer">
-            <div class="chart-container" id="chart-container-perf-sector"></div>
-        </div>
-        <div class="perf-legend" id="perf-legend-sector"></div>
-        <div class="notes-section">
-            <div class="notes-toggle" onclick="toggleNotes('perf-notes-sector')">
-                <span>📖 ETF 说明（点击展开）</span>
-                <span class="toggle-arrow">▼</span>
-            </div>
-            <div class="notes-content" id="perf-notes-sector">
-            {% for ticker in ['XLC', 'XLY', 'XLP', 'XLE', 'XLF', 'XLV', 'XLI', 'XLB', 'XLRE', 'XLK', 'XLU'] %}
-            {% set note = sector_notes.get(ticker) %}
-            {% if note %}
-                <div class="note-item">
-                    <div class="note-title"><span class="note-ticker">{{ ticker }}</span>（{{ note.name }} ETF）：代表"{{ note.represents }}"</div>
-                    <div class="note-detail"><strong>追踪指数：</strong>{{ note.index }}<br><strong>特点：</strong>{{ note.description }}</div>
-                </div>
-            {% endif %}
-            {% endfor %}
-            </div>
-        </div>
-    </div>
-
 </div>
 
 </div>{# end panel-market-overview #}
