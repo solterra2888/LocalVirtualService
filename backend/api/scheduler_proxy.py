@@ -535,6 +535,35 @@ async def create_default_market_weekly_report_task_proxy(request: Request, curre
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建默认 Market Weekly Report 任务代理失败: {str(e)}")
 
+@router.post("/tasks/daily-market-report", summary="create daily market report task")
+async def create_daily_market_report_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建 Daily Market Report 定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post(
+            "/scheduler/tasks/daily-market-report", json_data=json_data, headers=auth_headers
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建 Daily Market Report 任务代理失败: {str(e)}")
+
+@router.post("/tasks/daily-market-report/default", summary="create default daily market report task")
+async def create_default_daily_market_report_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建默认 Daily Market Report 定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.post(
+            "/scheduler/tasks/daily-market-report/default", headers=auth_headers
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建默认 Daily Market Report 任务代理失败: {str(e)}")
+
 @router.post("/tasks/{task_id}/enable", summary="enable task")
 async def enable_task_proxy(request: Request, task_id: str, current_user=Depends(get_current_user)):
     """代理启用定时任务"""

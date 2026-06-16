@@ -76,6 +76,42 @@ class SchedulerService:
         
         logger.info("定时任务调度器服务初始化完成")
     
+    # ──────────────────────────────────────────────────────────────────
+    # Unix cron -> APScheduler day_of_week 转换
+    # Unix cron:  0/7=周日, 1=周一 … 6=周六
+    # APScheduler: 0=周一 … 6=周日
+    # 所有数据库 cron 表达式、前端默认值均按 Unix 语义书写；
+    # 构造 CronTrigger 前调用此方法统一转换，不改动存储值。
+    # ──────────────────────────────────────────────────────────────────
+    _UNIX_DOW_TO_APS: Dict[str, str] = {
+        "0": "sun", "1": "mon", "2": "tue", "3": "wed",
+        "4": "thu", "5": "fri", "6": "sat", "7": "sun",
+    }
+
+    @staticmethod
+    def _normalize_cron_dow(dow: str) -> str:
+        """Unix cron day_of_week(0/7=Sun) -> APScheduler 名称别名(mon-sun)。
+
+        支持 '*'、单值、范围 a-b、逗号列表；已是名称则透传(小写)。
+        含 '/'(步进)的写法保持原样——当前无任务使用，留待未来处理。
+        """
+        dow = dow.strip()
+        if dow == "*" or "/" in dow:
+            return dow
+
+        def _conv(tok: str) -> str:
+            tok = tok.strip()
+            if tok.isdigit():
+                return SchedulerService._UNIX_DOW_TO_APS.get(tok, tok)
+            if "-" in tok:
+                a, _, b = tok.partition("-")
+                a = SchedulerService._UNIX_DOW_TO_APS.get(a.strip(), a.strip().lower())
+                b = SchedulerService._UNIX_DOW_TO_APS.get(b.strip(), b.strip().lower())
+                return f"{a}-{b}"
+            return tok.lower()
+
+        return ",".join(_conv(t) for t in dow.split(","))
+
     async def start(self):
         """启动调度器 (幂等)
 
@@ -155,7 +191,9 @@ class SchedulerService:
                 raise ValueError("Cron表达式格式错误，应为: 分 时 日 月 星期")
             
             minute, hour, day, month, day_of_week = cron_parts
-            
+            # 将 Unix cron 星期编号转换为 APScheduler 名称别名（兼容 0=周日 惯例）
+            day_of_week = self._normalize_cron_dow(day_of_week)
+
             # 创建任务ID
             task_id = f"{task_type}_{task_name}_{int(datetime.now().timestamp())}"
             
@@ -1506,6 +1544,11 @@ class SchedulerService:
                 - force_fetch: 可选，是否强制获取（默认 False）
         """
         try:
+            from backend.tasks.subscription_tasks import (
+                fetch_podcast_subscription_task,
+                fetch_all_podcast_subscriptions_task,
+            )
+
             subscription_id = params.get('subscription_id')
             user_id = params.get('user_id')
             force_fetch = params.get('force_fetch', False)
@@ -1515,19 +1558,12 @@ class SchedulerService:
                     "分发 Podcast 单订阅 Celery 任务: subscription_id=%s, user_id=%s",
                     subscription_id, user_id,
                 )
-                from celery import send_task
-                task = send_task(
-                    'fetch_podcast_subscription',
-                    args=[subscription_id, user_id, force_fetch],
-                    queue='data_fetching',
+                task = fetch_podcast_subscription_task.delay(
+                    subscription_id, user_id, force_fetch,
                 )
             else:
                 logger.info("分发 Podcast 批量订阅 Celery 任务")
-                from celery import send_task
-                task = send_task(
-                    'fetch_all_podcast_subscriptions',
-                    queue='data_fetching',
-                )
+                task = fetch_all_podcast_subscriptions_task.delay()
 
             message = f"✅ Podcast 订阅抓取任务已提交: {task.id}"
             logger.info(message)
@@ -2719,7 +2755,9 @@ class SchedulerService:
                 cron_expression = task_config['cron_expression']
                 cron_parts = cron_expression.split()
                 minute, hour, day, month, day_of_week = cron_parts
-                
+                # 将 Unix cron 星期编号转换为 APScheduler 名称别名（兼容 0=周日 惯例）
+                day_of_week = self._normalize_cron_dow(day_of_week)
+
                 trigger = CronTrigger(
                     minute=minute,
                     hour=hour,
