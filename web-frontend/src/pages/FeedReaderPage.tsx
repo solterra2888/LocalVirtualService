@@ -1762,7 +1762,7 @@ const FeedReaderPageInner: React.FC = () => {
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center',
-              height: 'calc(100vh - 200px)'
+              height: '100%'
             }}>
               <Empty description="Select a feed to view contents" />
             </div>

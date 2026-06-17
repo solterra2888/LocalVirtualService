@@ -555,7 +555,7 @@ const DailyPageInner: React.FC = () => {
           >
         {/* 内容主区 */}
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100%' }}>
             <Spin size="large" />
           </div>
         ) : items.length === 0 ? (

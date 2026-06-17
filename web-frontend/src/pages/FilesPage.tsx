@@ -3415,7 +3415,7 @@ const FilesPageInner: React.FC = () => {
                 );
               })}
               {filteredExecutions.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '48px 20px', color: themeColors.textMuted }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 20px', color: themeColors.textMuted }}>
                   <FileTextOutlined style={{ fontSize: '48px', marginBottom: '16px', display: 'block' }} />
                   <div>{taskExecutions.length === 0 ? 'no file records' : 'no files match the current filter'}</div>
                 </div>

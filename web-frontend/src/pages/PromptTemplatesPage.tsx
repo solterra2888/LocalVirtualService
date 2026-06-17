@@ -433,7 +433,11 @@ const PromptTemplatesPageContent: React.FC = () => {
 
   // ── Render: System Templates — Scheduler Management 式左右分栏 + 行列表 ──
   const renderSystemList = () => {
-    if (sysLoading) return <Spin />;
+    if (sysLoading) return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 240 }}>
+        <Spin />
+      </div>
+    );
 
     const moduleConfigurableMap = new Map<string, boolean>(
       modules.map((m) => [m.module_code, m.configurable]),
@@ -908,18 +912,24 @@ const PromptTemplatesPageContent: React.FC = () => {
               </Space>
             ),
             children: (
-              <Spin spinning={myLoading}>
-                {!ownedItems.length && !myLoading && (
-                  <Empty description="未找到可编辑模板" />
-                )}
-                <Row gutter={[12, 12]}>
-                  {ownedItems.map((item) => (
-                    <Col xs={24} md={12} xl={8} key={item.module_code}>
-                      {renderMyCard(item)}
-                    </Col>
-                  ))}
-                </Row>
-              </Spin>
+              myLoading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 240 }}>
+                  <Spin />
+                </div>
+              ) : (
+                <>
+                  {!ownedItems.length && (
+                    <Empty description="未找到可编辑模板" />
+                  )}
+                  <Row gutter={[12, 12]}>
+                    {ownedItems.map((item) => (
+                      <Col xs={24} md={12} xl={8} key={item.module_code}>
+                        {renderMyCard(item)}
+                      </Col>
+                    ))}
+                  </Row>
+                </>
+              )
             ),
           },
           ...(isAdmin

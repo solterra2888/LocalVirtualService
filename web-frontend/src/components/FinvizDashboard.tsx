@@ -2392,9 +2392,15 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
 
           {!watchlistCollapsed && (
             <div className="watchlist-list-scroll">
-              <Spin spinning={loading || pricesLoading}>
-                {renderWatchlistList()}
-              </Spin>
+              {loading ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100%' }}>
+                  <Spin size="large" />
+                </div>
+              ) : (
+                <Spin spinning={pricesLoading}>
+                  {renderWatchlistList()}
+                </Spin>
+              )}
             </div>
           )}
 
