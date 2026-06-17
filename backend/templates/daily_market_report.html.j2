@@ -472,7 +472,6 @@ tbody tr.chart-active { background: var(--bg-hover); }
 }
 .contrib-table td.col-ticker a { color: var(--text-primary); text-decoration: none; }
 .contrib-table td.col-ticker a:hover { text-decoration: underline; }
-.contrib-row-data.hide-count { display: none; }
 .ip-empty {
     padding: 18px;
     text-align: center;
@@ -632,8 +631,8 @@ tbody tr.chart-active { background: var(--bg-hover); }
     .content { padding: 16px; }
     table { font-size: 11px; }
     th, td { padding: 7px 8px; }
-    .tab-nav { padding: 0 12px; }
-    .tab-btn { padding: 8px 12px; font-size: 0.82rem; }
+    .tab-nav { padding: 0 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .tab-btn { padding: 8px 12px; font-size: 0.82rem; white-space: nowrap; flex-shrink: 0; }
     .summary-content { padding: 16px 18px; }
     /* Keep the 13-column Market Overview tables at full width and swipe horizontally */
     .table-scroll > table { min-width: 720px; }
@@ -653,10 +652,10 @@ tbody tr.chart-active { background: var(--bg-hover); }
 </div>
 
 <div class="tab-nav">
-    <button class="tab-btn active" data-tab="home" onclick="switchTab('home')">Home</button>
-    <button class="tab-btn" data-tab="stockview" onclick="switchTab('stockview')">Stockview</button>
-    <button class="tab-btn" data-tab="my-subscription" onclick="switchTab('my-subscription')">My Subscription</button>
-    <button class="tab-btn" data-tab="market-overview" onclick="switchTab('market-overview')">Market Overview</button>
+    <button class="tab-btn active" data-tab="home" onclick="switchTab('home')">Close Brief</button>
+    <button class="tab-btn" data-tab="stockview" onclick="switchTab('stockview')">Stock Pulse</button>
+    <button class="tab-btn" data-tab="my-subscription" onclick="switchTab('my-subscription')">Feed Digest</button>
+    <button class="tab-btn" data-tab="market-overview" onclick="switchTab('market-overview')">Market Movers</button>
 </div>
 
 <div class="content">
@@ -1042,10 +1041,6 @@ tbody tr.chart-active { background: var(--bg-hover); }
                 <button type="button" class="chart-range-btn" onclick="setContribPeriod('week',this)">Week</button>
                 <button type="button" class="chart-range-btn" onclick="setContribPeriod('year',this)">Year</button>
             </div>
-            <div class="contrib-btn-group" id="contrib-count">
-                <button type="button" class="chart-range-btn active" onclick="setContribCount(5,this)">Top 5</button>
-                <button type="button" class="chart-range-btn" onclick="setContribCount(10,this)">Top 10</button>
-            </div>
         </div>
     </div>
 
@@ -1058,7 +1053,7 @@ tbody tr.chart-active { background: var(--bg-hover); }
         {% endif %}
         <tbody>
         {% for r in rows %}
-            <tr class="contrib-row-data{% if loop.index0 >= 5 %} hide-count{% endif %}">
+            <tr class="contrib-row-data">
                 <td class="col-ticker"><a href="{{ r.finviz_url }}" target="_blank" rel="noopener">{{ r.ticker }}</a></td>
                 {% if mode == 'return' %}
                     <td data-val="{{ r.day }}">{{ r.day|fmt_pct }}</td>
@@ -1087,9 +1082,9 @@ tbody tr.chart-active { background: var(--bg-hover); }
             {% for col in panel.cols %}
             <div class="contrib-column">
                 <div class="contrib-column-header">{{ col.index_label }}</div>
-                <div class="contrib-table-title top">Top <span class="contrib-count">5</span> {{ 'Contributors' if panel.mode == 'weight' else 'Performers' }}</div>
+                <div class="contrib-table-title top">Top 10 {{ 'Contributors' if panel.mode == 'weight' else 'Performers' }}</div>
                 {{ ip_table(col.top, panel.mode) }}
-                <div class="contrib-table-title bottom">Bottom <span class="contrib-count">5</span> {{ 'Contributors' if panel.mode == 'weight' else 'Performers' }}</div>
+                <div class="contrib-table-title bottom">Bottom 10 {{ 'Contributors' if panel.mode == 'weight' else 'Performers' }}</div>
                 {{ ip_table(col.bottom, panel.mode) }}
             </div>
             {% endfor %}
@@ -1104,8 +1099,9 @@ tbody tr.chart-active { background: var(--bg-hover); }
 </div>{# end content #}
 
 <div class="footer">
-    <p>Generated: {{ generated_at_utc }} | {{ generated_at_new_york }} | {{ generated_at_beijing }}</p>
-    <p>Data source: Finviz Elite | Powered by GuanHe Capital Research Platform</p>
+    <p>Generated: {{ generated_at_new_york }} | {{ generated_at_beijing }}</p>
+    <p>Data source: finviz, Bloomberg - The Close, CNBC - Closing Bell</p>
+    <p>Powered by GuanHe Capital Research Platform</p>
 </div>
 
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
@@ -1713,7 +1709,7 @@ function setPerfRange(group, range, btn) {
 }
 
 // === Index Performers toggles ===
-const contribState = { period: 'day', mode: 'return', count: 5 };
+const contribState = { period: 'day', mode: 'return' };
 
 function setContribMode(mode, btn) {
     contribState.mode = mode;
@@ -1727,12 +1723,6 @@ function setContribPeriod(period, btn) {
     btn.classList.add('active');
     renderContrib();
 }
-function setContribCount(count, btn) {
-    contribState.count = count;
-    document.querySelectorAll('#contrib-count .chart-range-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    renderContrib();
-}
 function renderContrib() {
     const section = document.getElementById('section-index-performers');
     if (!section) return;
@@ -1740,12 +1730,8 @@ function renderContrib() {
         const show = (p.dataset.period === contribState.period && p.dataset.mode === contribState.mode);
         p.style.display = show ? '' : 'none';
     });
-    section.querySelectorAll('.contrib-row-data.hide-count').forEach(r => {
-        r.style.display = contribState.count === 10 ? '' : 'none';
-    });
-    section.querySelectorAll('.contrib-count').forEach(el => { el.textContent = contribState.count; });
 }
-// 初始化：使默认 panel 显隐与计数一致
+// 初始化：使默认 panel 显隐一致（Top 10 / Bottom 10 全部默认显示）
 renderContrib();
 
 </script>
