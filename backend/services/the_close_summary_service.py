@@ -37,6 +37,18 @@ MAX_TRANSCRIPT_CHARS = 80000
 THE_CLOSE_TITLE_PATTERN = "%The Close%"
 
 
+# 占位摘要原因（无节目 / 无转录）——不作为幂等终态，允许后续重生成
+PLACEHOLDER_REASONS = {"no_video_found", "no_transcript"}
+
+
+def _is_placeholder_summary(existing: Dict[str, Any]) -> bool:
+    """判断已有 completed 记录是否为占位摘要（无内容），占位则允许重生成。"""
+    meta = existing.get("metadata") or {}
+    if isinstance(meta, dict):
+        return meta.get("reason") in PLACEHOLDER_REASONS
+    return False
+
+
 def is_bloomberg_the_close_video(
     title: Optional[str],
     show_name: Optional[str] = None,
@@ -86,10 +98,16 @@ class TheCloseSummaryService:
             f"window=[{window_start.isoformat()}, {resolved_end.isoformat()})"
         )
 
-        # 幂等检查：已存在且非强制时跳过
+        # 幂等检查：已存在且非强制时跳过。
+        # 占位摘要（no_video_found / no_transcript）不视为终态，
+        # 允许后续调度在内容就绪后重新生成，避免被空占位永久阻断。
         if not force:
             existing = self._get_existing_summary(report_date)
-            if existing and existing["status"] == "completed":
+            if (
+                existing
+                and existing["status"] == "completed"
+                and not _is_placeholder_summary(existing)
+            ):
                 logger.info(f"The Close 摘要已存在, 跳过: {report_date}")
                 return {
                     "success": True,
@@ -348,7 +366,7 @@ class TheCloseSummaryService:
         try:
             cursor.execute(
                 """
-                SELECT id, status, summary_content, video_id, updated_at
+                SELECT id, status, summary_content, video_id, updated_at, metadata
                 FROM the_close_summaries
                 WHERE report_date = %s
                 """,
@@ -362,6 +380,7 @@ class TheCloseSummaryService:
                     "summary_content": row[2],
                     "video_id": row[3],
                     "updated_at": row[4],
+                    "metadata": row[5],
                 }
             return None
         finally:

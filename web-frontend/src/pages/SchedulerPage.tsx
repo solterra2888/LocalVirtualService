@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card,
   Row,
@@ -47,7 +47,25 @@ import {
   LineChartOutlined,
   CalendarOutlined,
   FileTextOutlined,
+  HolderOutlined,
 } from '@ant-design/icons';
+import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
 import { getModalStyles } from '../utils/modalStyles';
@@ -57,7 +75,7 @@ import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import DataSourceConfigModal from '../components/DataSourceConfigModal';
 import TaskStatusModal from '../components/TaskStatusModal';
 
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
 const { RangePicker } = DatePicker;
 const { Option } = Select;
 const { useBreakpoint } = Grid;
@@ -124,6 +142,7 @@ interface DataSource {
   status: 'idle' | 'running' | 'success' | 'error';
   lastRun?: string;
   lastSuccess?: string;
+  sortOrder?: number;
   quickActions: QuickAction[];
 }
 
@@ -138,22 +157,53 @@ interface QuickAction {
 
 // News theme interface
 
+const SCHEDULER_ORDER_STORAGE_KEY = 'guanhe_scheduler_card_order';
 
+function getDefaultCategoryOrder(sources: DataSource[], category: SchedulerCategory): string[] {
+  return sources
+    .filter((s) => s.category === category)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+    .map((s) => s.id);
+}
 
+function mergeCategoryOrder(saved: string[] | undefined, defaults: string[]): string[] {
+  const defaultSet = new Set(defaults);
+  const validSaved = (saved ?? []).filter((id) => defaultSet.has(id));
+  const savedSet = new Set(validSaved);
+  return [...validSaved, ...defaults.filter((id) => !savedSet.has(id))];
+}
 
-const SchedulerPage: React.FC = () => {
-  const { themeMode } = useDashboardSettings();
-  const isDark = themeMode === 'dark';
-  const colors = THEME_COLORS[themeMode];
-  const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
-  const screens = useBreakpoint();
-  const isLgUp = !!screens?.lg;
-  const [dataSources, setDataSources] = useState<DataSource[]>([
+function loadCategoryOrders(sources: DataSource[]): Record<SchedulerCategory, string[]> {
+  const defaults: Record<SchedulerCategory, string[]> = {
+    data_fetch: getDefaultCategoryOrder(sources, 'data_fetch'),
+    report_generation: getDefaultCategoryOrder(sources, 'report_generation'),
+  };
+  try {
+    const raw = localStorage.getItem(SCHEDULER_ORDER_STORAGE_KEY);
+    if (!raw) {
+      return defaults;
+    }
+    const parsed = JSON.parse(raw) as Partial<Record<SchedulerCategory, string[]>>;
+    return {
+      data_fetch: mergeCategoryOrder(parsed.data_fetch, defaults.data_fetch),
+      report_generation: mergeCategoryOrder(parsed.report_generation, defaults.report_generation),
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveCategoryOrders(order: Record<SchedulerCategory, string[]>) {
+  localStorage.setItem(SCHEDULER_ORDER_STORAGE_KEY, JSON.stringify(order));
+}
+
+const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
     {
       id: 'twitter_subscription',
       name: 'Twitter Subscription Feed',
       type: 'twitter_subscription',
       category: 'data_fetch',
+      sortOrder: 10,
       description: 'Fetch tweets from subscribed Twitter authors (supports multi-user subscriptions)',
       enabled: true,
       status: 'idle',
@@ -173,6 +223,7 @@ const SchedulerPage: React.FC = () => {
       name: 'YouTube Subscription Feed',
       type: 'youtube_subscription',
       category: 'data_fetch',
+      sortOrder: 20,
       description: 'Fetch videos from subscribed YouTube channels via RSS (supports multi-user subscriptions)',
       enabled: true,
       status: 'idle',
@@ -192,6 +243,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Podcast Subscription Feed',
       type: 'podcast_subscription',
       category: 'data_fetch',
+      sortOrder: 30,
       description: 'Fetch episodes from subscribed Podcast RSS feeds and auto-transcribe recent episodes (supports multi-user subscriptions)',
       enabled: true,
       status: 'idle',
@@ -211,6 +263,7 @@ const SchedulerPage: React.FC = () => {
       name: 'News Feed (My Feeds)',
       type: 'news_feed',
       category: 'data_fetch',
+      sortOrder: 40,
       description: 'Fetch EODHD news and distribute to My Feeds subscriptions (Yahoo Finance, CNBC, Seeking Alpha, etc.)',
       enabled: true,
       status: 'idle',
@@ -230,6 +283,7 @@ const SchedulerPage: React.FC = () => {
       name: '知识星球 Subscription Feed',
       type: 'zhishixingqiu_subscription',
       category: 'data_fetch',
+      sortOrder: 50,
       description: '定时从订阅的知识星球抓取最新话题，写入 My Feeds（支持多用户共享同一星球内容，Cookie 集中管理）',
       enabled: true,
       status: 'idle',
@@ -249,6 +303,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Twitter Daily Report',
       type: 'twitter_author_summary',
       category: 'report_generation',
+      sortOrder: 10,
       description: 'Schedule automatic Twitter Daily Report generation. Runs the full pipeline: pre-generates per-author summaries (shared across users), then synthesizes personalized daily reports for each subscriber.',
       enabled: true,
       status: 'idle',
@@ -268,6 +323,7 @@ const SchedulerPage: React.FC = () => {
       name: 'YouTube Daily Report',
       type: 'youtube_author_summary',
       category: 'report_generation',
+      sortOrder: 20,
       description: 'Schedule automatic YouTube Daily Report generation. Runs the full pipeline: pre-generates per-channel summaries (shared across users), then synthesizes personalized daily reports for each subscriber.',
       enabled: true,
       status: 'idle',
@@ -287,6 +343,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Theme Report',
       type: 'theme_report',
       category: 'report_generation',
+      sortOrder: 30,
       description: 'Pre-generate Theme Report static HTML for all users with Theme Report tagged themes (saved to OSS).',
       enabled: true,
       status: 'idle',
@@ -306,6 +363,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Market Weekly Report',
       type: 'market_weekly_report',
       category: 'report_generation',
+      sortOrder: 40,
       description: 'Pre-generate Market Weekly Report static HTML for all users with Market Weekly tagged themes (indices, sectors, forex, commodities, bonds WoW performance, AI themes, economic calendar).',
       enabled: true,
       status: 'idle',
@@ -325,6 +383,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Daily Market Report',
       type: 'daily_market_report',
       category: 'report_generation',
+      sortOrder: 50,
       description: 'Pre-generate Daily Market Report (Home/Stockview/My Subscription/Market Overview) static HTML for all users.',
       enabled: true,
       status: 'idle',
@@ -344,6 +403,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Bloomberg The Close Summary',
       type: 'the_close_summary',
       category: 'report_generation',
+      sortOrder: 60,
       description: 'Generate daily PM Brief summary from Bloomberg Television "The Close" episode transcript (8-section structured markdown).',
       enabled: true,
       status: 'idle',
@@ -363,6 +423,7 @@ const SchedulerPage: React.FC = () => {
       name: 'CNBC Closing Bell Summary',
       type: 'cnbc_closing_bell',
       category: 'report_generation',
+      sortOrder: 70,
       description: 'Generate daily Stock News summary from CNBC "Closing Bell" episode transcript (6-section structured markdown).',
       enabled: true,
       status: 'idle',
@@ -382,6 +443,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Zhishixingqiu Daily Summary',
       type: 'zhishixingqiu_summary',
       category: 'report_generation',
+      sortOrder: 80,
       description: 'Generate daily aggregated summary from all subscribed Zhishixingqiu groups, organized by group (global single report).',
       enabled: true,
       status: 'idle',
@@ -401,6 +463,7 @@ const SchedulerPage: React.FC = () => {
       name: 'EODHD Stock Prices',
       type: 'eodhd_stock_prices',
       category: 'data_fetch',
+      sortOrder: 60,
       description: 'Get real-time stock prices for watchlist stocks from EODHD API',
       enabled: true,
       status: 'idle',
@@ -420,6 +483,7 @@ const SchedulerPage: React.FC = () => {
       name: 'EODHD EOD Stock Prices',
       type: 'eodhd_eod_stock_prices',
       category: 'data_fetch',
+      sortOrder: 70,
       description: 'Get historical EOD (End of Day) stock prices for watchlist and theme associated stocks from EODHD API',
       enabled: true,
       status: 'idle',
@@ -440,6 +504,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Market Data (Indices, Forex, Commodities, Bonds, Sectors)',
       type: 'market_data',
       category: 'data_fetch',
+      sortOrder: 80,
       description: 'Get real-time and historical market data from EODHD API (32 assets: indices, forex, commodities, bond yields, sectors)',
       enabled: true,
       status: 'idle',
@@ -459,6 +524,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Earnings Calendar',
       type: 'earnings_calendar',
       category: 'data_fetch',
+      sortOrder: 90,
       description: 'Get US earnings calendar from EODHD API (no S&P 500 filtering, all US stocks)',
       enabled: true,
       status: 'idle',
@@ -478,6 +544,7 @@ const SchedulerPage: React.FC = () => {
       name: 'IPO Calendar',
       type: 'ipo_calendar',
       category: 'data_fetch',
+      sortOrder: 100,
       description: 'Get IPO calendar data from EODHD API for US and HK exchanges',
       enabled: true,
       status: 'idle',
@@ -497,6 +564,7 @@ const SchedulerPage: React.FC = () => {
       name: 'EODHD Economic Events',
       type: 'eodhd_events',
       category: 'data_fetch',
+      sortOrder: 110,
       description: 'Get economic calendar event data from EODHD API',
       enabled: true,
       status: 'idle',
@@ -516,6 +584,7 @@ const SchedulerPage: React.FC = () => {
       name: 'EODHD Macro Indicators',
       type: 'eodhd_macro',
       category: 'data_fetch',
+      sortOrder: 120,
       description: 'Get macroeconomic indicator data from EODHD API',
       enabled: true,
       status: 'idle',
@@ -534,6 +603,7 @@ const SchedulerPage: React.FC = () => {
       name: 'EODHD Fundamentals',
       type: 'eodhd_fundamentals',
       category: 'data_fetch',
+      sortOrder: 130,
       description: 'Manually get company fundamentals data from EODHD',
       enabled: true,
       status: 'idle',
@@ -553,6 +623,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Finviz Screener',
       type: 'finviz_screener',
       category: 'data_fetch',
+      sortOrder: 140,
       description: 'Comprehensive stock screener data from Finviz with technical and fundamental metrics',
       enabled: true,
       status: 'idle',
@@ -572,6 +643,7 @@ const SchedulerPage: React.FC = () => {
       name: 'Watchlist Fundamentals',
       type: 'watchlist_fundamentals',
       category: 'data_fetch',
+      sortOrder: 150,
       description: 'Automatically update fundamentals data for all watchlist stocks (weekly)',
       enabled: true,
       status: 'idle',
@@ -586,7 +658,19 @@ const SchedulerPage: React.FC = () => {
         }
       ]
     }
-  ]);
+];
+
+const SchedulerPage: React.FC = () => {
+  const { themeMode } = useDashboardSettings();
+  const isDark = themeMode === 'dark';
+  const colors = THEME_COLORS[themeMode];
+  const cardStyle = isDark ? CARD_STYLE_BEHANCE_DARK : CARD_STYLE_BEHANCE;
+  const screens = useBreakpoint();
+  const isLgUp = !!screens?.lg;
+  const [dataSources, setDataSources] = useState<DataSource[]>(INITIAL_SCHEDULER_DATA_SOURCES);
+  const [categoryOrder, setCategoryOrder] = useState<Record<SchedulerCategory, string[]>>(() =>
+    loadCategoryOrders(INITIAL_SCHEDULER_DATA_SOURCES)
+  );
 
   const [loading, setLoading] = useState(false);
   const [quickActionModal, setQuickActionModal] = useState<{
@@ -1142,10 +1226,64 @@ const SchedulerPage: React.FC = () => {
   const enabledSources = dataSources.filter(s => s.enabled).length;
   const runningSources = dataSources.filter(s => s.status === 'running').length;
   const enabledTasks = scheduledTasks.filter(t => t.enabled).length;
-  const dataFetchSources = dataSources.filter((s) => s.category === 'data_fetch');
-  const reportGenerationSources = dataSources.filter((s) => s.category === 'report_generation');
 
-  const renderSchedulerListItem = (source: DataSource, index: number, columnLength: number) => {
+  const orderSourcesByCategory = useCallback((category: SchedulerCategory) => {
+    const byId = new Map(
+      dataSources.filter((s) => s.category === category).map((s) => [s.id, s])
+    );
+    return categoryOrder[category]
+      .map((id) => byId.get(id))
+      .filter((s): s is DataSource => !!s);
+  }, [categoryOrder, dataSources]);
+
+  const dataFetchSources = useMemo(
+    () => orderSourcesByCategory('data_fetch'),
+    [orderSourcesByCategory]
+  );
+  const reportGenerationSources = useMemo(
+    () => orderSourcesByCategory('report_generation'),
+    [orderSourcesByCategory]
+  );
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleCategoryDragEnd = (category: SchedulerCategory) => (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) {
+      return;
+    }
+    setCategoryOrder((prev) => {
+      const items = prev[category];
+      const oldIndex = items.indexOf(String(active.id));
+      const newIndex = items.indexOf(String(over.id));
+      if (oldIndex < 0 || newIndex < 0) {
+        return prev;
+      }
+      const next = {
+        ...prev,
+        [category]: arrayMove(items, oldIndex, newIndex),
+      };
+      saveCategoryOrders(next);
+      return next;
+    });
+  };
+
+  const SchedulerListItem: React.FC<{
+    source: DataSource;
+    index: number;
+    columnLength: number;
+  }> = ({ source, index, columnLength }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: source.id });
     const cronInfo = getCronInfo(source.id);
     const formattedParams = cronInfo ? formatTaskParams(source.id, cronInfo.params) : null;
     const configContent = cronInfo ? (
@@ -1185,25 +1323,63 @@ const SchedulerPage: React.FC = () => {
 
     return (
       <div
-        key={source.id}
+        ref={setNodeRef}
         style={{
           display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: 16,
-          padding: '16px 24px',
+          alignItems: 'stretch',
+          minHeight: 118,
+          transform: CSS.Transform.toString(transform),
+          transition,
+          opacity: isDragging ? 0.65 : source.enabled ? 1 : 0.65,
+          backgroundColor: isDragging
+            ? (isDark ? colors.hoverBg ?? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.02)')
+            : 'transparent',
           borderBottom: index < columnLength - 1 ? `1px solid ${colors.cardBorder}` : 'none',
-          backgroundColor: 'transparent',
-          transition: 'background-color 0.2s',
-          opacity: source.enabled ? 1 : 0.65,
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = isDark ? colors.hoverBg ?? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.02)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.backgroundColor = 'transparent';
         }}
       >
+        <Tooltip title="拖拽排序">
+          <div
+            {...attributes}
+            {...listeners}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 36,
+              flexShrink: 0,
+              cursor: isDragging ? 'grabbing' : 'grab',
+              color: colors.textSecondary,
+              touchAction: 'none',
+            }}
+          >
+            <HolderOutlined style={{ fontSize: 16 }} />
+          </div>
+        </Tooltip>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 16,
+            padding: '16px 24px 16px 0',
+            transition: 'background-color 0.2s',
+            minHeight: 118,
+          }}
+          onMouseEnter={(e) => {
+            if (!isDragging) {
+              e.currentTarget.parentElement!.style.backgroundColor = isDark
+                ? colors.hoverBg ?? 'rgba(255,255,255,0.06)'
+                : 'rgba(0,0,0,0.02)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isDragging) {
+              e.currentTarget.parentElement!.style.backgroundColor = 'transparent';
+            }
+          }}
+        >
         <div style={{ flex: '1 1 280px', minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
             <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>{source.name}</span>
@@ -1212,10 +1388,19 @@ const SchedulerPage: React.FC = () => {
               <span style={{ fontSize: 12, color: colors.textSecondary }}>Last: {source.lastRun}</span>
             )}
           </div>
-          <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: cronInfo ? 8 : 0 }}>
+          <Paragraph
+            type="secondary"
+            ellipsis={{ rows: 2, tooltip: source.description }}
+            style={{
+              fontSize: 13,
+              marginBottom: 8,
+              lineHeight: 1.5,
+              minHeight: 39,
+            }}
+          >
             {source.description}
-          </div>
-          {cronInfo && (
+          </Paragraph>
+          {cronInfo ? (
             <div
               style={{
                 display: 'inline-flex',
@@ -1231,10 +1416,21 @@ const SchedulerPage: React.FC = () => {
               <Text code style={{ fontSize: 11, backgroundColor: 'transparent', padding: 0, color: cronInfo.isValid ? colors.codeBlockText : '#ff4d4f' }}>
                 {cronInfo.expression}
               </Text>
+              {cronInfo.timezone && (
+                <>
+                  <span style={{ color: colors.textSecondary, fontSize: 11, opacity: 0.6 }}>|</span>
+                  <GlobalOutlined style={{ color: cronInfo.isValid ? colors.textSecondary : '#ff4d4f', fontSize: 11 }} />
+                  <Text style={{ fontSize: 11, color: cronInfo.isValid ? colors.textSecondary : '#ff4d4f' }}>
+                    {cronInfo.timezone}
+                  </Text>
+                </>
+              )}
               <Tooltip title={configContent} placement="top" overlayStyle={{ maxWidth: 450 }} overlayInnerStyle={{ backgroundColor: 'rgba(0,0,0,0.85)', padding: 12, borderRadius: 8 }}>
                 <SettingOutlined style={{ color: cronInfo.isValid ? (isDark ? '#2196F3' : '#1890ff') : '#ff4d4f', fontSize: 14, cursor: 'pointer' }} />
               </Tooltip>
             </div>
+          ) : (
+            <div style={{ minHeight: 34 }} aria-hidden />
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
@@ -1348,6 +1544,7 @@ const SchedulerPage: React.FC = () => {
             </Tooltip>
           )}
         </div>
+        </div>
       </div>
     );
   };
@@ -1458,13 +1655,28 @@ const SchedulerPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Data source list — two columns: data fetch vs report generation */}
-        <Row gutter={[0, 0]} style={{ margin: 0 }}>
-          <Col xs={24} lg={12} style={{ padding: 0 }}>
+        {/* Data source list — two columns: equal height via flex stretch + bottom spacer */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: isLgUp ? 'row' : 'column',
+            alignItems: 'stretch',
+            margin: 0,
+          }}
+        >
+          <div
+            style={{
+              flex: isLgUp ? '1 1 50%' : '1 1 auto',
+              display: 'flex',
+              flexDirection: 'column',
+              minWidth: 0,
+            }}
+          >
             <div
               style={{
                 padding: '14px 24px 10px',
                 borderBottom: `1px solid ${colors.cardBorder}`,
+                flexShrink: 0,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1472,20 +1684,47 @@ const SchedulerPage: React.FC = () => {
                 <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>数据获取类</span>
               </div>
               <Text style={{ display: 'block', marginTop: 4, fontSize: 12, color: colors.textSecondary }}>
-                定时拉取行情、新闻、订阅源、日历与基本面等外部数据
+                定时拉取行情、新闻、订阅源、日历与基本面等外部数据 · 拖拽左侧把手可调整顺序
               </Text>
             </div>
-            <div style={{ padding: 0 }}>
-              {dataFetchSources.map((source, index) =>
-                renderSchedulerListItem(source, index, dataFetchSources.length)
-              )}
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+              }}
+            >
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleCategoryDragEnd('data_fetch')}
+                >
+                  <SortableContext
+                    items={dataFetchSources.map((source) => source.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {dataFetchSources.map((source, index) => (
+                      <SchedulerListItem
+                        key={source.id}
+                        source={source}
+                        index={index}
+                        columnLength={dataFetchSources.length}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+                <div style={{ flex: 1, minHeight: 0 }} aria-hidden />
+              </div>
             </div>
-          </Col>
-          <Col
-            xs={24}
-            lg={12}
+          </div>
+          <div
             style={{
-              padding: 0,
+              flex: isLgUp ? '1 1 50%' : '1 1 auto',
+              display: 'flex',
+              flexDirection: 'column',
+              minWidth: 0,
               borderTop: isLgUp ? undefined : `1px solid ${colors.cardBorder}`,
               borderLeft: isLgUp ? `1px solid ${colors.cardBorder}` : undefined,
             }}
@@ -1494,6 +1733,7 @@ const SchedulerPage: React.FC = () => {
               style={{
                 padding: '14px 24px 10px',
                 borderBottom: `1px solid ${colors.cardBorder}`,
+                flexShrink: 0,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1501,16 +1741,42 @@ const SchedulerPage: React.FC = () => {
                 <span style={{ fontWeight: 600, fontSize: 15, color: colors.text }}>报告生成类</span>
               </div>
               <Text style={{ display: 'block', marginTop: 4, fontSize: 12, color: colors.textSecondary }}>
-                预生成作者/频道摘要，并可链接至日报等报告流程
+                预生成作者/频道摘要，并可链接至日报等报告流程 · 拖拽左侧把手可调整顺序
               </Text>
             </div>
-            <div style={{ padding: 0 }}>
-              {reportGenerationSources.map((source, index) =>
-                renderSchedulerListItem(source, index, reportGenerationSources.length)
-              )}
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+              }}
+            >
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleCategoryDragEnd('report_generation')}
+                >
+                  <SortableContext
+                    items={reportGenerationSources.map((source) => source.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {reportGenerationSources.map((source, index) => (
+                      <SchedulerListItem
+                        key={source.id}
+                        source={source}
+                        index={index}
+                        columnLength={reportGenerationSources.length}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+                <div style={{ flex: 1, minHeight: 0 }} aria-hidden />
+              </div>
             </div>
-          </Col>
-        </Row>
+          </div>
+        </div>
       </div>
 
 

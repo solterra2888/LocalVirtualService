@@ -1398,21 +1398,27 @@ class SchedulerService:
             logger.info("分发 The Close Summary Celery 任务", params=params)
 
             from backend.tasks.the_close_summary_tasks import generate_the_close_summary_task
+            from backend.utils.datetime_utils import parse_iso_utc, window_label_date
 
             window_hours = int(params.get('window_hours', 24))
             force = params.get('force', False)
 
+            # 内容窗口：默认 window_end=utcnow()，配合 window_hours 走滚动 24h 窗口，
+            # 与 CNBC 对齐。不传 window_end 会退化为「report_date 自然日历窗口」，
+            # 而 The Close 节目 published_at 常落在前一自然日（美东 ~22:xx UTC），
+            # 日历窗口会漏掉当日节目，故必须显式传 window_end。
+            window_end = parse_iso_utc(params.get('window_end'))
+            if window_end is None:
+                window_end = utcnow()
+
             # 与 Twitter / YouTube / 知识星球上游统一使用「北京自然日」作为 report_date，
             # 保证 Daily Market Report 用单一 report_date 能同时命中所有上游摘要。
-            # 不能使用 _date.today()（UTC 服务器时钟）：调度在美东 17:30 = 北京 05:30，
-            # 此时 UTC 日期仍为美东当日，而北京日期已是次日。
-            from backend.utils.datetime_utils import window_label_date
+            # 不能使用 _date.today()（UTC 服务器时钟）：凌晨调度时 UTC 日期与北京日期可能错位。
             report_date = params.get('report_date') or window_label_date(utcnow(), 'Asia/Shanghai').isoformat()
-            window_end = params.get('window_end')
 
             task = generate_the_close_summary_task.delay(
                 report_date=report_date,
-                window_end=window_end,
+                window_end=window_end.isoformat(),
                 window_hours=window_hours,
                 force=force,
             )
