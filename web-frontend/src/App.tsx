@@ -38,14 +38,12 @@ import DashboardSettingsPage from './pages/DashboardSettingsPage';
 import ApiKeysPage from './pages/ApiKeysPage';
 import AgentIntegrationPage from './pages/AgentIntegrationPage';
 import TwitterDailyReportPage from './pages/TwitterDailyReportPage';
-import MobileReportsPage from './pages/MobileReportsPage';
 import YouTubeDailyReportPage from './pages/YouTubeDailyReportPage';
-import MobileYouTubeReportsPage from './pages/MobileYouTubeReportsPage';
-import ReportsLayout from './components/ReportsLayout';
-import MobileReportsLayout from './components/MobileReportsLayout';
 import ReportsDetailLayout from './components/ReportsDetailLayout';
 import ReportsOverviewPage from './pages/ReportsOverviewPage';
 import DailyMarketReportPage from './pages/DailyMarketReportPage';
+import MobileReportsOverviewPage from './pages/MobileReportsOverviewPage';
+import MobileReportsDetailLayout from './components/MobileReportsDetailLayout';
 import ZsxqAdminPage from './pages/ZsxqAdminPage';
 import { DashboardSettingsProvider } from './contexts/DashboardSettingsContext';
 import { FileProcessingProvider } from './contexts/FileProcessingContext';
@@ -157,13 +155,51 @@ const AppContent: React.FC = () => {
           )}
           {/* Reports 路由 */}
           {isMobile ? (
-            <Route path="reports" element={<MobileReportsLayout />}>
-              <Route index element={<Navigate to="/reports/twitter" replace />} />
-              <Route path="twitter" element={<MobileReportsPage />} />
-              <Route path="youtube" element={<MobileYouTubeReportsPage />} />
-              <Route path="market-weekly" element={<MarketWeeklyReportPage />} />
-              <Route path="theme" element={<ThemeReportPage />} />
-            </Route>
+            <>
+              {/* 手机端 Reports 概览入口页（对齐桌面版卡片概览） */}
+              <Route path="reports" element={<MobileReportsOverviewPage />} />
+              {/* 手机端具体报告页面（复用桌面报告页，用 MobileReportsDetailLayout 提供返回按钮） */}
+              <Route
+                path="reports/twitter"
+                element={
+                  <MobileReportsDetailLayout>
+                    <TwitterDailyReportPage />
+                  </MobileReportsDetailLayout>
+                }
+              />
+              <Route
+                path="reports/youtube"
+                element={
+                  <MobileReportsDetailLayout>
+                    <YouTubeDailyReportPage />
+                  </MobileReportsDetailLayout>
+                }
+              />
+              <Route
+                path="reports/market-weekly"
+                element={
+                  <MobileReportsDetailLayout>
+                    <MarketWeeklyReportPage />
+                  </MobileReportsDetailLayout>
+                }
+              />
+              <Route
+                path="reports/theme"
+                element={
+                  <MobileReportsDetailLayout>
+                    <ThemeReportPage />
+                  </MobileReportsDetailLayout>
+                }
+              />
+              <Route
+                path="reports/daily-market"
+                element={
+                  <MobileReportsDetailLayout>
+                    <DailyMarketReportPage />
+                  </MobileReportsDetailLayout>
+                }
+              />
+            </>
           ) : (
             <>
               {/* 桌面端 Reports 概览页面 */}

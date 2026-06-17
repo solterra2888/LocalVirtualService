@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button, Tabs, Typography, Space, Spin, message } from 'antd';
 import { ArrowLeftOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
-import type { WatchlistItem, StockPriceData, DashboardNewsItem, ResearchReport } from '../../../services/dashboard';
+import type { WatchlistItem, StockPriceData, DashboardNewsItem } from '../../../services/dashboard';
 import { dashboardAPI } from '../../../services/dashboard';
 import MobileStockChart from './MobileStockChart';
 import MobileStockOverview from './MobileStockOverview';
 import MobileNewsList from '../news/MobileNewsList';
-import MobileResearchReports from '../reports/MobileResearchReports';
 import './MobileStockDetail.css';
 
 const { Title, Text } = Typography;
@@ -25,9 +24,8 @@ interface MobileStockDetailProps {
  * 显示股票信息、图表、新闻和研报
  */
 const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) => {
-  const [activeTab, setActiveTab] = useState<string>('overview');
+  const [activeTab, setActiveTab] = useState<string>('news');
   const [newsData, setNewsData] = useState<DashboardNewsItem[]>([]);
-  const [researchReports, setResearchReports] = useState<ResearchReport[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
 
   const loadNews = useCallback(async () => {
@@ -43,26 +41,11 @@ const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) 
     }
   }, [stock.symbol]);
 
-  const loadResearchReports = useCallback(async () => {
-    try {
-      setLoading(true);
-      const response = await dashboardAPI.getTickerResearchReports(stock.symbol);
-      setResearchReports(response.reports);
-    } catch (error) {
-      console.error('Failed to load research reports:', error);
-      message.error('Failed to load research reports');
-    } finally {
-      setLoading(false);
-    }
-  }, [stock.symbol]);
-
   useEffect(() => {
     if (activeTab === 'news') {
       loadNews();
-    } else if (activeTab === 'reports') {
-      loadResearchReports();
     }
-  }, [activeTab, loadNews, loadResearchReports]);
+  }, [activeTab, loadNews]);
 
   const formatPrice = (price?: number) => {
     if (price === undefined || price === null) return '--';
@@ -85,21 +68,6 @@ const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) 
 
   const tabItems = [
     {
-      key: 'overview',
-      label: 'Overview',
-      children: (
-        <div className="mobile-tab-content mobile-overview-content">
-          <section className="mobile-overview-section mobile-chart-section">
-            <MobileStockChart 
-              symbol={stock.symbol} 
-              primaryTicker={stock.primaryticker}
-            />
-          </section>
-          <MobileStockOverview stock={stock} />
-        </div>
-      ),
-    },
-    {
       key: 'news',
       label: 'News',
       children: (
@@ -120,21 +88,17 @@ const MobileStockDetail: React.FC<MobileStockDetailProps> = ({ stock, onBack }) 
       ),
     },
     {
-      key: 'reports',
-      label: 'Sources',
+      key: 'overview',
+      label: 'Overview',
       children: (
-        <div className="mobile-tab-content">
-          {loading ? (
-            <div className="mobile-loading">
-              <Spin />
-            </div>
-          ) : researchReports.length === 0 ? (
-            <div className="mobile-loading">
-              <Text type="secondary">No Data available</Text>
-            </div>
-          ) : (
-            <MobileResearchReports reports={researchReports} />
-          )}
+        <div className="mobile-tab-content mobile-overview-content">
+          <section className="mobile-overview-section mobile-chart-section">
+            <MobileStockChart
+              symbol={stock.symbol}
+              primaryTicker={stock.primaryticker}
+            />
+          </section>
+          <MobileStockOverview stock={stock} />
         </div>
       ),
     },
