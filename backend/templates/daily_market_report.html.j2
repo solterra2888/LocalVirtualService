@@ -246,6 +246,13 @@ body {
     margin-bottom: 12px;
 }
 
+/* Horizontal scroll wrapper: lets the 13-column Market Overview tables swipe
+   left/right on mobile while keeping the section title (US ASSETS, etc.) fixed. */
+.table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
 table {
     width: 100%;
     border-collapse: collapse;
@@ -628,6 +635,10 @@ tbody tr.chart-active { background: var(--bg-hover); }
     .tab-nav { padding: 0 12px; }
     .tab-btn { padding: 8px 12px; font-size: 0.82rem; }
     .summary-content { padding: 16px 18px; }
+    /* Keep the 13-column Market Overview tables at full width and swipe horizontally */
+    .table-scroll > table { min-width: 720px; }
+    /* Markdown tables (Home / Stockview / Subscription) also swipe when too wide */
+    .summary-content table { display: block; max-width: 100%; overflow-x: auto; }
 }
 </style>
 </head>
@@ -701,6 +712,7 @@ tbody tr.chart-active { background: var(--bg-hover); }
 {# ── US Assets Section ── #}
 <div class="market-section" id="section-us-assets">
     <div class="table-title">US ASSETS</div>
+    <div class="table-scroll">
     <table id="table-us-assets">
         <thead>
             <tr>
@@ -739,6 +751,7 @@ tbody tr.chart-active { background: var(--bg-hover); }
         {% endfor %}
         </tbody>
     </table>
+    </div>
 
     <div class="chart-viewer" id="chart-viewer-us-assets" style="display:none">
         <div class="chart-header">
@@ -783,6 +796,7 @@ tbody tr.chart-active { background: var(--bg-hover); }
 {# ── US Sector Section ── #}
 <div class="market-section" id="section-us-sector">
     <div class="table-title">US SECTOR</div>
+    <div class="table-scroll">
     <table id="table-us-sector">
         <thead>
             <tr>
@@ -821,6 +835,7 @@ tbody tr.chart-active { background: var(--bg-hover); }
         {% endfor %}
         </tbody>
     </table>
+    </div>
 
     <div class="chart-viewer" id="chart-viewer-us-sector" style="display:none">
         <div class="chart-header">
@@ -865,6 +880,7 @@ tbody tr.chart-active { background: var(--bg-hover); }
 {# ── Thematic ETFs Section ── #}
 <div class="market-section" id="section-thematic">
     <div class="table-title">THEMATIC ETFS</div>
+    <div class="table-scroll">
     <table id="table-thematic">
         <thead>
             <tr>
@@ -903,6 +919,7 @@ tbody tr.chart-active { background: var(--bg-hover); }
         {% endfor %}
         </tbody>
     </table>
+    </div>
 
     <div class="chart-viewer" id="chart-viewer-thematic" style="display:none">
         <div class="chart-header">
