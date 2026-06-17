@@ -79,6 +79,11 @@
   padding: 12px 12px 0;
 }
 
+/* News tab: Daily feed 卡片流。底部 80px 防止 sentinel 被底部导航遮挡 */
+.mobile-news-content {
+  padding: 0 12px 80px;
+}
+
 .mobile-chart-section {
   padding: 0;
   background: transparent;
@@ -185,6 +190,11 @@
 
 .app-dark .mobile-loading {
   background: #252d3d;
+}
+
+/* News tab 空状态文字 (antd Empty) */
+.app-dark .mobile-news-content .ant-empty-description {
+  color: #a0a3ad !important;
 }
 
 .app-dark .mobile-loading .ant-typography-secondary {
