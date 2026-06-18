@@ -91,15 +91,18 @@ _UPLOAD_SUBTYPE_TO_DB_TYPES: Dict[str, List[str]] = {
 }
 
 # Feed 链路 channel_type 的标准化映射
-# subscription_content.channel_type 可能为：twitter/youtube/news/rss/zhishixingqiu
+# subscription_content.channel_type 可能为：twitter/youtube/news/rss/zhishixingqiu/podcast
 # 注意：Feed 的 youtube 与 Upload 的 youtube 重名，前端徽章共用 'YT'，
 # 但内部 source_subtype 必须区分，否则点击跳转目标会错。
+# podcast 同时是 Upload file_type 与 Feed channel_type（双义），此处单独映射，
+# 否则 feed 侧 podcast 订阅内容会被 fallback 成 news。
 _FEED_CHANNEL_TYPE_MAP = {
     "twitter": "twitter",
     "youtube": "youtube_feed",
     "news": "news",
     "rss": "news",  # rss 暂归并到 news 同类展示
     "zhishixingqiu": "zhishixingqiu",
+    "podcast": "podcast",  # Podcast RSS 频道订阅
 }
 
 # 所有合法 source_subtype
@@ -504,6 +507,12 @@ def _build_filter_clauses(
             feed_parts.append("AND FALSE")
         else:
             for st in source_subtypes:
+                if st == "podcast":
+                    # podcast 是双义类型：既是 upload file_type（Apple Podcast 单集上传），
+                    # 又是 feed channel_type（Podcast RSS 频道订阅），两侧都要查。
+                    upload_subtypes_pg.append("podcast")
+                    feed_subtypes_pg.append("podcast")
+                    continue
                 if st in _UPLOAD_SUBTYPE_TO_DB_TYPES:
                     upload_subtypes_pg.extend(_UPLOAD_SUBTYPE_TO_DB_TYPES[st])
                 elif st == "twitter":

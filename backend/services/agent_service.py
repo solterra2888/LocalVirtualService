@@ -294,6 +294,8 @@ def _map_agent_source(
             return "news"
         if source_subtype == "zhishixingqiu":
             return "zhishixingqiu"
+        if source_subtype == "podcast":
+            return "podcast"
         return "news"
     # For uploads: use the raw DB file_type for a specific format label when available.
     if raw_file_type:

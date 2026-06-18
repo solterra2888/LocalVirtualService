@@ -590,3 +590,31 @@ class TestStripReferences:
     def test_none_and_empty_passthrough(self):
         assert self._call(None) is None
         assert self._call({}) == {}
+
+
+class TestMapAgentSource:
+    """_map_agent_source maps internal source_subtype → AgentSource enum.
+
+    Podcast fix: feed-side podcast subscriptions must surface as 'podcast',
+    not fall back to 'news' (MCP otherwise hides podcast content).
+    """
+
+    def _call(self, source, source_subtype, raw_file_type=None):
+        from backend.services.agent_service import _map_agent_source
+        return _map_agent_source(source, source_subtype, raw_file_type)
+
+    def test_feed_podcast_returns_podcast(self):
+        # Feed 侧 podcast RSS 订阅不再被兜底成 news
+        assert self._call("feed", "podcast") == "podcast"
+
+    def test_upload_podcast_returns_podcast(self):
+        assert self._call("upload", "podcast", raw_file_type="podcast") == "podcast"
+
+    def test_feed_unknown_falls_back_to_news(self):
+        assert self._call("feed", "totally_unknown") == "news"
+
+    def test_feed_known_types(self):
+        assert self._call("feed", "twitter") == "twitter"
+        assert self._call("feed", "youtube_feed") == "youtube"
+        assert self._call("feed", "news") == "news"
+        assert self._call("feed", "zhishixingqiu") == "zhishixingqiu"
