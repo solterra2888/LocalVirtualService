@@ -582,6 +582,21 @@ class ZsxqSubscriptionService:
             )
         return result
 
+    def _get_credential_for_group(self, group_meta: Dict[str, Any]) -> Tuple[int, str]:
+        """
+        按 zsxq_groups.credential_id 返回该星球对应账号的凭证。
+        若凭证已过期或不存在，回退到首个有效凭证。
+        """
+        from backend.services.zsxq_credential_service import ZsxqCredentialService
+        svc = ZsxqCredentialService()
+        cred_id = group_meta.get("credential_id")
+        if cred_id:
+            cookie = svc.get_decrypted_cookie(cred_id)
+            if cookie:
+                return cred_id, cookie
+            logger.warning("知识星球星球 credential_id=%s 凭证不可用，尝试回退到首个有效凭证", cred_id)
+        return self._get_active_credential()
+
     def _mark_credential_expired(self, cred_id: int, error: str) -> None:
         from backend.services.zsxq_credential_service import ZsxqCredentialService
         ZsxqCredentialService().mark_expired(cred_id, error)
@@ -680,8 +695,9 @@ class ZsxqSubscriptionService:
                     report.failed_groups = list(base["failed_groups"])
             return base
 
+        # 预检：至少存在一个有效凭证
         try:
-            cred_id, cookie = self._get_active_credential()
+            self._get_active_credential()
         except RuntimeError as e:
             logger.error("知识星球凭证不可用: %s", e)
             if report:
@@ -702,10 +718,19 @@ class ZsxqSubscriptionService:
             gname = grp["group_name"]
             user_ids = grp["user_ids"]
 
-            # 从 zsxq_groups 补全 group_name
+            # 从 zsxq_groups 补全 group_name，并获取该星球对应的凭证
             meta = self._get_group_meta(gid)
             if meta.get("group_name"):
                 gname = meta["group_name"]
+
+            try:
+                cred_id, cookie = self._get_credential_for_group(meta)
+            except RuntimeError as e:
+                logger.error("知识星球 %s 凭证不可用，跳过: %s", gname, e)
+                if report:
+                    report.record_error(f"{gname} 凭证不可用: {e}")
+                failed_groups.append(gname or gid)
+                continue
 
             try:
                 client = ZsxqClient(
@@ -842,12 +867,12 @@ class ZsxqSubscriptionService:
                     report.add_group_summary(gname, mode, batch_new)
 
             except CookieExpiredError as e:
-                logger.error("知识星球凭证过期: %s", e)
+                logger.error("知识星球 %s 凭证过期 (credential_id=%s): %s", gname, cred_id, e)
                 self._mark_credential_expired(cred_id, str(e))
                 if report:
-                    report.record_error(f"Cookie 已过期: {e}")
+                    report.record_error(f"{gname} Cookie 已过期 (credential_id={cred_id}): {e}")
                 failed_groups.append(gname or gid)
-                break  # Cookie 过期则停止所有 group，避免无效请求
+                # 不 break：只跳过同一凭证的后续 group，继续处理其他凭证的 group
 
             except Exception as exc:
                 logger.exception("知识星球 %s 抓取失败", gid)

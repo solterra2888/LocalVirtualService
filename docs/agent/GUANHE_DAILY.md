@@ -1,8 +1,8 @@
-# GuanHe Daily — Agent Skill (v0.3.0)
+# GuanHe Daily — Agent Skill (v0.5.0)
 
 这个 skill 让 Cursor、Claude Code、Codex 等 AI 助手能够读取你在 **GuanHe** 平台上积累的信息——包括你订阅的 Feed（Twitter、YouTube、新闻等）、你自己上传的文件（PDF、文档、图片等），以及通过 **Vector RAG** 对长文档进行语义级问答。
 
-> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.3.0`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
+> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.5.0`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
 
 ---
 
@@ -51,9 +51,14 @@ MCP 工具只返回当前账号有权限访问的数据：
 | 近期美国访华有什么消息（多角度） | `daily_multi_search` | 见「多组搜索」示例 |
 | 这条具体讲了什么 / 全文 / 字幕 | `daily_item` | `id`（上一轮列表的 id） |
 | 帮我看这几条的全文 | `daily_items_batch` | `ids=[...]` |
-| 帮我看今天的 Twitter 日报 | `report_latest` | `kind=twitter` |
-| 帮我看 5 月 10 号的 YouTube 日报 | `report_by_date` | `kind=youtube, date=2026-05-10` |
-| 有哪些日报可以看？ | `report_list` | `kind=twitter` |
+| 帮我看今天的 Twitter 日报 | `report_latest` | `kind=twitter_daily` |
+| 帮我看今天的 YouTube 日报 | `report_latest` | `kind=youtube_daily` |
+| 帮我看今天的市场日报 | `report_latest` | `kind=market_daily` |
+| 帮我看本周市场周报 | `report_latest` | `kind=market_weekly` |
+| 帮我看主题绩效报告 | `report_latest` | `kind=theme` |
+| 帮我看 5 月 10 号的 YouTube 日报 | `report_by_date` | `kind=youtube_daily, date=2026-05-10` |
+| 帮我看上周五的市场周报 | `report_by_date` | `kind=market_weekly, date=2026-06-13`（用周五日期） |
+| 有哪些日报可以看？ | `report_list` | `kind=twitter_daily` |
 | 我订阅了哪些频道？ | `list_subscriptions` | — |
 | 哪些来源有内容 / 我的 preset 是什么？ | `list_sources` | — |
 | **这本书讲了什么投资方法论？** | **`semantic_search`** | **`query=...`** |
@@ -75,7 +80,9 @@ MCP 工具只返回当前账号有权限访问的数据：
 | 「最近 XX 有什么消息」 | `daily_feed q=XX` |
 | 「今天/这周有什么事」 | `daily_feed since=24h/7d` |
 | 「从多个角度分析一个话题」 | `daily_multi_search` |
-| 「帮我看日报」 | `report_latest / report_by_date` |
+| 「帮我看 Twitter/YouTube 日报」 | `report_latest kind=twitter_daily / youtube_daily` |
+| 「帮我看今天/本周市场报告」 | `report_latest kind=market_daily / market_weekly` |
+| 「帮我看主题报告」 | `report_latest kind=theme` |
 
 0 条时才换入口或放宽参数。**不要**同时调用 `daily_feed` 和 `daily_multi_search` 搜同一话题。
 
@@ -213,13 +220,21 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 
 ### `report_latest` / `report_by_date` / `report_list`
 
-获取每日汇总报告。
+获取汇总报告。所有报告工具只返回 `share_url`——一个公开免登录的 URL，直接交给用户在浏览器打开；不要尝试总结报告内容，`content_markdown` 始终为 null。
 
-所有报告工具必须传 `kind` 参数：
-- `kind=twitter`：Twitter 日报
-- `kind=youtube`：YouTube 日报
+所有报告工具必须传 `kind` 参数（五个规范值）：
 
-`report_by_date` 还需要 `date=YYYY-MM-DD`。
+| `kind` | 报告内容 | `report_by_date` 的日期字段 |
+|---|---|---|
+| `twitter_daily` | Twitter Feed 每日摘要 | report_date |
+| `youtube_daily` | YouTube Feed 每日摘要 | report_date |
+| `market_daily` | 每日市场报告（指数/ETF 表现） | report_date |
+| `market_weekly` | 每周市场报告（存储于 OSS） | **week_end（周五日期）** |
+| `theme` | 主题绩效报告（各投资主题成分收益） | report_date |
+
+> 旧别名 `twitter` / `youtube` / `market` 仍被接受，分别等同于 `twitter_daily` / `youtube_daily` / `market_daily`。
+
+`report_by_date` 还需要 `date=YYYY-MM-DD`。特别注意：`market_weekly` 使用**周五**的日期作为 `week_end`（如 `2026-06-13`）。
 
 ---
 
@@ -305,7 +320,7 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 
 ---
 
-## v0.3 新工具：Vector RAG 语义检索
+## Vector RAG 语义检索（v0.3+）
 
 ### `semantic_search` — 概念级语义搜索
 
