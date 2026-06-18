@@ -1,29 +1,39 @@
 Metadata-Version: 2.4
 Name: guanhe-mcp
-Version: 0.4.0
-Summary: MCP server for GuanHe Agent API v0.4.0 (daily market report + semantic search + vector RAG)
+Version: 0.5.0
+Summary: MCP server for GuanHe Agent API v0.5.0 (daily/weekly market reports, theme report, semantic search + vector RAG)
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
 Requires-Dist: httpx>=0.27.0
 Dynamic: requires-python
 
-# guanhe-mcp v0.4.0
+# guanhe-mcp v0.5.0
 
-Model Context Protocol (stdio) server that wraps the GuanHe **readonly** Agent HTTP API — both `/api/v1/agent` (keyword/timeline) and `/api/v2/agent` (semantic / vector RAG).
+Model Context Protocol (stdio) server that wraps the GuanHe **readonly** Agent HTTP API — `/api/v1/agent` (feed, search, reports) and `/api/v2/agent` (semantic / vector RAG).
 
-## Breaking changes from v0.1
+## What it gives you
 
-| v0.1 tool | v0.2 replacement |
-|---|---|
-| `search` | `daily_feed` with `q=` parameter |
-| `twitter_daily_latest` | `report_latest` with `kind=twitter` |
-| `twitter_daily_by_date` | `report_by_date` with `kind=twitter` |
-| `twitter_daily_list` | `report_list` with `kind=twitter` |
-| `youtube_daily_latest` | `report_latest` with `kind=youtube` |
-| `youtube_daily_by_date` | `report_by_date` with `kind=youtube` |
-| `ticker=NVDA` (single) | `tickers=NVDA.US,AAPL.US` (multi, with exchange suffix) |
+Three families of read-only tools over your GuanHe data:
 
-Old HTTP paths return **410 Gone** with an upgrade hint.
+1. **Feed & search** — time-ordered Twitter / YouTube / news items with keyword, ticker, tag, people, and country filters.
+2. **Reports** — daily / weekly digests and market / theme reports, delivered as a public `share_url`.
+3. **Semantic RAG** — concept-level vector search over uploaded documents and long-form content.
+
+## Reports
+
+The three report tools (`report_latest`, `report_by_date`, `report_list`) share a `kind` parameter. v0.5.0 supports five canonical kinds:
+
+| `kind` | Report | `report_by_date` key |
+|---|---|---|
+| `twitter_daily` | Twitter feed daily digest | report_date |
+| `youtube_daily` | YouTube feed daily digest | report_date |
+| `market_daily` | Daily market report (index performers, ETF performance) | report_date |
+| `market_weekly` | Weekly market report (stored on OSS) | **week_end** (Friday) |
+| `theme` | Theme performance report (constituent returns per investment theme) | report_date |
+
+> **All reports return only a `share_url`** — a public, no-auth URL that opens the fully rendered report in a browser. No report inlines its body (`content_markdown` is always null); hand the `share_url` to the user rather than trying to summarize raw HTML.
+>
+> Legacy short names `twitter` / `youtube` / `market` are still accepted as aliases and normalize to the canonical form (`twitter_daily` / `youtube_daily` / `market_daily`).
 
 ## Requirements
 
@@ -35,7 +45,7 @@ Old HTTP paths return **410 Gone** with an upgrade hint.
 
 ```bash
 # From the published wheel (recommended for end users):
-pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.4.0-py3-none-any.whl"
+pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.5.0-py3-none-any.whl"
 
 # From local source (dev):
 cd tools/guanhe-mcp
@@ -88,7 +98,7 @@ Replace `/path/to/your/python` with the output of `which python` (or `where pyth
 
 ## Tools (12)
 
-### v1 — Keyword / Timeline (9 tools)
+### Feed & search (6)
 
 | Tool | Description | Maps to |
 |------|-------------|---------|
@@ -98,11 +108,16 @@ Replace `/path/to/your/python` with the output of `which python` (or `where pyth
 | `daily_multi_search` | 1–5 parallel search groups, server-side dedup | `POST /api/v1/agent/daily/multi` |
 | `list_subscriptions` | Enabled feed channels with 30-day counts | `GET /api/v1/agent/subscriptions` |
 | `list_sources` | Source types, preset membership, 30-day counts | `GET /api/v1/agent/sources` |
-| `report_latest` | Latest daily report (kind=twitter\|youtube) | `GET /api/v1/agent/reports/latest?kind=` |
-| `report_by_date` | Daily report for YYYY-MM-DD | `GET /api/v1/agent/reports/{date}?kind=` |
+
+### Reports (3)
+
+| Tool | Description | Maps to |
+|------|-------------|---------|
+| `report_latest` | Latest completed report for a given `kind` | `GET /api/v1/agent/reports/latest?kind=` |
+| `report_by_date` | Report for a specific date (`market_weekly` uses week_end Friday) | `GET /api/v1/agent/reports/{date}?kind=` |
 | `report_list` | Paginated list of available reports | `GET /api/v1/agent/reports?kind=` |
 
-### v2 — Semantic / Vector RAG (3 tools, NEW in v0.3.0)
+### Semantic / Vector RAG (3, since v0.3.0)
 
 | Tool | Description | Maps to |
 |------|-------------|---------|
@@ -110,16 +125,24 @@ Replace `/path/to/your/python` with the output of `which python` (or `where pyth
 | `hybrid_search` | RRF-fused keyword + semantic search | `POST /api/v2/agent/hybrid-search` |
 | `chunks_by_locator` | Fetch contiguous chunks by chapter / page / chunk index | `POST /api/v2/agent/chunks-by-locator` |
 
-**When to use v2 tools:**
+## Which tool should I use?
 
-| User intent | Tool |
+| You want | Use |
 |---|---|
-| Concept query that keywords can't capture ("value investing methodology", "robot safety design") | `semantic_search` |
-| Query mixing a proper noun + concept ("1X Technologies funding strategy") | `hybrid_search` |
-| Already know which section of a doc to read (e.g. chapter "Timeline of Major Developments") | `chunks_by_locator` |
-| Short feed article / tweet full text | `daily_items_batch` (v1) — no need for v2 |
+| Recent items on a topic / ticker / person | `daily_feed` |
+| Several topic angles in one call (deduped) | `daily_multi_search` |
+| Full text of one or a few items | `daily_item` / `daily_items_batch` |
+| Today's Twitter / YouTube digest | `report_latest` kind=`twitter_daily` / `youtube_daily` |
+| Today's market report | `report_latest` kind=`market_daily` |
+| This week's market report | `report_latest` kind=`market_weekly` |
+| Theme performance report | `report_latest` kind=`theme` |
+| Browse report history | `report_list` |
+| Concept keywords can't capture ("value investing methodology") | `semantic_search` |
+| Proper noun + concept ("1X Technologies funding strategy") | `hybrid_search` |
+| A specific doc section (chapter / page) | `chunks_by_locator` |
+| Which channels are subscribed / active | `list_subscriptions` / `list_sources` |
 
-> **Citation rule:** v2 results are chunk-level snippets. Always cite the returned `content_id` in your answer so the user can verify in the GuanHe UI.
+> **Citation rule:** v2 results are chunk-level snippets. Always cite the returned `content_id` so the user can verify in the GuanHe UI.
 
 ## Quick usage examples
 
@@ -132,21 +155,29 @@ export GUANHE_BASE_URL="https://www.guanhecapital.hk"
 python -m guanhe_mcp.server
 ```
 
-For smoke testing via the fallback script:
+Smoke testing via the fallback script:
 
 ```bash
+# Feed & search
 python scripts/call_guanhe_mcp.py daily_feed '{"since": "24h", "limit": 5}'
 python scripts/call_guanhe_mcp.py daily_multi_search '{"groups": [{"q": "NVDA OR 英伟达", "since": "7d"}, {"q": "Greer OR USTR OR 贸易代表", "since": "7d"}]}'
-python scripts/call_guanhe_mcp.py report_latest '{"kind": "twitter"}'
-python scripts/call_guanhe_mcp.py list_subscriptions '{}'
 
-# v0.3 new tools
+# Reports (kind = canonical)
+python scripts/call_guanhe_mcp.py report_latest '{"kind": "market_daily"}'
+python scripts/call_guanhe_mcp.py report_latest '{"kind": "market_weekly"}'
+python scripts/call_guanhe_mcp.py report_latest '{"kind": "theme"}'
+python scripts/call_guanhe_mcp.py report_list '{"kind": "twitter_daily", "limit": 5}'
+python scripts/call_guanhe_mcp.py report_by_date '{"kind": "market_weekly", "date": "2026-06-13"}'
+
+# Semantic RAG (v0.3)
 python scripts/call_guanhe_mcp.py semantic_search '{"query": "humanoid robot home deployment", "top_k": 5}'
 python scripts/call_guanhe_mcp.py hybrid_search '{"query": "1X Technologies NEO funding", "top_k": 5}'
 python scripts/call_guanhe_mcp.py chunks_by_locator '{"file_id": 1439, "chapter": "**Timeline of Major Developments:**"}'
 ```
 
 ## Key parameter notes
+
+**`kind`** — report type. Canonical: `twitter_daily`, `youtube_daily`, `market_daily`, `market_weekly`, `theme` (legacy `twitter`/`youtube`/`market` accepted as aliases). See [Reports](#reports).
 
 **`q` syntax** — space = AND (all terms must match), `OR` (uppercase) = any match, `"phrase"` = exact substring.
 - Good: `q=NVDA OR 英伟达`
@@ -175,6 +206,20 @@ Full usage guide with search strategies and worked examples (includes v0.3 vecto
 https://www.guanhecapital.hk/agent/skill/GUANHE_DAILY.md
 ```
 
-## Breaking changes from v0.2
+## Changelog
 
-No breaking changes. v1 tools are unchanged. Three new v2 tools added.
+### v0.5.0
+- **Reports:** added `market_weekly` (weekly market report) and `theme` (theme performance report).
+- **`kind` normalized** to five canonical values (`twitter_daily`, `youtube_daily`, `market_daily`, `market_weekly`, `theme`). Legacy short names `twitter` / `youtube` / `market` still accepted as aliases.
+- All report tools return only a public `share_url`; no report inlines its body (`content_markdown` is always null) — twitter/youtube markdown bodies are no longer returned.
+- Removed legacy v0.1 HTTP stubs (`/search`, `/reports/twitter-daily/*`, `/reports/youtube-daily/*`) that previously returned 410 Gone.
+
+### v0.4.0
+- Added `market` (daily market report) kind to the report tools.
+
+### v0.3.0
+- Added v2 semantic / vector RAG tools: `semantic_search`, `hybrid_search`, `chunks_by_locator`.
+
+### v0.2.0
+- Consolidated per-source report tools under `kind=` (`report_latest` / `report_by_date` / `report_list`), replacing the old `twitter_daily_*` / `youtube_daily_*` tools.
+- `daily_feed` with `q=` replaced `search`; `tickers` (comma-separated, with exchange suffix) replaced the single `ticker` param.

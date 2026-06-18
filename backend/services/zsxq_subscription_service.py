@@ -211,7 +211,7 @@ class ZsxqClient:
         self,
         count: int = COUNT,
         end_time: Optional[str] = None,
-        max_retries: int = 6,
+        max_retries: int = 8,
     ) -> Dict[str, Any]:
         """拉取话题列表一页，遇 401 抛 CookieExpiredError。"""
         count = min(max(1, count), 30)
@@ -249,9 +249,15 @@ class ZsxqClient:
                         return data
                     code = data.get("code")
                     last_err = data.get("info") or data.get("resp_err") or str(data)
-                    if code == 2:
-                        continue
-                    if code == 1059 or "内部" in str(last_err):
+                    err_str = str(last_err)
+                    # code==2「版本太旧」或「非官方工具」提示：不直接报错，走退避重试。
+                    # 同时解除接口锁定，下次两个接口都能尝试。
+                    if code == 2 or "非官方" in err_str or "版本太旧" in err_str:
+                        need_retry = True
+                        last_err = f"[{label}] {last_err}"
+                        self._topics_api = None
+                        break
+                    if code == 1059 or "内部" in err_str:
                         need_retry = True
                         last_err = f"[{label}] {last_err}"
                         break
@@ -332,7 +338,9 @@ def _iter_backfill_pages(
         page_end_time: Optional[str] = _calc_next_end_time(resume_from_min_time)
         logger.info("ZSXQ backfill 断点续抓，end_time 锚点 %s", resume_from_min_time[:19])
     else:
-        page_end_time = quote(end_bound)
+        # 首页不传合成的 end_time，与增量拉取保持一致，避免触发 API 非官方工具校验。
+        # 客户端日期过滤（start_bound / end_bound）保留，补全范围不变。
+        page_end_time = None
 
     page = 0
     running_total = 0
@@ -724,54 +732,78 @@ class ZsxqSubscriptionService:
                     )
                     head_ids: Optional[List[int]] = None
                     group_new = 0
-                    for _page, batch, page_head_ids in _iter_backfill_pages(
-                        client, resume_from_min_time=resume_from
-                    ):
-                        if page_head_ids:
-                            head_ids = page_head_ids
-                        batch_new, batch_updated, new_ids = _store_topic_batch(
-                            self.content_service,
-                            batch,
-                            gid,
-                            gname,
-                            user_ids,
-                            report=report,
-                        )
-                        group_new += batch_new
-                        total_new += batch_new
-                        total_updated += batch_updated
-                        if new_ids:
-                            try:
-                                from backend.tasks.file_tasks import trigger_auto_feed_tagging
-                                trigger_auto_feed_tagging(new_ids)
-                            except Exception as tag_exc:
-                                logger.warning("ZSXQ 触发打标失败，将在下次 task 中补全")
-                                if report:
-                                    report.record_warning(
-                                        f"{gname} 触发打标失败: {tag_exc}"
+                    backfill_page_err: Optional[str] = None
+                    try:
+                        for _page, batch, page_head_ids in _iter_backfill_pages(
+                            client, resume_from_min_time=resume_from
+                        ):
+                            if page_head_ids:
+                                head_ids = page_head_ids
+                            batch_new, batch_updated, new_ids = _store_topic_batch(
+                                self.content_service,
+                                batch,
+                                gid,
+                                gname,
+                                user_ids,
+                                report=report,
+                            )
+                            group_new += batch_new
+                            total_new += batch_new
+                            total_updated += batch_updated
+                            if new_ids:
+                                try:
+                                    from backend.tasks.file_tasks import trigger_auto_feed_tagging
+                                    trigger_auto_feed_tagging(new_ids)
+                                except Exception as tag_exc:
+                                    logger.warning("ZSXQ 触发打标失败，将在下次 task 中补全")
+                                    if report:
+                                        report.record_warning(
+                                            f"{gname} 触发打标失败: {tag_exc}"
+                                        )
+                            if batch:
+                                with _get_conn() as conn:
+                                    _save_group_state(
+                                        conn,
+                                        gid,
+                                        batch,
+                                        mode,
+                                        head_ids=page_head_ids,
+                                        backfill_complete=False,
                                     )
-                        if batch:
-                            with _get_conn() as conn:
-                                _save_group_state(
-                                    conn,
-                                    gid,
-                                    batch,
-                                    mode,
-                                    head_ids=page_head_ids,
-                                    backfill_complete=False,
-                                )
-                    if not head_ids:
-                        head_ids = _fetch_head_topic_ids(client)
-                    with _get_conn() as conn:
-                        _save_group_state(
-                            conn,
-                            gid,
-                            [],
-                            mode,
-                            head_ids=head_ids,
-                            backfill_complete=True,
+                    except CookieExpiredError:
+                        raise
+                    except Exception as page_exc:
+                        # 中途某页失败：保留已入库数据，记录警告，本 group 标记为未完成
+                        # （下次任务会断点续抓），不计入 failed_groups。
+                        backfill_page_err = str(page_exc)
+                        logger.warning(
+                            "知识星球 %s backfill 中途失败（已抓 %d 条），将在下次任务续抓: %s",
+                            gname, group_new, page_exc,
                         )
-                    logger.info("知识星球 %s 完成 [%s] 新 %d 条", gname, mode, group_new)
+                        if report:
+                            report.record_warning(f"{gname} backfill 中途失败: {page_exc}")
+
+                    if group_new > 0 or backfill_page_err is None:
+                        # 全部页成功：标记 backfill_complete=True
+                        if not head_ids:
+                            try:
+                                head_ids = _fetch_head_topic_ids(client)
+                            except Exception:
+                                pass
+                        with _get_conn() as conn:
+                            _save_group_state(
+                                conn,
+                                gid,
+                                [],
+                                mode,
+                                head_ids=head_ids,
+                                backfill_complete=(backfill_page_err is None),
+                            )
+                    logger.info(
+                        "知识星球 %s 完成 [%s] 新 %d 条%s",
+                        gname, mode, group_new,
+                        "（部分完成，待续抓）" if backfill_page_err else "",
+                    )
                     if report:
                         report.add_group_summary(gname, mode, group_new)
                     continue
