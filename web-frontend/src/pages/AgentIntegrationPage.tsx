@@ -365,7 +365,7 @@ const AgentIntegrationPage: React.FC = () => {
     [apiOrigin]
   );
 
-  /** 与 docs/agent/GUANHE_DAILY.md 工具路由一致（v0.3.0） */
+  /** 与 docs/agent/GUANHE_DAILY.md 工具路由一致（v0.5.0） */
   const skillRoutingRows: IntentRow[] = [
     { intent: '今天有什么值得关注的？最近有什么新动态？', endpoint: 'daily_feed', params: 'since=24h' },
     { intent: '这周的信息帮我总结一下', endpoint: 'daily_feed', params: 'since=7d（默认，可省略）' },
@@ -396,21 +396,25 @@ const AgentIntegrationPage: React.FC = () => {
     {
       intent: '帮我同时拿这几条的详情',
       endpoint: 'daily_items_batch',
-      params: 'ids=[...], include_content=true',
+      params: 'ids=[...]，最多 10 条',
     },
     {
       intent: '我有哪些订阅频道 / 有什么数据来源？',
       endpoint: 'list_subscriptions / list_sources',
       params: '—',
     },
-    { intent: '帮我看看今天的 Twitter 日报', endpoint: 'report_latest', params: 'kind=twitter' },
-    { intent: '帮我看看 5 月 10 号的 Twitter 日报', endpoint: 'report_by_date', params: 'kind=twitter, date=2026-05-10' },
-    { intent: '帮我看看最新的 YouTube 日报', endpoint: 'report_latest', params: 'kind=youtube' },
-    { intent: '有哪些日报可以看？', endpoint: 'report_list', params: 'kind=twitter|youtube' },
-    { intent: '这本书 / 这份研报关于 XX 的观点是什么', endpoint: 'hybrid_search', params: 'q=XX（语义 + 关键词融合）' },
-    { intent: '帮我语义搜索一下关于价值投资方法论的内容', endpoint: 'semantic_search', params: 'q=价值投资方法论, top_k=5' },
-    { intent: '给我读一下第 3 章 / 第 12 段原文', endpoint: 'chunks_by_locator', params: 'file_id=…, chunk_seq=[12,13,14]' },
-    { intent: '这份上传的 PDF 里有没有提到某个数据 / 人名', endpoint: 'hybrid_search', params: 'q=数据/人名, file_id=…' },
+    { intent: '帮我看看今天的 Twitter 日报', endpoint: 'report_latest', params: 'kind=twitter_daily' },
+    { intent: '帮我看看 5 月 10 号的 Twitter 日报', endpoint: 'report_by_date', params: 'kind=twitter_daily, date=2026-05-10' },
+    { intent: '帮我看看最新的 YouTube 日报', endpoint: 'report_latest', params: 'kind=youtube_daily' },
+    { intent: '今日的市场报告', endpoint: 'report_latest', params: 'kind=market_daily' },
+    { intent: '本周的市场周报', endpoint: 'report_latest', params: 'kind=market_weekly' },
+    { intent: '6 月 13 号（周五）那周的周报', endpoint: 'report_by_date', params: 'kind=market_weekly, date=2026-06-13（week_end 周五）' },
+    { intent: '最新的主题表现报告', endpoint: 'report_latest', params: 'kind=theme' },
+    { intent: '有哪些报告可以看？', endpoint: 'report_list', params: 'kind=…（5 种，见下方对照表）' },
+    { intent: '这本书 / 这份研报关于 XX 的观点是什么', endpoint: 'hybrid_search', params: 'query=XX（语义 + 关键词融合）' },
+    { intent: '帮我语义搜索一下关于价值投资方法论的内容', endpoint: 'semantic_search', params: 'query=价值投资方法论, top_k=5' },
+    { intent: '给我读一下第 3 章 / 第 12 段原文', endpoint: 'chunks_by_locator', params: 'file_id=…, chapter="第3章" 或 chunk_idx_range=[12,14]' },
+    { intent: '这份上传的 PDF 里有没有提到某个数据 / 人名', endpoint: 'hybrid_search', params: 'query=数据/人名, file_ids=[42]' },
   ];
 
   const bg = dark ? DARK_BG : '#ffffff';
@@ -455,7 +459,7 @@ const AgentIntegrationPage: React.FC = () => {
 
         <p style={{ fontSize: 16, lineHeight: 1.75, color: dark ? '#94a3b8' : '#475569', margin: 0 }}>
           让 Cursor、Claude Code、Codex 等任意 Agent 直接读取你在 GuanHe 订阅的 Feed 和上传的文件，
-          用最自然的一句话拿到当日动态、关键词搜索、Twitter / YouTube 日报，
+          用最自然的一句话拿到当日动态、关键词搜索、Twitter / YouTube 日报、市场日报与周报、主题表现报告，
           或对长篇电子书、研报进行语义检索（Vector RAG）。
           装好后无需记忆 API，直接问就行。
         </p>
@@ -553,7 +557,7 @@ const AgentIntegrationPage: React.FC = () => {
               直接从服务器下载安装，无需 GitHub 访问权限：
             </p>
             <CodeBlock dark={dark} label="终端">
-              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.3.0-py3-none-any.whl"`}
+              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.5.0-py3-none-any.whl"`}
             </CodeBlock>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '8px 0 0' }}>
               安装后执行 <code style={{ fontSize: 12, color: TEAL }}>which python</code> 记下 Python 绝对路径，下一步需要用。
@@ -635,7 +639,7 @@ const AgentIntegrationPage: React.FC = () => {
 
             {/* 可用工具 */}
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 6px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              可用工具（v0.3.0）
+              可用工具（v0.5.0）
             </h3>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '0 0 14px', lineHeight: 1.6 }}>
               共 12 个工具，分为 v1 关键词 / 时间线 和 v2 语义 / Vector RAG 两类。
@@ -656,11 +660,32 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'daily_multi_search', endpoint: '多组条件并行搜索 + 跨组服务端去重，最多 5 组' },
                 { intent: 'list_subscriptions', endpoint: '查看当前账号已启用的订阅频道清单（供 LLM 了解"有什么数据"）' },
                 { intent: 'list_sources', endpoint: '查看全局数据来源类型及 30 天内容计数' },
-                { intent: 'report_latest', endpoint: '最新日报，kind=twitter 或 kind=youtube' },
-                { intent: 'report_by_date', endpoint: '指定日期日报（date=YYYY-MM-DD），kind=twitter|youtube' },
-                { intent: 'report_list', endpoint: '日报列表（可分页），kind=twitter|youtube' },
+                { intent: 'report_latest', endpoint: '最新报告；kind ∈ twitter_daily / youtube_daily / market_daily / market_weekly / theme（旧值 twitter/youtube/market 仍可用）' },
+                { intent: 'report_by_date', endpoint: '指定日期报告（date=YYYY-MM-DD）；market_weekly 的 date 取 week_end（周五）。kind 同上' },
+                { intent: 'report_list', endpoint: '报告列表（可分页）。kind 同上' },
               ]}
             />
+
+            <div style={{ height: 20 }} />
+
+            {/* 报告类型对照（v0.5.0） */}
+            <IntentTable
+              dark={dark}
+              col1="kind"
+              col2="报告"
+              col3="日期维度"
+              rows={[
+                { intent: 'twitter_daily', endpoint: 'Twitter 日报', params: 'report_date' },
+                { intent: 'youtube_daily', endpoint: 'YouTube 日报', params: 'report_date' },
+                { intent: 'market_daily', endpoint: '每日市场报告', params: 'report_date' },
+                { intent: 'market_weekly', endpoint: '市场周报', params: 'week_end（周五）' },
+                { intent: 'theme', endpoint: '主题表现报告', params: 'report_date' },
+              ]}
+            />
+            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, borderLeft: `3px solid ${TEAL}`, background: dark ? DARK_SURFACE : '#f0fdfa', fontSize: 13, color: dark ? '#94a3b8' : '#475569', lineHeight: 1.65 }}>
+              <strong style={{ color: dark ? '#e2e8f0' : '#0f766e' }}>报告以链接返回</strong>
+              ：所有报告工具只返回一个公开的 <code style={{ fontSize: 12, color: TEAL }}>share_url</code>（无需认证即可在浏览器打开的完整渲染报告），<code style={{ fontSize: 12, color: TEAL }}>content_markdown</code> 始终为空。Agent 应把链接交给用户打开，而不是试图复述报告正文（HTML）。
+            </div>
 
             <div style={{ height: 20 }} />
 
@@ -675,7 +700,7 @@ const AgentIntegrationPage: React.FC = () => {
             rows={[
               { intent: 'semantic_search', endpoint: '纯向量语义搜索，适合"这本书关于 XX 的观点是什么"类问题；返回最相关的分块片段（chunk），含来源文件标题和页码定位' },
               { intent: 'hybrid_search', endpoint: '语义 + 关键词混合搜索（Reciprocal Rank Fusion），精确词 + 语义理解兼顾；推荐作为默认选项' },
-              { intent: 'chunks_by_locator', endpoint: '按文件 ID + 分块序号精确取回原始 chunk 文本，用于「我想读第 3 章完整内容」等定位式阅读' },
+              { intent: 'chunks_by_locator', endpoint: '按 chapter / 页码 / chunk 区间取回完整章节原文，用于「我想读第 3 章完整内容」等定位式阅读' },
             ]}
             />
 
@@ -693,7 +718,7 @@ const AgentIntegrationPage: React.FC = () => {
               { intent: '按时间浏览 / 筛选今日动态', endpoint: 'daily_feed（v1）' },
               { intent: '关键词精确搜索 Feed 内容', endpoint: 'daily_feed q=…（v1）' },
               { intent: '读取单条详情 / 字幕 / 原文', endpoint: 'daily_item / daily_items_batch（v1）' },
-              { intent: '看 Twitter / YouTube 日报', endpoint: 'report_latest / report_by_date（v1）' },
+              { intent: '看 Twitter / YouTube / 市场 / 主题报告', endpoint: 'report_latest / report_by_date（v1）' },
               { intent: '对上传的长文档 / 电子书做语义提问', endpoint: 'hybrid_search（v2）首选' },
               { intent: '只想用纯语义相似度检索', endpoint: 'semantic_search（v2）' },
               { intent: '定位某章节 / 精确读取原始分块', endpoint: 'chunks_by_locator（v2）' },
@@ -813,19 +838,19 @@ const AgentIntegrationPage: React.FC = () => {
 
             {/* daily_feed 参数详情 */}
             <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              daily_feed 常用参数（v0.3.0）
+              daily_feed 常用参数（v0.5.0）
             </h4>
             <IntentTable
               dark={dark}
               col1="参数"
               col2="说明"
               rows={[
-                { intent: 'since', endpoint: '时间窗口：24h / 7d / 2w / ISO 日期时间（v0.2 新增 w 格式）。默认 7d；非法值返回 400' },
+                { intent: 'since', endpoint: '时间窗口：24h / 7d / 2w / ISO 日期时间。默认 7d；非法值返回 400' },
                 { intent: 'q', endpoint: '全文搜索关键词（可选）；支持多词 AND、减号排除（AI -crypto）；零结果时返回 diagnostics' },
-                { intent: 'tickers', endpoint: '按股票代码过滤，逗号分隔多值，如 NVDA.US,AAPL.US（v0.1 的 ticker 单值已弃用）' },
+                { intent: 'tickers', endpoint: '按股票代码过滤，逗号分隔多值（须带交易所后缀），如 NVDA.US,AAPL.US' },
                 { intent: 'tags', endpoint: '按概念标签过滤（匹配 concepts JSONB 数组），逗号分隔，如 AI,Chips' },
-                { intent: 'people', endpoint: '按关键人物名过滤，逗号分隔，如 Trump,Musk；大小写不敏感，匹配原文写法（v0.2.1 新增）' },
-                { intent: 'countries', endpoint: '按国家/地区过滤，逗号分隔英文全名，如 United States,China；需完全匹配（v0.2.1 新增）' },
+                { intent: 'people', endpoint: '按关键人物名过滤，逗号分隔，如 Trump,Musk；大小写不敏感，匹配原文写法' },
+                { intent: 'countries', endpoint: '按国家/地区过滤，逗号分隔英文全名，如 United States,China；需完全匹配' },
                 { intent: 'author', endpoint: '按作者名 / 账号模糊匹配（ILIKE）' },
                 { intent: 'sources', endpoint: '逗号分隔来源子类型；不填则使用网页端默认 preset。见下方来源类型表' },
                 { intent: 'dedup', endpoint: '服务端去重，默认 true；按 external_url 去重，NULL URL 不参与' },
@@ -957,9 +982,9 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'POST /api/v1/agent/daily/multi', endpoint: '多组并行搜索 + 服务端去重，body: { groups: [...], dedup_by, limit_per_group }' },
                 { intent: 'GET /api/v1/agent/subscriptions', endpoint: '已启用订阅频道清单，含每频道 30 天条目数' },
                 { intent: 'GET /api/v1/agent/sources', endpoint: 'source 类型清单，含 preset 信息与 30 天条目数' },
-                { intent: 'GET /api/v1/agent/reports/latest?kind=twitter|youtube', endpoint: '最新日报（twitter 或 youtube）' },
-                { intent: 'GET /api/v1/agent/reports/{YYYY-MM-DD}?kind=twitter|youtube', endpoint: '指定日期日报' },
-                { intent: 'GET /api/v1/agent/reports?kind=twitter|youtube', endpoint: '日报列表（分页），limit / offset' },
+                { intent: 'GET /api/v1/agent/reports/latest?kind=…', endpoint: '最新报告；kind ∈ twitter_daily|youtube_daily|market_daily|market_weekly|theme（旧值 twitter/youtube/market 作别名）' },
+                { intent: 'GET /api/v1/agent/reports/{YYYY-MM-DD}?kind=…', endpoint: '指定日期报告；market_weekly 用 week_end（周五）' },
+                { intent: 'GET /api/v1/agent/reports?kind=…', endpoint: '报告列表（分页），limit / offset' },
               ]}
             />
 
@@ -1033,9 +1058,9 @@ const AgentIntegrationPage: React.FC = () => {
               col1="请求"
               col2="说明"
               rows={[
-                { intent: 'POST /api/v2/agent/semantic_search', endpoint: '纯向量语义搜索；body: { q, top_k?, file_id? }；返回按相似度排序的 chunk 列表，含 chunk_text、score、file_title、chunk_seq' },
-                { intent: 'POST /api/v2/agent/hybrid_search', endpoint: '语义 + 关键词混合（RRF）；body: { q, top_k?, file_id? }；精确词与语义理解兼顾，推荐首选' },
-                { intent: 'POST /api/v2/agent/chunks_by_locator', endpoint: '按定位取原始 chunk；body: { file_id, chunk_seq: [n, …] }；可用于精确读取某章节完整文本' },
+                { intent: 'POST /api/v2/agent/semantic_search', endpoint: '纯向量语义搜索；body: { query, top_k?, source_types?, file_ids?, since? }；返回按相似度排序的 chunk 列表' },
+                { intent: 'POST /api/v2/agent/hybrid_search', endpoint: '语义 + 关键词混合（RRF）；body: { query, top_k?, source_types?, file_ids?, keyword_weight? }；精确词与语义理解兼顾，推荐首选' },
+                { intent: 'POST /api/v2/agent/chunks_by_locator', endpoint: '按定位取原始 chunk；body: { file_id|content_id, chapter?, chapter_prefix?, page_range?, chunk_idx_range?, max_chars? }；可用于精确读取某章节完整文本' },
               ]}
             />
 
@@ -1047,9 +1072,9 @@ Authorization: Bearer ght_…
 Content-Type: application/json
 
 {
-  "q": "价值投资的核心方法论是什么",
+  "query": "价值投资的核心方法论是什么",
   "top_k": 5,
-  "file_id": 42
+  "file_ids": [42]
 }`}
             </CodeBlock>
 
@@ -1057,18 +1082,20 @@ Content-Type: application/json
 
             <CodeBlock dark={dark} label="返回结构（chunk 列表）">
               {`{
-  "hits": [
+  "results": [
     {
-      "chunk_key": "file_42_chunk_87",
+      "content_id": 42,
+      "chunk_id": 10087,
+      "source_type": "upload",
+      "title": "证券分析（第六版）.pdf",
+      "chapter": "Chapter 5 / Value Investing",
+      "page": 142,
       "chunk_text": "格雷厄姆认为，安全边际是价值投资的基石……",
       "score": 0.923,
-      "file_id": 42,
-      "file_title": "证券分析（第六版）.pdf",
-      "chunk_seq": 87,
-      "chunk_total": 312
+      "found_via": ["vector", "keyword"]
     }
   ],
-  "total": 5
+  "diagnostics": { "returned": 5, "candidates": 48 }
 }`}
             </CodeBlock>
 
