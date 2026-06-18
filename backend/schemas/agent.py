@@ -34,7 +34,9 @@ AgentSource = Literal[
     "excel",  # uploaded Excel / CSV spreadsheet
 ]
 
-ReportKind = Literal["twitter", "youtube"]
+ReportKind = Literal[
+    "twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"
+]
 
 
 class AgentDailyItem(BaseModel):
@@ -243,6 +245,7 @@ class AgentTwitterReportSummary(BaseModel):
     report_date: str
     status: Optional[str] = None
     title: Optional[str] = None
+    share_url: Optional[str] = Field(None, description="Public no-auth URL to the rendered report")
 
 
 class AgentTwitterReportListResponse(BaseModel):
@@ -252,9 +255,20 @@ class AgentTwitterReportListResponse(BaseModel):
 
 class AgentReportBodyResponse(BaseModel):
     report_date: str
-    kind: Optional[str] = Field(None, description="'twitter' or 'youtube'")
+    kind: Optional[str] = Field(
+        None,
+        description=(
+            "Canonical report kind: 'twitter_daily', 'youtube_daily', 'market_daily', "
+            "'market_weekly', or 'theme'. Request accepts legacy aliases "
+            "(twitter/youtube/market) which normalize to the canonical form."
+        ),
+    )
     status: Optional[str] = None
-    content_markdown: Optional[str] = Field(None, description="Full markdown body when completed")
+    content_markdown: Optional[str] = Field(
+        None,
+        description="Always None as of v0.5.0 — all reports are delivered via share_url. Field retained for backward compatibility.",
+    )
+    share_url: Optional[str] = Field(None, description="Public no-auth URL to the rendered report")
     metadata: Optional[dict] = None
 
 

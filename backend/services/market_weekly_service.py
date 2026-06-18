@@ -16,7 +16,7 @@ import json
 import time
 import secrets
 from datetime import datetime, timedelta, date, timezone
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 
@@ -2520,6 +2520,86 @@ class MarketWeeklyService:
             if need_close_conn:
                 cursor.close()
                 conn.close()
+
+    def get_user_reports(
+        self, user_id, limit: int = 30, offset: int = 0
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """分页获取用户 Market Weekly 报告列表（供 Agent API 使用）。
+
+        每条记录不含正文 —— 正文存 OSS，通过 share_url 访问。
+        user_id 内部归一化为 str（表列为 VARCHAR，实际存 username）。
+        """
+        user_id = str(user_id)
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) FROM market_weekly_reports WHERE user_id = %s",
+                (user_id,),
+            )
+            total = cursor.fetchone()[0]
+
+            cursor.execute(
+                """
+                SELECT id, week_start, week_end, status, metadata, created_at, share_token
+                FROM market_weekly_reports
+                WHERE user_id = %s
+                ORDER BY week_end DESC
+                LIMIT %s OFFSET %s
+                """,
+                (user_id, limit, offset),
+            )
+            columns = [
+                "id", "week_start", "week_end", "status",
+                "metadata", "created_at", "share_token",
+            ]
+            reports = []
+            for row in cursor.fetchall():
+                d = dict(zip(columns, row))
+                if d.get("week_start"):
+                    d["week_start"] = str(d["week_start"])
+                if d.get("week_end"):
+                    d["week_end"] = str(d["week_end"])
+                if d.get("created_at"):
+                    d["created_at"] = d["created_at"].isoformat()
+                reports.append(d)
+            return reports, total
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_report_by_date(self, user_id, week_end) -> Optional[Dict[str, Any]]:
+        """获取指定 week_end 的已完成 Market Weekly 报告（供 Agent API 使用）。"""
+        user_id = str(user_id)
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT id, week_start, week_end, status, metadata, created_at, share_token
+                FROM market_weekly_reports
+                WHERE user_id = %s AND week_end = %s AND status = 'completed'
+                """,
+                (user_id, week_end),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            columns = [
+                "id", "week_start", "week_end", "status",
+                "metadata", "created_at", "share_token",
+            ]
+            d = dict(zip(columns, row))
+            if d.get("week_start"):
+                d["week_start"] = str(d["week_start"])
+            if d.get("week_end"):
+                d["week_end"] = str(d["week_end"])
+            if d.get("created_at"):
+                d["created_at"] = d["created_at"].isoformat()
+            return d
+        finally:
+            cursor.close()
+            conn.close()
 
     def get_latest_report(self, user_id: str) -> Optional[Dict[str, Any]]:
         """

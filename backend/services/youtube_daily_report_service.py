@@ -491,14 +491,14 @@ class YouTubeDailyReportService:
 
             cursor.execute("""
                 SELECT id, report_date, status, error_message,
-                       metadata, created_at, updated_at
+                       metadata, created_at, updated_at, share_token
                 FROM youtube_daily_reports
                 WHERE user_id = %s
                 ORDER BY report_date DESC
                 LIMIT %s OFFSET %s
             """, (user_id, limit, offset))
             columns = ['id', 'report_date', 'status', 'error_message',
-                        'metadata', 'created_at', 'updated_at']
+                        'metadata', 'created_at', 'updated_at', 'share_token']
             reports = [dict(zip(columns, row)) for row in cursor.fetchall()]
             for r in reports:
                 if r.get('report_date'):

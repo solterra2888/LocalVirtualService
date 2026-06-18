@@ -1089,6 +1089,82 @@ class ThemeReportService:
     # Report listing
     # ------------------------------------------------------------------
 
+    def get_user_reports(
+        self, user_id, limit: int = 30, offset: int = 0
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """分页获取用户主题报告列表（供 Agent API 使用）。
+
+        每条记录不含 html_content 正文 —— 正文通过 share_url 访问。
+        user_id 内部归一化为 str（表列为 VARCHAR，实际存 username）。
+        """
+        user_id = str(user_id)
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) FROM theme_reports WHERE user_id = %s",
+                (user_id,),
+            )
+            total = cursor.fetchone()[0]
+
+            cursor.execute(
+                """
+                SELECT id, report_date, status, metadata, created_at, share_token, theme_count
+                FROM theme_reports
+                WHERE user_id = %s
+                ORDER BY report_date DESC
+                LIMIT %s OFFSET %s
+                """,
+                (user_id, limit, offset),
+            )
+            columns = [
+                "id", "report_date", "status", "metadata",
+                "created_at", "share_token", "theme_count",
+            ]
+            reports = []
+            for row in cursor.fetchall():
+                d = dict(zip(columns, row))
+                if d.get("report_date"):
+                    d["report_date"] = str(d["report_date"])
+                if d.get("created_at"):
+                    d["created_at"] = d["created_at"].isoformat()
+                reports.append(d)
+            return reports, total
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_report_by_date(self, user_id, report_date) -> Optional[Dict[str, Any]]:
+        """获取指定日期的已完成主题报告（供 Agent API 使用）。"""
+        user_id = str(user_id)
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT id, report_date, status, metadata, created_at, share_token, theme_count
+                FROM theme_reports
+                WHERE user_id = %s AND report_date = %s AND status = 'completed'
+                """,
+                (user_id, report_date),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            columns = [
+                "id", "report_date", "status", "metadata",
+                "created_at", "share_token", "theme_count",
+            ]
+            d = dict(zip(columns, row))
+            if d.get("report_date"):
+                d["report_date"] = str(d["report_date"])
+            if d.get("created_at"):
+                d["created_at"] = d["created_at"].isoformat()
+            return d
+        finally:
+            cursor.close()
+            conn.close()
+
     def list_reports(
         self, user_id: str, limit: int = 20
     ) -> List[Dict[str, Any]]:

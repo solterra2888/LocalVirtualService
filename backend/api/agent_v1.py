@@ -9,7 +9,8 @@ Breaking changes from v0.1:
   - Query param `ticker` (singular) → `tickers` (comma-separated multi-value)
   - New params: tags (comma-sep), author (string), dedup (bool, default true)
   - New endpoints: POST /daily/batch, POST /daily/multi, GET /subscriptions, GET /sources
-  - Old paths return 410 Gone with upgrade guidance.
+  - Legacy v0.1 paths (/search, /reports/twitter-daily/*, /reports/youtube-daily/*)
+    removed entirely in v0.5.0 (previously 410 Gone) — use the replacements above.
 
 Auth: Bearer JWT (web) or Bearer PAT (ght_...).
 """
@@ -18,8 +19,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 
 from backend.auth.pat_auth import optional_pat_rate_headers, require_pat_scopes
 from backend.schemas.agent import (
@@ -240,85 +240,44 @@ def agent_list_sources(
 
 @router.get("/reports", response_model=AgentTwitterReportListResponse)
 def agent_report_list(
+    request: Request,
     response: Response,
-    kind: str = Query(..., description="Report type: 'twitter' or 'youtube'"),
+    kind: str = Query(..., description="Report type (canonical): 'twitter_daily', 'youtube_daily', 'market_daily', 'market_weekly', 'theme'. Legacy aliases twitter/youtube/market still accepted."),
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: TokenData = Depends(require_pat_scopes("reports:read")),
 ):
-    data = _svc().report_list(user, kind=kind, limit=limit, offset=offset)
+    data = _svc().report_list(
+        user, kind=kind, limit=limit, offset=offset, request_base=str(request.base_url),
+    )
     _rl(response, user)
     return data
 
 
 @router.get("/reports/latest", response_model=Optional[AgentReportBodyResponse])
 def agent_report_latest(
+    request: Request,
     response: Response,
-    kind: str = Query(..., description="Report type: 'twitter' or 'youtube'"),
+    kind: str = Query(..., description="Report type (canonical): 'twitter_daily', 'youtube_daily', 'market_daily', 'market_weekly', 'theme'. Legacy aliases twitter/youtube/market still accepted."),
     user: TokenData = Depends(require_pat_scopes("reports:read")),
 ):
-    data = _svc().report_latest(user, kind=kind)
+    data = _svc().report_latest(user, kind=kind, request_base=str(request.base_url))
     _rl(response, user)
     return data
 
 
 @router.get("/reports/{report_date}", response_model=AgentReportBodyResponse)
 def agent_report_by_date(
+    request: Request,
     response: Response,
     report_date: str,
-    kind: str = Query(..., description="Report type: 'twitter' or 'youtube'"),
+    kind: str = Query(..., description="Report type (canonical): 'twitter_daily', 'youtube_daily', 'market_daily', 'market_weekly', 'theme'. Legacy aliases twitter/youtube/market still accepted."),
     user: TokenData = Depends(require_pat_scopes("reports:read")),
 ):
-    data = _svc().report_by_date(user, kind=kind, report_date=report_date)
+    data = _svc().report_by_date(
+        user, kind=kind, report_date=report_date, request_base=str(request.base_url),
+    )
     if data is None:
         raise HTTPException(status_code=404, detail="No report for this date")
     _rl(response, user)
     return data
-
-
-# ---------------------------------------------------------------------------
-# 410 Gone stubs for removed v0.1 paths
-# ---------------------------------------------------------------------------
-
-_GONE_MSG = (
-    "This endpoint was removed in guanhe-mcp v0.2. "
-    "Upgrade to guanhe-mcp >= 0.2.0 and update your MCP configuration. "
-    "See: https://www.guanhecapital.hk/agent/skill/GUANHE_DAILY.md"
-)
-
-
-@router.get("/search")
-def _gone_search():
-    """Removed: use GET /daily?q=... instead."""
-    return JSONResponse(
-        status_code=410,
-        content={"detail": _GONE_MSG, "replacement": "GET /api/v1/agent/daily?q=..."},
-    )
-
-
-@router.get("/reports/twitter-daily/latest")
-@router.get("/reports/twitter-daily/{report_date}")
-@router.get("/reports/twitter-daily")
-def _gone_twitter_reports():
-    """Removed: use GET /reports?kind=twitter instead."""
-    return JSONResponse(
-        status_code=410,
-        content={
-            "detail": _GONE_MSG,
-            "replacement": "GET /api/v1/agent/reports?kind=twitter",
-        },
-    )
-
-
-@router.get("/reports/youtube-daily/latest")
-@router.get("/reports/youtube-daily/{report_date}")
-@router.get("/reports/youtube-daily")
-def _gone_youtube_reports():
-    """Removed: use GET /reports?kind=youtube instead."""
-    return JSONResponse(
-        status_code=410,
-        content={
-            "detail": _GONE_MSG,
-            "replacement": "GET /api/v1/agent/reports?kind=youtube",
-        },
-    )

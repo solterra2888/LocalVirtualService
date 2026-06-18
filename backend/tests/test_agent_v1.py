@@ -28,9 +28,14 @@ def _build_test_client():
     """Import the FastAPI app and return a TestClient with auth bypassed."""
     from fastapi import FastAPI
     from backend.api import agent_v1
+    from backend.auth import pat_auth
 
     app = FastAPI()
     app.include_router(agent_v1.router)
+    # Bypass PAT/JWT auth. The require_pat_scopes() closure and its inner
+    # dependency are bound at import time, so patching the module attribute is
+    # too late — override the inner dependency FastAPI actually calls instead.
+    app.dependency_overrides[pat_auth.get_current_user_or_pat] = lambda: FAKE_TOKEN_DATA
     return TestClient(app, raise_server_exceptions=True)
 
 
@@ -331,7 +336,7 @@ class TestMultiSearch:
 
     def test_per_group_stats_length_matches_groups(self):
         from backend.services.agent_service import AgentService
-        from backend.schemas.agent import AgentMultiSearchRequest
+        from backend.schemas.agent import AgentDailyItem, AgentMultiSearchRequest
 
         group_responses = [
             _mock_feed_response(items=["a"] * 3, total=3),
@@ -358,28 +363,6 @@ class TestMultiSearch:
         assert len(result.per_group) == 2
         assert result.per_group[0].total == 3
         assert result.per_group[1].total == 5
-
-
-# ---------------------------------------------------------------------------
-# Tests: 410 Gone stubs
-# ---------------------------------------------------------------------------
-
-class TestGoneStubs:
-    def test_search_returns_410(self):
-        client = _build_test_client()
-        resp = client.get("/api/v1/agent/search", params={"q": "test"})
-        assert resp.status_code == 410
-        assert "replacement" in resp.json()
-
-    def test_twitter_daily_returns_410(self):
-        client = _build_test_client()
-        resp = client.get("/api/v1/agent/reports/twitter-daily/latest")
-        assert resp.status_code == 410
-
-    def test_youtube_daily_returns_410(self):
-        client = _build_test_client()
-        resp = client.get("/api/v1/agent/reports/youtube-daily/latest")
-        assert resp.status_code == 410
 
 
 # ---------------------------------------------------------------------------
@@ -419,3 +402,191 @@ class TestBatchEndpoint:
         data = resp.json()
         assert "items" in data
         assert "errors" in data
+
+
+# ---------------------------------------------------------------------------
+# Tests: GET /api/v1/agent/reports* — 5 canonical kinds (v0.5.0)
+# ---------------------------------------------------------------------------
+
+class TestReportEndpoints:
+    """Market report kind routes through the same endpoints and returns share_url."""
+
+    def test_market_latest_returns_share_url(self):
+        from backend.schemas.agent import AgentReportBodyResponse
+
+        body = AgentReportBodyResponse(
+            report_date="2026-06-17",
+            kind="market",
+            status="completed",
+            share_url="https://example.com/api/daily-market-report/shared/abc123",
+            metadata={"us_assets_count": 17},
+        )
+        client = _build_test_client()
+        with _patched_service("report_latest", body):
+            resp = client.get(
+                "/api/v1/agent/reports/latest",
+                params={"kind": "market"},
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["kind"] == "market"
+        assert data["share_url"].endswith("/shared/abc123")
+        # market reports carry no markdown body — content delivered via share_url
+        assert data["content_markdown"] is None
+
+    def test_market_list_returns_share_url(self):
+        from backend.schemas.agent import (
+            AgentTwitterReportListResponse,
+            AgentTwitterReportSummary,
+        )
+
+        list_resp = AgentTwitterReportListResponse(
+            reports=[
+                AgentTwitterReportSummary(
+                    report_date="2026-06-17",
+                    status="completed",
+                    share_url="https://example.com/api/daily-market-report/shared/abc123",
+                )
+            ],
+            total=1,
+        )
+        client = _build_test_client()
+        with _patched_service("report_list", list_resp):
+            resp = client.get(
+                "/api/v1/agent/reports",
+                params={"kind": "market"},
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["reports"][0]["share_url"].endswith("/shared/abc123")
+
+    def test_market_weekly_latest_returns_share_url(self):
+        from backend.schemas.agent import AgentReportBodyResponse
+
+        body = AgentReportBodyResponse(
+            report_date="2026-06-13",
+            kind="market_weekly",
+            status="completed",
+            share_url="https://example.com/api/market-weekly-report/shared/abc123",
+            metadata={"week_range": "2026-06-06 to 2026-06-13"},
+        )
+        client = _build_test_client()
+        with _patched_service("report_latest", body):
+            resp = client.get(
+                "/api/v1/agent/reports/latest",
+                params={"kind": "market_weekly"},
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["kind"] == "market_weekly"
+        assert data["share_url"].endswith("/shared/abc123")
+        assert data["content_markdown"] is None
+
+    def test_theme_latest_returns_share_url(self):
+        from backend.schemas.agent import AgentReportBodyResponse
+
+        body = AgentReportBodyResponse(
+            report_date="2026-06-17",
+            kind="theme",
+            status="completed",
+            share_url="https://example.com/api/theme-report/shared/def456",
+            metadata={"theme_count": 12},
+        )
+        client = _build_test_client()
+        with _patched_service("report_latest", body):
+            resp = client.get(
+                "/api/v1/agent/reports/latest",
+                params={"kind": "theme"},
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["kind"] == "theme"
+        assert data["share_url"].endswith("/shared/def456")
+
+    def test_market_alias_normalizes_to_canonical(self):
+        """kind=market (legacy alias) normalizes to market_daily in the service layer.
+
+        Patches _resolve_report_service + _uid_for so the real report_latest() runs,
+        proving the alias is canonicalized before dispatch and reflected in the
+        response kind + share_url path.
+        """
+        from unittest.mock import patch, MagicMock
+        from backend.services import agent_service
+
+        fake_report = {
+            "report_date": "2026-06-17",
+            "status": "completed",
+            "share_token": "abc123",
+            "metadata": {},
+        }
+        client = _build_test_client()
+        with patch.object(agent_service, "_resolve_report_service") as mock_resolve, \
+             patch.object(agent_service, "_uid_for", return_value="1"):
+            mock_svc = MagicMock()
+            mock_svc.get_latest_report.return_value = fake_report
+            mock_resolve.return_value = mock_svc
+            resp = client.get(
+                "/api/v1/agent/reports/latest",
+                params={"kind": "market"},
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        # Alias normalized to canonical before dispatch
+        assert mock_resolve.call_args.args[0] == "market_daily"
+        data = resp.json()
+        assert data["kind"] == "market_daily"
+        assert data["share_url"].endswith("/api/daily-market-report/shared/abc123")
+
+
+# ---------------------------------------------------------------------------
+# Tests: _normalize_kind (v0.5.0 canonical kind aliases)
+# ---------------------------------------------------------------------------
+
+class TestNormalizeKind:
+    """Legacy kind aliases normalize to canonical form."""
+
+    def _call(self, kind):
+        from backend.services.agent_service import _normalize_kind
+        return _normalize_kind(kind)
+
+    def test_aliases(self):
+        assert self._call("twitter") == "twitter_daily"
+        assert self._call("youtube") == "youtube_daily"
+        assert self._call("market") == "market_daily"
+
+    def test_canonical_unchanged(self):
+        for k in ("twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"):
+            assert self._call(k) == k
+
+    def test_unknown_passes_through(self):
+        # Unknown kinds pass through unchanged; _resolve_report_service raises 400.
+        assert self._call("nonsense") == "nonsense"
+
+
+class TestStripReferences:
+    """Metadata *_references (rendering-only) are stripped from Agent responses."""
+
+    def _call(self, meta):
+        from backend.services.agent_service import _strip_references
+        return _strip_references(meta)
+
+    def test_strips_reference_keys_keeps_rest(self):
+        out = self._call({
+            "video_count": 5,
+            "video_references": [{"ref_id": 1, "url": "x"}],
+            "tweet_references": [{"ref_id": 1}],
+            "theme_count": 3,
+        })
+        assert "video_references" not in out
+        assert "tweet_references" not in out
+        assert out["video_count"] == 5
+        assert out["theme_count"] == 3
+
+    def test_none_and_empty_passthrough(self):
+        assert self._call(None) is None
+        assert self._call({}) == {}

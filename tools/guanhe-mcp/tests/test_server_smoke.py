@@ -185,6 +185,24 @@ class TestReportLatest:
         _, kwargs = client.get.call_args
         assert kwargs["params"] == {"kind": "youtube"}
 
+    def test_market(self):
+        client = _make_client_mock()
+        srv._call_tool("report_latest", {"kind": "market"}, client)
+        _, kwargs = client.get.call_args
+        assert kwargs["params"] == {"kind": "market"}
+
+    def test_market_weekly(self):
+        client = _make_client_mock()
+        srv._call_tool("report_latest", {"kind": "market_weekly"}, client)
+        _, kwargs = client.get.call_args
+        assert kwargs["params"] == {"kind": "market_weekly"}
+
+    def test_theme(self):
+        client = _make_client_mock()
+        srv._call_tool("report_latest", {"kind": "theme"}, client)
+        _, kwargs = client.get.call_args
+        assert kwargs["params"] == {"kind": "theme"}
+
 
 class TestReportByDate:
     def test_path_and_params(self):
@@ -194,6 +212,13 @@ class TestReportByDate:
         args, kwargs = client.get.call_args
         assert args[0] == "/api/v1/agent/reports/2026-05-10"
         assert kwargs["params"]["kind"] == "twitter"
+
+    def test_market_weekly(self):
+        client = _make_client_mock()
+        srv._call_tool("report_by_date", {"kind": "market_weekly", "date": "2026-06-13"}, client)
+        args, kwargs = client.get.call_args
+        assert args[0] == "/api/v1/agent/reports/2026-06-13"
+        assert kwargs["params"]["kind"] == "market_weekly"
 
 
 class TestReportList:
@@ -212,6 +237,14 @@ class TestReportList:
         assert kwargs["params"]["limit"] == 10
         assert kwargs["params"]["offset"] == 20
 
+    def test_theme(self):
+        client = _make_client_mock()
+        srv._call_tool("report_list", {"kind": "theme"}, client)
+        _, kwargs = client.get.call_args
+        assert kwargs["params"]["kind"] == "theme"
+        assert kwargs["params"]["limit"] == 30
+        assert kwargs["params"]["offset"] == 0
+
 
 class TestUnknownTool:
     def test_raises_value_error(self):
@@ -225,8 +258,8 @@ class TestUnknownTool:
 # ---------------------------------------------------------------------------
 
 class TestToolsList:
-    def test_nine_tools_defined(self):
-        assert len(srv.TOOLS) == 9
+    def test_twelve_tools_defined(self):
+        assert len(srv.TOOLS) == 12
 
     def test_tool_names(self):
         names = {t["name"] for t in srv.TOOLS}
@@ -234,6 +267,7 @@ class TestToolsList:
             "daily_feed", "daily_item", "daily_items_batch", "daily_multi_search",
             "list_subscriptions", "list_sources",
             "report_latest", "report_by_date", "report_list",
+            "semantic_search", "hybrid_search", "chunks_by_locator",
         }
         assert names == expected
 
@@ -256,6 +290,14 @@ class TestToolsList:
 
         tool = next(t for t in srv.TOOLS if t["name"] == "daily_items_batch")
         assert "ids" in tool["inputSchema"].get("required", [])
+
+    def test_report_kinds_canonical(self):
+        """All three report tools expose the 5 canonical kinds (v0.5.0)."""
+        expected = ["twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"]
+        for name in ("report_latest", "report_by_date", "report_list"):
+            tool = next(t for t in srv.TOOLS if t["name"] == name)
+            kind_prop = tool["inputSchema"]["properties"]["kind"]
+            assert kind_prop["enum"] == expected, f"{name} enum mismatch: {kind_prop['enum']}"
 
 
 # ---------------------------------------------------------------------------
@@ -311,8 +353,8 @@ class TestInitialize:
         assert result["serverInfo"].get("title"), "serverInfo.title must be set"
         assert result.get("instructions"), "instructions must be set"
 
-    def test_version_is_0_2_1(self):
-        assert srv.SERVER_VERSION == "0.2.1"
+    def test_version_is_0_5_0(self):
+        assert srv.SERVER_VERSION == "0.5.0"
 
     def test_daily_feed_has_people_countries_hints(self):
         tool = next(t for t in srv.TOOLS if t["name"] == "daily_feed")

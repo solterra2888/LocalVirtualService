@@ -23,7 +23,7 @@ import sys
 from typing import Any, Dict, List, Optional, Union
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.3.0"
+SERVER_VERSION = "0.5.0"
 
 _Q_SYNTAX_HINT = (
     "q syntax: space=AND (all terms match), OR (uppercase)=any match, "
@@ -284,16 +284,25 @@ TOOLS: List[Dict[str, Any]] = [
     {
         "name": "report_latest",
         "description": (
-            "Get the latest completed daily report for the given kind. "
-            "Use for: 'show me today's Twitter/YouTube daily'."
+            "Get the latest completed report for the given kind: twitter_daily / "
+            "youtube_daily (feed digest), market_daily (daily market report), "
+            "market_weekly (weekly market report), or theme (theme performance report). "
+            "Use for: 'show me today's Twitter/YouTube/market daily', 'this week's "
+            "market weekly', 'latest theme report'."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "kind": {
                     "type": "string",
-                    "enum": ["twitter", "youtube"],
-                    "description": "Report type: 'twitter' or 'youtube'.",
+                    "enum": ["twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"],
+                    "description": (
+                        "Report type (canonical): twitter_daily / youtube_daily / "
+                        "market_daily / market_weekly / theme. market_daily = daily market "
+                        "report; market_weekly = weekly market report; theme = theme "
+                        "performance report. (Legacy aliases twitter/youtube/market still "
+                        "accepted by the API.)"
+                    ),
                 }
             },
             "required": ["kind"],
@@ -302,14 +311,20 @@ TOOLS: List[Dict[str, Any]] = [
     # 8 ─── report_by_date ────────────────────────────────────────────────
     {
         "name": "report_by_date",
-        "description": "Get the daily report for a specific date.",
+        "description": "Get the report for a specific date. For market_weekly, the date is the week_end (Friday).",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "kind": {
                     "type": "string",
-                    "enum": ["twitter", "youtube"],
-                    "description": "Report type: 'twitter' or 'youtube'.",
+                    "enum": ["twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"],
+                    "description": (
+                        "Report type (canonical): twitter_daily / youtube_daily / "
+                        "market_daily / market_weekly / theme. market_daily = daily market "
+                        "report; market_weekly = weekly market report; theme = theme "
+                        "performance report. (Legacy aliases twitter/youtube/market still "
+                        "accepted by the API.)"
+                    ),
                 },
                 "date": {
                     "type": "string",
@@ -322,14 +337,20 @@ TOOLS: List[Dict[str, Any]] = [
     # 9 ─── report_list ───────────────────────────────────────────────────
     {
         "name": "report_list",
-        "description": "List available daily reports with pagination.",
+        "description": "List available reports with pagination.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "kind": {
                     "type": "string",
-                    "enum": ["twitter", "youtube"],
-                    "description": "Report type: 'twitter' or 'youtube'.",
+                    "enum": ["twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"],
+                    "description": (
+                        "Report type (canonical): twitter_daily / youtube_daily / "
+                        "market_daily / market_weekly / theme. market_daily = daily market "
+                        "report; market_weekly = weekly market report; theme = theme "
+                        "performance report. (Legacy aliases twitter/youtube/market still "
+                        "accepted by the API.)"
+                    ),
                 },
                 "limit": {"type": "integer", "default": 30, "minimum": 1, "maximum": 100},
                 "offset": {"type": "integer", "default": 0, "minimum": 0},

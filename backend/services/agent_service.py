@@ -46,6 +46,9 @@ from backend.schemas.agent import (
 )
 from backend.schemas.daily import DailyFeedItem, DailyItemDetail
 from backend.schemas.user import TokenData
+from backend.services.daily_market_report_service import DailyMarketReportService
+from backend.services.market_weekly_service import MarketWeeklyService
+from backend.services.theme_report_service import ThemeReportService
 from backend.services.twitter_daily_report_service import TwitterDailyReportService
 from backend.services.youtube_daily_report_service import YouTubeDailyReportService
 from backend.utils.database_config import get_database_config
@@ -465,16 +468,106 @@ def _detail_to_agent_detail(
     )
 
 
+# Canonical report kinds. Legacy short names (twitter/youtube/market) are
+# accepted as aliases and normalized to the canonical form before dispatch.
+_KIND_ALIASES = {
+    "twitter": "twitter_daily",
+    "youtube": "youtube_daily",
+    "market": "market_daily",
+}
+
+_REPORT_SERVICES = {
+    "twitter_daily": TwitterDailyReportService,
+    "youtube_daily": YouTubeDailyReportService,
+    "market_daily": DailyMarketReportService,
+    "market_weekly": MarketWeeklyService,
+    "theme": ThemeReportService,
+}
+
+
+def _normalize_kind(kind: str) -> str:
+    """Map legacy kind aliases to their canonical form (unchanged if already canonical)."""
+    return _KIND_ALIASES.get(kind, kind)
+
+
 def _resolve_report_service(kind: str):
-    """Return the correct report service for the given kind."""
-    if kind == "youtube":
-        return YouTubeDailyReportService()
-    if kind == "twitter":
-        return TwitterDailyReportService()
-    raise HTTPException(
-        status_code=400,
-        detail=f"Unknown report kind '{kind}'. Use 'twitter' or 'youtube'.",
+    """Return the correct report service for the given (possibly aliased) kind."""
+    canonical = _normalize_kind(kind)
+    svc_cls = _REPORT_SERVICES.get(canonical)
+    if not svc_cls:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown report kind '{kind}'. Use one of: "
+                f"{', '.join(_REPORT_SERVICES.keys())}."
+            ),
+        )
+    return svc_cls()
+
+
+# user_id column format diverges per report family:
+#   twitter_daily / youtube_daily : integer user_id
+#   market_daily                  : str(user_id)  (numeric string)
+#   market_weekly / theme         : username  (sourced from theme_tags.user_id)
+_USERNAME_KINDS = {"market_weekly", "theme"}
+
+
+def _uid_for(user: TokenData, kind: str):
+    """Resolve the user identifier a report service expects for this canonical kind."""
+    if kind in _USERNAME_KINDS:
+        return user.username
+    if kind == "market_daily":
+        return str(user.user_id)
+    return user.user_id
+
+
+# Public share path per report kind — share_url points here (no auth required).
+_REPORT_SHARE_PATH = {
+    "twitter_daily": "/api/reports/twitter-daily/shared/",
+    "youtube_daily": "/api/reports/youtube-daily/shared/",
+    "market_daily": "/api/daily-market-report/shared/",
+    "market_weekly": "/api/market-weekly-report/shared/",
+    "theme": "/api/theme-report/shared/",
+}
+
+
+def _build_share_url(
+    kind: Optional[str], token: Optional[str], request_base: Optional[str] = None
+) -> Optional[str]:
+    """Build the public share URL for a report from its kind + share_token.
+
+    Base origin resolution (first wins):
+      1. PUBLIC_WEB_URL env var — explicit public site, for split front/back deployments
+         (backend on private network, site on public domain).
+      2. request_base — origin of the incoming API request; auto-adapts to local/prod
+         so share_url is populated even when PUBLIC_WEB_URL is unset.
+    Returns None only if the token is missing or no base can be resolved.
+    """
+    if not token or kind not in _REPORT_SHARE_PATH:
+        return None
+    base = (
+        os.environ.get("PUBLIC_WEB_URL", "").rstrip("/")
+        or (request_base or "").rstrip("/")
     )
+    if not base:
+        logger.warning(
+            "Cannot build report share_url: set PUBLIC_WEB_URL or pass request_base."
+        )
+        return None
+    return f"{base}{_REPORT_SHARE_PATH[kind]}{token}"
+
+
+def _strip_references(metadata: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Drop report rendering references (*_references: tweet_references /
+    video_references / …) from metadata before returning to the Agent.
+
+    These are only needed server-side to render the HTML/share_url (injecting
+    clickable links for [1][2] markers); they bloat the LLM context and carry no
+    value now that bodies are delivered via share_url.
+    """
+    if not metadata:
+        return metadata
+    return {k: v for k, v in metadata.items() if not k.endswith("_references")}
 
 
 class AgentService:
@@ -1062,43 +1155,56 @@ class AgentService:
     # ------------------------------------------------------------------
 
     def report_list(
-        self, user: TokenData, kind: str, limit: int = 30, offset: int = 0
+        self, user: TokenData, kind: str, limit: int = 30, offset: int = 0,
+        request_base: Optional[str] = None,
     ) -> AgentTwitterReportListResponse:
+        kind = _normalize_kind(kind)
         svc = _resolve_report_service(kind)
-        reports, total = svc.get_user_reports(user.user_id, limit, offset)
+        uid = _uid_for(user, kind)
+        reports, total = svc.get_user_reports(uid, limit, offset)
         summaries = [
             AgentTwitterReportSummary(
-                report_date=str(r.get("report_date") or r.get("date") or ""),
+                report_date=str(r.get("report_date") or r.get("week_end") or r.get("date") or ""),
                 status=r.get("status"),
                 title=r.get("title"),
+                share_url=_build_share_url(kind, r.get("share_token"), request_base),
             )
             for r in (reports or [])
         ]
         return AgentTwitterReportListResponse(reports=summaries, total=total)
 
-    def report_latest(self, user: TokenData, kind: str) -> Optional[AgentReportBodyResponse]:
+    def report_latest(
+        self, user: TokenData, kind: str, request_base: Optional[str] = None
+    ) -> Optional[AgentReportBodyResponse]:
+        kind = _normalize_kind(kind)
         svc = _resolve_report_service(kind)
-        r = svc.get_latest_report(user.user_id)
+        uid = _uid_for(user, kind)
+        r = svc.get_latest_report(uid)
         if not r:
             return None
-        return self._report_dict_to_agent(r, kind=kind)
+        return self._report_dict_to_agent(r, kind=kind, request_base=request_base)
 
     def report_by_date(
-        self, user: TokenData, kind: str, report_date: str
+        self, user: TokenData, kind: str, report_date: str,
+        request_base: Optional[str] = None,
     ) -> Optional[AgentReportBodyResponse]:
         try:
             d = datetime.strptime(report_date, "%Y-%m-%d").date()
         except ValueError:
             raise HTTPException(status_code=400, detail="Use YYYY-MM-DD")
+        kind = _normalize_kind(kind)
         svc = _resolve_report_service(kind)
-        r = svc.get_report_by_date(user.user_id, d)
+        uid = _uid_for(user, kind)
+        r = svc.get_report_by_date(uid, d)
         if not r:
             return None
-        return self._report_dict_to_agent(r, kind=kind)
+        return self._report_dict_to_agent(r, kind=kind, request_base=request_base)
 
     @staticmethod
-    def _report_dict_to_agent(r: Dict[str, Any], kind: Optional[str] = None) -> AgentReportBodyResponse:
-        rd = r.get("report_date") or r.get("date")
+    def _report_dict_to_agent(
+        r: Dict[str, Any], kind: Optional[str] = None, request_base: Optional[str] = None
+    ) -> AgentReportBodyResponse:
+        rd = r.get("report_date") or r.get("week_end") or r.get("date")
         if hasattr(rd, "isoformat"):
             rd_str = rd.isoformat()
         else:
@@ -1107,6 +1213,9 @@ class AgentService:
             report_date=rd_str[:10],
             kind=kind,
             status=r.get("status"),
-            content_markdown=r.get("content") or r.get("report_content") or r.get("body"),
-            metadata=r.get("metadata"),
+            # v0.5.0: all reports are delivered via share_url; the body (markdown for
+            # twitter/youtube, HTML for market/weekly/theme) is no longer inlined.
+            content_markdown=None,
+            share_url=_build_share_url(kind, r.get("share_token"), request_base),
+            metadata=_strip_references(r.get("metadata")),
         )
