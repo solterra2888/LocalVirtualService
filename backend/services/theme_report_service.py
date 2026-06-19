@@ -12,6 +12,8 @@ Theme Report Service
 import os
 import re
 import json
+import csv
+import io
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
@@ -216,6 +218,9 @@ class ThemeReportService:
             )
             stock_charts = self._build_stock_charts(themes_data)
 
+            # share_token 提前生成：渲染 HTML 时需嵌入 CSV 下载链接
+            share_token = uuid4().hex
+
             # 4. 渲染 HTML
             html = self._render_html(
                 themes_details=themes_details,
@@ -227,7 +232,11 @@ class ThemeReportService:
                 price_as_of=price_as_of,
                 user_id=user_id,
                 generation_times=generation_times,
+                share_token=share_token,
             )
+
+            # 4b. 生成成分股收益 CSV（Download spreadsheet）
+            csv_text = self._build_constituents_csv(themes_details)
 
             # 5. 上传至 OSS
             upload_result = self.oss_service.upload_bytes(
@@ -255,14 +264,12 @@ class ThemeReportService:
                 **generation_times,
             }
 
-            share_token = uuid4().hex
-
             cursor.execute(
                 """
                 UPDATE theme_reports
                 SET status='completed',
                     theme_count=%s, category_count=%s, constituent_count=%s,
-                    metadata=%s, share_token=%s, html_content=%s, updated_at=NOW()
+                    metadata=%s, share_token=%s, html_content=%s, csv_content=%s, updated_at=NOW()
                 WHERE id=%s
                 """,
                 (
@@ -272,6 +279,7 @@ class ThemeReportService:
                     json.dumps(metadata),
                     share_token,
                     html,
+                    csv_text,
                     report_id,
                 ),
             )
@@ -678,6 +686,47 @@ class ThemeReportService:
         return themes_details
 
     # ------------------------------------------------------------------
+    # Constituent CSV export ("Download spreadsheet")
+    # ------------------------------------------------------------------
+
+    def _build_constituents_csv(self, themes_details: List[Dict[str, Any]]) -> str:
+        """
+        构建成分股收益 CSV 字符串，供报告顶部 "Download spreadsheet" 导出。
+
+        列：ticker, theme, Categories, 1D, 1W, 1M, 3M, 1Y
+        - 按 theme 分组、组内按 ticker 字母序（对齐参考样例 theme_constituent_performance.csv）
+        - 收益为百分比数值（如 0.3885 表示 +0.39%），保留 4 位小数并去尾零；None 留空
+        - category 为空时留空（与参考样例空值风格一致）
+        """
+        def _fmt(v):
+            if v is None:
+                return ""
+            r = round(float(v), 4)
+            if r == int(r):
+                return str(int(r))
+            return f"{r:.4f}".rstrip("0").rstrip(".")
+
+        buf = io.StringIO()
+        writer = csv.writer(buf, lineterminator="\n")  # LF，对齐参考样例（默认是 CRLF）
+        writer.writerow(["ticker", "theme", "Categories", "1D", "1W", "1M", "3M", "1Y"])
+        for td in themes_details:
+            theme_name = td["theme_name"]
+            # 组内按 ticker 字母序（与报告内 3M-desc 排序无关，仅影响导出顺序）
+            constituents = sorted(td["constituents"], key=lambda c: c["ticker"])
+            for c in constituents:
+                writer.writerow([
+                    c["ticker"],
+                    theme_name,
+                    c.get("category") or "",
+                    _fmt(c.get("1D")),
+                    _fmt(c.get("1W")),
+                    _fmt(c.get("1M")),
+                    _fmt(c.get("3M")),
+                    _fmt(c.get("1Y")),
+                ])
+        return buf.getvalue()
+
+    # ------------------------------------------------------------------
     # Theme-level performance (Performance Table / Cumulative / Multi-Period)
     # ------------------------------------------------------------------
 
@@ -1041,6 +1090,7 @@ class ThemeReportService:
         price_as_of: Optional[date],
         user_id: str,
         generation_times: Optional[Dict[str, Optional[str]]] = None,
+        share_token: str = "",
     ) -> str:
         """Render a self-contained HTML string via Jinja2."""
         from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -1079,6 +1129,7 @@ class ThemeReportService:
             scheduler_timezone_label=gen.get("scheduler_timezone_label"),
             generated_at_scheduler_tz=gen.get("generated_at_scheduler_tz"),
             user_id=user_id,
+            share_token=share_token,
             themes=themes_details,
             theme_performance=theme_performance,
             executive_summary=executive_summary,
@@ -1402,6 +1453,33 @@ class ThemeReportService:
 
             logger.error(f"[get_report_html_by_token] no html_content and no oss_object_name for token {token[:8]}…")
             return None
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_report_csv_by_token(self, token: str) -> Optional[bytes]:
+        """
+        按 share_token 查询已完成报告，返回成分股收益 CSV 的原始 bytes。
+        供公开端点 GET /theme-report/shared/{token}/csv 下载。
+
+        csv_content 为 NULL（历史报告尚未回填）或 token 无效时返回 None。
+        """
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT csv_content
+                FROM theme_reports
+                WHERE share_token = %s AND status = 'completed'
+                LIMIT 1
+                """,
+                (token,),
+            )
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                return None
+            return row[0].encode("utf-8")
         finally:
             cursor.close()
             conn.close()

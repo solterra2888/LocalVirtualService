@@ -8,7 +8,7 @@ POST /theme-report/generate  — 手动触发生成（异步 Celery 任务）
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from typing import Optional
 from pydantic import BaseModel
 
@@ -157,6 +157,46 @@ async def get_shared_theme_report(token: str):
     except Exception as exc:
         logger.error(f"[get_shared_theme_report] Error for token={token[:8]}…: {exc}")
         raise HTTPException(status_code=500, detail="Failed to retrieve shared report.")
+
+
+# ──────────────────────────────────────────────────────────────
+# GET /theme-report/shared/{token}/csv  — public, no auth required
+# ──────────────────────────────────────────────────────────────
+
+@router.get("/theme-report/shared/{token}/csv")
+async def get_shared_theme_report_csv(token: str):
+    """
+    Public endpoint — no authentication required.
+
+    Returns the constituent-performance CSV (Download spreadsheet) for the
+    completed Theme Report identified by its share_token. Mirrors the layout
+    of the cntlabs reference export, with an extra `Categories` column:
+        ticker, theme, Categories, 1D, 1W, 1M, 3M, 1Y
+
+    Returns 404 if the token is unknown, the report is not completed, or its
+    csv_content has not been populated yet (regenerate the report to fill it).
+    """
+    try:
+        svc = ThemeReportService()
+        csv_bytes = svc.get_report_csv_by_token(token)
+        if csv_bytes is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Shared report CSV not found. Regenerate the report to populate it.",
+            )
+        return Response(
+            content=csv_bytes,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="theme_constituent_performance.csv"',
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[get_shared_theme_report_csv] Error for token={token[:8]}…: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve shared report CSV.")
 
 
 # ──────────────────────────────────────────────────────────────

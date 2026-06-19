@@ -282,6 +282,27 @@
   }
   .stat-pill strong { color: var(--text); }
 
+  /* ── Download spreadsheet（导出成分股收益 CSV） ── */
+  .download-button {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent);
+    color: #ffffff;
+    border: 1px solid var(--accent);
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: filter 0.15s, opacity 0.15s;
+    white-space: nowrap;
+  }
+  .download-button:hover { filter: brightness(1.08); }
+  .download-button:active { opacity: 0.9; }
+
   /* ── Theme section ── */
   .theme-section {
     margin-bottom: 48px;
@@ -674,6 +695,9 @@
       <span class="stat-pill"><strong>{{ total_themes }}</strong> themes</span>
       <span class="stat-pill"><strong>{{ total_categories }}</strong> categories</span>
       <span class="stat-pill"><strong>{{ total_constituents }}</strong> constituents</span>
+      {% if share_token %}
+      <a class="download-button" href="/api/theme-report/shared/{{ share_token }}/csv" download>Download spreadsheet</a>
+      {% endif %}
     </div>
   </div>
 
