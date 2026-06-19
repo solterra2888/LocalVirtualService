@@ -37,11 +37,16 @@ logger = get_logger("theme_report_service")
 #   1Y  = 364 calendar days (52 weeks); partial histories included for new listings
 #
 # NOTE: 1W previously used WTD (week-to-date) logic but that caused 0% returns
-# whenever price_as_of fell on a Monday (start == end).  Fixed to uniform
-# 7-calendar-day lookback to match the reference dashboard (dashboard.cntlabs.io).
+# whenever price_as_of fell on a Monday (start == end).  Fixed to a uniform
+# calendar-day lookback to match the reference dashboard (dashboard.cntlabs.io).
+# Horizon days verified by reverse-engineering the reference's implied start
+# prices on its own price series: 1M=21 and 3M=63 cal-days land exactly on the
+# reference's start price. 1W is 5 cal-days (NOT 7): for a Wed 6/17 anchor the
+# reference's 1W start resolves to Fri 6/12 (5 days back), not 6/10 (7 days) —
+# confirmed on AMD/ADSK.
 RETURN_HORIZONS: Dict[str, int] = {
     "1D": 1,
-    "1W": 7,
+    "1W": 5,
     "1M": 21,
     "3M": 63,
     "1Y": 364,
@@ -398,11 +403,12 @@ class ThemeReportService:
 
         cursor.execute(
             """
-            SELECT code, date::date AS trade_date, close
+            SELECT code, date::date AS trade_date,
+                   COALESCE(adjusted_close, close) AS close
             FROM stock_prices_eod
             WHERE code = ANY(%s)
               AND date BETWEEN %s AND %s
-              AND close IS NOT NULL
+              AND COALESCE(adjusted_close, close) IS NOT NULL
               AND period = 'd'
             ORDER BY code, date
             """,
@@ -445,7 +451,7 @@ class ThemeReportService:
         #
         # Using price_as_of (e.g. May 29 when report_date=June 1) means:
         #   - 1D: end=May29, start=last≤May28  → correct daily return
-        #   - 1W: end=May29, start=last≤May22  → matches reference
+        #   - 1W: end=May29, start=last≤May24  → matches reference (5-day)
         # ----------------------------------------------------------------
         if price_as_of is None:
             return {t: {h: None for h in RETURN_HORIZONS} for t in tickers}, None
@@ -699,11 +705,12 @@ class ThemeReportService:
 
         cursor.execute(
             """
-            SELECT code, date::date AS trade_date, close
+            SELECT code, date::date AS trade_date,
+                   COALESCE(adjusted_close, close) AS close
             FROM stock_prices_eod
             WHERE code = ANY(%s)
               AND date BETWEEN %s AND %s
-              AND close IS NOT NULL
+              AND COALESCE(adjusted_close, close) IS NOT NULL
               AND period = 'd'
             ORDER BY code, date
             """,
