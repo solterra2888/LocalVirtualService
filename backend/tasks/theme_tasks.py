@@ -880,7 +880,13 @@ def batch_create_themes_task(
                                             for ticker in unverified_tickers:
                                                 try:
                                                     # Parse ticker (e.g., "NVDA.US" -> symbol="NVDA", exchange="US")
-                                                    symbol, exchange = format_ticker_for_eodhd(ticker)
+                                                    # format_ticker_for_eodhd 返回 "SYMBOL.EXCHANGE" 字符串，需 rsplit 拆分
+                                                    formatted_ticker = format_ticker_for_eodhd(ticker)
+                                                    if '.' in formatted_ticker:
+                                                        symbol, exchange = formatted_ticker.rsplit('.', 1)
+                                                    else:
+                                                        symbol = formatted_ticker
+                                                        exchange = 'US'
                                                     
                                                     # Check if ticker exists in companies table
                                                     check_conn = db_manager.get_connection()

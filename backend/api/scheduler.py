@@ -957,6 +957,64 @@ async def create_default_eodhd_eod_stock_prices_task(
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
+@router.post("/tasks/eodhd-eod-stock-prices/weekly-backfill", summary="创建EODHD每周历史回填定时任务(兜底)")
+async def create_weekly_backfill_eodhd_eod_stock_prices_task(
+    current_user=Depends(get_current_user)
+):
+    """
+    创建每周 EOD 历史回填定时任务（兜底，保证 1Y 历史无缺口）。
+
+    默认配置：
+    - 纽约时间每周六 05:30 执行 (30 5 * * 6)，市场闭市、在每日 09:00 任务之前
+    - 回溯 400 天日线（覆盖 Theme Report 1Y=364 日历日 + 36 天余量）
+    - 补齐新 ticker 首次回填钩子（create_associations）偶发遗漏的历史缺口
+    - 复用 fetch_eodhd_eod_stock_prices_task，ON CONFLICT 幂等覆盖，不破坏已有数据
+    """
+    try:
+        logger.info("创建每周EOD历史回填定时任务请求", user=current_user.username)
+
+        scheduler_service = await get_scheduler_service()
+
+        result = await scheduler_service.create_cron_task(
+            task_name="EODHD EOD Weekly Backfill (400d)",
+            task_type="eodhd_eod_stock_prices",
+            cron_expression="30 5 * * 6",  # 每周六 05:30 纽约时间
+            timezone="America/New_York",
+            enabled=True,
+            task_params={
+                'days_back': 400,
+                'periods': ['d']  # 仅日线：Theme Report 各 horizon 均基于日线
+            },
+            created_by=current_user.username
+        )
+
+        if result['success']:
+            logger.info("每周EOD历史回填定时任务创建成功",
+                       user=current_user.username,
+                       task_id=result['task_id'])
+            return {
+                "success": True,
+                "message": result['message'],
+                "data": {
+                    "task_id": result['task_id'],
+                    "task_config": result['task_config']
+                }
+            }
+        else:
+            logger.error("每周EOD历史回填定时任务创建失败",
+                        failure_reason=result.get('message', '未知错误'),
+                        user=current_user.username)
+            raise HTTPException(status_code=400, detail=result.get('message', '创建任务失败'))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建每周EOD历史回填定时任务失败",
+                    exception=str(e),
+                    user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
 # ============ Futu投资主题定时任务专用API ============
 
 # @router.post("/tasks/futu-themes") - 已删除

@@ -265,6 +265,18 @@ async def create_eodhd_eod_stock_prices_task_proxy(request: Request, current_use
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to proxy create eodhd eod stock prices task: {str(e)}")
 
+@router.post("/tasks/eodhd-eod-stock-prices/weekly-backfill", summary="create weekly backfill eodhd stock prices task")
+async def create_weekly_backfill_eodhd_eod_stock_prices_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建每周EOD历史回填定时任务（兜底，400天日线）"""
+    try:
+        auth_headers = get_auth_headers(request)
+        result = await scheduler_client.post("/scheduler/tasks/eodhd-eod-stock-prices/weekly-backfill", headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to proxy create weekly backfill eodhd stock prices task: {str(e)}")
+
 @router.post("/tasks/eodhd-eod-stock-prices/default", summary="create default eodhd eod stock prices task")
 async def create_default_eodhd_eod_stock_prices_task_proxy(request: Request, current_user=Depends(get_current_user)):
     """代理创建默认EODHD历史股价定时任务"""

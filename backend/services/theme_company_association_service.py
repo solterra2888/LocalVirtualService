@@ -237,10 +237,11 @@ class ThemeCompanyAssociationService:
         
         try:
             cursor = conn.cursor()
-            
+
             created_count = 0
             skipped_count = 0
             details = []
+            created_tickers = []  # 新增的 ticker，commit 后触发首次 EOD 历史回填
             
             # 处理有效的 tickers
             for ticker_info in validation_result["valid"]:
@@ -273,6 +274,7 @@ class ThemeCompanyAssociationService:
                     
                     if cursor.rowcount > 0:
                         created_count += 1
+                        created_tickers.append(full_ticker)
                         details.append({
                             "ticker": full_ticker,
                             "status": "created",
@@ -328,6 +330,7 @@ class ThemeCompanyAssociationService:
                         
                         if cursor.rowcount > 0:
                             created_count += 1
+                            created_tickers.append(full_ticker)
                             details.append({
                                 "ticker": full_ticker,
                                 "status": "created",
@@ -364,7 +367,24 @@ class ThemeCompanyAssociationService:
             conn.commit()
             cursor.close()
             conn.close()
-            
+
+            # 对新增 ticker 异步触发首次 EOD 历史回填（默认 10 年，与 watchlist 新增一致），
+            # 保证 Theme Report 的 1Y（回溯 364 日历日）有足够历史，避免走 partial 分支失真。
+            # 失败绝不影响已提交的关联与返回值。
+            if created_tickers:
+                try:
+                    from backend.tasks.data_tasks import fetch_single_ticker_eod_history_task
+                    for _tk in created_tickers:
+                        try:
+                            _task = fetch_single_ticker_eod_history_task.apply_async(
+                                args=[_tk], kwargs={'days_back': None}
+                            )
+                            logger.info(f"📥 已派发首次 EOD 回填: {_tk} (task_id={_task.id})")
+                        except Exception as dispatch_err:
+                            logger.warning(f"⚠️ 派发首次 EOD 回填失败 {_tk}: {dispatch_err}")
+                except Exception as import_err:
+                    logger.warning(f"⚠️ EOD 回填任务导入失败，跳过首次回填: {import_err}")
+
             logger.info(f"关联创建完成: {created_count} 创建, {skipped_count} 跳过")
             
             return {
