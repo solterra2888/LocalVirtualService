@@ -1441,11 +1441,12 @@ class InvestmentThemeEmbeddingService:
         group: Optional[str] = None,
         theme_id: Optional[str] = None,
         market: Optional[str] = None,
-        tickers: Optional[List[str]] = None
+        tickers: Optional[List[str]] = None,
+        defer_eod_backfill: bool = False,
     ) -> Dict[str, Any]:
         """
         创建新的投资主题并生成向量
-        
+
         Args:
             theme_name: 主题名称
             category: 主题分类/类别
@@ -1455,7 +1456,9 @@ class InvestmentThemeEmbeddingService:
             theme_id: 主题ID（可选，如果不提供则自动生成）
             market: 市场代码（US/HK/CN，可选）
             tickers: 关联的股票代码列表（简写，可选）
-            
+            defer_eod_backfill: 透传给 create_associations，为 True 时跳过即时 EOD 派发。
+                批量创建路径应传 True，由 batch_create_themes_task 在全批结束后统一回填。
+
         Returns:
             {
                 "success": bool,
@@ -1690,7 +1693,8 @@ class InvestmentThemeEmbeddingService:
                             tickers=market_tickers,
                             market=ticker_market,
                             created_by=creator_username,
-                            allow_unverified=True  # 允许创建未验证的关联
+                            allow_unverified=True,  # 允许创建未验证的关联
+                            defer_eod_backfill=defer_eod_backfill,
                         )
                         
                         if association_result.get("success"):

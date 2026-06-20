@@ -806,6 +806,8 @@ def batch_create_themes_task(
                     category = data['category']
 
                     # 创建主题的任务
+                    # defer_eod_backfill=True：抑制每个 theme 单独触发 fetch_single；
+                    # 全批结束后统一派发 1 个 fetch_eodhd_eod_stock_prices_task 回填。
                     task = service.create_theme(
                         theme_name=theme_name,
                         category=category,
@@ -814,7 +816,8 @@ def batch_create_themes_task(
                         theme_id=theme_id,
                         group=data.get('group'),
                         market=data['market'],
-                        tickers=data['tickers']
+                        tickers=data['tickers'],
+                        defer_eod_backfill=True,
                     )
                     create_tasks.append(task)
                     create_params.append((theme_name, theme_id))
@@ -1003,6 +1006,23 @@ def batch_create_themes_task(
             d['theme_id'] for d in details
             if d.get('status') == 'success' and d.get('theme_id')
         ]
+
+        # 批量上传时每个 theme 的 create_associations 均以 defer_eod_backfill=True 被调用，
+        # 此处统一派发 1 个批量 EOD 回填任务，覆盖全批所有新增 ticker（is_verified=true）。
+        # 这样把原先 N×fetch_single（每个拉 10 年）压成 1×fetch_eodhd（仅 400 天），
+        # 不再堵满 data_fetching 队列、阻塞 generate_all_theme_reports。
+        if created > 0:
+            try:
+                from backend.tasks.data_tasks import fetch_eodhd_eod_stock_prices_task
+                _eod_task = fetch_eodhd_eod_stock_prices_task.apply_async(
+                    kwargs={'days_back': 400, 'periods': ['d']}
+                )
+                logger.info(
+                    f"📥 批量上传结束，统一派发 EOD 回填: "
+                    f"覆盖全批已验证 ticker (days_back=400, task_id={_eod_task.id})"
+                )
+            except Exception as _eod_err:
+                logger.warning(f"⚠️ 统一 EOD 回填派发失败（不影响主题创建）: {_eod_err}")
 
         # 为新建主题自动打 'Theme Report' 个人标签，使其纳入 Theme Report 生成范围。
         # Theme Report 通过 theme_tags JOIN 筛选 tag_name='Theme Report' AND user_id=<用户>
