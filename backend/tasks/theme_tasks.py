@@ -1003,7 +1003,37 @@ def batch_create_themes_task(
             d['theme_id'] for d in details
             if d.get('status') == 'success' and d.get('theme_id')
         ]
-        
+
+        # 为新建主题自动打 'Theme Report' 个人标签，使其纳入 Theme Report 生成范围。
+        # Theme Report 通过 theme_tags JOIN 筛选 tag_name='Theme Report' AND user_id=<用户>
+        # （见 theme_report_service.py:446-449 的 _get_tagged_themes）。CSV 导入的主题此前
+        # 缺失此标签，导致 generate_all_theme_reports 找不到目标、报告为空。
+        # 唯一调用方为 CSV 上传（investment_themes.py:2649），默认打标符合该路径语义；
+        # ON CONFLICT 幂等，重复导入不重复；失败仅告警，不影响已创建的主题与返回值。
+        if created_theme_ids:
+            try:
+                tag_conn = db_manager.get_connection()
+                if tag_conn:
+                    tag_cursor = tag_conn.cursor()
+                    tag_cursor.executemany(
+                        """
+                        INSERT INTO theme_tags (theme_id, tag_name, user_id, created_by, created_at)
+                        VALUES (%s, %s, %s, %s, NOW())
+                        ON CONFLICT (theme_id, tag_name, user_id) DO NOTHING
+                        """,
+                        [(_tid, "Theme Report", creator_username, creator_username)
+                         for _tid in created_theme_ids],
+                    )
+                    tag_conn.commit()
+                    tag_cursor.close()
+                    tag_conn.close()
+                    logger.info(
+                        f"🏷️ 已为 {len(created_theme_ids)} 个新主题自动打 'Theme Report' 标签 "
+                        f"(user={creator_username})"
+                    )
+            except Exception as tag_err:
+                logger.warning(f"⚠️ 自动打 'Theme Report' 标签失败（不影响主题创建）: {tag_err}")
+
         return {
             "success": True,
             "message": f"Batch creation completed",

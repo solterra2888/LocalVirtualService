@@ -241,7 +241,8 @@ class ThemeCompanyAssociationService:
             created_count = 0
             skipped_count = 0
             details = []
-            created_tickers = []  # 新增的 ticker，commit 后触发首次 EOD 历史回填
+            created_tickers = []  # 已验证的新增 ticker，commit 后派发批量 EOD 回填
+            created_unverified = []  # 未验证的新增 ticker，批量任务扫不到，单独单 ticker 兜底
             
             # 处理有效的 tickers
             for ticker_info in validation_result["valid"]:
@@ -330,7 +331,7 @@ class ThemeCompanyAssociationService:
                         
                         if cursor.rowcount > 0:
                             created_count += 1
-                            created_tickers.append(full_ticker)
+                            created_unverified.append(full_ticker)
                             details.append({
                                 "ticker": full_ticker,
                                 "status": "created",
@@ -368,22 +369,58 @@ class ThemeCompanyAssociationService:
             cursor.close()
             conn.close()
 
-            # 对新增 ticker 异步触发首次 EOD 历史回填（默认 10 年，与 watchlist 新增一致），
-            # 保证 Theme Report 的 1Y（回溯 364 日历日）有足够历史，避免走 partial 分支失真。
-            # 失败绝不影响已提交的关联与返回值。
+            # 对新增 ticker 异步触发首次 EOD 历史回填，保证 Theme Report 的 1Y（回溯 364 日历日）
+            # 有足够历史，避免走 partial 分支失真。失败绝不影响已提交的关联与返回值。
+            #
+            # 策略（避免任务风暴堵塞 data_fetching 队列）：
+            # - 已验证 ticker：派发 1 个批量任务 fetch_eodhd_eod_stock_prices_task，它内部读取
+            #   theme_company_associations 中所有 is_verified=true 的 ticker（含本次新增）一次并发拉取。
+            #   1 个任务替代原先 N 个单 ticker 任务（历史教训：838 个单 ticker 任务曾把 Theme Report
+            #   堵在队列后排队 4.5 分钟）。days_back=400 覆盖 1Y（364 日历日）+ 余量，只补日线。
+            # - 未验证 ticker：批量任务只读 is_verified=true 扫不到它们，逐个单 ticker 兜底
+            #   （通常为 companies 表缺失的冷门 ticker，数量极少，不构成风暴）。
             if created_tickers:
                 try:
+                    from backend.tasks.data_tasks import (
+                        fetch_eodhd_eod_stock_prices_task,
+                        fetch_single_ticker_eod_history_task,
+                    )
+                    # 少量新增（≤2）：逐个单 ticker 精准回填，避免触发批量任务重拉全部 theme ticker。
+                    # 批量新增（≥3）：1 个批量任务，内部并发拉取所有 is_verified ticker，
+                    #   避免 N 个单任务风暴（历史教训：838 个单任务曾把 Theme Report 堵排队 4.5 分钟）。
+                    if len(created_tickers) <= 2:
+                        for _tk in created_tickers:
+                            try:
+                                _task = fetch_single_ticker_eod_history_task.apply_async(
+                                    args=[_tk], kwargs={'days_back': None}
+                                )
+                                logger.info(f"📥 已派发首次 EOD 回填(少量精准): {_tk} (task_id={_task.id})")
+                            except Exception as dispatch_err:
+                                logger.warning(f"⚠️ 派发 EOD 回填失败 {_tk}: {dispatch_err}")
+                    else:
+                        _task = fetch_eodhd_eod_stock_prices_task.apply_async(
+                            kwargs={'days_back': 400, 'periods': ['d']}
+                        )
+                        logger.info(
+                            f"📥 已派发批量首次 EOD 回填: 覆盖 {len(created_tickers)} 个已验证新 ticker "
+                            f"(task_id={_task.id})"
+                        )
+                except Exception as dispatch_err:
+                    logger.warning(f"⚠️ 派发首次 EOD 回填失败: {dispatch_err}")
+
+            if created_unverified:
+                try:
                     from backend.tasks.data_tasks import fetch_single_ticker_eod_history_task
-                    for _tk in created_tickers:
+                    for _tk in created_unverified:
                         try:
                             _task = fetch_single_ticker_eod_history_task.apply_async(
                                 args=[_tk], kwargs={'days_back': None}
                             )
-                            logger.info(f"📥 已派发首次 EOD 回填: {_tk} (task_id={_task.id})")
+                            logger.info(f"📥 已派发未验证 ticker 单独 EOD 回填: {_tk} (task_id={_task.id})")
                         except Exception as dispatch_err:
-                            logger.warning(f"⚠️ 派发首次 EOD 回填失败 {_tk}: {dispatch_err}")
+                            logger.warning(f"⚠️ 派发 EOD 回填失败 {_tk}: {dispatch_err}")
                 except Exception as import_err:
-                    logger.warning(f"⚠️ EOD 回填任务导入失败，跳过首次回填: {import_err}")
+                    logger.warning(f"⚠️ 单 ticker EOD 回填任务导入失败: {import_err}")
 
             logger.info(f"关联创建完成: {created_count} 创建, {skipped_count} 跳过")
             
