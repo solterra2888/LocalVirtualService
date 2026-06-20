@@ -495,6 +495,14 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
           endpoint: '/scheduler/tasks/eodhd-eod-stock-prices',
           params: {},
           icon: <BarChartOutlined />
+        },
+        {
+          id: 'create_weekly_backfill',
+          name: 'Create Weekly Backfill (400d)',
+          description: 'One-click create weekly Saturday 05:30 ET backfill task (400 days, daily periods). Guarantees 1Y history coverage for Theme Report; complements the daily fetch.',
+          endpoint: '/scheduler/tasks/eodhd-eod-stock-prices/weekly-backfill',
+          params: {},
+          icon: <CalendarOutlined />
         }
       ]
     },
@@ -1124,7 +1132,10 @@ const SchedulerPage: React.FC = () => {
       ));
 
       message.success(response.message || 'Operation successful');
-      
+
+      // 刷新任务列表，确保新建/变更的定时任务立即可见（如 weekly-backfill 创建后）
+      await loadScheduledTasks();
+
     } catch (error: any) {
       console.error('Quick action error:', error);
       

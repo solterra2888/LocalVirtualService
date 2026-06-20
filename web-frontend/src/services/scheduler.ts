@@ -580,6 +580,28 @@ export class SchedulerAPI {
   }
 
   /**
+   * 创建EODHD每周历史回填定时任务（兜底，400天日线）
+   * 每周六 05:30 纽约时间执行，补齐新 ticker 首次回填偶发遗漏的历史缺口，
+   * 保证 Theme Report 的 1Y（回溯 364 日历日）有足够历史。
+   */
+  async createEODHDEODStockPricesWeeklyBackfillTask(): Promise<TaskCreateResponse> {
+    try {
+      const response = await api.post('/scheduler/tasks/eodhd-eod-stock-prices/weekly-backfill');
+      return {
+        success: true,
+        message: response.data?.message || '创建每周EOD历史回填定时任务成功',
+        data: response.data?.data
+      };
+    } catch (error: any) {
+      console.error('创建每周EOD历史回填定时任务失败:', error);
+      return {
+        success: false,
+        message: error.response?.data?.detail || error.message || '创建每周EOD历史回填定时任务失败'
+      };
+    }
+  }
+
+  /**
    * 创建默认EODHD新闻定时任务
    */
   async createDefaultEODHDNewsTask(): Promise<TaskCreateResponse> {
