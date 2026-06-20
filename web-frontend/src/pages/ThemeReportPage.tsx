@@ -71,9 +71,10 @@ const ThemeReportPage: React.FC = () => {
       message.success(
         `Report generation queued (task: ${result.task_id.slice(0, 8)}…). Refresh in a minute.`
       );
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to trigger generation:', err);
-      message.error('Failed to queue generation');
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      message.error(detail || 'Failed to queue generation');
     } finally {
       setGenerating(false);
     }

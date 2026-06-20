@@ -98,6 +98,16 @@ async def generate_theme_report(
     - 若需同步生成（测试/回填），可直接调用服务层。
     """
     try:
+        svc = ThemeReportService()
+        if not svc.has_tagged_themes(current_user.username):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No themes tagged 'Theme Report'. "
+                    "Tag at least one theme in Investment Theme Settings before generating."
+                ),
+            )
+
         from backend.tasks.theme_report_tasks import generate_all_theme_reports_task
 
         task = generate_all_theme_reports_task.apply_async(
@@ -119,6 +129,8 @@ async def generate_theme_report(
             "user_id": current_user.username,
             "report_date": request.report_date or "today",
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"[generate_theme_report] Error for user {current_user.username}: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to queue report generation: {exc}")

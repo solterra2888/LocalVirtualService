@@ -170,29 +170,40 @@ class ThemeReportService:
 
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
-
-        # 创建 pending 记录（若已存在则更新为 generating）
-        cursor.execute(
-            """
-            INSERT INTO theme_reports
-                (user_id, report_date, oss_object_name, status, created_at, updated_at)
-            VALUES (%s, %s, %s, 'generating', NOW(), NOW())
-            ON CONFLICT (user_id, report_date)
-            DO UPDATE SET status='generating', updated_at=NOW(), error_message=NULL
-            RETURNING id
-            """,
-            (user_id, report_date, oss_object_name),
-        )
-        report_id = cursor.fetchone()[0]
-        conn.commit()
+        completed_snapshot = None
+        report_id = None
 
         try:
-            # 1. 获取带 'Theme Report' 标签的主题及其关联 tickers
+            # 1. 先校验主题配置，避免无主题时覆盖同日已完成的报告
             themes_data = self._get_tagged_themes(user_id, cursor)
             if not themes_data:
-                raise ValueError(
-                    f"No themes tagged '{TAG_NAME}' found for user {user_id}"
-                )
+                return {
+                    "success": False,
+                    "error": (
+                        f"No themes tagged '{TAG_NAME}' found for user {user_id}. "
+                        "Tag at least one theme in Investment Theme Settings."
+                    ),
+                }
+
+            # 若同日已有 completed 报告，失败时需恢复，防止 get_latest 回退到更早日期
+            completed_snapshot = self._snapshot_completed_report(
+                user_id, report_date, cursor
+            )
+
+            # 创建 pending 记录（若已存在则更新为 generating）
+            cursor.execute(
+                """
+                INSERT INTO theme_reports
+                    (user_id, report_date, oss_object_name, status, created_at, updated_at)
+                VALUES (%s, %s, %s, 'generating', NOW(), NOW())
+                ON CONFLICT (user_id, report_date)
+                DO UPDATE SET status='generating', updated_at=NOW(), error_message=NULL
+                RETURNING id
+                """,
+                (user_id, report_date, oss_object_name),
+            )
+            report_id = cursor.fetchone()[0]
+            conn.commit()
 
             # 2. 计算各 ticker 的多周期收益率
             all_tickers = list(
@@ -310,15 +321,24 @@ class ThemeReportService:
                 exc_info=True,
             )
             try:
-                cursor.execute(
-                    """
-                    UPDATE theme_reports
-                    SET status='failed', error_message=%s, updated_at=NOW()
-                    WHERE id=%s
-                    """,
-                    (str(exc), report_id),
-                )
-                conn.commit()
+                if completed_snapshot:
+                    self._restore_completed_report(completed_snapshot, cursor)
+                    conn.commit()
+                    logger.info(
+                        f"Restored previous completed Theme Report for user={user_id}, "
+                        f"date={report_date} after generation failure"
+                    )
+                else:
+                    if report_id is not None:
+                        cursor.execute(
+                            """
+                            UPDATE theme_reports
+                            SET status='failed', error_message=%s, updated_at=NOW()
+                            WHERE id=%s
+                            """,
+                            (str(exc), report_id),
+                        )
+                        conn.commit()
             except Exception:
                 pass
             return {"success": False, "error": str(exc)}
@@ -329,6 +349,81 @@ class ThemeReportService:
     # ------------------------------------------------------------------
     # DB helpers
     # ------------------------------------------------------------------
+
+    def _snapshot_completed_report(
+        self, user_id: str, report_date: date, cursor
+    ) -> Optional[Dict[str, Any]]:
+        """Return a restorable snapshot when the user already has a completed report for this date."""
+        cursor.execute(
+            """
+            SELECT id, oss_object_name, theme_count, category_count, constituent_count,
+                   metadata, share_token, html_content, csv_content
+            FROM theme_reports
+            WHERE user_id = %s AND report_date = %s AND status = 'completed'
+            """,
+            (user_id, report_date),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        (
+            rid, oss_object_name, theme_count, category_count, constituent_count,
+            metadata, share_token, html_content, csv_content,
+        ) = row
+        return {
+            "id": rid,
+            "oss_object_name": oss_object_name,
+            "theme_count": theme_count,
+            "category_count": category_count,
+            "constituent_count": constituent_count,
+            "metadata": metadata,
+            "share_token": share_token,
+            "html_content": html_content,
+            "csv_content": csv_content,
+        }
+
+    def _restore_completed_report(self, snapshot: Dict[str, Any], cursor) -> None:
+        """Restore a previously completed report row after a failed regeneration."""
+        cursor.execute(
+            """
+            UPDATE theme_reports
+            SET status='completed',
+                oss_object_name=%s,
+                theme_count=%s,
+                category_count=%s,
+                constituent_count=%s,
+                metadata=%s,
+                share_token=%s,
+                html_content=%s,
+                csv_content=%s,
+                error_message=NULL,
+                updated_at=NOW()
+            WHERE id=%s
+            """,
+            (
+                snapshot["oss_object_name"],
+                snapshot["theme_count"],
+                snapshot["category_count"],
+                snapshot["constituent_count"],
+                json.dumps(snapshot["metadata"])
+                if isinstance(snapshot["metadata"], dict)
+                else snapshot["metadata"],
+                snapshot["share_token"],
+                snapshot["html_content"],
+                snapshot["csv_content"],
+                snapshot["id"],
+            ),
+        )
+
+    def has_tagged_themes(self, user_id: str) -> bool:
+        """Return True if the user has at least one 'Theme Report' tagged theme."""
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            return bool(self._get_tagged_themes(user_id, cursor))
+        finally:
+            cursor.close()
+            conn.close()
 
     def _get_tagged_themes(
         self, user_id: str, cursor
