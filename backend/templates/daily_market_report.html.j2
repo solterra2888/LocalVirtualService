@@ -190,9 +190,23 @@ body {
 .summary-content table {
     margin: 12px 0;
     font-size: 13px;
+    /* Markdown content tables (Close Brief / Stock Pulse / Feed Digest) wrap
+       cell text instead of inheriting the global `white-space: nowrap`
+       Market-Movers rule. Without this, the wide YouTube / 知识星球 summary
+       tables blow past the page width. */
+    table-layout: auto;
 }
 .summary-content th, .summary-content td {
     padding: 8px 12px;
+    /* Override the global data-grid defaults (right-aligned + nowrap) — these
+       are prose/content tables, not numeric Market-Movers tables. */
+    text-align: left;
+    vertical-align: top;
+    white-space: normal;
+    overflow-wrap: break-word;
+}
+.summary-content th {
+    white-space: nowrap; /* keep short header labels on a single line */
 }
 .summary-content code {
     font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
