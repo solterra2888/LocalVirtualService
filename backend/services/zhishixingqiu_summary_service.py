@@ -225,15 +225,20 @@ class ZhishixingqiuSummaryService:
         if not force:
             existing = self._get_existing_user_report(user_id, report_date)
             if existing and existing.get("status") == "completed":
+                if not self._is_user_report_stale(existing, user_id, report_date):
+                    logger.info(
+                        f"用户报告已存在, 跳过: user_id={user_id}, date={report_date}"
+                    )
+                    return {
+                        "success": True,
+                        "report_id": existing["id"],
+                        "message": "报告已存在",
+                        "skipped": True,
+                    }
                 logger.info(
-                    f"用户报告已存在, 跳过: user_id={user_id}, date={report_date}"
+                    f"Phase 1 摘要已更新, 重拼用户报告: user_id={user_id}, "
+                    f"date={report_date}"
                 )
-                return {
-                    "success": True,
-                    "report_id": existing["id"],
-                    "message": "报告已存在",
-                    "skipped": True,
-                }
 
         report_id = self._upsert_user_report_status(user_id, report_date, "generating")
 
@@ -268,16 +273,22 @@ class ZhishixingqiuSummaryService:
                 user_id=user_id,
             )
 
-            missing_groups = [
-                (gid, group_name_map[gid])
-                for gid in group_ids
-                if gid not in cached
-            ]
+            if force:
+                missing_groups = [
+                    (gid, group_name_map[gid]) for gid in group_ids
+                ]
+            else:
+                missing_groups = [
+                    (gid, group_name_map[gid])
+                    for gid in group_ids
+                    if gid not in cached
+                ]
             fallback_generated = 0
             if missing_groups:
                 logger.info(
                     f"[Step 3] Fallback: 需即时生成 {len(missing_groups)} 个星球摘要",
                     user_id=user_id,
+                    force=force,
                 )
                 topics_by_group, _ = self._group_topics(
                     self._fetch_topics_for_groups(
@@ -1045,6 +1056,54 @@ class ZhishixingqiuSummaryService:
             cursor.close()
 
     # ── User report persistence (Phase 2 output) ───────────────────────────
+
+    @staticmethod
+    def _user_report_needs_regeneration(
+        existing: Dict[str, Any],
+        max_phase1_updated: Optional[datetime],
+    ) -> bool:
+        """若任一订阅星球的 Phase 1 摘要晚于用户报告，则应重拼。"""
+        if max_phase1_updated is None:
+            return False
+        report_updated = existing.get("updated_at")
+        if report_updated is None:
+            return True
+        return ensure_utc(max_phase1_updated) > ensure_utc(report_updated)
+
+    def _is_user_report_stale(
+        self,
+        existing: Dict[str, Any],
+        user_id: int,
+        report_date: date,
+    ) -> bool:
+        group_ids = [g[0] for g in self._get_user_subscribed_groups(user_id)]
+        if not group_ids:
+            return False
+        max_updated = self._get_max_group_summary_updated_at(group_ids, report_date)
+        return self._user_report_needs_regeneration(existing, max_updated)
+
+    def _get_max_group_summary_updated_at(
+        self, group_ids: List[str], summary_date: date
+    ) -> Optional[datetime]:
+        if not group_ids:
+            return None
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT MAX(updated_at)
+                FROM zhishixingqiu_group_daily_summaries
+                WHERE group_id = ANY(%s)
+                  AND summary_date = %s
+                  AND status = 'completed'
+                """,
+                (group_ids, summary_date),
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+        finally:
+            cursor.close()
 
     def _get_existing_user_report(
         self, user_id: int, report_date: date

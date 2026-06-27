@@ -22,10 +22,12 @@ from zoneinfo import ZoneInfo
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
-from backend.utils.datetime_utils import utcnow, utc_today
+from backend.utils.datetime_utils import utcnow, window_label_date
 from backend.utils.logger import get_logger
 
 logger = get_logger("daily_market_report_service")
+
+DEFAULT_REPORT_TIMEZONE = "Asia/Shanghai"
 
 # ──────────────────────────────────────────────
 # Ticker 分组定义
@@ -666,15 +668,14 @@ class DailyMarketReportService:
 
         Args:
             user_id: 用户 ID（字符串形式，如 "123"）。
-            report_date: 报告日期，默认今天（UTC）。
+            report_date: 报告日期，默认北京自然日。
 
         Returns:
             dict with keys: success, report_date, file_path, share_token, metadata
         """
-        if report_date is None:
-            report_date = utc_today()
-
         generated_at_utc = utcnow()
+        if report_date is None:
+            report_date = window_label_date(generated_at_utc, DEFAULT_REPORT_TIMEZONE)
 
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()

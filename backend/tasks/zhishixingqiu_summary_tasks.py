@@ -10,11 +10,33 @@
 
 import asyncio
 from datetime import date as _date, datetime as _datetime
+from typing import Optional, Tuple
 
 from backend.celery_app import app
 from backend.utils.logger import get_logger
 
 logger = get_logger("zhishixingqiu_summary_tasks")
+
+DEFAULT_TIMEZONE = "Asia/Shanghai"
+
+
+def _resolve_zsxq_task_dates(
+    report_date: Optional[str] = None,
+    window_end: Optional[str] = None,
+) -> Tuple[_date, Optional[_datetime]]:
+    """解析 report_date 标签与 window_end（与 Twitter/YouTube 调度契约一致）。"""
+    from backend.utils.datetime_utils import parse_iso_utc, utcnow, window_label_date
+
+    we = parse_iso_utc(window_end)
+    if we is None:
+        we = utcnow()
+
+    if report_date:
+        as_of = _date.fromisoformat(report_date)
+    else:
+        as_of = window_label_date(we, DEFAULT_TIMEZONE)
+
+    return as_of, we
 
 
 def _run_async(coro):
@@ -49,8 +71,8 @@ def generate_zhishixingqiu_summary_task(
     完成后可选链式触发所有用户的 Phase 2 报告生成。
 
     Args:
-        report_date: ISO 日期字符串 (YYYY-MM-DD)，默认为今天。
-        window_end: ISO 时间字符串（UTC），内容窗口结束时间。
+        report_date: ISO 日期字符串 (YYYY-MM-DD)，默认由 window_end 推导北京自然日。
+        window_end: ISO 时间字符串（UTC），内容窗口结束时间；默认 utcnow()。
         window_hours: 回溯小时数，默认 24。
         force: 是否强制重新生成，默认 False。
         chain_user_reports: 完成后是否自动触发按用户报告生成。
@@ -61,8 +83,8 @@ def generate_zhishixingqiu_summary_task(
     try:
         svc = ZhishixingqiuSummaryService()
 
-        as_of = _date.fromisoformat(report_date) if report_date else _date.today()
-        we = _datetime.fromisoformat(window_end) if window_end else None
+        as_of, we = _resolve_zsxq_task_dates(report_date, window_end)
+        window_end_iso = we.isoformat()
 
         result = _run_async(
             svc.generate_all_group_summaries(
@@ -82,7 +104,7 @@ def generate_zhishixingqiu_summary_task(
             report_task = generate_all_zhishixingqiu_user_reports_task.delay(
                 report_date=str(as_of),
                 force=force,
-                window_end=window_end,
+                window_end=window_end_iso,
                 window_hours=window_hours,
             )
             logger.info(
@@ -189,8 +211,7 @@ def generate_zhishixingqiu_user_report_task(
 
     try:
         svc = ZhishixingqiuSummaryService()
-        as_of = _date.fromisoformat(report_date)
-        we = _datetime.fromisoformat(window_end) if window_end else None
+        as_of, we = _resolve_zsxq_task_dates(report_date, window_end)
 
         result = _run_async(
             svc.generate_user_report(

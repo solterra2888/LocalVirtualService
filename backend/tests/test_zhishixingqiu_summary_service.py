@@ -10,12 +10,45 @@ from backend.services.zhishixingqiu_summary_service import (
 
 
 def test_resolve_zhishixingqiu_content_window_beijing_day():
-    """默认按北京自然日计算窗口。"""
+    """未传 window_end 时按北京自然日计算窗口。"""
     report_date = date(2026, 6, 12)
     start, end = resolve_zhishixingqiu_content_window(report_date)
     # 北京 6-12 00:00 = UTC 6-11 16:00
     assert start == datetime(2026, 6, 11, 16, 0, tzinfo=timezone.utc)
     assert end == datetime(2026, 6, 12, 16, 0, tzinfo=timezone.utc)
+
+
+def test_resolve_zhishixingqiu_content_window_rolling():
+    """传 window_end 时走滚动 24h 窗口（与 Twitter/YouTube 一致）。"""
+    report_date = date(2026, 6, 25)
+    window_end = datetime(2026, 6, 25, 7, 30, tzinfo=timezone.utc)
+    start, end = resolve_zhishixingqiu_content_window(
+        report_date, window_end=window_end, window_hours=24
+    )
+    assert end == window_end
+    assert start == datetime(2026, 6, 24, 7, 30, tzinfo=timezone.utc)
+
+
+def test_user_report_needs_regeneration_when_phase1_newer():
+    svc = ZhishixingqiuSummaryService()
+    existing = {
+        "updated_at": datetime(2026, 6, 24, 6, 45, 14, tzinfo=timezone.utc),
+    }
+    phase1_updated = datetime(2026, 6, 24, 22, 2, 43, tzinfo=timezone.utc)
+    assert svc._user_report_needs_regeneration(existing, phase1_updated)
+
+
+def test_user_report_needs_regeneration_when_up_to_date():
+    svc = ZhishixingqiuSummaryService()
+    ts = datetime(2026, 6, 24, 22, 3, 14, tzinfo=timezone.utc)
+    existing = {"updated_at": ts}
+    assert not svc._user_report_needs_regeneration(existing, ts)
+
+
+def test_user_report_needs_regeneration_no_phase1():
+    svc = ZhishixingqiuSummaryService()
+    existing = {"updated_at": datetime(2026, 6, 24, 6, 45, tzinfo=timezone.utc)}
+    assert not svc._user_report_needs_regeneration(existing, None)
 
 
 def test_format_group_topics():

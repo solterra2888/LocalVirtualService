@@ -127,16 +127,23 @@ class TwitterDailyReportService:
                         user_id=user_id)
 
             # 3) 补生成缺失的摘要（fallback）
-            missing_authors = [
-                (aid, aname) for aid, aname in user_authors
-                if aid not in cached_summaries
-            ]
+            if force:
+                missing_authors = list(user_authors)
+            else:
+                missing_authors = [
+                    (aid, aname) for aid, aname in user_authors
+                    if aid not in cached_summaries
+                ]
             if missing_authors:
-                logger.info(f"[Step 3/5] Fallback: 需即时生成 {len(missing_authors)} 位作者摘要",
-                            user_id=user_id)
+                logger.info(
+                    f"[Step 3/5] Fallback: 需即时生成 {len(missing_authors)} 位作者摘要",
+                    user_id=user_id,
+                    force=force,
+                )
                 for aid, aname in missing_authors:
                     result = await author_summary_service.generate_author_summary(
                         aid, aname, report_date,
+                        force=force,
                         window_end=window_end,
                         window_hours=window_hours,
                     )

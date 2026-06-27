@@ -1494,42 +1494,64 @@ class SchedulerService:
 
     async def _execute_zhishixingqiu_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        生成知识星球每日摘要（全局，按星球聚合当天话题观点）。
-        应在知识星球抓取完成后调度（默认每日 22:00 北京时间）。
+        生成知识星球每日摘要（Phase A → chain → Phase B，契约对齐 Twitter/YouTube）。
+        应在知识星球抓取完成后、Daily Market Report 之前调度（默认每日 07:30 北京时间）。
 
         Args:
             params:
-                - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)，北京自然日
-                - window_end: 可选，ISO 时间字符串（UTC），内容窗口结束时间
+                - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)，北京自然日标签
+                - window_end: 可选，ISO 时间字符串（UTC），内容窗口结束时间；默认 utcnow()
                 - window_hours: 可选，回溯小时数（默认 24）
                 - force: 可选，是否强制重新生成（默认 False）
+                - chain_user_reports: 可选，Phase A 完成后是否链式触发 Phase B（默认 True）
         """
         try:
             logger.info("分发知识星球摘要 Celery 任务", params=params)
 
+            from datetime import datetime
             from backend.tasks.zhishixingqiu_summary_tasks import (
                 generate_zhishixingqiu_summary_task,
             )
+            from backend.utils.datetime_utils import (
+                utcnow,
+                parse_iso_utc,
+                window_label_date,
+            )
 
-            report_date = params.get('report_date')
-            window_end = params.get('window_end')
-            window_hours = int(params.get('window_hours', 24))
             force = params.get('force', False)
             chain_user_reports = params.get('chain_user_reports', True)
+            window_hours = int(params.get('window_hours', 24))
+
+            report_date_str = params.get('report_date')
+            window_end = parse_iso_utc(params.get('window_end'))
+            if window_end is None:
+                window_end = utcnow()
+
+            if report_date_str:
+                label_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
+            else:
+                label_date = window_label_date(
+                    window_end, params.get('scheduler_timezone')
+                )
 
             task = generate_zhishixingqiu_summary_task.delay(
-                report_date=report_date,
-                window_end=window_end,
+                report_date=str(label_date),
+                window_end=window_end.isoformat(),
                 window_hours=window_hours,
                 force=force,
                 chain_user_reports=chain_user_reports,
             )
 
-            date_info = f", date={report_date}" if report_date else ", today"
+            chain_info = "，完成后自动触发用户报告" if chain_user_reports else ""
             force_info = "（强制重新生成）" if force else ""
+            logger.info(
+                f"分发知识星球摘要 Celery 任务 | params="
+                f"{{'chain_user_reports': {chain_user_reports}, 'force': {force}, "
+                f"'label_date': '{label_date}', 'window_end': '{window_end.isoformat()}'}}"
+            )
             message = (
-                f"✅ 知识星球摘要: "
-                f"已提交 Celery 异步任务 {task.id}{date_info}{force_info}"
+                f"✅ 知识星球摘要 ({label_date}, 过去{window_hours}h): "
+                f"已提交 Celery 异步任务 {task.id}{chain_info}{force_info}"
             )
             logger.info(message)
             return {'success': True, 'message': message, 'celery_task_id': task.id}

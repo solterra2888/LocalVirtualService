@@ -93,7 +93,7 @@ Scheduler
 | 场景 | 推荐 `report_date` 推导方式 | 内容窗口 |
 |------|------------------------------|----------|
 | YouTube / Twitter / The Close / CNBC | `window_label_date(window_end, params.get('scheduler_timezone') or 'Asia/Shanghai')` | `resolve_report_content_window(label_date, window_end, window_hours)` |
-| 知识星球 | Celery 内解析；无 `report_date` 时用北京自然日 | `resolve_zhishixingqiu_content_window()` → 北京 `day_window_utc` 或滚动窗口 |
+| 知识星球 | `window_label_date(window_end, scheduler_timezone)` | `resolve_zhishixingqiu_content_window()` → 滚动 24h（有 window_end）或北京自然日 |
 
 **规则**
 
