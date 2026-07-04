@@ -1262,6 +1262,40 @@ export class SchedulerAPI {
     }
   }
 
+  /**
+   * 获取当前用户的 Scheduler 卡片排序偏好（懒加载：首次访问返回空对象）
+   */
+  async getCardOrder(): Promise<Partial<Record<'data_fetch' | 'report_generation', string[]>>> {
+    try {
+      const body = await api.get<{ success: boolean; data: Record<string, string[]> }>(
+        '/scheduler/card-order'
+      );
+      return body.data ?? {};
+    } catch (error) {
+      console.error('获取卡片排序失败:', error);
+      return {};
+    }
+  }
+
+  /**
+   * 持久化某一列的卡片排序（category 维度，发全量顺序）
+   */
+  async reorderCards(
+    category: 'data_fetch' | 'report_generation',
+    items: Array<{ source_id: string; sort_order: number }>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      await api.put('/scheduler/reorder', { category, items });
+      return { success: true };
+    } catch (error: any) {
+      console.error('保存卡片排序失败:', error);
+      return {
+        success: false,
+        error: error.response?.data?.detail || error.message || '保存排序失败',
+      };
+    }
+  }
+
   // ============ 实用工具方法 ============
 
   /**

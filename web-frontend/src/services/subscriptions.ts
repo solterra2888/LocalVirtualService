@@ -27,6 +27,7 @@ export interface Subscription {
   last_fetch_items_count: number;
   consecutive_failures: number;
   unread_count?: number; // 🔥 新增：未读内容数量
+  sort_order?: number; // 显示排序（每用户独立，越小越靠前）
 }
 
 export interface CreateSubscriptionRequest {
@@ -45,6 +46,11 @@ export interface UpdateSubscriptionRequest {
   enabled?: boolean;
   filter_config?: Record<string, any>;
   metadata?: Record<string, any>;
+}
+
+export interface ReorderSubscriptionItem {
+  subscription_id: number;
+  sort_order: number;
 }
 
 export interface SubscriptionStats {
@@ -336,6 +342,32 @@ export const subscriptionsAPI = {
       return {
         success: false,
         error: error.response?.data?.detail || 'Failed to delete subscription',
+      };
+    }
+  },
+
+  /**
+   * 批量重排订阅（拖拽排序持久化）
+   * @param items [{ subscription_id, sort_order }, ...] 全量重编号后的顺序
+   */
+  async reorderSubscriptions(
+    items: ReorderSubscriptionItem[]
+  ): Promise<ApiResponse<{ success: boolean; updated: number }>> {
+    try {
+      const data = await api.put<{ success: boolean; updated: number }>(
+        '/subscriptions/reorder',
+        { items }
+      );
+
+      return {
+        success: true,
+        data,
+      };
+    } catch (error: any) {
+      console.error('Failed to reorder subscriptions:', error);
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to reorder subscriptions',
       };
     }
   },

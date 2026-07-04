@@ -379,6 +379,60 @@ class DatabaseManager:
     
 
     
+    def _migrate_add_sort_order_to_subscription_list(self, cursor):
+        """迁移：为 subscription_list 表添加 sort_order 字段（每用户独立的显示排序）"""
+        try:
+            # 检查表是否存在
+            cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_name = 'subscription_list'
+            )
+            """)
+            if not cursor.fetchone()[0]:
+                return
+
+            # 检查字段是否已存在
+            cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name='subscription_list' AND column_name='sort_order'
+            """)
+
+            if not cursor.fetchone():
+                cursor.execute("""
+                ALTER TABLE subscription_list
+                ADD COLUMN sort_order INTEGER
+                """)
+                print("已添加sort_order字段到subscription_list表")
+
+            # 沿用迁移前的 UI 顺序回填（仅 NULL），保持零感知
+            cursor.execute("""
+            WITH ranked_sub AS (
+                SELECT
+                    id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY user_id
+                        ORDER BY priority DESC, created_at DESC, id DESC
+                    ) AS rn
+                FROM subscription_list
+            )
+            UPDATE subscription_list AS s
+            SET sort_order = ranked_sub.rn
+            FROM ranked_sub
+            WHERE ranked_sub.id = s.id
+              AND s.sort_order IS NULL
+            """)
+
+            # 创建索引以提升排序查询效率
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_subscription_user_sort
+                ON subscription_list (user_id, sort_order)
+            """)
+        except Exception as e:
+            print(f"迁移subscription_list.sort_order字段时出错: {str(e)}")
+            # 不阻断整体迁移流程
+
     def migrate_database_schema(self, conn):
         """迁移数据库架构到最新版本"""
         cursor = conn.cursor()
@@ -550,6 +604,8 @@ class DatabaseManager:
             self._migrate_add_primaryticker_to_target_tracking_config(conn.cursor())
             # 检查并添加target_tracking_config表的sort_order列
             self._migrate_add_sort_order_to_target_tracking_config(conn.cursor())
+            # 检查并添加subscription_list表的sort_order列（Feeds 订阅栏拖拽排序）
+            self._migrate_add_sort_order_to_subscription_list(conn.cursor())
             
             # 创建调度器相关表
             self._create_scheduler_tables(conn)
@@ -738,6 +794,22 @@ class DatabaseManager:
             self._ensure_task_execution_logs_status_constraint(cursor)
             self._ensure_task_execution_period_lock_column(cursor)
             self._deduplicate_task_scheduling(cursor)
+
+            # Scheduler 卡片拖拽排序偏好（每用户独立；懒加载，初始为空，首次拖拽才落库）
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS scheduler_card_order (
+                user_id    INTEGER      NOT NULL,
+                source_id  VARCHAR(100) NOT NULL,
+                category   VARCHAR(30)  NOT NULL,
+                sort_order INTEGER      NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, source_id)
+            )
+            """)
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_scheduler_card_order_user_cat
+                ON scheduler_card_order (user_id, category, sort_order)
+            """)
             
             # task_default_configs 表已删除，不再需要创建和插入默认配置
             

@@ -58,6 +58,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import type { Modifier } from '@dnd-kit/core';
 import {
   SortableContext,
   arrayMove,
@@ -157,7 +158,11 @@ interface QuickAction {
 
 // News theme interface
 
-const SCHEDULER_ORDER_STORAGE_KEY = 'guanhe_scheduler_card_order';
+/** dnd-kit 修饰器：限制拖拽只能沿垂直轴移动 */
+const restrictToVerticalAxis: Modifier = ({ transform }) => {
+  if (!transform) return transform;
+  return { ...transform, x: 0 };
+};
 
 function getDefaultCategoryOrder(sources: DataSource[], category: SchedulerCategory): string[] {
   return sources
@@ -173,28 +178,12 @@ function mergeCategoryOrder(saved: string[] | undefined, defaults: string[]): st
   return [...validSaved, ...defaults.filter((id) => !savedSet.has(id))];
 }
 
-function loadCategoryOrders(sources: DataSource[]): Record<SchedulerCategory, string[]> {
-  const defaults: Record<SchedulerCategory, string[]> = {
+/** 返回静态目录的默认顺序（首屏兜底；挂载后从后端拉取用户偏好覆盖） */
+function getDefaultCategoryOrders(sources: DataSource[]): Record<SchedulerCategory, string[]> {
+  return {
     data_fetch: getDefaultCategoryOrder(sources, 'data_fetch'),
     report_generation: getDefaultCategoryOrder(sources, 'report_generation'),
   };
-  try {
-    const raw = localStorage.getItem(SCHEDULER_ORDER_STORAGE_KEY);
-    if (!raw) {
-      return defaults;
-    }
-    const parsed = JSON.parse(raw) as Partial<Record<SchedulerCategory, string[]>>;
-    return {
-      data_fetch: mergeCategoryOrder(parsed.data_fetch, defaults.data_fetch),
-      report_generation: mergeCategoryOrder(parsed.report_generation, defaults.report_generation),
-    };
-  } catch {
-    return defaults;
-  }
-}
-
-function saveCategoryOrders(order: Record<SchedulerCategory, string[]>) {
-  localStorage.setItem(SCHEDULER_ORDER_STORAGE_KEY, JSON.stringify(order));
 }
 
 const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
@@ -697,7 +686,7 @@ const SchedulerPage: React.FC = () => {
   const isLgUp = !!screens?.lg;
   const [dataSources, setDataSources] = useState<DataSource[]>(INITIAL_SCHEDULER_DATA_SOURCES);
   const [categoryOrder, setCategoryOrder] = useState<Record<SchedulerCategory, string[]>>(() =>
-    loadCategoryOrders(INITIAL_SCHEDULER_DATA_SOURCES)
+    getDefaultCategoryOrders(INITIAL_SCHEDULER_DATA_SOURCES)
   );
 
   const [loading, setLoading] = useState(false);
@@ -728,6 +717,25 @@ const SchedulerPage: React.FC = () => {
   // Load scheduled task data when page loads
   useEffect(() => {
     loadScheduledTasks();
+  }, []);
+
+  // 从后端加载当前用户的卡片排序偏好，合并覆盖静态默认顺序（跨设备同步）
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const remote = await schedulerAPI.getCardOrder();
+      if (cancelled) return;
+      // 后端无偏好（首次访问）时保持静态默认，避免无谓 re-render
+      if (!remote.data_fetch?.length && !remote.report_generation?.length) return;
+      setCategoryOrder(() => {
+        const defaults = getDefaultCategoryOrders(INITIAL_SCHEDULER_DATA_SOURCES);
+        return {
+          data_fetch: mergeCategoryOrder(remote.data_fetch, defaults.data_fetch),
+          report_generation: mergeCategoryOrder(remote.report_generation, defaults.report_generation),
+        };
+      });
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // Handle tab change and refresh data
@@ -1283,25 +1291,28 @@ const SchedulerPage: React.FC = () => {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const handleCategoryDragEnd = (category: SchedulerCategory) => (event: DragEndEvent) => {
+  const handleCategoryDragEnd = (category: SchedulerCategory) => async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) {
       return;
     }
-    setCategoryOrder((prev) => {
-      const items = prev[category];
-      const oldIndex = items.indexOf(String(active.id));
-      const newIndex = items.indexOf(String(over.id));
-      if (oldIndex < 0 || newIndex < 0) {
-        return prev;
-      }
-      const next = {
-        ...prev,
-        [category]: arrayMove(items, oldIndex, newIndex),
-      };
-      saveCategoryOrders(next);
-      return next;
-    });
+    const prevSnapshot = categoryOrder; // 拖拽前快照（handler 每次渲染重建，闭包最新）
+    const items = prevSnapshot[category];
+    const oldIndex = items.indexOf(String(active.id));
+    const newIndex = items.indexOf(String(over.id));
+    if (oldIndex < 0 || newIndex < 0) {
+      return;
+    }
+    const newItems = arrayMove(items, oldIndex, newIndex);
+    setCategoryOrder({ ...prevSnapshot, [category]: newItems }); // 乐观更新
+
+    // 落库（本 category 全量重编号 1..N）；失败回滚到拖拽前
+    const payload = newItems.map((source_id, idx) => ({ source_id, sort_order: idx + 1 }));
+    const resp = await schedulerAPI.reorderCards(category, payload);
+    if (!resp.success) {
+      setCategoryOrder(prevSnapshot);
+      message.error('排序保存失败，已回滚');
+    }
   };
 
   const SchedulerListItem: React.FC<{
@@ -1733,6 +1744,7 @@ const SchedulerPage: React.FC = () => {
                 <DndContext
                   sensors={sensors}
                   collisionDetection={closestCenter}
+                  modifiers={[restrictToVerticalAxis]}
                   onDragEnd={handleCategoryDragEnd('data_fetch')}
                 >
                   <SortableContext
@@ -1790,6 +1802,7 @@ const SchedulerPage: React.FC = () => {
                 <DndContext
                   sensors={sensors}
                   collisionDetection={closestCenter}
+                  modifiers={[restrictToVerticalAxis]}
                   onDragEnd={handleCategoryDragEnd('report_generation')}
                 >
                   <SortableContext

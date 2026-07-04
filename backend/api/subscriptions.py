@@ -89,6 +89,7 @@ class SubscriptionResponse(BaseModel):
     last_fetch_items_count: int
     consecutive_failures: int
     unread_count: int = 0  # 🔥 新增：未读内容数量
+    sort_order: Optional[int] = None  # 显示排序（每用户独立，越小越靠前）
 
 
 class SubscriptionStatsResponse(BaseModel):
@@ -205,10 +206,10 @@ async def get_user_subscriptions(
                 fetch_interval_minutes, max_items_per_fetch, filter_config,
                 metadata, created_at, updated_at, last_fetched_at,
                 next_fetch_at, total_items_fetched, last_fetch_items_count,
-                consecutive_failures, unread_count
+                consecutive_failures, unread_count, sort_order
             FROM subscription_list
             WHERE {' AND '.join(conditions)}
-            ORDER BY priority DESC, created_at DESC
+            ORDER BY COALESCE(sort_order, 999999) ASC, priority DESC, created_at DESC
         """
 
         cursor.execute(query, params)
@@ -237,7 +238,8 @@ async def get_user_subscriptions(
                 total_items_fetched=row[17],
                 last_fetch_items_count=row[18],
                 consecutive_failures=row[19],
-                unread_count=row[20] or 0  # 🔥 新增：未读计数
+                unread_count=row[20] or 0,  # 🔥 新增：未读计数
+                sort_order=row[21]
             ))
         
         cursor.close()
@@ -271,7 +273,7 @@ async def get_subscription(
                 fetch_interval_minutes, max_items_per_fetch, filter_config,
                 metadata, created_at, updated_at, last_fetched_at,
                 next_fetch_at, total_items_fetched, last_fetch_items_count,
-                consecutive_failures, unread_count
+                consecutive_failures, unread_count, sort_order
             FROM subscription_list
             WHERE id = %s AND user_id = %s
         """
@@ -303,7 +305,8 @@ async def get_subscription(
             total_items_fetched=row[17],
             last_fetch_items_count=row[18],
             consecutive_failures=row[19],
-            unread_count=row[20] or 0
+            unread_count=row[20] or 0,
+            sort_order=row[21]
         )
         
         cursor.close()
@@ -579,12 +582,19 @@ async def create_subscription(
         if existing:
             raise HTTPException(status_code=400, detail="Subscription already exists")
         
+        # 计算显示排序：追加到当前用户列表末尾
+        cursor.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subscription_list WHERE user_id = %s",
+            (user_id,)
+        )
+        next_sort_order = cursor.fetchone()[0] or 1
+
         # 插入新订阅（使用默认值；channel_url 已移除，channel_name 可选并由 API 自动填充）
         query = """
             INSERT INTO subscription_list (
                 user_id, channel_type, channel_identifier,
-                channel_name, channel_description, channel_avatar, enabled, filter_config, metadata
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)
+                channel_name, channel_description, channel_avatar, enabled, filter_config, metadata, sort_order
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)
             RETURNING id, created_at, updated_at
         """
 
@@ -597,7 +607,8 @@ async def create_subscription(
             channel_avatar,
             request.enabled,
             json.dumps(request.filter_config or {}),
-            json.dumps(request.metadata or {})
+            json.dumps(request.metadata or {}),
+            next_sort_order
         ))
         
         result = cursor.fetchone()
@@ -906,7 +917,8 @@ async def create_subscription(
             total_items_fetched=0,
             last_fetch_items_count=0,
             consecutive_failures=0,
-            unread_count=0  # 🔥 新创建时未读计数为0
+            unread_count=0,  # 🔥 新创建时未读计数为0
+            sort_order=next_sort_order
         )
         
     except HTTPException:
@@ -914,6 +926,80 @@ async def create_subscription(
     except Exception as e:
         logger.error(f"Failed to create subscription: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create subscription: {str(e)}")
+
+
+class ReorderSubscriptionItem(BaseModel):
+    """单个订阅的排序更新项"""
+    subscription_id: int
+    sort_order: int
+
+
+class ReorderSubscriptionsRequest(BaseModel):
+    """批量重排订阅请求"""
+    items: List[ReorderSubscriptionItem]
+
+
+@router.put("/reorder", summary="批量重排当前用户的订阅")
+async def reorder_subscriptions(
+    request: ReorderSubscriptionsRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """
+    批量更新当前用户订阅的显示顺序（拖拽排序持久化）。
+
+    请求体: {"items": [{"subscription_id": int, "sort_order": int}, ...]}
+    仅校验并更新属于当前用户的订阅；缺失或不属于该用户的 id 返回 404。
+    """
+    if not request.items:
+        raise HTTPException(status_code=400, detail="Items must be a non-empty list")
+
+    updates = {int(item.subscription_id): int(item.sort_order) for item in request.items}
+    if any(so < 1 for so in updates.values()):
+        raise HTTPException(status_code=400, detail="sort_order must be >= 1")
+
+    user_id = current_user.user_id
+    db_manager = get_db_manager()
+    conn = None
+    try:
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+
+        # 批量校验所有权：所有 id 必须属于当前用户
+        cursor.execute(
+            "SELECT id FROM subscription_list WHERE user_id = %s AND id = ANY(%s)",
+            (user_id, list(updates.keys()))
+        )
+        owned = {row[0] for row in cursor.fetchall()}
+        missing = sorted(set(updates.keys()) - owned)
+        if missing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Subscriptions not found or permission denied: {missing}"
+            )
+
+        # 逐条更新（事务）
+        for sid, so in updates.items():
+            cursor.execute(
+                "UPDATE subscription_list SET sort_order = %s WHERE id = %s AND user_id = %s",
+                (so, sid, user_id)
+            )
+
+        conn.commit()
+        logger.info(f"Reordered {len(updates)} subscriptions for user {user_id}")
+        return {"success": True, "updated": len(updates)}
+
+    except HTTPException:
+        if conn:
+            conn.rollback()
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Failed to reorder subscriptions for user {user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to reorder subscriptions: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
 
 
 @router.put("/{subscription_id}", response_model=SubscriptionResponse)
@@ -975,11 +1061,11 @@ async def update_subscription(
             WHERE id = %s AND user_id = %s
             RETURNING 
                 id, user_id, channel_type, channel_identifier,
-                channel_name, channel_description, enabled, priority,
+                channel_name, channel_description, channel_avatar, enabled, priority,
                 fetch_interval_minutes, max_items_per_fetch, filter_config,
                 metadata, created_at, updated_at, last_fetched_at,
                 next_fetch_at, total_items_fetched, last_fetch_items_count,
-                consecutive_failures, unread_count
+                consecutive_failures, unread_count, sort_order
         """
         
         cursor.execute(query, params)
@@ -998,20 +1084,22 @@ async def update_subscription(
             channel_identifier=row[3],
             channel_name=row[4],
             channel_description=row[5],
-            enabled=row[6],
-            priority=row[7],
-            fetch_interval_minutes=row[8],
-            max_items_per_fetch=row[9],
-            filter_config=row[10] or {},
-            metadata=row[11] or {},
-            created_at=row[12],
-            updated_at=row[13],
-            last_fetched_at=row[14],
-            next_fetch_at=row[15],
-            total_items_fetched=row[16],
-            last_fetch_items_count=row[17],
-            consecutive_failures=row[18],
-            unread_count=row[19] or 0
+            channel_avatar=row[6],
+            enabled=row[7],
+            priority=row[8],
+            fetch_interval_minutes=row[9],
+            max_items_per_fetch=row[10],
+            filter_config=row[11] or {},
+            metadata=row[12] or {},
+            created_at=row[13],
+            updated_at=row[14],
+            last_fetched_at=row[15],
+            next_fetch_at=row[16],
+            total_items_fetched=row[17],
+            last_fetch_items_count=row[18],
+            consecutive_failures=row[19],
+            unread_count=row[20] or 0,
+            sort_order=row[21]
         )
         
     except HTTPException:

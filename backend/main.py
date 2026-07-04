@@ -166,6 +166,9 @@ app.include_router(twitter_daily_reports.router, prefix="/api", tags=["Twitter D
 app.include_router(youtube_daily_reports.router, prefix="/api", tags=["YouTube Daily Report"])
 # 使用调度器代理API，与独立调度器服务通信
 app.include_router(scheduler_proxy.router, prefix="/api", tags=["定时任务调度代理"])
+# Scheduler 卡片排序偏好（每用户独立，直连主库；与上面 scheduler_proxy 转发层各司其职）
+from backend.api import scheduler_card_order
+app.include_router(scheduler_card_order.router, prefix="/api/scheduler", tags=["Scheduler 卡片排序"])
 app.include_router(subscriptions.router, prefix="/api/subscriptions", tags=["订阅管理"])
 app.include_router(zsxq_admin.router, prefix="/api/admin/zsxq", tags=["知识星球管理员"])
 app.include_router(weibo_admin.router, prefix="/api/admin/weibo", tags=["微博管理员"])

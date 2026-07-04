@@ -41,7 +41,24 @@ import {
   CheckSquareOutlined,
   CloseOutlined,
   ClockCircleOutlined,
+  HolderOutlined,
 } from '@ant-design/icons';
+import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { Modifier } from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -91,6 +108,44 @@ const { Text } = Typography;
 
 /** 桌面 Feeds 右侧详情正文最大宽度（仅 FeedReaderPage）；Daily 预览抽屉独立宽度，不受此项影响 */
 const FEED_READER_ARTICLE_MAX_WIDTH_PX = 800;
+
+/** dnd-kit 修饰器：限制拖拽只能沿垂直轴移动 */
+const restrictToVerticalAxis: Modifier = ({ transform }) => {
+  if (!transform) {
+    return transform;
+  }
+  return { ...transform, x: 0 };
+};
+
+/**
+ * 可排序订阅项 wrapper：用 useSortable 注册拖拽源，通过 render props
+ * 把 {attributes, listeners} 暴露给内部的拖拽手柄。children 是完整的 List.Item。
+ */
+const SortableSubscriptionItem: React.FC<{
+  subscription: Subscription;
+  disabled: boolean;
+  children: (
+    handle: Pick<ReturnType<typeof useSortable>, 'attributes' | 'listeners'>
+  ) => React.ReactNode;
+}> = ({ subscription, disabled, children }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: subscription.id,
+    disabled,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 1000 : 'auto',
+      }}
+      {...attributes}
+    >
+      {children({ attributes, listeners })}
+    </div>
+  );
+};
 
 const FeedReaderPageInner: React.FC = () => {
   const { modal } = App.useApp();
@@ -154,6 +209,12 @@ const FeedReaderPageInner: React.FC = () => {
   const [batchSelectedIds, setBatchSelectedIds] = useState<Set<number>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
 
+  // 🖐️ 拖拽排序：dnd-kit sensors + 拖拽落库期间跳过轮询的 ref
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+  const isReorderingRef = useRef(false);
+
   const statusFilteredSubscriptions = useMemo(
     () =>
       subscriptions.filter((sub) =>
@@ -164,9 +225,11 @@ const FeedReaderPageInner: React.FC = () => {
 
   const visibleSubscriptions = useMemo(
     () =>
-      statusFilteredSubscriptions.filter((sub) =>
-        matchesFeedChannelTypeFilter(sub.channel_type, feedChannelTypeFilter)
-      ),
+      statusFilteredSubscriptions
+        .filter((sub) =>
+          matchesFeedChannelTypeFilter(sub.channel_type, feedChannelTypeFilter)
+        )
+        .sort((a, b) => (a.sort_order ?? 999999) - (b.sort_order ?? 999999)),
     [statusFilteredSubscriptions, feedChannelTypeFilter]
   );
 
@@ -269,6 +332,8 @@ const FeedReaderPageInner: React.FC = () => {
     const POLL_INTERVAL = 3 * 60 * 1000; // 3 minutes
     
     const intervalId = setInterval(async () => {
+      // 拖拽落库期间跳过，避免覆盖本地刚调整的顺序
+      if (isReorderingRef.current) return;
       try {
         // 静默刷新订阅列表（不显示 loading）
         const response = await subscriptionsAPI.getUserSubscriptions(undefined, true);
@@ -348,6 +413,62 @@ const FeedReaderPageInner: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // 🖐️ 拖拽结束：可见项重排 → 全量重编号 → 乐观更新 → 落库（失败回滚）
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const oldIndex = visibleSubscriptions.findIndex((s) => s.id === Number(active.id));
+      const newIndex = visibleSubscriptions.findIndex((s) => s.id === Number(over.id));
+      if (oldIndex < 0 || newIndex < 0) return;
+
+      // 1. 可见项按拖拽结果重排
+      const reorderedVisible = arrayMove(visibleSubscriptions, oldIndex, newIndex);
+      const visibleIds = new Set(reorderedVisible.map((s) => s.id));
+
+      // 2. 把新可见顺序回填到全量的可见槽位，不可见项原位不动
+      let visPtr = 0;
+      const newOrderIds: number[] = [];
+      for (const s of subscriptions) {
+        if (visibleIds.has(s.id)) {
+          newOrderIds.push(reorderedVisible[visPtr++].id);
+        } else {
+          newOrderIds.push(s.id);
+        }
+      }
+
+      // 3. 全量重编号 1..N（消除删除留下的空洞）
+      const orderMap = new Map<number, number>();
+      newOrderIds.forEach((id, idx) => orderMap.set(id, idx + 1));
+
+      // 4. 乐观更新本地顺序
+      const prevSubscriptions = subscriptions;
+      isReorderingRef.current = true;
+      setSubscriptions(
+        subscriptions
+          .map((s) => ({ ...s, sort_order: orderMap.get(s.id) }))
+          .sort((a, b) => (a.sort_order ?? 999999) - (b.sort_order ?? 999999))
+      );
+
+      // 5. 落库（发全量顺序，保证前后端一致）
+      try {
+        const payload = Array.from(orderMap, ([id, sort_order]) => ({
+          subscription_id: id,
+          sort_order,
+        }));
+        const resp = await subscriptionsAPI.reorderSubscriptions(payload);
+        if (!resp.success) throw new Error(resp.error);
+      } catch (error) {
+        setSubscriptions(prevSubscriptions);
+        message.error('排序保存失败，已回滚');
+      } finally {
+        isReorderingRef.current = false;
+      }
+    },
+    [visibleSubscriptions, subscriptions]
+  );
 
   const loadContents = async (subscriptionId: number, onlyUnread: boolean = false) => {
     setContentsLoading(true);
@@ -1037,10 +1158,20 @@ const FeedReaderPageInner: React.FC = () => {
                 />
               </div>
             ) : (
-              <List
-                dataSource={visibleSubscriptions}
-                renderItem={(subscription) => {
-                const displayName =
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                modifiers={[restrictToVerticalAxis]}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={visibleSubscriptions.map((s) => s.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <List
+                    dataSource={visibleSubscriptions}
+                    renderItem={(subscription) => {
+                    const displayName =
                   subscription.channel_name || `@${subscription.channel_identifier}`;
                 const newsFavicon =
                   subscription.channel_type === 'news'
@@ -1051,6 +1182,12 @@ const FeedReaderPageInner: React.FC = () => {
                 const isChecked = batchSelectedIds.has(subscription.id);
                 const isSelected = selectedSubscription?.id === subscription.id;
                 return (
+                <SortableSubscriptionItem
+                  key={subscription.id}
+                  subscription={subscription}
+                  disabled={batchMode}
+                >
+                  {({ attributes, listeners }) => (
                 <List.Item
                   key={subscription.id}
                   style={{
@@ -1101,6 +1238,28 @@ const FeedReaderPageInner: React.FC = () => {
                     }
                   }}
                 >
+                  {/* 🖐️ 拖拽手柄（非批量模式显示） */}
+                  {!batchMode && (
+                    <Tooltip title="拖拽排序">
+                      <div
+                        {...attributes}
+                        {...listeners}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 18,
+                          flexShrink: 0,
+                          cursor: 'grab',
+                          color: themeColors.textSecondary,
+                          touchAction: 'none',
+                        }}
+                      >
+                        <HolderOutlined style={{ fontSize: 14 }} />
+                      </div>
+                    </Tooltip>
+                  )}
                   {/* ☑️ Batch mode checkbox */}
                   {batchMode && (
                     <Checkbox
@@ -1249,9 +1408,13 @@ const FeedReaderPageInner: React.FC = () => {
                     </Dropdown>
                   )}
                 </List.Item>
+                  )}
+                </SortableSubscriptionItem>
                 );
                 }}
-            />
+                  />
+                </SortableContext>
+              </DndContext>
           )}
           </div>
 
