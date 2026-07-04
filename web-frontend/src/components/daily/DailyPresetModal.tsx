@@ -41,7 +41,7 @@ const UPLOAD_GROUP: DailySourceSubtype[] = SOURCE_BADGE_DISPLAY_ORDER.filter(
   (s) => ['document', 'image', 'audio', 'youtube', 'web', 'text', 'podcast'].includes(s)
 );
 const FEED_GROUP: DailySourceSubtype[] = SOURCE_BADGE_DISPLAY_ORDER.filter((s) =>
-  ['twitter', 'news', 'youtube_feed'].includes(s)
+  ['twitter', 'news', 'youtube_feed', 'zhishixingqiu', 'weibo'].includes(s)
 );
 
 const DailyPresetModal: React.FC<DailyPresetModalProps> = ({

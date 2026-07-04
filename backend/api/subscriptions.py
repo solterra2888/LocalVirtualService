@@ -22,10 +22,31 @@ logger = get_logger("subscriptions_api")
 router = APIRouter()
 
 
+def _parse_weibo_uid(raw: str) -> str:
+    """解析微博 UID：支持纯数字 UID 与多种主页链接格式。无法解析返回 ''。"""
+    if not raw:
+        return ""
+    s = raw.strip()
+    if s.isdigit():
+        return s
+    s = s.split("?")[0].split("#")[0].rstrip("/")
+    import re
+    m = re.search(r"(?:weibo\.com|weibo\.cn)/(?:u|profile)/(\d+)", s)
+    if m:
+        return m.group(1)
+    m = re.search(r"weibo\.com/(\d+)", s)
+    if m:
+        return m.group(1)
+    m = re.search(r"(\d{6,})", s)
+    if m:
+        return m.group(1)
+    return ""
+
+
 # Pydantic模型
 class CreateSubscriptionRequest(BaseModel):
     """创建订阅请求模型"""
-    channel_type: str = Field(..., description="频道类型: twitter, youtube, zhishixingqiu, rss, news, podcast")
+    channel_type: str = Field(..., description="频道类型: twitter, youtube, zhishixingqiu, weibo, rss, news, podcast")
     channel_identifier: str = Field(..., description="频道唯一标识: Twitter用户名、YouTube频道ID等")
     channel_name: Optional[str] = Field(None, description="频道显示名称（可选，Twitter 等会从 API 自动填充）")
     channel_description: Optional[str] = Field(None, description="频道描述")
@@ -450,6 +471,79 @@ async def create_subscription(
 
             logger.info(f"知识星球验证成功 | group_id={group_id} | name={request.channel_name}")
 
+        # 🔥 如果是微博订阅，解析 UID、校验博主、回填昵称头像、upsert weibo_accounts
+        elif request.channel_type == 'weibo':
+            from backend.services.weibo_credential_service import WeiboCredentialService
+            uid = _parse_weibo_uid(request.channel_identifier)
+            if not uid:
+                raise HTTPException(
+                    status_code=400,
+                    detail="无法解析微博 UID，请输入博主 UID 或主页链接（如 https://weibo.com/u/1234567890）",
+                )
+            request.channel_identifier = uid  # 标准化为纯 uid
+
+            import os
+            weibo_svc = WeiboCredentialService()
+            cred = weibo_svc.get_first_valid_cookie()
+            if cred:
+                cred_id, cookie = cred
+            else:
+                # 无登录凭证：回退到 WEIBO_COOKIE env，再无则访客模式（crawl4weibo 自动获取，需 playwright）
+                cred_id = None
+                cookie = os.getenv("WEIBO_COOKIE", "").strip() or None
+
+            # 稳健导入 UserNotFoundError（crawl4weibo 异常路径可能在不同子模块）
+            try:
+                from crawl4weibo.exceptions import UserNotFoundError as _WBUserNotFound
+            except ImportError:
+                try:
+                    from crawl4weibo.exceptions.base import UserNotFoundError as _WBUserNotFound
+                except ImportError:
+                    _WBUserNotFound = ()  # type: ignore[assignment]
+
+            # 校验博主：有 cookie 用登录态；无 cookie 走访客模式（crawl4weibo Playwright 自动获取访客 Cookie）
+            try:
+                from crawl4weibo import WeiboClient
+                from backend.services.weibo_subscription_service import _VISITOR_COOKIE_PATH
+                if cookie:
+                    client = WeiboClient(
+                        cookies=cookie,
+                        use_browser_cookies=False,
+                        auto_fetch_cookies=False,
+                        log_level="WARNING",
+                    )
+                else:
+                    client = WeiboClient(
+                        use_browser_cookies=True,
+                        auto_fetch_cookies=True,
+                        cookie_storage_path=_VISITOR_COOKIE_PATH,
+                        browser_headless=True,
+                        log_level="WARNING",
+                    )
+                user = client.get_user_by_uid(uid, use_proxy=False)
+            except _WBUserNotFound:
+                raise HTTPException(status_code=400, detail=f"微博用户 '{uid}' 不存在或为私密账号")
+            except Exception as e:
+                # 访客模式失败（如 playwright/chromium 未装）时退化为 uid 作昵称，不阻塞订阅
+                logger.warning(f"微博用户 {uid} 校验失败（退化为 uid 作昵称）: {e}")
+                user = None
+
+            if user is not None:
+                screen_name = getattr(user, "screen_name", "") or uid
+                avatar = getattr(user, "avatar_url", "") or ""
+            else:
+                screen_name = uid
+                avatar = ""
+            if not request.channel_name:
+                request.channel_name = screen_name
+            channel_avatar = avatar or None
+
+            # 订阅时自动建立博主元数据（不覆盖增量锚点）
+            weibo_svc.upsert_account(uid, screen_name, avatar=avatar, credential_id=cred_id)
+
+            _auth_mode = f"凭证={cred_id}" if cred_id else "访客模式"
+            logger.info(f"微博验证成功 | uid={uid} | name={screen_name} | {_auth_mode}")
+
         conn = db_manager.get_connection()
         cursor = conn.cursor()
         
@@ -722,6 +816,36 @@ async def create_subscription(
                     queue='data_fetching',
                 )
                 logger.info(f"Celery task scheduled: fetch_zhishixingqiu_subscription (task_id={task.id})")
+
+        # 🌟 微博：已有内容时把新用户并入 user_ids；否则触发首抓 backfill
+        elif request.enabled and request.channel_type == 'weibo':
+            from backend.tasks.subscription_tasks import (
+                fetch_weibo_subscription_task,
+                add_user_to_existing_content_task,
+            )
+
+            if has_existing_content:
+                logger.info(
+                    f"Reusing existing weibo content for uid {request.channel_identifier}: "
+                    f"{existing_content_count} posts found. Adding user {user_id} to user_ids."
+                )
+                task = add_user_to_existing_content_task.apply_async(
+                    args=[user_id, request.channel_type, request.channel_identifier, subscription_id],
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(f"Celery task scheduled: add_user_to_existing_content (weibo) (task_id={task.id})")
+            else:
+                logger.info(
+                    f"No existing weibo content for uid {request.channel_identifier}. "
+                    f"Triggering backfill (subscription_id={subscription_id})."
+                )
+                task = fetch_weibo_subscription_task.apply_async(
+                    args=[subscription_id, None, True],  # force_fetch=True (backfill)
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(f"Celery task scheduled: fetch_weibo_subscription (task_id={task.id})")
 
         # News：已有文章时把新用户并入 user_ids（与 Twitter/YouTube 复用逻辑一致）
         elif request.enabled and request.channel_type == 'news':

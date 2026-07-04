@@ -10,6 +10,7 @@ from .rss_adapter import RSSAdapter
 from .news_adapter import NewsAdapter
 from .zsxq_adapter import ZsxqAdapter
 from .podcast_adapter import PodcastAdapter
+from .weibo_adapter import WeiboAdapter
 
 __all__ = [
     'BaseContentAdapter',
@@ -19,6 +20,7 @@ __all__ = [
     'NewsAdapter',
     'ZsxqAdapter',
     'PodcastAdapter',
+    'WeiboAdapter',
 ]
 
 
@@ -27,7 +29,7 @@ def get_adapter(channel_type: str) -> BaseContentAdapter:
     获取指定渠道类型的适配器实例
 
     Args:
-        channel_type: 渠道类型 (twitter, youtube, rss, news, zhishixingqiu, podcast)
+        channel_type: 渠道类型 (twitter, youtube, rss, news, zhishixingqiu, podcast, weibo)
 
     Returns:
         对应的适配器实例
@@ -42,10 +44,11 @@ def get_adapter(channel_type: str) -> BaseContentAdapter:
         'news': NewsAdapter(),
         'zhishixingqiu': ZsxqAdapter(),
         'podcast': PodcastAdapter(),
+        'weibo': WeiboAdapter(),
     }
-    
+
     adapter = adapters.get(channel_type)
     if not adapter:
         raise ValueError(f"Unsupported channel type: {channel_type}")
-    
+
     return adapter

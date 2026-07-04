@@ -135,7 +135,7 @@ type SchedulerCategory = 'data_fetch' | 'report_generation';
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'other';
   category: SchedulerCategory;
   description: string;
   enabled: boolean;
@@ -293,6 +293,26 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
           name: 'Configure ZSXQ Fetch Schedule',
           description: '配置知识星球定期抓取计划（默认每 30 分钟一次）',
           endpoint: '/scheduler/tasks/zhishixingqiu-subscription',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'weibo_subscription',
+      name: 'Weibo Subscription Feed',
+      type: 'weibo_subscription',
+      category: 'data_fetch',
+      sortOrder: 60,
+      description: '定时从订阅的微博博主抓取最新博文，写入 My Feeds（支持多用户共享同一博主内容，Cookie 集中管理与轮换）',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_weibo_schedule',
+          name: 'Configure Weibo Fetch Schedule',
+          description: '配置微博定期抓取计划（默认每 30 分钟一次）',
+          endpoint: '/scheduler/tasks/weibo-subscription',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -744,6 +764,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
           (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
           (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
+          (sourceIdLower === 'weibo_subscription' && taskType === 'weibo_subscription') ||
           (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
           (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
           (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
@@ -1035,6 +1056,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
           (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
           (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
+          (sourceIdLower === 'weibo_subscription' && taskType === 'weibo_subscription') ||
           (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
           (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
           (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
@@ -1162,7 +1184,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'podcast_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'daily_market_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'cnbc_closing_bell' || dataSource.id === 'zhishixingqiu_summary' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'podcast_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'weibo_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'daily_market_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'cnbc_closing_bell' || dataSource.id === 'zhishixingqiu_summary' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1512,6 +1534,7 @@ const SchedulerPage: React.FC = () => {
                         (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
                         (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
                         (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
+          (sourceIdLower === 'weibo_subscription' && taskType === 'weibo_subscription') ||
                         (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
                         (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
                         (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||
@@ -1805,7 +1828,7 @@ const SchedulerPage: React.FC = () => {
               setSelectedDataSource(null);
             }}
             onSuccess={handleDataSourceConfigSuccess}
-            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary'}
+            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary'}
             dataSourceName={selectedDataSource.name}
             initialCronExpression={existingTask?.cron_expression}
             initialTimezone={existingTask?.timezone}

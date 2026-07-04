@@ -21,6 +21,7 @@ import {
   EditOutlined,
   AppleOutlined,
   StarOutlined,
+  MessageOutlined,
 } from '@ant-design/icons';
 import type { DailySourceSubtype } from '../../services/daily';
 import { SOURCE_BADGE_STYLES } from './sourceBadgeConfig';
@@ -38,6 +39,7 @@ const SUBTYPE_ICONS: Record<DailySourceSubtype, React.ReactNode> = {
   text:         <EditOutlined />,
   podcast:      <AppleOutlined />,
   zhishixingqiu: <StarOutlined />,
+  weibo: <MessageOutlined />,
 };
 
 interface SourceBadgeProps {

@@ -930,6 +930,7 @@ class DatabaseManager:
                 'cnbc_closing_bell',
                 'zhishixingqiu_summary',
                 'podcast_subscription',
+                'weibo_subscription',
                 # legacy rows in some deployments
                 'cctv_news',
                 'eodhd_news',

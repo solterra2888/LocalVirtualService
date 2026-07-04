@@ -47,18 +47,12 @@ import { aiTagChipStyle, AI_TAG_CHIP_FONT_SIZE } from '../shared/aiTagChipStyles
 import UploadAnalysisTemplatePicker, {
   UploadAnalysisTemplatePickerValue,
 } from '../UploadAnalysisTemplatePicker';
-// PR-N4: 读取用户对各渠道的自动个性化开关, 用于决定 "Generate / Regenerate" 兜底按钮可见性
-import {
-  feedSummarySettingsAPI,
-  FeedSummaryChannel,
-  FeedSummarySettingItem,
-} from '../../services/feedSummarySettings';
 import AIAnalysisSection from '../shared/content-viewer/AIAnalysisSection';
 import AISummarySection from '../shared/content-viewer/AISummarySection';
 import CollapsibleOriginalSection from '../shared/content-viewer/CollapsibleOriginalSection';
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
 import type { FeedArticleViewMode } from './feedArticleViewMode';
-import { estimateSubscriptionContentReadingMinutes } from './feedUtils';
+import { estimateSubscriptionContentReadingMinutes, getFeedEngagementCounts } from './feedUtils';
 import { getModalStyles } from '../../utils/modalStyles';
 
 export type { FeedArticleViewMode } from './feedArticleViewMode';
@@ -91,7 +85,7 @@ export interface FeedArticleBodyProps {
  * - News 打标路由: CCTV → LLM (NEWS_LLM_TAG_SOURCES); EODHD → 轻量映射 (map_news_tags).
  * - 知识星球: 入库后 trigger_auto_feed_tagging，使用 content_tag_feeds_v1 模板。
  */
-const AUTO_TAG_CHANNELS = new Set(['twitter', 'youtube', 'news', 'zhishixingqiu', 'podcast']);
+const AUTO_TAG_CHANNELS = new Set(['twitter', 'youtube', 'news', 'zhishixingqiu', 'podcast', 'weibo']);
 
 interface CeleryTaskStatusResponse {
   task_id: string;
@@ -163,37 +157,6 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
   const [personalizeModalOpen, setPersonalizeModalOpen] = useState(false);
   const [personalizePicker, setPersonalizePicker] = useState<UploadAnalysisTemplatePickerValue>({});
   const [personalizeLoading, setPersonalizeLoading] = useState(false);
-
-  // PR-N4: 用户对各渠道自动个性化的开关 (组件挂载时拉一次, 全生命周期内复用)
-  const [feedSummarySettings, setFeedSummarySettings] = useState<
-    Record<FeedSummaryChannel, FeedSummarySettingItem | null>
-  >({
-    twitter: null,
-    youtube: null,
-  });
-  useEffect(() => {
-    let cancelled = false;
-    feedSummarySettingsAPI
-      .list()
-      .then((res) => {
-        if (cancelled) return;
-        const map: Record<FeedSummaryChannel, FeedSummarySettingItem | null> = {
-          twitter: null,
-          youtube: null,
-        };
-        for (const it of res.items || []) {
-          map[it.channel_type] = it;
-        }
-        setFeedSummarySettings(map);
-      })
-      .catch((err) => {
-        // 失败时退化为全 null, 按钮按"未开启自动 + 无个性化"逻辑隐藏 / 显示 Generate
-        console.warn('Failed to load feed summary settings', err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const { addTask, tasks } = useFileProcessing();
 
@@ -606,6 +569,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
     : 'Generate a personalized AI analysis for this content using your private template.';
 
   const readingMin = estimateSubscriptionContentReadingMinutes(selectedContent);
+  const engagementCounts = getFeedEngagementCounts(selectedContent);
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -1154,51 +1118,47 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             </div>
           )}
 
-          {selectedContent.channel_type !== 'youtube' && (
+          {selectedContent.channel_type !== 'youtube' && engagementCounts && (
             <Space wrap size={16}>
-              {selectedContent.metadata && (
-                <>
-                  {typeof selectedContent.metadata.like_count === 'number' && (
-                    <Tooltip title="点赞">
-                      <Space size={4}>
-                        <LikeOutlined style={{ color: '#eb2f96' }} />
-                        <Text type="secondary" style={{ fontSize: 13 }}>
-                          {selectedContent.metadata.like_count}
-                        </Text>
-                      </Space>
-                    </Tooltip>
-                  )}
-                  {typeof selectedContent.metadata.retweet_count === 'number' && (
-                    <Tooltip title="转发">
-                      <Space size={4}>
-                        <RetweetOutlined style={{ color: '#52c41a' }} />
-                        <Text type="secondary" style={{ fontSize: 13 }}>
-                          {selectedContent.metadata.retweet_count}
-                        </Text>
-                      </Space>
-                    </Tooltip>
-                  )}
-                  {typeof selectedContent.metadata.reply_count === 'number' && (
-                    <Tooltip title="回复">
-                      <Space size={4}>
-                        <CommentOutlined style={{ color: '#1890ff' }} />
-                        <Text type="secondary" style={{ fontSize: 13 }}>
-                          {selectedContent.metadata.reply_count}
-                        </Text>
-                      </Space>
-                    </Tooltip>
-                  )}
-                  {typeof selectedContent.metadata.quote_count === 'number' && selectedContent.metadata.quote_count > 0 && (
-                    <Tooltip title="引用">
-                      <Space size={4}>
-                        <MessageOutlined style={{ color: '#1890ff' }} />
-                        <Text type="secondary" style={{ fontSize: 13 }}>
-                          {selectedContent.metadata.quote_count}
-                        </Text>
-                      </Space>
-                    </Tooltip>
-                  )}
-                </>
+              {typeof engagementCounts.like === 'number' && (
+                <Tooltip title="点赞">
+                  <Space size={4}>
+                    <LikeOutlined style={{ color: '#eb2f96' }} />
+                    <Text type="secondary" style={{ fontSize: 13 }}>
+                      {engagementCounts.like}
+                    </Text>
+                  </Space>
+                </Tooltip>
+              )}
+              {typeof engagementCounts.retweet === 'number' && (
+                <Tooltip title="转发">
+                  <Space size={4}>
+                    <RetweetOutlined style={{ color: '#52c41a' }} />
+                    <Text type="secondary" style={{ fontSize: 13 }}>
+                      {engagementCounts.retweet}
+                    </Text>
+                  </Space>
+                </Tooltip>
+              )}
+              {typeof engagementCounts.reply === 'number' && (
+                <Tooltip title="回复">
+                  <Space size={4}>
+                    <CommentOutlined style={{ color: '#1890ff' }} />
+                    <Text type="secondary" style={{ fontSize: 13 }}>
+                      {engagementCounts.reply}
+                    </Text>
+                  </Space>
+                </Tooltip>
+              )}
+              {typeof engagementCounts.quote === 'number' && engagementCounts.quote > 0 && (
+                <Tooltip title="引用">
+                  <Space size={4}>
+                    <MessageOutlined style={{ color: '#1890ff' }} />
+                    <Text type="secondary" style={{ fontSize: 13 }}>
+                      {engagementCounts.quote}
+                    </Text>
+                  </Space>
+                </Tooltip>
               )}
             </Space>
           )}

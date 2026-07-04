@@ -77,6 +77,7 @@ task_routes = {
     'match_content_themes_vector': {'queue': 'ai_processing'},    # Phase 2: 向量语义匹配（Qwen embedding）
     'backfill_content_theme_matches': {'queue': 'ai_processing'}, # 批量回填历史内容
     'fetch_zhishixingqiu_subscription': {'queue': 'data_fetching'},  # 知识星球订阅抓取
+    'fetch_weibo_subscription': {'queue': 'data_fetching'},  # 微博订阅抓取
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
     'smart_wait_and_add_user': {'queue': 'data_fetching'},
     'generate_author_summary': {'queue': 'ai_processing'},

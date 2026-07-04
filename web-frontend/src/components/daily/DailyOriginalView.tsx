@@ -124,6 +124,17 @@ const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({
             themeMode={themeMode}
           />
         );
+      case 'weibo':
+        return (
+          <TwitterOriginalView
+            content={f.content}
+            url={f.url}
+            media_urls={f.media_urls}
+            is_retweet={f.is_retweet ?? undefined}
+            retweeted_author={f.retweeted_author}
+            themeMode={themeMode}
+          />
+        );
       case 'news':
         return (
           <NewsOriginalView

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Tooltip, Typography, Spin } from 'antd';
-import { TwitterOutlined, YoutubeOutlined, StarOutlined, CustomerServiceOutlined } from '@ant-design/icons';
+import { TwitterOutlined, YoutubeOutlined, StarOutlined, CustomerServiceOutlined, MessageOutlined } from '@ant-design/icons';
 import { NEWS_SOURCES, getNewsSourceFaviconUrl } from './feedChannelConfig';
 import api from '../../services/api';
 
@@ -32,6 +32,7 @@ const PLATFORMS: PlatformOption[] = [
   { value: 'twitter', label: 'Twitter', icon: <TwitterOutlined />, color: '#1DA1F2' },
   { value: 'youtube', label: 'YouTube', icon: <YoutubeOutlined />, color: '#FF0000' },
   { value: 'podcast', label: 'Podcast', icon: <CustomerServiceOutlined />, color: '#8B5CF6' },
+  { value: 'weibo', label: '微博', icon: <MessageOutlined />, color: '#E6162D' },
 ];
 
 const tileBase: React.CSSProperties = {

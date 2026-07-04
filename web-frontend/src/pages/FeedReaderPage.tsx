@@ -40,7 +40,6 @@ import {
   PauseCircleOutlined,
   CheckSquareOutlined,
   CloseOutlined,
-  SettingOutlined,
   ClockCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -81,7 +80,6 @@ import {
   adjacentFeedArticleViewMode,
 } from '../components/feed/feedArticleViewMode';
 import FeedSourceIconPicker, { parsePickerValue } from '../components/feed/FeedSourceIconPicker';
-import FeedSummarySettingsDrawer from '../components/feed/FeedSummarySettingsDrawer';
 import SubscriptionDigestButton from '../components/feed/SubscriptionDigestButton';
 import { ConfigProvider, App, theme as antdTheme } from 'antd';
 
@@ -133,9 +131,6 @@ const FeedReaderPageInner: React.FC = () => {
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [isSubmittingSubscription, setIsSubmittingSubscription] = useState(false);
 
-  // PR-N3: 个性化摘要设置 Drawer
-  const [summarySettingsOpen, setSummarySettingsOpen] = useState(false);
-  
   // 🔥 分页状态
   const [contentOffset, setContentOffset] = useState(0);
   const [contentTotal, setContentTotal] = useState(0);
@@ -916,7 +911,7 @@ const FeedReaderPageInner: React.FC = () => {
             className="feed-page-layout__sider-head"
             style={{ padding: '16px 12px', borderBottom: `1px solid ${themeColors.cardBorder}` }}
           >
-            {/* 第一行：标题 + Active / Disable / Batch */}
+            {/* 第一行：标题 + Add Feed / Active / Disable / Batch */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <Text strong style={{ color: themeColors.textSecondary, fontSize: 12 }}>
                 MY FEEDS ({visibleSubscriptions.length})
@@ -924,8 +919,19 @@ const FeedReaderPageInner: React.FC = () => {
               <div
                 className="feed-list-status-tabs"
                 role="group"
-                aria-label="Subscription status"
+                aria-label="Subscription actions"
               >
+                <Tooltip title="Add Feed">
+                  <button
+                    type="button"
+                    className="feed-list-type-tab"
+                    onClick={handleAddSubscription}
+                    aria-label="Add Feed"
+                    style={{ color: '#2196F3' }}
+                  >
+                    <span className="feed-list-type-tab-icon"><PlusOutlined /></span>
+                  </button>
+                </Tooltip>
                 <Tooltip title={`Active (${subscriptions.filter((s) => s.enabled).length})`}>
                   <button
                     type="button"
@@ -962,7 +968,7 @@ const FeedReaderPageInner: React.FC = () => {
               </div>
             </div>
 
-            {/* 第二行：频道类型 tabs + Add Feed 按钮 */}
+            {/* 第二行：频道类型 tabs */}
             <div className="feed-list-filter-row">
               <div className="feed-list-type-tabs">
                 {FEED_CHANNEL_TYPE_FILTER_TABS.map(({ key, label, icon }) => (
@@ -978,28 +984,6 @@ const FeedReaderPageInner: React.FC = () => {
                   </Tooltip>
                 ))}
               </div>
-              <Tooltip title="Add Feed">
-                <button
-                  type="button"
-                  className="feed-list-type-tab"
-                  onClick={handleAddSubscription}
-                  aria-label="Add Feed"
-                  style={{ color: '#2196F3' }}
-                >
-                  <span className="feed-list-type-tab-icon"><PlusOutlined /></span>
-                </button>
-              </Tooltip>
-              <Tooltip title="Personalized summary settings">
-                <button
-                  type="button"
-                  className="feed-list-type-tab"
-                  onClick={() => setSummarySettingsOpen(true)}
-                  aria-label="Personalized summary settings"
-                  style={{ color: themeColors.textSecondary }}
-                >
-                  <span className="feed-list-type-tab-icon"><SettingOutlined /></span>
-                </button>
-              </Tooltip>
             </div>
           </div>
 
@@ -1948,7 +1932,7 @@ const FeedReaderPageInner: React.FC = () => {
                   >
                     {({ getFieldValue }) => {
                       const rawChannelType = getFieldValue('channel_type') || '';
-                      if (rawChannelType !== 'twitter' && rawChannelType !== 'youtube' && rawChannelType !== 'podcast') {
+                      if (rawChannelType !== 'twitter' && rawChannelType !== 'youtube' && rawChannelType !== 'podcast' && rawChannelType !== 'weibo') {
                         return null;
                       }
                       const channelType = rawChannelType;
@@ -1956,17 +1940,23 @@ const FeedReaderPageInner: React.FC = () => {
                         ? 'Twitter Username'
                         : channelType === 'podcast'
                           ? 'Podcast RSS Feed URL'
-                          : 'YouTube Channel';
+                          : channelType === 'weibo'
+                            ? '微博 UID 或主页链接'
+                            : 'YouTube Channel';
                       const placeholder = channelType === 'twitter'
                         ? '@elonmusk or elonmusk'
                         : channelType === 'podcast'
                           ? 'https://feeds.simplecast.com/Nh1wIaXT'
-                          : '@markets or UCIALMKvObZNtJ6AmdCLP7Lg';
+                          : channelType === 'weibo'
+                            ? '1234567890 或 https://weibo.com/u/1234567890'
+                            : '@markets or UCIALMKvObZNtJ6AmdCLP7Lg';
                       const extra = channelType === 'twitter'
                         ? 'With or without @ (e.g. @elonmusk or elonmusk)'
                         : channelType === 'podcast'
                           ? 'Paste the RSS Feed URL of the podcast (e.g. from Apple Podcasts or Spotify)'
-                          : 'Recommended: paste the @handle from youtube.com/@xxx (e.g., @markets → Bloomberg Television). You can also paste a UC… channel ID. Bare names without @ use the legacy username and may resolve to a different channel.';
+                          : channelType === 'weibo'
+                            ? '粘贴博主 UID 或主页链接（支持 weibo.com/u/xxx、m.weibo.cn/u/xxx、纯数字 UID）'
+                            : 'Recommended: paste the @handle from youtube.com/@xxx (e.g., @markets → Bloomberg Television). You can also paste a UC… channel ID. Bare names without @ use the legacy username and may resolve to a different channel.';
                       const rules = channelType === 'twitter'
                         ? [
                             { required: true, message: 'Please input identifier' },
@@ -1997,7 +1987,9 @@ const FeedReaderPageInner: React.FC = () => {
                                 },
                               },
                             ]
-                          : [{ required: true, message: 'Please input identifier' }];
+                          : channelType === 'weibo'
+                            ? [{ required: true, message: '请输入微博 UID 或主页链接' }]
+                            : [{ required: true, message: 'Please input identifier' }];
                       return (
                         <>
                           {channelType === 'podcast' && (
@@ -2092,12 +2084,6 @@ const FeedReaderPageInner: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
-
-      {/* PR-N3: 个性化摘要设置 Drawer (右上角齿轮) */}
-      <FeedSummarySettingsDrawer
-        open={summarySettingsOpen}
-        onClose={() => setSummarySettingsOpen(false)}
-      />
     </Layout>
   );
 };

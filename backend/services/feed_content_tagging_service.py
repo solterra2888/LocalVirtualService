@@ -28,7 +28,7 @@ from backend.utils.logger import get_logger
 
 logger = get_logger("feed_content_tagging_service")
 
-_SUPPORTED_CHANNELS = {"twitter", "youtube", "podcast", "news", "zhishixingqiu"}
+_SUPPORTED_CHANNELS = {"twitter", "youtube", "podcast", "news", "zhishixingqiu", "weibo"}
 
 FEEDS_TEMPLATE_CODE = "content_tag_feeds_v1"
 TWEET_SIGNAL_TEMPLATE_CODE = "tweet_signal_v1"
@@ -148,7 +148,7 @@ class FeedContentTaggingService:
         allowed = {
             c.strip()
             for c in os.getenv(
-                "AUTO_FEED_TAG_CHANNELS", "twitter,youtube,podcast,news,zhishixingqiu"
+                "AUTO_FEED_TAG_CHANNELS", "twitter,youtube,podcast,news,zhishixingqiu,weibo"
             ).split(",")
             if c.strip()
         }
@@ -217,6 +217,20 @@ class FeedContentTaggingService:
             if len(text) > max_chars:
                 text = text[:max_chars]
             return text, "zhishixingqiu"
+
+        if channel_type == "weibo":
+            min_len = int(os.getenv("AUTO_FEED_TAG_MIN_LENGTH_WEIBO", "30"))
+            content = (row.get("content") or "").strip()
+            parts = [content] if content else []
+            if row.get("is_retweet") and row.get("retweeted_content"):
+                rt_author = row.get("retweeted_author") or ""
+                parts.append(f"\n[转发 @{rt_author}]\n{row['retweeted_content']}")
+            text = "\n".join(parts).strip()
+            if len(text) < min_len:
+                return None
+            if len(text) > max_chars:
+                text = text[:max_chars]
+            return text, "weibo"
 
         return None
 

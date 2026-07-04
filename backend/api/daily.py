@@ -91,7 +91,7 @@ _UPLOAD_SUBTYPE_TO_DB_TYPES: Dict[str, List[str]] = {
 }
 
 # Feed 链路 channel_type 的标准化映射
-# subscription_content.channel_type 可能为：twitter/youtube/news/rss/zhishixingqiu/podcast
+# subscription_content.channel_type 可能为：twitter/youtube/news/rss/zhishixingqiu/podcast/weibo
 # 注意：Feed 的 youtube 与 Upload 的 youtube 重名，前端徽章共用 'YT'，
 # 但内部 source_subtype 必须区分，否则点击跳转目标会错。
 # podcast 同时是 Upload file_type 与 Feed channel_type（双义），此处单独映射，
@@ -103,6 +103,7 @@ _FEED_CHANNEL_TYPE_MAP = {
     "rss": "news",  # rss 暂归并到 news 同类展示
     "zhishixingqiu": "zhishixingqiu",
     "podcast": "podcast",  # Podcast RSS 频道订阅
+    "weibo": "weibo",  # 微博订阅（无标题，正文即主体，结构同 twitter）
 }
 
 # 所有合法 source_subtype
@@ -125,6 +126,7 @@ ALL_SOURCE_SUBTYPES = [
     "news",
     "youtube_feed",
     "zhishixingqiu",
+    "weibo",
 ]
 
 # podcast 上线前 Daily 已有的 6 类 Upload 子类型（旧「全选 Upload」preset 不含 podcast）
@@ -523,6 +525,8 @@ def _build_filter_clauses(
                     feed_subtypes_pg.extend(["news", "rss"])
                 elif st == "zhishixingqiu":
                     feed_subtypes_pg.append("zhishixingqiu")
+                elif st == "weibo":
+                    feed_subtypes_pg.append("weibo")
             # 任一边没匹配到对应类型 → 用恒假条件让该边返回 0 行（避免 IN ()
             if not upload_subtypes_pg:
                 upload_parts.append("AND FALSE")

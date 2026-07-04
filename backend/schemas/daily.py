@@ -39,6 +39,7 @@ SourceSubtype = Literal[
     "news",
     "youtube_feed",  # 区分 Upload youtube 与 Feed youtube
     "zhishixingqiu",  # 知识星球订阅
+    "weibo",  # 微博订阅
 ]
 
 

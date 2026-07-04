@@ -33,12 +33,20 @@ export function normalizeTwitterUsername(raw: string): string {
 }
 
 /**
- * List card primary line: YouTube etc. use `title`; Twitter items usually have no title — use tweet text.
+ * Channels whose items carry no `title` — the body text IS the headline
+ * (e.g. Twitter tweets, Weibo posts). Kept as a Set so a new titleless
+ * channel is a one-line add.
+ */
+const TITLELESS_CHANNELS = new Set(['twitter', 'weibo']);
+
+/**
+ * List card primary line: YouTube/News use `title`; titleless channels
+ * (Twitter, Weibo) fall back to body text.
  */
 export function getFeedListHeadline(c: SubscriptionContent): string {
   const t = (c.title || '').trim();
   if (t) return t;
-  if (c.channel_type === 'twitter') {
+  if (TITLELESS_CHANNELS.has(c.channel_type)) {
     const body = (c.content || '').trim().replace(/\s+/g, ' ');
     if (body) return body;
     return c.author_name || (c.author_identifier ? `@${c.author_identifier}` : 'Post');
@@ -51,7 +59,7 @@ export function getFeedListHeadline(c: SubscriptionContent): string {
  * already shows the tweet — skip the duplicate line.
  */
 export function showFeedListSecondaryExcerpt(c: SubscriptionContent): boolean {
-  if (c.channel_type === 'twitter' && !(c.title || '').trim()) return false;
+  if (TITLELESS_CHANNELS.has(c.channel_type) && !(c.title || '').trim()) return false;
   return Boolean((c.content || '').trim());
 }
 
@@ -59,7 +67,7 @@ export function showFeedListSecondaryExcerpt(c: SubscriptionContent): boolean {
  * Twitter 多数无 title，列表主行实为推文正文 — 应用正文排版，勿用标题字重/字号。
  */
 export function feedListPrimaryLineIsTweetBody(c: SubscriptionContent): boolean {
-  return c.channel_type === 'twitter' && !(c.title || '').trim();
+  return TITLELESS_CHANNELS.has(c.channel_type) && !(c.title || '').trim();
 }
 
 /** 与 Daily 模块一致：`max(1, ceil(chars / 400))`。见 `backend/api/daily.py` WORDS_PER_MINUTE */
@@ -67,19 +75,56 @@ const READING_CHARS_PER_MINUTE = 400;
 
 /**
  * 用列表接口已有字段估算阅读分钟数（与 Daily `reading_time_min` 同一公式）。
- * Twitter 合并正文与嵌入的 retweet / quote 文本；YouTube / News 仅用 `content`
+ * Twitter / 微博 等无标题渠道合并正文与嵌入的 retweet / quote 文本；其余渠道仅用 `content`
  *（列表不含 transcript，详情页字幕另行展示）。
  */
 export function estimateSubscriptionContentReadingMinutes(
   c: SubscriptionContent,
 ): number | null {
   let len = (c.content || '').length;
-  if (c.channel_type === 'twitter') {
+  if (TITLELESS_CHANNELS.has(c.channel_type)) {
     len += (c.retweeted_content || '').length;
     len += (c.quoted_content || '').length;
   }
   if (len <= 0) return null;
   return Math.max(1, Math.ceil(len / READING_CHARS_PER_MINUTE));
+}
+
+/**
+ * Per-channel engagement metric keys, normalized into a common shape.
+ * Twitter: like_count / retweet_count / reply_count / quote_count.
+ * Weibo:   attitudes_count (赞) / reposts_count (转发) / comments_count (评论) — no quote.
+ * Returns null when no metric is present, so callers can skip the whole badge row.
+ */
+export type FeedEngagementCounts = {
+  like?: number;
+  retweet?: number;
+  reply?: number;
+  quote?: number;
+};
+
+export function getFeedEngagementCounts(c: SubscriptionContent): FeedEngagementCounts | null {
+  const md = (c.metadata || {}) as Record<string, unknown>;
+  const isWeibo = c.channel_type === 'weibo';
+  const rawLike = isWeibo ? md.attitudes_count : md.like_count;
+  const rawRetweet = isWeibo ? md.reposts_count : md.retweet_count;
+  const rawReply = isWeibo ? md.comments_count : md.reply_count;
+  const rawQuote = isWeibo ? undefined : md.quote_count;
+  const result: FeedEngagementCounts = {
+    like: typeof rawLike === 'number' ? rawLike : undefined,
+    retweet: typeof rawRetweet === 'number' ? rawRetweet : undefined,
+    reply: typeof rawReply === 'number' ? rawReply : undefined,
+    quote: typeof rawQuote === 'number' ? rawQuote : undefined,
+  };
+  if (
+    result.like == null &&
+    result.retweet == null &&
+    result.reply == null &&
+    result.quote == null
+  ) {
+    return null;
+  }
+  return result;
 }
 
 /** Heat level badge config for subscription content */

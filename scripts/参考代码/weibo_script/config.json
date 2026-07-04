@@ -1,0 +1,12 @@
+{
+  "user_ids": [
+    "1249424622",
+    "1042026447",
+    "1243861097",
+    "2635695961"
+  ],
+  "poll_interval_seconds": 300,
+  "posts_per_user": 5,
+  "state_file": "data/last_seen.json",
+  "cookie_storage_path": ".crawl4weibo/weibo_storage_state.json"
+}

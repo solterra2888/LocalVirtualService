@@ -620,6 +620,89 @@ def fetch_zhishixingqiu_subscription_task(
         return failure_result
 
 
+# ── Weibo 订阅任务 ─────────────────────────────────────────────────────────
+
+
+@app.task(
+    name='fetch_weibo_subscription',
+    bind=True,
+    max_retries=2,
+    default_retry_delay=120,
+    # backfill 可能跨多博主翻多页，给足够大的上限
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def fetch_weibo_subscription_task(
+    self,
+    subscription_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    force_fetch: bool = False,
+) -> Dict[str, Any]:
+    """
+    抓取用户订阅的微博博主博文，写入 subscription_content。
+
+    路由到 data_fetching 队列（rc-celery-data worker）。
+    由 subscriptions API 在新建订阅时触发首抓（backfill），
+    也由 Scheduler 定时触发增量抓取。
+    """
+    is_scheduler_run = subscription_id is None and user_id is None
+    logger.info(
+        "[Celery Task] fetch_weibo_subscription 开始: "
+        "subscription_id=%s user_id=%s force_fetch=%s scheduler=%s",
+        subscription_id, user_id, force_fetch, is_scheduler_run,
+    )
+    try:
+        from backend.services.weibo_subscription_service import WeiboSubscriptionService
+        from backend.utils.lark_notifier import send_weibo_scheduler_report
+
+        result = WeiboSubscriptionService().fetch_and_store_posts(
+            subscription_id=subscription_id,
+            user_id=user_id,
+            force_fetch=force_fetch,
+            collect_report=is_scheduler_run,
+        )
+        logger.info(
+            "[Celery Task] fetch_weibo_subscription 完成: "
+            "accounts=%s new=%s updated=%s failed=%s",
+            result.get("accounts_processed", 0),
+            result.get("posts_new", 0),
+            result.get("posts_updated", 0),
+            result.get("failed_accounts", []),
+        )
+        if is_scheduler_run:
+            send_weibo_scheduler_report(result)
+        return result
+
+    except Exception as exc:
+        logger.error(
+            "[Celery Task] fetch_weibo_subscription 失败: %s",
+            exc,
+            exc_info=True,
+        )
+        if self.request.retries < self.max_retries:
+            logger.warning(
+                "[Celery Task] 重试中... (attempt %d/%d)",
+                self.request.retries + 1, self.max_retries,
+            )
+            raise self.retry(exc=exc)
+        failure_result = {
+            "success": False,
+            "message": str(exc),
+            "accounts_processed": 0,
+            "posts_new": 0,
+            "posts_updated": 0,
+            "failed_accounts": [],
+            "report": {
+                "errors": [str(exc)],
+                "finished_at": utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            },
+        }
+        if is_scheduler_run:
+            from backend.utils.lark_notifier import send_weibo_scheduler_report
+            send_weibo_scheduler_report(failure_result)
+        return failure_result
+
+
 # ── Podcast 订阅任务 ────────────────────────────────────────────────────────
 
 

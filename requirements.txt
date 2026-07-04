@@ -71,6 +71,7 @@ readability-lxml>=0.8.1
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 playwright>=1.49.0
+crawl4weibo>=0.5.2           # 微博 Feeds 抓取（crawl4weibo + Cookie 凭证）
 
 # RSS Feed 解析（用于 YouTube 订阅）
 feedparser==6.0.11

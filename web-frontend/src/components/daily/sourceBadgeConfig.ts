@@ -96,6 +96,12 @@ export const SOURCE_BADGE_STYLES: Record<DailySourceSubtype, SourceBadgeStyle> =
     light: { bg: '#fff7e6', fg: '#d46b08' },
     dark: { bg: 'rgba(255, 107, 0, 0.20)', fg: '#ffa940' },
   },
+  weibo: {
+    label: '微博',
+    fullName: '微博',
+    light: { bg: '#ffece8', fg: '#e6162d' },
+    dark: { bg: 'rgba(230, 22, 45, 0.20)', fg: '#ff9c9c' },
+  },
 };
 
 /**
@@ -113,4 +119,5 @@ export const SOURCE_BADGE_DISPLAY_ORDER: DailySourceSubtype[] = [
   'youtube_feed',
   'news',
   'zhishixingqiu',
+  'weibo',
 ];
