@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons';
 import type { SubscriptionContent } from '../../services/subscriptions';
 import type { FeedThemeColors } from './feedTheme';
+import { weiboSafeAvatarSrc, weiboSafeImageUrl } from './weiboSafeImage';
 
 const { Text, Paragraph } = Typography;
 
@@ -81,7 +82,7 @@ const FeedTweetContent: React.FC<FeedTweetContentProps> = ({
                         <Space>
                           <Avatar
                             size="small"
-                            src={originalTweet.author_avatar}
+                            src={weiboSafeAvatarSrc(originalTweet.author_avatar)}
                             style={{
                               backgroundColor: originalTweet.author_avatar ? 'transparent' : '#1DA1F2',
                             }}
@@ -103,7 +104,7 @@ const FeedTweetContent: React.FC<FeedTweetContentProps> = ({
                             {originalTweet.media_urls.map((url, index) => (
                               <img
                                 key={index}
-                                src={url}
+                                src={weiboSafeImageUrl(url) ?? url}
                                 alt="media"
                                 style={{
                                   maxWidth: '100%',

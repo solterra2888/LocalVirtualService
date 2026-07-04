@@ -65,6 +65,7 @@ import {
   subscriptionContentMatchesSearchQuery,
   estimateSubscriptionContentReadingMinutes,
 } from '../components/feed/feedUtils';
+import { weiboSafeAvatarSrc } from '../components/feed/weiboSafeImage';
 import {
   getChannelColor,
   getChannelIcon,
@@ -1138,7 +1139,7 @@ const FeedReaderPageInner: React.FC = () => {
                           size={24}
                           src={
                             (subscription.channel_type === 'twitter' || subscription.channel_type === 'weibo') && subscription.channel_avatar
-                              ? subscription.channel_avatar
+                              ? weiboSafeAvatarSrc(subscription.channel_avatar)
                               : newsFavicon
                           }
                           icon={
@@ -1644,7 +1645,7 @@ const FeedReaderPageInner: React.FC = () => {
                             {(content.channel_type === 'twitter' || content.channel_type === 'weibo') && content.author_avatar && (
                               <Avatar
                                 size={16}
-                                src={content.author_avatar}
+                                src={weiboSafeAvatarSrc(content.author_avatar)}
                                 style={{ flexShrink: 0 }}
                               />
                             )}

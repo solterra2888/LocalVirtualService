@@ -4,6 +4,7 @@
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import Response
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -16,6 +17,7 @@ from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
 from backend.utils.datetime_utils import ensure_utc
+from backend.utils.weibo_image_proxy import fetch_weibo_cdn_image, is_weibo_cdn_url
 
 logger = get_logger("subscriptions_api")
 
@@ -118,6 +120,25 @@ def get_db_manager():
     """获取数据库管理器实例"""
     db_params = get_database_config()
     return DatabaseManager(db_params)
+
+
+@router.get("/proxy-image", summary="代理微博 CDN 图片（防盗链绕过）")
+async def proxy_weibo_image(
+    url: str = Query(..., description="sinaimg.cn 图片 URL"),
+):
+    """浏览器直连微博 CDN 会因 Referer / UA 被拒；由服务端带 weibo.com Referer 拉取。"""
+    if not is_weibo_cdn_url(url):
+        raise HTTPException(status_code=400, detail="Only HTTPS sinaimg.cn image URLs are allowed")
+    try:
+        data, content_type = fetch_weibo_cdn_image(url)
+    except Exception as e:
+        logger.warning("proxy-image fetch failed | url=%s | err=%s", url[:160], e)
+        raise HTTPException(status_code=502, detail="Failed to fetch image") from e
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/news-sources")

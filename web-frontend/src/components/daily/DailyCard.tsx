@@ -16,6 +16,7 @@ import { formatTime as fmtTimeInTz } from '../../utils/datetime';
 import { useDashboardSettings } from '../../contexts/DashboardSettingsContext';
 import { aiTagChipStyle } from '../shared/aiTagChipStyles';
 import { useAuthStore } from '../../store/authStore';
+import { weiboSafeAvatarSrc } from '../feed/weiboSafeImage';
 
 interface DailyCardProps {
   item: DailyFeedItem;
@@ -210,7 +211,7 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
             {(item.source_subtype === 'twitter' || item.source_subtype === 'weibo') && item.author_avatar && (
               <Avatar
                 size={16}
-                src={item.author_avatar}
+                src={weiboSafeAvatarSrc(item.author_avatar)}
                 style={{ flexShrink: 0 }}
               />
             )}

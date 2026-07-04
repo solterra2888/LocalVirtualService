@@ -52,7 +52,11 @@ import AISummarySection from '../shared/content-viewer/AISummarySection';
 import CollapsibleOriginalSection from '../shared/content-viewer/CollapsibleOriginalSection';
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
 import type { FeedArticleViewMode } from './feedArticleViewMode';
-import { estimateSubscriptionContentReadingMinutes, getFeedEngagementCounts } from './feedUtils';
+import {
+  estimateSubscriptionContentReadingMinutes,
+  getFeedEngagementCounts,
+} from './feedUtils';
+import { weiboSafeAvatarSrc, weiboSafeImageUrl } from './weiboSafeImage';
 import { getModalStyles } from '../../utils/modalStyles';
 
 export type { FeedArticleViewMode } from './feedArticleViewMode';
@@ -578,7 +582,7 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           <Avatar
             src={
               (selectedContent.channel_type === 'twitter' || selectedContent.channel_type === 'weibo') && selectedContent.author_avatar
-                ? selectedContent.author_avatar
+                ? weiboSafeAvatarSrc(selectedContent.author_avatar)
                 : undefined
             }
             icon={
@@ -1113,7 +1117,12 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
           {selectedContent.channel_type !== 'youtube' && selectedContent.channel_type !== 'podcast' && selectedContent.media_urls && selectedContent.media_urls.length > 0 && (
             <div>
               {selectedContent.media_urls.map((url, idx) => (
-                <img key={idx} src={url} alt="" style={{ width: '100%', borderRadius: 12, marginBottom: 12 }} />
+                <img
+                  key={idx}
+                  src={weiboSafeImageUrl(url) ?? url}
+                  alt=""
+                  style={{ width: '100%', borderRadius: 12, marginBottom: 12 }}
+                />
               ))}
             </div>
           )}
