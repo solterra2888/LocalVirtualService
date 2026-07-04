@@ -119,7 +119,8 @@ class WeiboAdapter(BaseContentAdapter):
             "content": content,
             "author_name": screen_name,
             "author_identifier": uid,
-            "author_avatar": raw_data.get("avatar") or None,
+            # 微博 avatar 带 KID/Expires/ssig 签名 query，几天即过期；只保留纯路径长期可访问
+            "author_avatar": (raw_data.get("avatar") or "").split("?")[0] or None,
             "url": url,
             "media_urls": media_urls,
             "published_at": published_at,

@@ -534,6 +534,8 @@ async def create_subscription(
             else:
                 screen_name = uid
                 avatar = ""
+            # 微博 avatar URL 带 KID/Expires/ssig 签名 query，几天即过期；只保留纯路径长期可访问
+            avatar = avatar.split("?")[0]
             if not request.channel_name:
                 request.channel_name = screen_name
             channel_avatar = avatar or None

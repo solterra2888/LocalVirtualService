@@ -577,18 +577,18 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
         <Space>
           <Avatar
             src={
-              selectedContent.channel_type === 'twitter' && selectedContent.author_avatar
+              (selectedContent.channel_type === 'twitter' || selectedContent.channel_type === 'weibo') && selectedContent.author_avatar
                 ? selectedContent.author_avatar
                 : undefined
             }
             icon={
-              selectedContent.channel_type === 'twitter' && selectedContent.author_avatar
+              (selectedContent.channel_type === 'twitter' || selectedContent.channel_type === 'weibo') && selectedContent.author_avatar
                 ? undefined
                 : getChannelIcon(selectedContent.channel_type)
             }
             style={{
               backgroundColor:
-                selectedContent.channel_type === 'twitter' && selectedContent.author_avatar
+                (selectedContent.channel_type === 'twitter' || selectedContent.channel_type === 'weibo') && selectedContent.author_avatar
                   ? 'transparent'
                   : selectedContent.channel_type === 'news'
                     ? getNewsSourceColor(selectedContent.author_identifier)

@@ -206,8 +206,8 @@ const DailyCard: React.FC<DailyCardProps> = ({ item, themeMode, onClick, onTicke
       >
         {item.author_name && (
           <>
-            {/* Twitter 作者头像 - 16px 小头像 */}
-            {item.source_subtype === 'twitter' && item.author_avatar && (
+            {/* Twitter / 微博 作者头像 - 16px 小头像 */}
+            {(item.source_subtype === 'twitter' || item.source_subtype === 'weibo') && item.author_avatar && (
               <Avatar
                 size={16}
                 src={item.author_avatar}

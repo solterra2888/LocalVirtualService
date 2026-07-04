@@ -21,10 +21,10 @@ import {
   EditOutlined,
   AppleOutlined,
   StarOutlined,
-  MessageOutlined,
 } from '@ant-design/icons';
 import type { DailySourceSubtype } from '../../services/daily';
 import { SOURCE_BADGE_STYLES } from './sourceBadgeConfig';
+import { WeiboIcon } from '../feed/feedChannelConfig';
 
 /** 品牌 / 类型图标映射 — 参考 Feeds 模块的 feedChannelConfig */
 const SUBTYPE_ICONS: Record<DailySourceSubtype, React.ReactNode> = {
@@ -39,7 +39,7 @@ const SUBTYPE_ICONS: Record<DailySourceSubtype, React.ReactNode> = {
   text:         <EditOutlined />,
   podcast:      <AppleOutlined />,
   zhishixingqiu: <StarOutlined />,
-  weibo: <MessageOutlined />,
+  weibo: <WeiboIcon />,
 };
 
 interface SourceBadgeProps {

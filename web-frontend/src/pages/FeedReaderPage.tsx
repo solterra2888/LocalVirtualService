@@ -1137,12 +1137,12 @@ const FeedReaderPageInner: React.FC = () => {
                         <Avatar
                           size={24}
                           src={
-                            subscription.channel_type === 'twitter' && subscription.channel_avatar
+                            (subscription.channel_type === 'twitter' || subscription.channel_type === 'weibo') && subscription.channel_avatar
                               ? subscription.channel_avatar
                               : newsFavicon
                           }
                           icon={
-                            subscription.channel_type === 'twitter' && subscription.channel_avatar
+                            (subscription.channel_type === 'twitter' || subscription.channel_type === 'weibo') && subscription.channel_avatar
                               ? undefined // 有头像时不显示图标
                               : subscription.channel_type === 'news' && newsFavicon
                                 ? undefined
@@ -1150,7 +1150,7 @@ const FeedReaderPageInner: React.FC = () => {
                           }
                           style={{
                             backgroundColor:
-                              subscription.channel_type === 'twitter' && subscription.channel_avatar
+                              (subscription.channel_type === 'twitter' || subscription.channel_type === 'weibo') && subscription.channel_avatar
                                 ? 'transparent'
                                 : subscription.channel_type === 'news'
                                   ? newsFavicon
@@ -1640,8 +1640,8 @@ const FeedReaderPageInner: React.FC = () => {
                                 <CommentOutlined style={{ color: '#657786', fontSize: 12 }} />
                               </Tooltip>
                             )}
-                            {/* Twitter 作者头像 */}
-                            {content.channel_type === 'twitter' && content.author_avatar && (
+                            {/* Twitter / 微博 作者头像 */}
+                            {(content.channel_type === 'twitter' || content.channel_type === 'weibo') && content.author_avatar && (
                               <Avatar
                                 size={16}
                                 src={content.author_avatar}
@@ -1897,7 +1897,7 @@ const FeedReaderPageInner: React.FC = () => {
         cancelText="Cancel"
         okButtonProps={{ loading: isSubmittingSubscription }}
         cancelButtonProps={{ disabled: isSubmittingSubscription }}
-        width={520}
+        width={720}
         centered
         destroyOnClose
         maskClosable={!isSubmittingSubscription}
