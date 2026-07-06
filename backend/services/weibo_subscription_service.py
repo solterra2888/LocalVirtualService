@@ -214,7 +214,7 @@ class WeiboClientWrapper:
         target_uid = str(uid) if uid else self.uid
         try:
             return self._client.get_user_posts(
-                target_uid, page=page, expand=False, use_proxy=False
+                target_uid, page=page, expand=True, use_proxy=False
             ) or []
         except _C4WAuthError as e:
             raise WeiboCookieExpiredError(f"拉取认证失败 (page={page}): {e}") from e
