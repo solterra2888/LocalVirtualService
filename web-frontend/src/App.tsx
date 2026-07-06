@@ -7,6 +7,7 @@ import { useDeviceDetection } from './hooks/useDeviceDetection';
 import Layout from './components/Layout';
 import MobileLayout from './components/MobileLayout';
 import LoginPage from './pages/LoginPage';
+import LandingPage from './pages/LandingPage';
 import DashboardPage from './pages/DashboardPage';
 import MobileDashboardPage from './pages/MobileDashboardPage';
 import MarketsPage from './pages/MarketsPage';
@@ -114,12 +115,15 @@ const AppContent: React.FC = () => {
   return (
     <div className="App">
       <Routes>
+        {/* 公共介绍页（根域名，无需登录） */}
+        <Route path="/" element={<LandingPage />} />
+
         {/* 登录页面 */}
         <Route path="/login" element={<LoginPage />} />
         
         {/* 私有路由 */}
+        {/* 私有路由（pathless layout route：子路由相对路径不变，/daily /files /reports 等顶级路径零破坏） */}
         <Route
-          path="/"
           element={
             <PrivateRoute>
               <LayoutComponent />
@@ -127,7 +131,6 @@ const AppContent: React.FC = () => {
           }
         >
           {/* Daily 聚合视图 = 登录后首屏: 把 Upload Files 与 Feeds 订阅按时间轴合并 */}
-          <Route index element={<Navigate to="/daily" replace />} />
           <Route path="daily" element={<DailyComponent />} />
           <Route path="dashboard" element={<DashboardComponent />} />
           <Route path="markets" element={<MarketsPage />} />
@@ -296,8 +299,8 @@ const AppContent: React.FC = () => {
           />
         </Route>
         
-        {/* 404页面 */}
-        <Route path="*" element={<Navigate to="/daily" replace />} />
+        {/* 404：跳回公共介绍页 */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
   );

@@ -1,4 +1,0 @@
-crawl4weibo>=0.5.2
-playwright>=1.48.0
-psycopg2-binary>=2.9.0
-python-dotenv>=1.0.0
