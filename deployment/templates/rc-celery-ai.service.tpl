@@ -31,8 +31,8 @@ ExecStart={{CONDA_ENV}}/bin/celery -A backend.celery_app worker \
     --queues=file_processing,ai_processing \
     --hostname=ai-worker@%h \
     --prefetch-multiplier=1 \
-    --soft-time-limit=290 \
-    --time-limit=320 \
+    --soft-time-limit=600 \
+    --time-limit=660 \
     --logfile={{LOG_DIR}}/celery_ai_worker.log \
     --pidfile={{LOG_DIR}}/celery_ai_worker.pid
 
@@ -48,9 +48,9 @@ LimitNPROC=4096
 # - SIGTERM → worker 等当前任务完成 → 正确写 result → 再退出
 # - 30s 太短，LLM 长任务（Claude / qwen3-max 长文本，常 60~120s）会被 SIGKILL 腰斩，
 #   导致 Python 异常无法正确序列化，Redis 中留下损坏 meta，触发下次启动崩溃循环
-# - 配合上面的 --soft-time-limit=290（任务最多跑 ~5 分钟），300s 足够安全收尾
+# - 配合上面的 --soft-time-limit=600（与 FILE_PROCESSING_TIMEOUT_MINUTES=10 对齐），720s 足够安全收尾
 KillSignal=SIGTERM
-TimeoutStopSec=300
+TimeoutStopSec=720
 
 [Install]
 WantedBy=multi-user.target

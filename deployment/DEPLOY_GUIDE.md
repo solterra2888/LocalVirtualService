@@ -507,9 +507,9 @@ sudo bash deployment/deploy.sh
 > | 参数 | AI Worker | Data Worker | 说明 |
 > |------|-----------|-------------|------|
 > | `ExecStartPre` | ✅ | ✅ | 每次启动（含 systemd 自动重启）前自动清理 Redis 旧 task meta，防止损坏记录触发无限崩溃循环 |
-> | `TimeoutStopSec` | `300` | `120` | 给 worker 足够时间在 SIGTERM 后优雅退出（默认 30s 会硬杀长 LLM 任务，导致 Redis meta 损坏） |
-> | `--soft-time-limit` | `290` | `110` | 单任务最长执行时间（秒），超时后 Celery 抛 `SoftTimeLimitExceeded` 并正常写结果，不留损坏 meta |
-> | `--time-limit` | `320` | `130` | 硬截止时间，超时强制杀进程 |
+> | `TimeoutStopSec` | `720` | `120` | 给 worker 足够时间在 SIGTERM 后优雅退出（默认 30s 会硬杀长 LLM 任务，导致 Redis meta 损坏） |
+> | `--soft-time-limit` | `600` | `110` | 单任务最长执行时间（秒），与 `FILE_PROCESSING_TIMEOUT_MINUTES=10` 对齐；超时后 Celery 抛 `SoftTimeLimitExceeded` 并正常写结果 |
+> | `--time-limit` | `660` | `130` | 硬截止时间，超时强制杀进程 |
 >
 > 修改模板后须重新执行 `sudo bash deployment/deploy.sh && sudo systemctl daemon-reload && sudo ./restart_services.sh` 才能生效。
 
@@ -791,8 +791,8 @@ sudo systemctl restart rc-celery-ai rc-celery-data
 
 | 层级 | 机制 | 覆盖场景 |
 |------|------|---------|
-| **治本** | `--soft-time-limit`（AI: 290s，Data: 110s）+ `--time-limit`（AI: 320s，Data: 130s） | 任务超时后由 Celery 自行终止并正常写结果，不留损坏 meta |
-| **第二道** | `TimeoutStopSec`（AI: 300s，Data: 120s） | 给 Worker 足够时间在收到 SIGTERM 后优雅退出 |
+| **治本** | `--soft-time-limit`（AI: 600s，Data: 110s）+ `--time-limit`（AI: 660s，Data: 130s） | 任务超时后由 Celery 自行终止并正常写结果，不留损坏 meta |
+| **第二道** | `TimeoutStopSec`（AI: 720s，Data: 120s） | 给 Worker 足够时间在收到 SIGTERM 后优雅退出 |
 | **第三道** | `ExecStartPre` 启动前清理（两个 Celery service 均已配置） | 即使前两道失守，每次 systemd 启动时自动删除所有旧 meta |
 | **第四道** | `result_expires = 3600`（celery_config.py） | 残留 meta 1 小时后自动过期，不会永久积累 |
 | **运维入口** | start / stop / restart 脚本均内置清理 | 常规运维操作自动保证 Redis 干净 |

@@ -2083,7 +2083,7 @@ def upload_and_transcribe_audio_task(self, temp_file_path, filename, username, m
                 'filename': filename
             }
         )
-        raise Exception(error_msg)
+        raise RuntimeError(error_msg)
 
 
 @app.task(bind=True, name='upload_and_transcribe_apple_podcast_task', queue='file_processing')
