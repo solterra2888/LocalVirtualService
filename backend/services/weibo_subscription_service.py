@@ -82,6 +82,13 @@ LONG_SLEEP_MIN = 200.0
 LONG_SLEEP_MAX = 400.0
 ACCOUNT_INTERVAL = 20      # 博主间隔 20s
 
+# ---------- 长文展开（get_post_by_bid → m.weibo.cn/statuses/show）调优 ----------
+# 库内置 expand 循环对一页内所有长文零间隔连发，易触发 432 反爬 → 部分长文仍以 "...全文" 结尾。
+# WeiboClientWrapper.get_user_posts 改为 expand=False + 自行展开：加间隔 + 抬超时 + 轻量重试。
+LONG_TEXT_EXPAND_INTERVAL = 5.0      # 长文之间的请求间隔（打散突发，主防 432）
+LONG_TEXT_EXPAND_RETRIES = 2         # 单条长文展开重试次数
+LONG_TEXT_TIMEOUT = (10, 30)         # (connect, read)，覆盖库硬编码的 5s
+
 # 访客模式 Cookie 持久化路径（无登录凭证时 crawl4weibo 用 Playwright 自动获取访客 Cookie）
 _VISITOR_COOKIE_PATH = str(Path.home() / ".crawl4weibo" / "weibo_visitor_state.json")
 
@@ -210,11 +217,24 @@ class WeiboClientWrapper:
         except _C4WAuthError as e:
             raise WeiboCookieExpiredError(f"初始化即认证失败: {e}") from e
 
+        # crawl4weibo 把 _request 的 timeout 硬编码为 5s（client.py:363），无参数可覆盖。
+        # 长文展开走 m.weibo.cn/statuses/show，大 payload 时 5s 偏紧；
+        # 在 session.get 层把库默认的 5s 抬到 (connect=10s, read=30s)。
+        _orig_get = self._client.session.get
+
+        def _get_with_long_timeout(url, *args, **kwargs):
+            if kwargs.get("timeout") == 5:       # 只覆盖库默认 5s，保留显式传入值
+                kwargs["timeout"] = LONG_TEXT_TIMEOUT
+            return _orig_get(url, *args, **kwargs)
+
+        self._client.session.get = _get_with_long_timeout
+
     def get_user_posts(self, uid: Optional[str] = None, page: int = 1) -> List[Any]:
         target_uid = str(uid) if uid else self.uid
         try:
-            return self._client.get_user_posts(
-                target_uid, page=page, expand=True, use_proxy=False
+            # expand=False：库内置展开循环零间隔连发易触发 432，改由 _expand_long_posts 接管节奏
+            posts = self._client.get_user_posts(
+                target_uid, page=page, expand=False, use_proxy=False
             ) or []
         except _C4WAuthError as e:
             raise WeiboCookieExpiredError(f"拉取认证失败 (page={page}): {e}") from e
@@ -226,6 +246,41 @@ class WeiboClientWrapper:
         except _C4WNetwork as e:
             logger.warning("微博 %s 网络错误 (page=%d): %s", self.account_label, page, e)
             raise
+
+        self._expand_long_posts(posts)
+        return posts
+
+    def _expand_long_posts(self, posts: List[Any]) -> None:
+        """自行展开长文：长文之间 sleep 打散突发（防 432），单条带轻量重试。
+
+        库默认循环对一页内所有长文零间隔连发 statuses/show，常触发反爬导致部分长文截断。
+        单条展开失败不抛异常（保留截断文本），仅 Cookie 失效时向上抛 WeiboCookieExpiredError。
+        """
+        long_posts = [p for p in posts if getattr(p, "is_long_text", False)]
+        for idx, post in enumerate(long_posts):
+            if idx > 0:
+                time.sleep(LONG_TEXT_EXPAND_INTERVAL)
+            for attempt in range(1, LONG_TEXT_EXPAND_RETRIES + 1):
+                try:
+                    full = self._client.get_post_by_bid(post.bid, use_proxy=False)
+                    if full and getattr(full, "text", ""):
+                        post.text = full.text
+                        if getattr(full, "pic_urls", None):
+                            post.pic_urls = full.pic_urls
+                        if getattr(full, "video_url", ""):
+                            post.video_url = full.video_url
+                    break
+                except _C4WAuthError as e:
+                    # 单条长文认证失败通常意味着 Cookie 整体失效，向上抛出以标记凭证过期
+                    raise WeiboCookieExpiredError(f"长文展开认证失败 ({post.bid}): {e}") from e
+                except Exception as e:
+                    if attempt < LONG_TEXT_EXPAND_RETRIES:
+                        time.sleep(random.uniform(4, 7))
+                    else:
+                        logger.warning(
+                            "微博 %s 长文 %s 展开 %d 次均失败，保留截断文本: %s",
+                            self.account_label, getattr(post, "bid", ""), attempt, e,
+                        )
 
 
 # ---------- 帖子解析（Post → adapter 输入 dict） ----------
