@@ -21,6 +21,7 @@
 """
 
 import logging
+import os
 import random
 import time
 from pathlib import Path
@@ -85,12 +86,21 @@ ACCOUNT_INTERVAL = 20      # 博主间隔 20s
 # ---------- 长文展开（get_post_by_bid → m.weibo.cn/statuses/show）调优 ----------
 # 库内置 expand 循环对一页内所有长文零间隔连发，易触发 432 反爬 → 部分长文仍以 "...全文" 结尾。
 # WeiboClientWrapper.get_user_posts 改为 expand=False + 自行展开：加间隔 + 抬超时 + 轻量重试。
-LONG_TEXT_EXPAND_INTERVAL = 5.0      # 长文之间的请求间隔（打散突发，主防 432）
-LONG_TEXT_EXPAND_RETRIES = 2         # 单条长文展开重试次数
-LONG_TEXT_TIMEOUT = (10, 30)         # (connect, read)，覆盖库硬编码的 5s
+# 访客模式下 statuses/show 易被反爬拦截，故重试/间隔比登录态更保守（见 WEIBO_LONGTEXT_TRUNCATION.md）。
+LONG_TEXT_EXPAND_INTERVAL = 8.0              # 长文之间的请求间隔（打散突发，主防 432）
+LONG_TEXT_EXPAND_RETRIES = 4                 # 单条长文展开重试次数
+LONG_TEXT_EXPAND_RETRY_SLEEP = (6.0, 12.0)   # 单条重试间隔
+LONG_TEXT_TIMEOUT = (10, 30)                 # (connect, read)，覆盖库硬编码的 5s
+WEIBO_REPAIR_QUOTA_DEFAULT = 5               # 每次抓取尾部清扫截断帖配额（可用 WEIBO_REPAIR_QUOTA 覆盖）
+_TRUNCATION_SUFFIX = "...全文"               # 列表接口截断正文的固定后缀
 
 # 访客模式 Cookie 持久化路径（无登录凭证时 crawl4weibo 用 Playwright 自动获取访客 Cookie）
 _VISITOR_COOKIE_PATH = str(Path.home() / ".crawl4weibo" / "weibo_visitor_state.json")
+
+
+def _is_truncated_weibo_text(text: Optional[str]) -> bool:
+    """列表接口截断正文恒以 ...全文 结尾；展开成功后不应再带此后缀。"""
+    return bool(text) and text.rstrip().endswith(_TRUNCATION_SUFFIX)
 
 
 # ---------- 异常 ----------
@@ -255,32 +265,73 @@ class WeiboClientWrapper:
 
         库默认循环对一页内所有长文零间隔连发 statuses/show，常触发反爬导致部分长文截断。
         单条展开失败不抛异常（保留截断文本），仅 Cookie 失效时向上抛 WeiboCookieExpiredError。
+        展开结果若仍以 ...全文 结尾或为空，视为失败并重试（避免假成功入库）。
         """
         long_posts = [p for p in posts if getattr(p, "is_long_text", False)]
         for idx, post in enumerate(long_posts):
             if idx > 0:
                 time.sleep(LONG_TEXT_EXPAND_INTERVAL)
+            expanded = False
+            last_err: Optional[BaseException] = None
             for attempt in range(1, LONG_TEXT_EXPAND_RETRIES + 1):
                 try:
                     full = self._client.get_post_by_bid(post.bid, use_proxy=False)
-                    if full and getattr(full, "text", ""):
-                        post.text = full.text
-                        if getattr(full, "pic_urls", None):
-                            post.pic_urls = full.pic_urls
-                        if getattr(full, "video_url", ""):
-                            post.video_url = full.video_url
+                    full_text = getattr(full, "text", "") if full else ""
+                    if not full_text or _is_truncated_weibo_text(full_text):
+                        last_err = ValueError(
+                            f"展开结果无效（空或仍截断）: bid={getattr(post, 'bid', '')}"
+                        )
+                        if attempt < LONG_TEXT_EXPAND_RETRIES:
+                            time.sleep(random.uniform(*LONG_TEXT_EXPAND_RETRY_SLEEP))
+                        continue
+                    post.text = full_text
+                    if getattr(full, "pic_urls", None):
+                        post.pic_urls = full.pic_urls
+                    if getattr(full, "video_url", ""):
+                        post.video_url = full.video_url
+                    expanded = True
                     break
                 except _C4WAuthError as e:
                     # 单条长文认证失败通常意味着 Cookie 整体失效，向上抛出以标记凭证过期
                     raise WeiboCookieExpiredError(f"长文展开认证失败 ({post.bid}): {e}") from e
                 except Exception as e:
+                    last_err = e
                     if attempt < LONG_TEXT_EXPAND_RETRIES:
-                        time.sleep(random.uniform(4, 7))
-                    else:
-                        logger.warning(
-                            "微博 %s 长文 %s 展开 %d 次均失败，保留截断文本: %s",
-                            self.account_label, getattr(post, "bid", ""), attempt, e,
-                        )
+                        time.sleep(random.uniform(*LONG_TEXT_EXPAND_RETRY_SLEEP))
+            if not expanded:
+                logger.warning(
+                    "微博 %s 长文 %s 展开 %d 次均失败，保留截断文本: %s",
+                    self.account_label, getattr(post, "bid", ""), LONG_TEXT_EXPAND_RETRIES, last_err,
+                )
+
+    def expand_post_by_bid(self, bid: str) -> Optional[str]:
+        """按 bid 展开单条长文，返回完整正文；失败返回 None。
+
+        供抓取尾部清扫与 scripts/repair_weibo_truncated.py 复用。
+        Cookie 失效时向上抛 WeiboCookieExpiredError。
+        """
+        bid = (bid or "").strip()
+        if not bid:
+            return None
+        last_err: Optional[BaseException] = None
+        for attempt in range(1, LONG_TEXT_EXPAND_RETRIES + 1):
+            try:
+                full = self._client.get_post_by_bid(bid, use_proxy=False)
+                full_text = getattr(full, "text", "") if full else ""
+                if full_text and not _is_truncated_weibo_text(full_text):
+                    return full_text
+                last_err = ValueError(f"展开结果无效（空或仍截断）: bid={bid}")
+            except _C4WAuthError as e:
+                raise WeiboCookieExpiredError(f"长文展开认证失败 ({bid}): {e}") from e
+            except Exception as e:
+                last_err = e
+            if attempt < LONG_TEXT_EXPAND_RETRIES:
+                time.sleep(random.uniform(*LONG_TEXT_EXPAND_RETRY_SLEEP))
+        logger.warning(
+            "微博 %s bid=%s 展开 %d 次均失败: %s",
+            self.account_label, bid, LONG_TEXT_EXPAND_RETRIES, last_err,
+        )
+        return None
 
 
 # ---------- 帖子解析（Post → adapter 输入 dict） ----------
@@ -560,6 +611,133 @@ class WeiboSubscriptionService:
         from backend.services.weibo_credential_service import WeiboCredentialService
         return WeiboCredentialService().get_account_meta(uid)
 
+    def _list_truncated_posts(self, limit: int) -> List[Dict[str, Any]]:
+        """列出仍以 ...全文 结尾的微博博文（精确截断探测，0 误判）。"""
+        if limit <= 0:
+            return []
+        with _get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        id,
+                        content_id,
+                        author_identifier AS uid,
+                        author_name,
+                        metadata->>'bid' AS bid,
+                        length(content) AS content_len
+                    FROM subscription_content
+                    WHERE channel_type = 'weibo'
+                      AND content LIKE %s
+                    ORDER BY fetched_at DESC NULLS LAST, id DESC
+                    LIMIT %s
+                    """,
+                    (f"%{_TRUNCATION_SUFFIX}", limit),
+                )
+                return [dict(row) for row in cur.fetchall()]
+
+    def _update_content_text(self, content_db_id: int, new_text: str) -> bool:
+        """直接更新正文（仅当新正文更长时）。返回是否实际更新。"""
+        from backend.services.content_adapters.weibo_adapter import _strip_html
+        cleaned = _strip_html(new_text)
+        if not cleaned or _is_truncated_weibo_text(cleaned):
+            return False
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE subscription_content
+                    SET content = %s,
+                        fetched_at = now()
+                    WHERE id = %s
+                      AND char_length(%s) > char_length(COALESCE(content, ''))
+                    """,
+                    (cleaned, content_db_id, cleaned),
+                )
+                updated = cur.rowcount > 0
+            conn.commit()
+            return updated
+
+    def repair_truncated_posts(
+        self,
+        quota: Optional[int] = None,
+        *,
+        client: Optional[WeiboClientWrapper] = None,
+        report: Optional[WeiboRunReport] = None,
+    ) -> Dict[str, int]:
+        """小配额清扫：重新展开仍以 ...全文 结尾的存量博文。
+
+        quota 默认取 WEIBO_REPAIR_QUOTA env，否则 WEIBO_REPAIR_QUOTA_DEFAULT。
+        返回 {attempted, repaired, failed, skipped}。
+        """
+        if quota is None:
+            try:
+                quota = int(os.getenv("WEIBO_REPAIR_QUOTA", str(WEIBO_REPAIR_QUOTA_DEFAULT)))
+            except ValueError:
+                quota = WEIBO_REPAIR_QUOTA_DEFAULT
+        stats = {"attempted": 0, "repaired": 0, "failed": 0, "skipped": 0}
+        if quota <= 0:
+            return stats
+
+        rows = self._list_truncated_posts(quota)
+        if not rows:
+            return stats
+
+        if client is None:
+            active = self._get_active_credential()
+            cookie = active[1] if active else None
+            try:
+                client = WeiboClientWrapper(
+                    cookie, rows[0].get("uid") or "0",
+                    report=report, account_label="repair",
+                )
+            except Exception as e:
+                logger.warning("微博截断清扫无法初始化客户端，跳过: %s", e)
+                if report:
+                    report.record_warning(f"截断清扫客户端初始化失败: {e}")
+                stats["skipped"] = len(rows)
+                return stats
+
+        for idx, row in enumerate(rows):
+            stats["attempted"] += 1
+            bid = (row.get("bid") or "").strip()
+            if not bid:
+                stats["skipped"] += 1
+                logger.warning("微博截断清扫 id=%s 缺少 bid，跳过", row.get("id"))
+                continue
+            if idx > 0:
+                time.sleep(LONG_TEXT_EXPAND_INTERVAL)
+            try:
+                full_text = client.expand_post_by_bid(bid)
+                if not full_text:
+                    stats["failed"] += 1
+                    continue
+                if self._update_content_text(int(row["id"]), full_text):
+                    stats["repaired"] += 1
+                    logger.info(
+                        "微博截断清扫成功 id=%s author=%s %d→%d 字",
+                        row["id"], row.get("author_name"), row.get("content_len") or 0, len(full_text),
+                    )
+                else:
+                    stats["skipped"] += 1
+            except WeiboCookieExpiredError as e:
+                stats["failed"] += 1
+                if report:
+                    report.record_error(f"截断清扫 Cookie 失效: {e}")
+                logger.error("微博截断清扫 Cookie 失效，中止本轮清扫: %s", e)
+                break
+            except Exception as e:
+                stats["failed"] += 1
+                logger.warning("微博截断清扫 id=%s bid=%s 失败: %s", row.get("id"), bid, e)
+                if report:
+                    report.record_warning(f"截断清扫 id={row.get('id')} 失败: {e}")
+
+        logger.info(
+            "微博截断清扫完成: attempted=%d repaired=%d failed=%d skipped=%d",
+            stats["attempted"], stats["repaired"], stats["failed"], stats["skipped"],
+        )
+        return stats
+
     def fetch_and_store_posts(
         self,
         subscription_id: Optional[int] = None,
@@ -598,8 +776,15 @@ class WeiboSubscriptionService:
 
         accounts = self._aggregate_accounts(subscription_id=subscription_id, user_id=user_id)
         if not accounts:
-            logger.info("无 enabled 微博订阅，跳过")
-            return _result(success=True)
+            logger.info("无 enabled 微博订阅，跳过主抓取；仍尝试截断清扫")
+            try:
+                repair_stats = self.repair_truncated_posts(report=report)
+            except Exception as repair_exc:
+                logger.warning("微博截断清扫异常: %s", repair_exc)
+                repair_stats = {"attempted": 0, "repaired": 0, "failed": 0, "skipped": 0}
+                if report:
+                    report.record_warning(f"截断清扫异常: {repair_exc}")
+            return _result(success=True, repair=repair_stats)
 
         total_new = 0
         total_updated = 0
@@ -733,10 +918,29 @@ class WeiboSubscriptionService:
             if idx < len(accounts) - 1:
                 time.sleep(ACCOUNT_INTERVAL)
 
+        # 抓取尾部：小配额清扫仍以 ...全文 结尾的存量截断帖（配合 ON CONFLICT content 自愈）
+        repair_stats: Dict[str, int] = {"attempted": 0, "repaired": 0, "failed": 0, "skipped": 0}
+        try:
+            repair_client = visitor_client
+            if repair_client is None and active_cred:
+                try:
+                    repair_client = WeiboClientWrapper(
+                        active_cred[1], "0", report=report, account_label="repair",
+                    )
+                except Exception as init_exc:
+                    logger.warning("微博截断清扫客户端初始化失败，将在 repair 内自行创建: %s", init_exc)
+                    repair_client = None
+            repair_stats = self.repair_truncated_posts(client=repair_client, report=report)
+        except Exception as repair_exc:
+            logger.warning("微博截断清扫异常（不影响主抓取结果）: %s", repair_exc)
+            if report:
+                report.record_warning(f"截断清扫异常: {repair_exc}")
+
         return _result(
             success=True,
             accounts_processed=len(accounts) - len(failed_accounts),
             posts_new=total_new,
             posts_updated=total_updated,
             failed_accounts=failed_accounts,
+            repair=repair_stats,
         )

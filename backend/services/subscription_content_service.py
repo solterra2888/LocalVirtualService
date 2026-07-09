@@ -178,6 +178,13 @@ class SubscriptionContentService:
                     author_avatar = EXCLUDED.author_avatar,
                     heat_level = EXCLUDED.heat_level,
                     fetched_at = EXCLUDED.fetched_at,
+                    -- 仅当新正文更长时覆盖：支持微博长文截断自愈，且永不把完整正文降级为短正文。
+                    content = CASE
+                        WHEN EXCLUDED.content IS NOT NULL
+                         AND char_length(EXCLUDED.content) > char_length(COALESCE(subscription_content.content, ''))
+                        THEN EXCLUDED.content
+                        ELSE subscription_content.content
+                    END,
                     -- 允许 Snowflake 校正在重新抓取时修复曾错存的 published_at（twitterapi.io +0000 误标 bug）。
                     -- twitter_adapter 对每次抓取都用 Snowflake ID 交叉校验 createdAt；
                     -- 若发现偏差 > 60s 则以 Snowflake 时间覆盖，这里再写回 DB 保证永久生效。
