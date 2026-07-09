@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Tooltip, Typography, Spin } from 'antd';
-import { TwitterOutlined, YoutubeOutlined, StarOutlined, CustomerServiceOutlined, MessageOutlined } from '@ant-design/icons';
+import { TwitterOutlined, YoutubeOutlined, StarOutlined, CustomerServiceOutlined, MessageOutlined, ReadOutlined } from '@ant-design/icons';
 import { NEWS_SOURCES, getNewsSourceFaviconUrl } from './feedChannelConfig';
 import api from '../../services/api';
 
@@ -26,6 +26,11 @@ interface PlatformOption {
 interface ZsxqGroup {
   group_id: string;
   group_name: string;
+}
+
+interface SubstackPublication {
+  publication_url: string;
+  publication_name: string;
 }
 
 const PLATFORMS: PlatformOption[] = [
@@ -71,6 +76,7 @@ function newsTileUnselectedBackground(brandColor: string, isDark: boolean): stri
 }
 
 const ZSXQ_COLOR = '#FF6B00';
+const SUBSTACK_COLOR = '#FF6719';
 
 const FeedSourceIconPicker: React.FC<{
   value?: string;
@@ -83,6 +89,8 @@ const FeedSourceIconPicker: React.FC<{
 }> = ({ value, onChange, disabled, isDark = false, belowPlatforms }) => {
   const [zsxqGroups, setZsxqGroups] = useState<ZsxqGroup[]>([]);
   const [zsxqLoading, setZsxqLoading] = useState(false);
+  const [substackPubs, setSubstackPubs] = useState<SubstackPublication[]>([]);
+  const [substackLoading, setSubstackLoading] = useState(false);
 
   useEffect(() => {
     setZsxqLoading(true);
@@ -94,6 +102,16 @@ const FeedSourceIconPicker: React.FC<{
       })
       .catch(() => setZsxqGroups([]))
       .finally(() => setZsxqLoading(false));
+
+    setSubstackLoading(true);
+    api
+      .get('/subscriptions/substack-publications')
+      .then((res) => {
+        const data = res.data ?? res;
+        setSubstackPubs(Array.isArray(data) ? data : []);
+      })
+      .catch(() => setSubstackPubs([]))
+      .finally(() => setSubstackLoading(false));
   }, []);
 
   const handleSelect = (v: string) => {
@@ -210,6 +228,70 @@ const FeedSourceIconPicker: React.FC<{
                       }}
                     >
                       {grp.group_name}
+                    </span>
+                  </div>
+                </Tooltip>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
+
+      {/* Substack publications section */}
+      {substackLoading ? (
+        <div style={{ marginTop: 16, marginBottom: 8 }}>
+          <Spin size="small" /> <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>加载 Substack 列表…</Text>
+        </div>
+      ) : substackPubs.length > 0 ? (
+        <>
+          <Text
+            type="secondary"
+            style={{
+              display: 'block',
+              marginTop: 16,
+              marginBottom: 8,
+              fontSize: 12,
+            }}
+          >
+            Substack
+          </Text>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+            {substackPubs.map((pub) => {
+              const tileValue = `substack:${pub.publication_url}`;
+              const selected = value === tileValue;
+              return (
+                <Tooltip key={pub.publication_url} title={`${pub.publication_name} — ${pub.publication_url}`}>
+                  <div
+                    role="button"
+                    tabIndex={disabled ? -1 : 0}
+                    onClick={() => !disabled && handleSelect(tileValue)}
+                    onKeyDown={(e) => !disabled && (e.key === 'Enter' || e.key === ' ') && handleSelect(tileValue)}
+                    style={{
+                      ...tileBase,
+                      width: 80,
+                      height: 72,
+                      border: `2px solid ${selected ? SUBSTACK_COLOR : 'transparent'}`,
+                      backgroundColor: selected ? `${SUBSTACK_COLOR}18` : newsTileUnselectedBackground(SUBSTACK_COLOR, isDark),
+                      color: selected ? SUBSTACK_COLOR : newsTileUnselectedLabelColor(SUBSTACK_COLOR, isDark),
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    <span style={{ fontSize: 22, marginBottom: 4 }}><ReadOutlined /></span>
+                    <span
+                      style={{
+                        display: 'block',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        width: '100%',
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        textAlign: 'center',
+                        padding: '0 4px',
+                      }}
+                    >
+                      {pub.publication_name}
                     </span>
                   </div>
                 </Tooltip>
@@ -349,6 +431,12 @@ export function parsePickerValue(pickerValue: string): {
     return {
       channelType: 'zhishixingqiu',
       channelIdentifier: pickerValue.slice(5),
+    };
+  }
+  if (pickerValue.startsWith('substack:')) {
+    return {
+      channelType: 'substack',
+      channelIdentifier: pickerValue.slice(9),
     };
   }
   return { channelType: pickerValue };

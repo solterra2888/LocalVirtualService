@@ -144,6 +144,12 @@ except ImportError as e:
     print(f"❌ 导入知识星球摘要任务模块失败: {e}")
 
 try:
+    from backend.tasks import substack_summary_tasks
+    print(f"✅ 成功导入 Substack 摘要任务模块: {substack_summary_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入 Substack 摘要任务模块失败: {e}")
+
+try:
     from backend.tasks import theme_matching_tasks
     print(f"✅ 成功导入内容主题匹配任务模块: {theme_matching_tasks.__name__}")
 except ImportError as e:

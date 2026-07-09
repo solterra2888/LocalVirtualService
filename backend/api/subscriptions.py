@@ -48,7 +48,7 @@ def _parse_weibo_uid(raw: str) -> str:
 # Pydantic模型
 class CreateSubscriptionRequest(BaseModel):
     """创建订阅请求模型"""
-    channel_type: str = Field(..., description="频道类型: twitter, youtube, zhishixingqiu, weibo, rss, news, podcast")
+    channel_type: str = Field(..., description="频道类型: twitter, youtube, zhishixingqiu, weibo, substack, rss, news, podcast")
     channel_identifier: str = Field(..., description="频道唯一标识: Twitter用户名、YouTube频道ID等")
     channel_name: Optional[str] = Field(None, description="频道显示名称（可选，Twitter 等会从 API 自动填充）")
     channel_description: Optional[str] = Field(None, description="频道描述")
@@ -164,6 +164,24 @@ async def get_zsxq_groups(
             "group_name": g["group_name"],
         }
         for g in groups
+    ]
+
+
+@router.get("/substack-publications")
+async def get_substack_publications(
+    current_user: TokenData = Depends(get_current_user)
+):
+    """返回可供用户订阅的 Substack publication 列表（订阅源并集中 enabled=true）。"""
+    from backend.services.substack_credential_service import SubstackCredentialService
+    pubs = SubstackCredentialService().list_publications(enabled_only=True)
+    return [
+        {
+            "publication_url": p["publication_url"],
+            "publication_name": p["publication_name"] or p["publication_url"],
+            "is_subscribed": p.get("is_subscribed", False),
+            "is_followed": p.get("is_followed", False),
+        }
+        for p in pubs
     ]
 
 
@@ -570,6 +588,32 @@ async def create_subscription(
             _auth_mode = f"凭证={cred_id}" if cred_id else "访客模式"
             logger.info(f"微博验证成功 | uid={uid} | name={screen_name} | {_auth_mode}")
 
+        # 🔥 如果是 Substack 订阅，校验 publication_url 是否在 substack_publications 并集中
+        elif request.channel_type == 'substack':
+            from backend.services.substack_credential_service import (
+                SubstackCredentialService,
+                normalize_publication_url,
+            )
+            try:
+                pub_url = normalize_publication_url(request.channel_identifier.strip())
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Substack channel_identifier 必须是有效的 publication URL（如 https://citrini.substack.com）",
+                )
+            request.channel_identifier = pub_url  # 标准化为根 URL
+
+            pubs = SubstackCredentialService().list_publications(enabled_only=True)
+            pub_map = {p["publication_url"]: p["publication_name"] for p in pubs}
+            if pub_url not in pub_map:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Substack publication '{pub_url}' 不在可订阅列表中，请联系管理员同步订阅源",
+                )
+            if not request.channel_name:
+                request.channel_name = pub_map[pub_url]
+            logger.info(f"Substack 验证成功 | publication_url={pub_url} | name={request.channel_name}")
+
         conn = db_manager.get_connection()
         cursor = conn.cursor()
         
@@ -850,6 +894,36 @@ async def create_subscription(
                     queue='data_fetching',
                 )
                 logger.info(f"Celery task scheduled: fetch_zhishixingqiu_subscription (task_id={task.id})")
+
+        # 🌟 Substack：已有内容时把新用户并入 user_ids；否则触发首抓 backfill
+        elif request.enabled and request.channel_type == 'substack':
+            from backend.tasks.subscription_tasks import (
+                fetch_substack_subscription_task,
+                add_user_to_existing_content_task,
+            )
+
+            if has_existing_content:
+                logger.info(
+                    f"Reusing existing Substack content for {request.channel_identifier}: "
+                    f"{existing_content_count} items found. Adding user {user_id} to user_ids."
+                )
+                task = add_user_to_existing_content_task.apply_async(
+                    args=[user_id, request.channel_type, request.channel_identifier, subscription_id],
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(f"Celery task scheduled: add_user_to_existing_content (substack) (task_id={task.id})")
+            else:
+                logger.info(
+                    f"No existing Substack content for {request.channel_identifier}. "
+                    f"Triggering backfill (subscription_id={subscription_id})."
+                )
+                task = fetch_substack_subscription_task.apply_async(
+                    args=[subscription_id, None, True],  # force_fetch=True (backfill)
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(f"Celery task scheduled: fetch_substack_subscription (task_id={task.id})")
 
         # 🌟 微博：已有内容时把新用户并入 user_ids；否则触发首抓 backfill
         elif request.enabled and request.channel_type == 'weibo':

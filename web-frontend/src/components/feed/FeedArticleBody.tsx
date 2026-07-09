@@ -89,7 +89,7 @@ export interface FeedArticleBodyProps {
  * - News 打标路由: CCTV → LLM (NEWS_LLM_TAG_SOURCES); EODHD → 轻量映射 (map_news_tags).
  * - 知识星球: 入库后 trigger_auto_feed_tagging，使用 content_tag_feeds_v1 模板。
  */
-const AUTO_TAG_CHANNELS = new Set(['twitter', 'youtube', 'news', 'zhishixingqiu', 'podcast', 'weibo']);
+const AUTO_TAG_CHANNELS = new Set(['twitter', 'youtube', 'news', 'zhishixingqiu', 'substack', 'podcast', 'weibo']);
 
 interface CeleryTaskStatusResponse {
   task_id: string;

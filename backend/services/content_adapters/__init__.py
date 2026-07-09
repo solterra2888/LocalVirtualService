@@ -11,6 +11,7 @@ from .news_adapter import NewsAdapter
 from .zsxq_adapter import ZsxqAdapter
 from .podcast_adapter import PodcastAdapter
 from .weibo_adapter import WeiboAdapter
+from .substack_adapter import SubstackAdapter
 
 __all__ = [
     'BaseContentAdapter',
@@ -21,6 +22,7 @@ __all__ = [
     'ZsxqAdapter',
     'PodcastAdapter',
     'WeiboAdapter',
+    'SubstackAdapter',
 ]
 
 
@@ -29,7 +31,7 @@ def get_adapter(channel_type: str) -> BaseContentAdapter:
     获取指定渠道类型的适配器实例
 
     Args:
-        channel_type: 渠道类型 (twitter, youtube, rss, news, zhishixingqiu, podcast, weibo)
+        channel_type: 渠道类型 (twitter, youtube, rss, news, zhishixingqiu, podcast, weibo, substack)
 
     Returns:
         对应的适配器实例
@@ -45,6 +47,7 @@ def get_adapter(channel_type: str) -> BaseContentAdapter:
         'zhishixingqiu': ZsxqAdapter(),
         'podcast': PodcastAdapter(),
         'weibo': WeiboAdapter(),
+        'substack': SubstackAdapter(),
     }
 
     adapter = adapters.get(channel_type)

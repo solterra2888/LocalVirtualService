@@ -620,6 +620,89 @@ def fetch_zhishixingqiu_subscription_task(
         return failure_result
 
 
+# ── Substack 订阅任务 ───────────────────────────────────────────────────────
+
+
+@app.task(
+    name='fetch_substack_subscription',
+    bind=True,
+    max_retries=2,
+    default_retry_delay=120,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def fetch_substack_subscription_task(
+    self,
+    subscription_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    force_fetch: bool = False,
+) -> Dict[str, Any]:
+    """
+    抓取用户订阅的 Substack 文章 + 关注作者动态，写入 subscription_content。
+
+    路由到 data_fetching 队列。由 subscriptions API 新建订阅时触发首抓，
+    也由 Scheduler 定时触发增量抓取。
+    """
+    is_scheduler_run = subscription_id is None and user_id is None
+    logger.info(
+        "[Celery Task] fetch_substack_subscription 开始: "
+        "subscription_id=%s user_id=%s force_fetch=%s scheduler=%s",
+        subscription_id, user_id, force_fetch, is_scheduler_run,
+    )
+    try:
+        from backend.services.substack_subscription_service import SubstackSubscriptionService
+        from backend.utils.lark_notifier import send_substack_scheduler_report
+
+        result = SubstackSubscriptionService().fetch_and_store(
+            subscription_id=subscription_id,
+            user_id=user_id,
+            force_fetch=force_fetch,
+            collect_report=is_scheduler_run,
+        )
+        logger.info(
+            "[Celery Task] fetch_substack_subscription 完成: "
+            "publications=%s posts_new=%s notes_new=%s failed_pubs=%s failed_authors=%s",
+            result.get("publications_processed", 0),
+            result.get("posts_new", 0),
+            result.get("notes_new", 0),
+            result.get("failed_publications", []),
+            result.get("failed_authors", []),
+        )
+        if is_scheduler_run:
+            send_substack_scheduler_report(result)
+        return result
+
+    except Exception as exc:
+        logger.error(
+            "[Celery Task] fetch_substack_subscription 失败: %s",
+            exc,
+            exc_info=True,
+        )
+        if self.request.retries < self.max_retries:
+            logger.warning(
+                "[Celery Task] 重试中... (attempt %d/%d)",
+                self.request.retries + 1, self.max_retries,
+            )
+            raise self.retry(exc=exc)
+        failure_result = {
+            "success": False,
+            "message": str(exc),
+            "publications_processed": 0,
+            "posts_new": 0,
+            "notes_new": 0,
+            "failed_publications": [],
+            "failed_authors": [],
+            "report": {
+                "errors": [str(exc)],
+                "finished_at": utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            },
+        }
+        if is_scheduler_run:
+            from backend.utils.lark_notifier import send_substack_scheduler_report
+            send_substack_scheduler_report(failure_result)
+        return failure_result
+
+
 # ── Weibo 订阅任务 ─────────────────────────────────────────────────────────
 
 

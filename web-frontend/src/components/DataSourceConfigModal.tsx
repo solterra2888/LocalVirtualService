@@ -35,6 +35,7 @@ import {
   StarOutlined,
   StockOutlined,
   CustomerServiceOutlined,
+  ReadOutlined,
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -61,7 +62,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'substack_summary' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
@@ -241,6 +242,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultName: 'Zhishixingqiu Subscription Feed',
       description: 'Automatically fetch topics from all subscribed Knowledge Planet (知识星球) groups every 30 minutes'
     },
+    substack_subscription: {
+      icon: <ReadOutlined style={{ color: '#FF6719' }} />,
+      params: [],
+      defaultSchedule: '*/30 * * * *',
+      defaultName: 'Substack Subscription Feed',
+      description: 'Fetch Substack articles (subscribed newsletters) + notes (followed authors) every 30 minutes; admin-shared cookie, union of two sources'
+    },
     twitter_author_summary: {
       icon: <TwitterOutlined style={{ color: '#1DA1F2' }} />,
       params: ['force'],
@@ -296,6 +304,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 22 * * *',
       defaultName: 'Zhishixingqiu Daily Summary',
       description: 'Generate daily aggregated summary from all Zhishixingqiu groups (default: 10 PM Beijing)'
+    },
+    substack_summary: {
+      icon: <ReadOutlined style={{ color: '#FF6719' }} />,
+      params: [],
+      defaultSchedule: '0 22 * * *',
+      defaultName: 'Substack Daily Summary',
+      description: 'Two-phase daily summary: per-publication LLM (articles + notes, cached) then per-user mechanical concat (default: 10 PM Beijing)'
     },
   };
 
@@ -1041,6 +1056,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           return null;
 
         case 'zhishixingqiu_subscription':
+          return null;
+
+        case 'substack_subscription':
           return null;
 
         case 'weibo_subscription':

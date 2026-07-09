@@ -42,6 +42,7 @@ import YoutubeFeedOriginalBlock from '../feed/YoutubeFeedOriginalBlock';
 import TwitterOriginalView from '../shared/content-viewer/original-views/TwitterOriginalView';
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
 import ZsxqOriginalView from '../shared/content-viewer/original-views/ZsxqOriginalView';
+import SubstackOriginalView from '../shared/content-viewer/original-views/SubstackOriginalView';
 import type {
   DailyItemDetail,
   DailyItemDetailUpload,
@@ -164,6 +165,25 @@ const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({
                 ? (f.metadata!.files as unknown[]).map(String).filter(Boolean)
                 : []
             }
+            themeMode={themeMode}
+          />
+        );
+      case 'substack':
+        return (
+          <SubstackOriginalView
+            title={f.title}
+            content={f.content}
+            url={f.url}
+            publicationName={
+              typeof f.metadata?.publication_name === 'string' ? f.metadata.publication_name : f.author_name
+            }
+            authorName={typeof f.metadata?.author === 'string' ? f.metadata.author : null}
+            contentKind={
+              typeof f.metadata?.content_kind === 'string' ? (f.metadata.content_kind as 'post' | 'note') : 'post'
+            }
+            isPaywalled={Boolean(f.metadata?.is_paywalled)}
+            noteType={typeof f.metadata?.note_type === 'string' ? f.metadata.note_type : null}
+            authorHandle={typeof f.metadata?.author_handle === 'string' ? f.metadata.author_handle : null}
             themeMode={themeMode}
           />
         );

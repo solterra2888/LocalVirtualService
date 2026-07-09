@@ -197,6 +197,99 @@ def send_zsxq_scheduler_report(result: dict) -> bool:
     return send_text(title, lines, webhook_url=webhook)
 
 
+def send_substack_scheduler_report(result: dict) -> bool:
+    """
+    Substack Scheduler 定时抓取完成后，将运行摘要与错误统计一次性推送到 Lark。
+
+    使用 SUBSTACK_LARK_WEBHOOK_URL（默认 LARK_WEBHOOK_ALERT_BOT）。
+    可通过 SUBSTACK_LARK_NOTIFY_ENABLED=false 关闭。
+    """
+    if os.getenv("SUBSTACK_LARK_NOTIFY_ENABLED", "true").lower() != "true":
+        return False
+
+    webhook = os.getenv("SUBSTACK_LARK_WEBHOOK_URL", LARK_WEBHOOK_ALERT_BOT).strip()
+    if not webhook:
+        logger.warning("Substack Lark 通知跳过: 未配置 SUBSTACK_LARK_WEBHOOK_URL")
+        return False
+
+    report = result.get("report") or {}
+    success = result.get("success", False)
+    error_msg = result.get("error") or result.get("message") or ""
+
+    if not success and error_msg:
+        status = "失败"
+    elif report.get("failed_publications") or report.get("failed_authors") or report.get("errors"):
+        status = "部分失败"
+    elif report.get("warnings"):
+        status = "成功（有告警）"
+    else:
+        status = "成功"
+
+    lines = [
+        f"状态: {status}",
+        f"publication 处理: {result.get('publications_processed', 0)} 个",
+        f"新增文章: {result.get('posts_new', 0)} 条",
+        f"新增动态: {result.get('notes_new', 0)} 条",
+        f"关注作者处理: {result.get('authors_processed', 0)} 个",
+    ]
+
+    failed_pubs = report.get("failed_publications") or result.get("failed_publications") or []
+    failed_authors = report.get("failed_authors") or result.get("failed_authors") or []
+    if failed_pubs:
+        lines.append(f"失败 publication: {', '.join(failed_pubs)}")
+    if failed_authors:
+        lines.append(f"失败作者: {', '.join(failed_authors)}")
+    if not failed_pubs and not failed_authors:
+        lines.append("失败: 无")
+
+    errors = report.get("errors") or []
+    if errors:
+        lines.append("")
+        lines.append("异常统计:")
+        for err in errors[:10]:
+            lines.append(f"- {err}")
+        if len(errors) > 10:
+            lines.append(f"- … 另有 {len(errors) - 10} 条")
+
+    warnings = report.get("warnings") or []
+    if warnings:
+        lines.append("")
+        lines.append("警告:")
+        for warn in warnings[:8]:
+            lines.append(f"- {warn}")
+        if len(warnings) > 8:
+            lines.append(f"- … 另有 {len(warnings) - 8} 条")
+
+    post_summaries = report.get("post_summaries") or []
+    if post_summaries:
+        lines.append("")
+        lines.append("各 publication (文章):")
+        for ps in post_summaries:
+            lines.append(
+                f"- {ps.get('name', '?')} [{ps.get('mode', '?')}]: 新 {ps.get('new', 0)} 条"
+            )
+
+    note_summaries = report.get("note_summaries") or []
+    if note_summaries:
+        lines.append("")
+        lines.append("各作者 (动态):")
+        for ns in note_summaries:
+            lines.append(f"- @{ns.get('handle', '?')}: 新 {ns.get('new', 0)} 条")
+
+    if not success and error_msg:
+        lines.append("")
+        lines.append(f"错误: {error_msg}")
+
+    duration = report.get("duration_sec")
+    if duration is not None:
+        lines.append(f"耗时: {duration:.0f}s")
+
+    finished_at = report.get("finished_at") or ""
+    title = f"【Substack 定时抓取】{finished_at}".strip()
+
+    return send_text(title, lines, webhook_url=webhook)
+
+
 def send_weibo_scheduler_report(result: dict) -> bool:
     """
     微博 Scheduler 定时抓取完成后，将运行摘要与错误统计一次性推送到 Lark。

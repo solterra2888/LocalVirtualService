@@ -1001,6 +1001,7 @@ class DatabaseManager:
                 'the_close_summary',
                 'cnbc_closing_bell',
                 'zhishixingqiu_summary',
+                'substack_summary',
                 'podcast_subscription',
                 'weibo_subscription',
                 # legacy rows in some deployments
@@ -1008,6 +1009,7 @@ class DatabaseManager:
                 'eodhd_news',
                 'watchlist_news',
                 'zhishixingqiu_subscription',
+                'substack_subscription',
             ]
             
             # 合并现有类型和新类型（去重）

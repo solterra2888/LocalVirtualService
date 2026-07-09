@@ -77,6 +77,7 @@ task_routes = {
     'match_content_themes_vector': {'queue': 'ai_processing'},    # Phase 2: 向量语义匹配（Qwen embedding）
     'backfill_content_theme_matches': {'queue': 'ai_processing'}, # 批量回填历史内容
     'fetch_zhishixingqiu_subscription': {'queue': 'data_fetching'},  # 知识星球订阅抓取
+    'fetch_substack_subscription': {'queue': 'data_fetching'},  # Substack 订阅抓取（文章 + 动态）
     'fetch_weibo_subscription': {'queue': 'data_fetching'},  # 微博订阅抓取
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
     'smart_wait_and_add_user': {'queue': 'data_fetching'},
@@ -114,6 +115,10 @@ task_routes = {
     'generate_zhishixingqiu_summary': {'queue': 'ai_processing'},
     'generate_all_zhishixingqiu_user_reports': {'queue': 'ai_processing'},
     'generate_zhishixingqiu_user_report': {'queue': 'ai_processing'},
+    # Substack 每日摘要 — Phase 1 全局 + Phase 2 按用户
+    'generate_substack_summary': {'queue': 'ai_processing'},
+    'generate_all_substack_user_reports': {'queue': 'ai_processing'},
+    'generate_substack_user_report': {'queue': 'ai_processing'},
     # Podcast 订阅抓取（公网 CDN，无需住宅 IP）
     'fetch_podcast_subscription': {'queue': 'data_fetching'},
     'fetch_all_podcast_subscriptions': {'queue': 'data_fetching'},

@@ -26,6 +26,7 @@ export type DailySourceSubtype =
   | 'news'        // Feed News
   | 'youtube_feed' // Feed YouTube Subscription
   | 'zhishixingqiu' // Feed 知识星球
+  | 'substack'     // Feed Substack（文章 + 动态）
   | 'weibo';       // Feed 微博
 
 export type DailyNavigateType = 'execution' | 'feed_article' | 'external_url';
@@ -166,6 +167,7 @@ export const ALL_DAILY_SOURCE_SUBTYPES: DailySourceSubtype[] = [
   'news',
   'youtube_feed',
   'zhishixingqiu',
+  'substack',
   'weibo',
 ];
 

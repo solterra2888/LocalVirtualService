@@ -60,6 +60,7 @@ class SchedulerService:
             'ipo_calendar': self._execute_ipo_calendar_task,
             'news_feed': self._execute_news_feed_task,  # EODHD + CCTV Feed 订阅任务
             'zhishixingqiu_subscription': self._execute_zhishixingqiu_subscription_task,
+            'substack_subscription': self._execute_substack_subscription_task,
             'weibo_subscription': self._execute_weibo_subscription_task,
             'twitter_author_summary': self._execute_twitter_author_summary_task,
             'youtube_author_summary': self._execute_youtube_author_summary_task,
@@ -69,6 +70,7 @@ class SchedulerService:
             'the_close_summary': self._execute_the_close_summary_task,
             'cnbc_closing_bell': self._execute_cnbc_closing_bell_task,
             'zhishixingqiu_summary': self._execute_zhishixingqiu_summary_task,
+            'substack_summary': self._execute_substack_summary_task,
             'podcast_subscription': self._execute_podcast_subscription_task,
         }
         
@@ -1030,6 +1032,46 @@ class SchedulerService:
                 'error': str(e)
             }
 
+    async def _execute_substack_subscription_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行 Substack 订阅抓取任务（文章 + 动态双轨）— 通过 Celery 异步分发给 data-worker。
+
+        Args:
+            params:
+                - subscription_id: 指定订阅ID（可选）
+                - user_id: 指定用户ID（可选）
+                - force_fetch: 是否强制获取（可选）
+        """
+        try:
+            logger.info("分发 Substack 订阅抓取 Celery 任务", params=params)
+
+            from backend.tasks.subscription_tasks import fetch_substack_subscription_task
+
+            subscription_id = params.get('subscription_id')
+            user_id = params.get('user_id')
+            force_fetch = params.get('force_fetch', False)
+
+            task = fetch_substack_subscription_task.delay(
+                subscription_id=subscription_id,
+                user_id=user_id,
+                force_fetch=force_fetch,
+            )
+
+            message = (
+                f"✅ Substack 订阅抓取任务已提交 Celery 异步执行，task_id={task.id}"
+            )
+            logger.info("Substack 订阅抓取任务已提交", celery_task_id=task.id)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"Substack 订阅任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {
+                'success': False,
+                'message': f"❌ {error_msg}",
+                'error': str(e)
+            }
+
     async def _execute_weibo_subscription_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行微博订阅博文获取任务 — 通过 Celery 异步分发给 data-worker。
@@ -1607,6 +1649,70 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"知识星球摘要任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_substack_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        生成 Substack 每日摘要（Phase A → chain → Phase B）。
+        应在 Substack 抓取完成后调度（默认每日，北京自然日标签）。
+
+        Args:
+            params:
+                - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)，北京自然日标签
+                - window_end: 可选，ISO 时间字符串（UTC），内容窗口结束时间；默认 utcnow()
+                - window_hours: 可选，回溯小时数（默认 24）
+                - force: 可选，是否强制重新生成（默认 False）
+                - chain_user_reports: 可选，Phase A 完成后是否链式触发 Phase B（默认 True）
+        """
+        try:
+            logger.info("分发 Substack 摘要 Celery 任务", params=params)
+
+            from datetime import datetime
+            from backend.tasks.substack_summary_tasks import (
+                generate_substack_summary_task,
+            )
+            from backend.utils.datetime_utils import (
+                utcnow,
+                parse_iso_utc,
+                window_label_date,
+            )
+
+            force = params.get('force', False)
+            chain_user_reports = params.get('chain_user_reports', True)
+            window_hours = int(params.get('window_hours', 24))
+
+            report_date_str = params.get('report_date')
+            window_end = parse_iso_utc(params.get('window_end'))
+            if window_end is None:
+                window_end = utcnow()
+
+            if report_date_str:
+                label_date = datetime.strptime(report_date_str, '%Y-%m-%d').date()
+            else:
+                label_date = window_label_date(
+                    window_end, params.get('scheduler_timezone')
+                )
+
+            task = generate_substack_summary_task.delay(
+                report_date=str(label_date),
+                window_end=window_end.isoformat(),
+                window_hours=window_hours,
+                force=force,
+                chain_user_reports=chain_user_reports,
+            )
+
+            chain_info = "，完成后自动触发用户报告" if chain_user_reports else ""
+            force_info = "（强制重新生成）" if force else ""
+            message = (
+                f"✅ Substack 摘要 ({label_date}, 过去{window_hours}h): "
+                f"已提交 Celery 异步任务 {task.id}{chain_info}{force_info}"
+            )
+            logger.info(message)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"Substack 摘要任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

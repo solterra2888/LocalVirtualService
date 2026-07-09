@@ -28,7 +28,7 @@ from backend.utils.logger import get_logger
 
 logger = get_logger("feed_content_tagging_service")
 
-_SUPPORTED_CHANNELS = {"twitter", "youtube", "podcast", "news", "zhishixingqiu", "weibo"}
+_SUPPORTED_CHANNELS = {"twitter", "youtube", "podcast", "news", "zhishixingqiu", "weibo", "substack"}
 
 FEEDS_TEMPLATE_CODE = "content_tag_feeds_v1"
 TWEET_SIGNAL_TEMPLATE_CODE = "tweet_signal_v1"
@@ -148,7 +148,7 @@ class FeedContentTaggingService:
         allowed = {
             c.strip()
             for c in os.getenv(
-                "AUTO_FEED_TAG_CHANNELS", "twitter,youtube,podcast,news,zhishixingqiu,weibo"
+                "AUTO_FEED_TAG_CHANNELS", "twitter,youtube,podcast,news,zhishixingqiu,weibo,substack"
             ).split(",")
             if c.strip()
         }
@@ -231,6 +231,24 @@ class FeedContentTaggingService:
             if len(text) > max_chars:
                 text = text[:max_chars]
             return text, "weibo"
+
+        if channel_type == "substack":
+            # 文章(post) 用 title+content；动态(note) 仅 content（body_text）
+            metadata = row.get("metadata") or {}
+            content_kind = metadata.get("content_kind") if isinstance(metadata, dict) else None
+            if content_kind == "note":
+                min_len = int(os.getenv("AUTO_FEED_TAG_MIN_LENGTH_SUBSTACK_NOTE", "30"))
+                text = (row.get("content") or "").strip()
+            else:
+                min_len = int(os.getenv("AUTO_FEED_TAG_MIN_LENGTH_SUBSTACK", "200"))
+                title = (row.get("title") or "").strip()
+                content = (row.get("content") or "").strip()
+                text = f"{title}\n\n{content}" if (title and content) else (title or content)
+            if len(text) < min_len:
+                return None
+            if len(text) > max_chars:
+                text = text[:max_chars]
+            return text, "substack"
 
         return None
 

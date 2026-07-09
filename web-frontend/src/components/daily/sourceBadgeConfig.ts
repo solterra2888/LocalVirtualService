@@ -96,6 +96,12 @@ export const SOURCE_BADGE_STYLES: Record<DailySourceSubtype, SourceBadgeStyle> =
     light: { bg: '#fff7e6', fg: '#d46b08' },
     dark: { bg: 'rgba(255, 107, 0, 0.20)', fg: '#ffa940' },
   },
+  substack: {
+    label: 'Substack',
+    fullName: 'Substack（文章 + 动态）',
+    light: { bg: '#fff1ed', fg: '#d4450f' },
+    dark: { bg: 'rgba(255, 103, 25, 0.20)', fg: '#ff8a5c' },
+  },
   weibo: {
     label: '微博',
     fullName: '微博',
@@ -119,5 +125,6 @@ export const SOURCE_BADGE_DISPLAY_ORDER: DailySourceSubtype[] = [
   'youtube_feed',
   'news',
   'zhishixingqiu',
+  'substack',
   'weibo',
 ];

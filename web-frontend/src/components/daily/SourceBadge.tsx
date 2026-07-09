@@ -39,6 +39,7 @@ const SUBTYPE_ICONS: Record<DailySourceSubtype, React.ReactNode> = {
   text:         <EditOutlined />,
   podcast:      <AppleOutlined />,
   zhishixingqiu: <StarOutlined />,
+  substack: <ReadOutlined />,
   weibo: <WeiboIcon />,
 };
 

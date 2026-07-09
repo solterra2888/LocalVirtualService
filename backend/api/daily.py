@@ -104,6 +104,7 @@ _FEED_CHANNEL_TYPE_MAP = {
     "zhishixingqiu": "zhishixingqiu",
     "podcast": "podcast",  # Podcast RSS 频道订阅
     "weibo": "weibo",  # 微博订阅（无标题，正文即主体，结构同 twitter）
+    "substack": "substack",  # Substack 订阅（文章 post + 动态 note）
 }
 
 # 所有合法 source_subtype
@@ -126,6 +127,7 @@ ALL_SOURCE_SUBTYPES = [
     "news",
     "youtube_feed",
     "zhishixingqiu",
+    "substack",
     "weibo",
 ]
 
@@ -525,6 +527,8 @@ def _build_filter_clauses(
                     feed_subtypes_pg.extend(["news", "rss"])
                 elif st == "zhishixingqiu":
                     feed_subtypes_pg.append("zhishixingqiu")
+                elif st == "substack":
+                    feed_subtypes_pg.append("substack")
                 elif st == "weibo":
                     feed_subtypes_pg.append("weibo")
             # 任一边没匹配到对应类型 → 用恒假条件让该边返回 0 行（避免 IN ()

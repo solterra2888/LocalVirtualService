@@ -32,8 +32,9 @@ export const CHANNEL_TYPES = [
   { value: 'youtube', label: 'YouTube', icon: <YoutubeOutlined />, color: '#FF0000', disabled: false },
   { value: 'podcast', label: 'Podcast', icon: <CustomerServiceOutlined />, color: '#8B5CF6', disabled: false },
   { value: 'zhishixingqiu', label: '知识星球', icon: <StarOutlined />, color: '#FF6B00', disabled: false },
+  { value: 'substack', label: 'Substack', icon: <ReadOutlined />, color: '#FF6719', disabled: false },
   { value: 'weibo', label: '微博', icon: <WeiboIcon />, color: '#E6162D', disabled: false },
-  { value: 'rss', label: 'RSS Feed', icon: <GlobalOutlined />, color: '#orange', disabled: true },
+  { value: 'rss', label: 'RSS Feed', icon: <GlobalOutlined />, color: '#FF8A00', disabled: true },
 ];
 
 /**
@@ -89,7 +90,7 @@ export function getNewsSourceFaviconUrl(identifier: string): string | undefined 
 }
 
 /** My Feeds 侧栏：与 Sources 文件类型栏一致的频道类型筛选 */
-export type FeedChannelTypeFilterKey = 'all' | 'twitter' | 'youtube' | 'podcast' | 'news' | 'zhishixingqiu' | 'weibo';
+export type FeedChannelTypeFilterKey = 'all' | 'twitter' | 'youtube' | 'podcast' | 'news' | 'zhishixingqiu' | 'substack' | 'weibo';
 
 export const FEED_CHANNEL_TYPE_FILTER_TABS: {
   key: FeedChannelTypeFilterKey;
@@ -102,6 +103,7 @@ export const FEED_CHANNEL_TYPE_FILTER_TABS: {
   { key: 'podcast', label: 'Podcast', icon: <CustomerServiceOutlined /> },
   { key: 'news', label: 'News', icon: <ReadOutlined /> },
   { key: 'zhishixingqiu', label: '知识星球', icon: <StarOutlined /> },
+  { key: 'substack', label: 'Substack', icon: <ReadOutlined /> },
   { key: 'weibo', label: '微博', icon: <WeiboIcon /> },
 ];
 
@@ -118,6 +120,7 @@ export function getChannelIcon(channelType: string) {
   if (config) return config.icon;
   if (channelType === 'news') return <ReadOutlined />;
   if (channelType === 'zhishixingqiu') return <StarOutlined />;
+  if (channelType === 'substack') return <ReadOutlined />;
   if (channelType === 'podcast') return <CustomerServiceOutlined />;
   return <GlobalOutlined />;
 }

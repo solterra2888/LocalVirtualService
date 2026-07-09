@@ -46,6 +46,7 @@ import DailyMarketReportPage from './pages/DailyMarketReportPage';
 import MobileReportsOverviewPage from './pages/MobileReportsOverviewPage';
 import MobileReportsDetailLayout from './components/MobileReportsDetailLayout';
 import ZsxqAdminPage from './pages/ZsxqAdminPage';
+import SubstackAdminPage from './pages/SubstackAdminPage';
 import { DashboardSettingsProvider } from './contexts/DashboardSettingsContext';
 import { FileProcessingProvider } from './contexts/FileProcessingContext';
 import './App.css';
@@ -294,6 +295,14 @@ const AppContent: React.FC = () => {
             element={
               <AdminRoute>
                 <ZsxqAdminPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="substack-admin"
+            element={
+              <AdminRoute>
+                <SubstackAdminPage />
               </AdminRoute>
             }
           />
