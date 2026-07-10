@@ -295,9 +295,9 @@ async def get_user_subscriptions(
                     if resolved:
                         sub.channel_name = resolved
                 if not (sub.channel_avatar or "").strip():
+                    # 仅使用 DB 已缓存的头像；不在列表接口同步拉 Substack 公开 API
+                    # （ensure_publication_avatar 单次可达 20s 超时，多刊叠加会拖垮 Feeds 首屏）
                     avatar = (pub.get("avatar") or "").strip()
-                    if not avatar:
-                        avatar = svc.ensure_publication_avatar(sub.channel_identifier)
                     if avatar:
                         sub.channel_avatar = avatar
         
