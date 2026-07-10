@@ -56,13 +56,17 @@ import {
 import {
   collapseWhitespaceForPreview,
   getFeedListHeadline,
+  getFeedListBodyExcerpt,
   getHeatLevelConfig,
   normalizeTwitterUsername,
   showFeedListSecondaryExcerpt,
   feedListPrimaryLineIsTweetBody,
   subscriptionContentMatchesSearchQuery,
   estimateSubscriptionContentReadingMinutes,
+  getFeedAuthorAvatarSrc,
+  feedListShowsAuthorAvatar,
 } from '../components/feed/feedUtils';
+import SubstackFeedBadges, { getFeedListAuthorLabel } from '../components/feed/SubstackFeedBadges';
 import FeedSourceIconPicker, { parsePickerValue } from '../components/feed/FeedSourceIconPicker';
 import { weiboSafeAvatarSrc } from '../components/feed/weiboSafeImage';
 import { getModalStyles } from '../utils/modalStyles';
@@ -681,12 +685,16 @@ const MobileFeedsListView: React.FC = () => {
                       overflowWrap: 'anywhere',
                     }}
                   >
-                    {collapseWhitespaceForPreview(c.content || '')}
+                    {collapseWhitespaceForPreview(getFeedListBodyExcerpt(c))}
                   </span>
                 )}
               </div>
               <div>
                 <Space size={6} wrap>
+                  <SubstackFeedBadges content={c} />
+                  {feedListShowsAuthorAvatar(c) && (
+                    <Avatar size={16} src={getFeedAuthorAvatarSrc(c)} style={{ flexShrink: 0 }} />
+                  )}
                   {c.is_retweet && <RetweetOutlined style={{ color: '#00ba7c', fontSize: 12 }} />}
                   {c.is_quote && <MessageOutlined style={{ color: '#1DA1F2', fontSize: 12 }} />}
                   {c.is_reply && <CommentOutlined style={{ color: '#657786', fontSize: 12 }} />}
@@ -700,9 +708,7 @@ const MobileFeedsListView: React.FC = () => {
                     }
                   >
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      {c.channel_type === 'youtube' && c.metadata?.show_name
-                        ? c.metadata.show_name
-                        : c.author_name || (c.author_identifier ? `@${c.author_identifier}` : '')}
+                      {getFeedListAuthorLabel(c)}
                     </Text>
                   </Tooltip>
                   <Text type="secondary" style={{ fontSize: 12 }}>

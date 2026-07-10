@@ -1,4 +1,29 @@
 import type { SubscriptionContent } from '../../services/subscriptions';
+import { substackHtmlToPlainText } from '../../utils/substackHtmlUtils';
+import { getSubstackContentKind } from './SubstackFeedBadges';
+import { weiboSafeAvatarSrc } from './weiboSafeImage';
+
+/** 列表/详情作者头像（Twitter / 微博 / Substack）。 */
+export function getFeedAuthorAvatarSrc(c: {
+  channel_type?: string;
+  source_subtype?: string;
+  author_avatar?: string | null;
+}): string | undefined {
+  if (!c.author_avatar) return undefined;
+  const kind = c.channel_type ?? c.source_subtype;
+  if (kind === 'twitter' || kind === 'weibo' || kind === 'substack') {
+    return weiboSafeAvatarSrc(c.author_avatar);
+  }
+  return undefined;
+}
+
+export function feedListShowsAuthorAvatar(c: {
+  channel_type?: string;
+  source_subtype?: string;
+  author_avatar?: string | null;
+}): boolean {
+  return Boolean(getFeedAuthorAvatarSrc(c));
+}
 
 /** New items notification (Web Audio API) */
 export function playNewItemsNotificationSound() {
@@ -39,6 +64,20 @@ export function normalizeTwitterUsername(raw: string): string {
  */
 const TITLELESS_CHANNELS = new Set(['twitter', 'weibo']);
 
+function getSubstackPlainBody(c: SubscriptionContent): string {
+  if (c.channel_type !== 'substack') return (c.content || '').trim();
+  if (getSubstackContentKind(c) === 'note') return (c.content || '').trim();
+  return substackHtmlToPlainText(c.content || '');
+}
+
+/** 列表卡片摘要行：Substack 文章去掉 HTML 标签 */
+export function getFeedListBodyExcerpt(c: SubscriptionContent): string {
+  if (c.channel_type === 'substack' && getSubstackContentKind(c) === 'post') {
+    return getSubstackPlainBody(c);
+  }
+  return (c.content || '').trim();
+}
+
 /**
  * List card primary line: YouTube/News use `title`; titleless channels
  * (Twitter, Weibo) fall back to body text.
@@ -60,6 +99,9 @@ export function getFeedListHeadline(c: SubscriptionContent): string {
  */
 export function showFeedListSecondaryExcerpt(c: SubscriptionContent): boolean {
   if (TITLELESS_CHANNELS.has(c.channel_type) && !(c.title || '').trim()) return false;
+  if (c.channel_type === 'substack' && getSubstackContentKind(c) === 'post') {
+    return Boolean(getSubstackPlainBody(c));
+  }
   return Boolean((c.content || '').trim());
 }
 
@@ -82,7 +124,9 @@ export function estimateSubscriptionContentReadingMinutes(
   c: SubscriptionContent,
 ): number | null {
   let len = (c.content || '').length;
-  if (TITLELESS_CHANNELS.has(c.channel_type)) {
+  if (c.channel_type === 'substack' && getSubstackContentKind(c) === 'post') {
+    len = getSubstackPlainBody(c).length;
+  } else if (TITLELESS_CHANNELS.has(c.channel_type)) {
     len += (c.retweeted_content || '').length;
     len += (c.quoted_content || '').length;
   }
@@ -150,6 +194,7 @@ export function subscriptionContentMatchesSearchQuery(c: SubscriptionContent, ra
   const hay: string[] = [
     c.title,
     c.content,
+    getFeedListBodyExcerpt(c),
     c.author_name,
     c.author_identifier,
     getFeedListHeadline(c),

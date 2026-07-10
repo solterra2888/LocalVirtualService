@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Typography, Tag, Space } from 'antd';
+import { prepareSubstackHtmlForDisplay } from '../../../../utils/substackHtmlUtils';
+import './substackArticleBody.css';
 
-const { Title, Paragraph, Text } = Typography;
+const { Title, Text } = Typography;
 
 interface SubstackOriginalViewProps {
   title?: string | null;
@@ -14,6 +16,8 @@ interface SubstackOriginalViewProps {
   noteType?: string | null;
   authorHandle?: string | null;
   themeMode?: 'light' | 'dark';
+  /** Feeds 详情页已有作者/渠道信息，默认隐藏类型徽标 */
+  showTypeTags?: boolean;
 }
 
 /**
@@ -32,39 +36,51 @@ const SubstackOriginalView: React.FC<SubstackOriginalViewProps> = ({
   noteType,
   authorHandle,
   themeMode,
+  showTypeTags = true,
 }) => {
   const isDark = themeMode === 'dark';
   const isNote = contentKind === 'note';
   const textColor = isDark ? 'rgba(255,255,255,0.85)' : undefined;
   const subColor = isDark ? 'rgba(255,255,255,0.45)' : undefined;
+  const displayHtml = useMemo(
+    () => (isNote ? '' : prepareSubstackHtmlForDisplay(content || '')),
+    [content, isNote],
+  );
 
   return (
     <div>
-      <Space size={6} wrap style={{ marginBottom: 8 }}>
-        {publicationName && <Tag color="orange">{publicationName}</Tag>}
-        {isNote ? (
-          <Tag color="purple">动态</Tag>
-        ) : (
-          <Tag color="blue">文章</Tag>
-        )}
-        {isPaywalled && <Tag color="gold">付费</Tag>}
-        {noteType && isNote && <Tag>{noteType}</Tag>}
-      </Space>
+      {showTypeTags && (
+        <Space size={6} wrap style={{ marginBottom: 8 }}>
+          {publicationName && <Tag color="orange">{publicationName}</Tag>}
+          {isNote ? (
+            <Tag color="purple">动态</Tag>
+          ) : (
+            <Tag color="blue">文章</Tag>
+          )}
+          {isPaywalled && <Tag color="gold">付费</Tag>}
+          {noteType && isNote && <Tag>{noteType}</Tag>}
+        </Space>
+      )}
 
       {!isNote && title && (
         <Title level={5} style={{ color: textColor, marginBottom: 8 }}>{title}</Title>
       )}
 
-      <Paragraph style={{ color: textColor, whiteSpace: 'pre-wrap' }}>
-        {isNote ? (
-          content
-        ) : (
-          <div
-            // Substack 文章正文为 HTML（来自 post.get_content() 的 body_html）
-            dangerouslySetInnerHTML={{ __html: content || '' }}
-          />
-        )}
-      </Paragraph>
+      {isNote ? (
+        <div style={{ color: textColor, whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>
+          {content}
+        </div>
+      ) : (
+        <div
+          className="substack-article-body"
+          style={{
+            color: textColor,
+            lineHeight: 1.7,
+            fontSize: 15,
+          }}
+          dangerouslySetInnerHTML={{ __html: displayHtml }}
+        />
+      )}
 
       {(authorName || authorHandle) && (
         <div style={{ marginBottom: 4 }}>

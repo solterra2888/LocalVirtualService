@@ -55,6 +55,33 @@ def _parse_dt(value: Any) -> datetime:
         return datetime.now(tz=timezone.utc)
 
 
+def _looks_like_url(s: str) -> bool:
+    s = (s or "").strip().lower()
+    return s.startswith("http://") or s.startswith("https://")
+
+
+def _resolve_substack_post_author_name(pub_name: str, pub_url: str, author: str) -> str:
+    """Prefer human-readable publication/author name; avoid storing URL as author_name."""
+    pub_name = (pub_name or "").strip()
+    author = (author or "").strip()
+    if pub_name and not _looks_like_url(pub_name):
+        return pub_name
+    if author:
+        return author
+    if pub_url:
+        try:
+            from urllib.parse import urlparse
+
+            host = (urlparse(pub_url).hostname or "").lower()
+            if host.endswith(".substack.com"):
+                slug = host[: -len(".substack.com")]
+                if slug and slug not in ("www", "substack"):
+                    return slug
+        except Exception:
+            pass
+    return pub_name or author or pub_url
+
+
 class SubstackAdapter(BaseContentAdapter):
     """Substack 适配器（post / note 双分支）。"""
 
@@ -71,19 +98,24 @@ class SubstackAdapter(BaseContentAdapter):
     def _normalize_post(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
         pub_url = str(raw_data.get("publication_url") or "")
         pub_name = str(raw_data.get("publication_name") or "")
+        author = str(raw_data.get("author") or "")
+        display_name = _resolve_substack_post_author_name(pub_name, pub_url, author)
+        stored_pub_name = pub_name if pub_name and not _looks_like_url(pub_name) else display_name
         post_id = raw_data.get("post_id")
         content_id = str(post_id) if post_id is not None else ""
 
         title = (raw_data.get("title") or "").strip()
         content = raw_data.get("content") or ""
+        avatar = str(raw_data.get("author_avatar") or raw_data.get("avatar") or "").strip()
 
         return {
             "channel_type": "substack",
             "content_id": content_id,
             "title": title,
             "content": content,
-            "author_name": pub_name,
+            "author_name": display_name,
             "author_identifier": pub_url,
+            "author_avatar": avatar or None,
             "url": raw_data.get("canonical_url") or "",
             "media_urls": [],
             "published_at": _parse_dt(raw_data.get("post_date")),
@@ -92,8 +124,8 @@ class SubstackAdapter(BaseContentAdapter):
             "metadata": {
                 "content_kind": "post",
                 "publication_url": pub_url,
-                "publication_name": pub_name,
-                "author": raw_data.get("author") or "",
+                "publication_name": stored_pub_name,
+                "author": author,
                 "audience": raw_data.get("audience") or "",
                 "is_paywalled": bool(raw_data.get("is_paywalled")),
                 "subtitle": raw_data.get("subtitle") or "",
@@ -107,6 +139,7 @@ class SubstackAdapter(BaseContentAdapter):
         pub_url = str(raw_data.get("publication_url") or "https://substack.com")
         body_text = (raw_data.get("body_text") or "").strip()
         title = body_text[:60] if body_text else ""
+        avatar = str(raw_data.get("author_avatar") or raw_data.get("avatar") or "").strip()
 
         return {
             "channel_type": "substack",
@@ -115,6 +148,7 @@ class SubstackAdapter(BaseContentAdapter):
             "content": body_text,
             "author_name": raw_data.get("author_name") or "",
             "author_identifier": pub_url,
+            "author_avatar": avatar or None,
             "url": raw_data.get("note_url") or "",
             "media_urls": [],
             "published_at": _parse_dt(raw_data.get("published_at")),

@@ -1601,7 +1601,11 @@ async def get_subscription_contents(
                 sc.content,
                 sc.author_name,
                 sc.author_identifier,
-                sc.author_avatar,
+                COALESCE(
+                    NULLIF(TRIM(sc.author_avatar), ''),
+                    NULLIF(TRIM(sp.avatar), ''),
+                    NULLIF(TRIM(sfa.avatar), '')
+                ) AS author_avatar,
                 sc.url,
                 sc.media_urls,
                 sc.published_at,
@@ -1650,6 +1654,12 @@ async def get_subscription_contents(
             LEFT JOIN subscription_content_user_summaries scus
                 ON scus.subscription_content_id = sc.id
                AND scus.user_id = %s
+            LEFT JOIN substack_publications sp
+                ON sc.channel_type = 'substack'
+               AND sp.publication_url = sc.author_identifier
+            LEFT JOIN substack_followed_authors sfa
+                ON sc.channel_type = 'substack'
+               AND sfa.publication_url = sc.author_identifier
             WHERE {where_clause}
             ORDER BY sc.published_at DESC
             LIMIT %s OFFSET %s

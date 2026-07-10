@@ -26,6 +26,8 @@ import {
   getDailyPreset,
   getDailyStats,
   listDailyFeed,
+  readDailyPresetCache,
+  writeDailyPresetCache,
 } from '../services/daily';
 import DailyCard from '../components/daily/DailyCard';
 import DailyTimelineItem from '../components/daily/DailyTimelineItem';
@@ -86,7 +88,9 @@ const DailyPageInner: React.FC = () => {
   // ─── Preset (per-user persistent filter) ─────────────────────────
   // null = 还没拉到 preset, 暂不发起 feed 请求 (避免首次拉了 "全部" 又被 preset 覆盖)
   // []   = 用户未设置 preset, 等同 "展示全部" (与 backend 语义对齐)
-  const [presetSubtypes, setPresetSubtypes] = useState<DailySourceSubtype[] | null>(null);
+  const [presetSubtypes, setPresetSubtypes] = useState<DailySourceSubtype[] | null>(
+    () => readDailyPresetCache(),
+  );
   const [presetModalOpen, setPresetModalOpen] = useState(false);
 
   // 抽屉预览 (卡片点击不再跳出, 而是就地预览; 详见 docs §1)
@@ -113,16 +117,21 @@ const DailyPageInner: React.FC = () => {
     return () => window.clearTimeout(t);
   }, [searchInput]);
 
-  // 首次挂载: 优先拉用户 preset, 拉到后再触发 feed 加载
+  // 首次挂载: 有缓存则立即拉 feed；后台刷新 preset
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const r = await getDailyPreset();
-        if (!cancelled) setPresetSubtypes(r.source_subtypes);
+        if (cancelled) return;
+        writeDailyPresetCache(r.source_subtypes);
+        setPresetSubtypes((prev) => {
+          const prevKey = JSON.stringify(prev ?? []);
+          const nextKey = JSON.stringify(r.source_subtypes);
+          return prevKey === nextKey ? prev : r.source_subtypes;
+        });
       } catch {
-        // 拉不到 preset 不阻塞 Daily 体验, 兜底为空 (= 展示全部)
-        if (!cancelled) setPresetSubtypes([]);
+        if (!cancelled && presetSubtypes === null) setPresetSubtypes([]);
       }
     })();
     return () => {
@@ -149,20 +158,22 @@ const DailyPageInner: React.FC = () => {
 
   // ─── 加载首页 + 统计 ─────────────────────────────────
   const loadFirstPage = useCallback(async () => {
-    if (presetSubtypes === null) return; // 等 preset 拉到再加载
+    if (presetSubtypes === null) return; // 无缓存时等 preset 拉到再加载
     const seq = ++requestSeqRef.current;
     setLoading(true);
     try {
-      const [feed, statsResp] = await Promise.all([
-        listDailyFeed({ ...baseQuery, limit: PAGE_SIZE, offset: 0 }),
-        getDailyStats({ q: baseQuery.q }), // 统计不按 subtype 筛, 让用户看清各类总量
-      ]);
-      if (seq !== requestSeqRef.current) return; // 过期了
+      const feed = await listDailyFeed({ ...baseQuery, limit: PAGE_SIZE, offset: 0 });
+      if (seq !== requestSeqRef.current) return;
       setItems(feed.items);
       setTotal(feed.total);
       setHasMore(feed.has_more);
       offsetRef.current = feed.items.length;
-      setStats(statsResp.by_source);
+      // 统计不阻塞首屏：chip 数量稍后补齐即可
+      getDailyStats({ q: baseQuery.q })
+        .then((statsResp) => {
+          if (seq === requestSeqRef.current) setStats(statsResp.by_source);
+        })
+        .catch(() => {});
     } catch (e: any) {
       if (seq !== requestSeqRef.current) return;
       message.error(e?.message || 'Failed to load Daily feed');
@@ -348,6 +359,7 @@ const DailyPageInner: React.FC = () => {
   // 模式 A 约定: 临时 chip 选择必须落在新 preset 范围内, 否则视为脏选, 清除.
   // (preset 为空数组时无需限制 — 表示 "全部")
   const handlePresetSaved = useCallback((next: DailySourceSubtype[]) => {
+    writeDailyPresetCache(next);
     setPresetSubtypes(next);
     // 保存 preset 后清空 chip 临时筛选。否则若此前只点了例如 Twitter，
     // activeSubtypes 仍为 ['twitter']，effectiveSubtypes 只会传 twitter，

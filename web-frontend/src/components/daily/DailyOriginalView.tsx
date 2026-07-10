@@ -44,6 +44,10 @@ import TwitterOriginalView from '../shared/content-viewer/original-views/Twitter
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
 import ZsxqOriginalView from '../shared/content-viewer/original-views/ZsxqOriginalView';
 import SubstackOriginalView from '../shared/content-viewer/original-views/SubstackOriginalView';
+import {
+  getSubstackDisplayAuthorFromItem,
+  getSubstackPublicationDisplayNameFromItem,
+} from '../feed/SubstackFeedBadges';
 import type {
   DailyItemDetail,
   DailyItemDetailUpload,
@@ -175,10 +179,22 @@ const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({
             title={f.title}
             content={f.content}
             url={f.url}
-            publicationName={
-              typeof f.metadata?.publication_name === 'string' ? f.metadata.publication_name : f.author_name
+            publicationName={getSubstackPublicationDisplayNameFromItem({
+              author_name: f.author_name,
+              author_identifier: f.author_identifier ?? undefined,
+              content_id: detail.feed.content_id ?? undefined,
+              metadata: f.metadata ?? undefined,
+            })}
+            authorName={
+              typeof f.metadata?.author === 'string'
+                ? f.metadata.author
+                : getSubstackDisplayAuthorFromItem({
+                    author_name: f.author_name,
+                    author_identifier: f.author_identifier ?? undefined,
+                    content_id: detail.feed.content_id ?? undefined,
+                    metadata: f.metadata ?? undefined,
+                  })
             }
-            authorName={typeof f.metadata?.author === 'string' ? f.metadata.author : null}
             contentKind={
               typeof f.metadata?.content_kind === 'string' ? (f.metadata.content_kind as 'post' | 'note') : 'post'
             }

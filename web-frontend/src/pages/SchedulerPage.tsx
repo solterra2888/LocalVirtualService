@@ -887,7 +887,8 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
         (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
         (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
-          (sourceIdLower === 'substack_subscription' && taskType === 'substack_subscription') ||
+        (sourceIdLower === 'substack_subscription' && taskType === 'substack_subscription') ||
+        (sourceIdLower === 'weibo_subscription' && taskType === 'weibo_subscription') ||
         (sourceIdLower === 'twitter_author_summary' && taskType === 'twitter_author_summary') ||
         (sourceIdLower === 'youtube_author_summary' && taskType === 'youtube_author_summary') ||
         (sourceIdLower === 'theme_report' && taskType === 'theme_report') ||

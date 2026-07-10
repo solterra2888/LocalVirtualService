@@ -51,10 +51,19 @@ import AIAnalysisSection from '../shared/content-viewer/AIAnalysisSection';
 import AISummarySection from '../shared/content-viewer/AISummarySection';
 import CollapsibleOriginalSection from '../shared/content-viewer/CollapsibleOriginalSection';
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
+import SubstackOriginalView from '../shared/content-viewer/original-views/SubstackOriginalView';
+import {
+  getSubstackContentKind,
+  getSubstackDisplayAuthor,
+  getSubstackPublicationDisplayName,
+  isSubstackPaywalled,
+} from './SubstackFeedBadges';
 import type { FeedArticleViewMode } from './feedArticleViewMode';
 import {
   estimateSubscriptionContentReadingMinutes,
   getFeedEngagementCounts,
+  getFeedAuthorAvatarSrc,
+  feedListShowsAuthorAvatar,
 } from './feedUtils';
 import { weiboSafeAvatarSrc, weiboSafeImageUrl } from './weiboSafeImage';
 import { getModalStyles } from '../../utils/modalStyles';
@@ -580,19 +589,15 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
       <div>
         <Space>
           <Avatar
-            src={
-              (selectedContent.channel_type === 'twitter' || selectedContent.channel_type === 'weibo') && selectedContent.author_avatar
-                ? weiboSafeAvatarSrc(selectedContent.author_avatar)
-                : undefined
-            }
+            src={feedListShowsAuthorAvatar(selectedContent) ? getFeedAuthorAvatarSrc(selectedContent) : undefined}
             icon={
-              (selectedContent.channel_type === 'twitter' || selectedContent.channel_type === 'weibo') && selectedContent.author_avatar
+              feedListShowsAuthorAvatar(selectedContent)
                 ? undefined
                 : getChannelIcon(selectedContent.channel_type)
             }
             style={{
               backgroundColor:
-                (selectedContent.channel_type === 'twitter' || selectedContent.channel_type === 'weibo') && selectedContent.author_avatar
+                feedListShowsAuthorAvatar(selectedContent)
                   ? 'transparent'
                   : selectedContent.channel_type === 'news'
                     ? getNewsSourceColor(selectedContent.author_identifier)
@@ -609,7 +614,9 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                     ]
                       .filter(Boolean)
                       .join(' - ')
-                  : selectedContent.author_name || selectedContent.author_identifier}
+                  : selectedContent.channel_type === 'substack'
+                    ? getSubstackDisplayAuthor(selectedContent) || selectedContent.author_identifier
+                    : selectedContent.author_name || selectedContent.author_identifier}
               </Text>
             </div>
             <Text type="secondary" style={{ fontSize: 12 }}>
@@ -1103,7 +1110,38 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             </div>
           )}
 
-          {selectedContent.channel_type !== 'youtube' && selectedContent.channel_type !== 'news' && selectedContent.channel_type !== 'podcast' && (
+          {selectedContent.channel_type === 'substack' && (
+            <SubstackOriginalView
+              title={selectedContent.title}
+              content={selectedContent.content}
+              url={selectedContent.url}
+              publicationName={getSubstackPublicationDisplayName(selectedContent)}
+              authorName={
+                typeof selectedContent.metadata?.author === 'string'
+                  ? selectedContent.metadata.author
+                  : getSubstackDisplayAuthor(selectedContent)
+              }
+              contentKind={getSubstackContentKind(selectedContent) ?? 'post'}
+              isPaywalled={isSubstackPaywalled(selectedContent)}
+              noteType={
+                typeof selectedContent.metadata?.note_type === 'string'
+                  ? selectedContent.metadata.note_type
+                  : null
+              }
+              authorHandle={
+                typeof selectedContent.metadata?.author_handle === 'string'
+                  ? selectedContent.metadata.author_handle
+                  : null
+              }
+              themeMode={themeMode}
+              showTypeTags={false}
+            />
+          )}
+
+          {selectedContent.channel_type !== 'youtube' &&
+            selectedContent.channel_type !== 'news' &&
+            selectedContent.channel_type !== 'podcast' &&
+            selectedContent.channel_type !== 'substack' && (
             <FeedTweetContent
               content={selectedContent}
               themeColors={themeColors}

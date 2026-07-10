@@ -155,7 +155,7 @@ def _extract_note_text(body_json: Any) -> str:
 
 # ---------- 半标准化（对应 zsxq _extract_content / 脚本 post_to_row、note_item_to_row） ----------
 
-def _post_to_row(post: Any, pub_url: str, pub_name: str) -> Dict[str, Any]:
+def _post_to_row(post: Any, pub_url: str, pub_name: str, avatar: str = "") -> Dict[str, Any]:
     meta = post.get_metadata() or {}
     post_id = meta.get("id")
     content = post.get_content() or meta.get("truncated_body_text") or meta.get("description") or ""
@@ -174,6 +174,7 @@ def _post_to_row(post: Any, pub_url: str, pub_name: str) -> Dict[str, Any]:
         "audience": meta.get("audience") or "",
         "is_paywalled": bool(post.is_paywalled()),
         "content": content or "",
+        "author_avatar": avatar,
     }
 
 
@@ -208,6 +209,7 @@ def _note_to_row(item: Dict[str, Any], profile: Dict[str, Any]) -> Optional[Dict
         "note_type": note_type,
         "body_text": body_text,
         "published_at": published_at,
+        "author_avatar": profile.get("author_avatar") or "",
     }
 
 
@@ -480,7 +482,7 @@ class SubstackSubscriptionService:
                     """
                     SELECT substack_user_id, author_handle, author_name,
                            publication_url, credential_id, backfill_complete,
-                           recent_note_ids
+                           recent_note_ids, avatar
                     FROM substack_followed_authors
                     WHERE enabled = true
                     ORDER BY author_name, author_handle
@@ -503,6 +505,7 @@ class SubstackSubscriptionService:
     ) -> Tuple[int, int]:
         pub_url = pub["publication_url"]
         pub_name = pub["publication_name"] or meta.get("publication_name") or pub_url
+        pub_avatar = str(meta.get("avatar") or "").strip()
         backfill_done = bool(meta.get("backfill_complete", False))
         known_ids: List[int] = [int(x) for x in (meta.get("recent_post_ids") or [])]
 
@@ -512,7 +515,7 @@ class SubstackSubscriptionService:
             mode = "backfill"
             logger.info("[%d/%d] Substack %s backfill %d 篇", idx, total, pub_name, BACKFILL_POSTS)
             posts = client.get_posts(BACKFILL_POSTS)
-            rows = [_post_to_row(p, pub_url, pub_name) for p in posts]
+            rows = [_post_to_row(p, pub_url, pub_name, pub_avatar) for p in posts]
             head_ids = [r["post_id"] for r in rows if r.get("post_id") is not None][:20]
         else:
             mode = "incremental"
@@ -522,7 +525,7 @@ class SubstackSubscriptionService:
             rows = []
             head_ids = []
             for p in posts:
-                row = _post_to_row(p, pub_url, pub_name)
+                row = _post_to_row(p, pub_url, pub_name, pub_avatar)
                 if row.get("post_id") is not None:
                     head_ids.append(row["post_id"])
                     if row["post_id"] in known:
@@ -565,6 +568,7 @@ class SubstackSubscriptionService:
             "author_handle": handle,
             "author_name": author.get("author_name") or "",
             "publication_url": pub_url,
+            "author_avatar": author.get("avatar") or "",
         }
         user_ids = user_ids_by_pub.get(pub_url, [])
         known = {int(x) for x in (author.get("recent_note_ids") or [])}

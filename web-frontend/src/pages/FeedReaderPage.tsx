@@ -74,6 +74,7 @@ import {
 import { FEED_THEME_COLORS as THEME_COLORS } from '../components/feed/feedTheme';
 import {
   getFeedListHeadline,
+  getFeedListBodyExcerpt,
   getHeatLevelConfig,
   normalizeTwitterUsername,
   playNewItemsNotificationSound,
@@ -81,7 +82,10 @@ import {
   feedListPrimaryLineIsTweetBody,
   subscriptionContentMatchesSearchQuery,
   estimateSubscriptionContentReadingMinutes,
+  getFeedAuthorAvatarSrc,
+  feedListShowsAuthorAvatar,
 } from '../components/feed/feedUtils';
+import SubstackFeedBadges, { getFeedListAuthorLabel } from '../components/feed/SubstackFeedBadges';
 import { weiboSafeAvatarSrc } from '../components/feed/weiboSafeImage';
 import {
   getChannelColor,
@@ -1783,13 +1787,14 @@ const FeedReaderPageInner: React.FC = () => {
                                   overflow: 'hidden',
                                 }}
                               >
-                                {content.content}
+                                {getFeedListBodyExcerpt(content)}
                               </Text>
                             )}
                           </div>
 
                           {/* 末行：类型图标 + 作者头像 + 作者名 · 时间 · 热度，始终可见，在限高区域外 */}
-                          <Space size={6}>
+                          <Space size={6} wrap>
+                            <SubstackFeedBadges content={content} />
                             {content.is_retweet && (
                               <Tooltip title="Retweet">
                                 <RetweetOutlined style={{ color: '#00ba7c', fontSize: 12 }} />
@@ -1805,11 +1810,11 @@ const FeedReaderPageInner: React.FC = () => {
                                 <CommentOutlined style={{ color: '#657786', fontSize: 12 }} />
                               </Tooltip>
                             )}
-                            {/* Twitter / 微博 作者头像 */}
-                            {(content.channel_type === 'twitter' || content.channel_type === 'weibo') && content.author_avatar && (
+                            {/* Twitter / 微博 / Substack 作者头像 */}
+                            {feedListShowsAuthorAvatar(content) && (
                               <Avatar
                                 size={16}
-                                src={weiboSafeAvatarSrc(content.author_avatar)}
+                                src={getFeedAuthorAvatarSrc(content)}
                                 style={{ flexShrink: 0 }}
                               />
                             )}
@@ -1823,13 +1828,7 @@ const FeedReaderPageInner: React.FC = () => {
                               }
                             >
                               <Text type="secondary" style={{ fontSize: 12 }}>
-                                {content.channel_type === 'youtube' &&
-                                content.metadata?.show_name
-                                  ? content.metadata.show_name
-                                  : content.author_name ||
-                                    (content.author_identifier
-                                      ? `@${content.author_identifier}`
-                                      : '')}
+                                {getFeedListAuthorLabel(content)}
                               </Text>
                             </Tooltip>
                             <Text type="secondary" style={{ fontSize: 12 }}>·</Text>

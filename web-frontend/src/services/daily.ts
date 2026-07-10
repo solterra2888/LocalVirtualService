@@ -188,6 +188,31 @@ export interface DailyPresetUpdate {
   source_subtypes: DailySourceSubtype[];
 }
 
+const DAILY_PRESET_CACHE_KEY = 'gh_daily_preset_v1';
+
+/** sessionStorage 缓存 preset，避免每次进入 Daily 都等 preset 接口再拉 feed。 */
+export function readDailyPresetCache(): DailySourceSubtype[] | null {
+  try {
+    const raw = sessionStorage.getItem(DAILY_PRESET_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter((s): s is DailySourceSubtype =>
+      ALL_DAILY_SOURCE_SUBTYPES.includes(s as DailySourceSubtype),
+    );
+  } catch {
+    return null;
+  }
+}
+
+export function writeDailyPresetCache(sourceSubtypes: DailySourceSubtype[]): void {
+  try {
+    sessionStorage.setItem(DAILY_PRESET_CACHE_KEY, JSON.stringify(sourceSubtypes));
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
 /** 读取当前用户的 Daily preset; 未设置时返回 source_subtypes: []. */
 export async function getDailyPreset(): Promise<DailyPresetResponse> {
   return api.get<DailyPresetResponse>('/daily/preset');

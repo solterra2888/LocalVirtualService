@@ -365,21 +365,7 @@ _UPLOAD_SQL = """
             )
           ELSE NULL
         END                                           AS shared_to_recipients_raw,
-        COALESCE(
-            (SELECT json_agg(json_build_object(
-                'theme_id', ctm.theme_id,
-                'theme_name', ite.theme_name,
-                'category', ite.category,
-                'match_mode', ctm.match_mode,
-                'confidence', ctm.confidence,
-                'matched_tickers', ctm.matched_tickers
-            ) ORDER BY ctm.confidence DESC)
-            FROM content_theme_matches ctm
-            JOIN investment_theme_embeddings ite ON ite.theme_id = ctm.theme_id
-            WHERE ctm.content_type = 'upload'
-              AND ctm.content_id = fpd.id
-            ), '[]'::json
-        )                                               AS matched_themes_raw
+        '[]'::json                                    AS matched_themes_raw
     FROM file_processing_details fpd
     JOIN processing_stats ps ON fpd.processing_stats_id = ps.id
     LEFT JOIN file_tags ft ON ft.file_id = fpd.id
@@ -423,7 +409,11 @@ _FEED_SQL = """
         LEFT(COALESCE(sc.content, sc.transcript, ''), 400) AS content_snippet,
         sc.author_name                                AS author_name,
         sc.author_identifier                          AS author_identifier,
-        sc.author_avatar                              AS author_avatar,
+        COALESCE(
+            NULLIF(TRIM(sc.author_avatar), ''),
+            NULLIF(TRIM(sp.avatar), ''),
+            NULLIF(TRIM(sfa.avatar), '')
+        )                                             AS author_avatar,
         sc.url                                        AS external_url,
         sct.sector                                    AS sector,
         sct.industry                                  AS industry,
@@ -437,24 +427,16 @@ _FEED_SQL = """
         NULL::integer                                 AS shared_by_user_id,
         NULL::text                                    AS shared_by_avatar_url_raw,
         NULL::json                                    AS shared_to_recipients_raw,
-        COALESCE(
-            (SELECT json_agg(json_build_object(
-                'theme_id', ctm.theme_id,
-                'theme_name', ite.theme_name,
-                'category', ite.category,
-                'match_mode', ctm.match_mode,
-                'confidence', ctm.confidence,
-                'matched_tickers', ctm.matched_tickers
-            ) ORDER BY ctm.confidence DESC)
-            FROM content_theme_matches ctm
-            JOIN investment_theme_embeddings ite ON ite.theme_id = ctm.theme_id
-            WHERE ctm.content_type = 'feed'
-              AND ctm.content_id = sc.id
-            ), '[]'::json
-        )                                               AS matched_themes_raw
+        '[]'::json                                    AS matched_themes_raw
     FROM subscription_content sc
     LEFT JOIN subscription_content_tags sct
         ON sct.subscription_content_id = sc.id
+    LEFT JOIN substack_publications sp
+        ON sc.channel_type = 'substack'
+       AND sp.publication_url = sc.author_identifier
+    LEFT JOIN substack_followed_authors sfa
+        ON sc.channel_type = 'substack'
+       AND sfa.publication_url = sc.author_identifier
     WHERE %(user_id)s = ANY(sc.user_ids)
       AND sc.published_at IS NOT NULL
       AND EXISTS (
@@ -725,6 +707,51 @@ def _parse_shared_to_recipients_json(raw: Any) -> List[DailyShareRecipient]:
     return out
 
 
+def _batch_fetch_matched_themes(
+    cursor,
+    feed_ids: List[int],
+    upload_ids: List[int],
+) -> Dict[tuple, List[Dict[str, Any]]]:
+    """列表页仅对当前页 item 批量拉 matched_themes，避免 correlated subquery 扫全表。"""
+    out: Dict[tuple, List[Dict[str, Any]]] = {}
+    if not feed_ids and not upload_ids:
+        return out
+
+    clauses: List[str] = []
+    params: List[Any] = []
+    if feed_ids:
+        clauses.append("(ctm.content_type = 'feed' AND ctm.content_id = ANY(%s))")
+        params.append(feed_ids)
+    if upload_ids:
+        clauses.append("(ctm.content_type = 'upload' AND ctm.content_id = ANY(%s))")
+        params.append(upload_ids)
+    where = " OR ".join(clauses)
+
+    cursor.execute(
+        f"""
+        SELECT
+            ctm.content_type,
+            ctm.content_id,
+            json_agg(json_build_object(
+                'theme_id', ctm.theme_id,
+                'theme_name', ite.theme_name,
+                'category', ite.category,
+                'match_mode', ctm.match_mode,
+                'confidence', ctm.confidence,
+                'matched_tickers', ctm.matched_tickers
+            ) ORDER BY ctm.confidence DESC) AS themes_raw
+        FROM content_theme_matches ctm
+        JOIN investment_theme_embeddings ite ON ite.theme_id = ctm.theme_id
+        WHERE {where}
+        GROUP BY ctm.content_type, ctm.content_id
+        """,
+        params,
+    )
+    for content_type, content_id, themes_raw in cursor.fetchall():
+        out[(content_type, int(content_id))] = _parse_matched_themes(themes_raw)
+    return out
+
+
 def _parse_matched_themes(raw: Any) -> List[Dict[str, Any]]:
     """解析 scalar subquery 返回的 matched_themes JSON 数组。"""
     if raw is None:
@@ -760,6 +787,7 @@ def _parse_matched_themes(raw: Any) -> List[Dict[str, Any]]:
 def _row_to_item(
     row: tuple,
     subscription_id_map: Dict[tuple, int],
+    matched_themes_override: Optional[List[Dict[str, Any]]] = None,
 ) -> DailyFeedItem:
     """SQL 行 → DailyFeedItem。列序见上面 SQL 注释。"""
     (
@@ -857,7 +885,9 @@ def _row_to_item(
         shared_to=_parse_shared_to_recipients_json(shared_to_recipients_raw)
         if source == "upload"
         else [],
-        matched_themes=_parse_matched_themes(matched_themes_raw),
+        matched_themes=matched_themes_override
+        if matched_themes_override is not None
+        else _parse_matched_themes(matched_themes_raw),
     )
 
 
@@ -968,7 +998,18 @@ def list_daily_feed(
             cursor, current_user.user_id, feed_channel_identifiers
         )
 
-        items = [_row_to_item(row, sub_id_map) for row in rows]
+        feed_ids = [int(r[2]) for r in rows if r[0] == "feed"]
+        upload_ids = [int(r[2]) for r in rows if r[0] == "upload"]
+        theme_map = _batch_fetch_matched_themes(cursor, feed_ids, upload_ids)
+
+        items = [
+            _row_to_item(
+                row,
+                sub_id_map,
+                theme_map.get((row[0], int(row[2]))),
+            )
+            for row in rows
+        ]
 
         return DailyFeedResponse(
             items=items,
@@ -1559,7 +1600,12 @@ def _fetch_feed_detail(
         SELECT
             sc.id, sc.channel_type, sc.content_id,
             sc.title, sc.content,
-            sc.author_name, sc.author_identifier, sc.author_avatar,
+            sc.author_name, sc.author_identifier,
+            COALESCE(
+                NULLIF(TRIM(sc.author_avatar), ''),
+                NULLIF(TRIM(sp.avatar), ''),
+                NULLIF(TRIM(sfa.avatar), '')
+            ) AS author_avatar,
             sc.url, sc.media_urls, sc.published_at,
             sc.engagement_count, sc.view_count,
             sc.metadata, sc.heat_level,
@@ -1580,6 +1626,12 @@ def _fetch_feed_detail(
         LEFT JOIN subscription_content_user_summaries scus
             ON scus.subscription_content_id = sc.id
            AND scus.user_id = %s
+        LEFT JOIN substack_publications sp
+            ON sc.channel_type = 'substack'
+           AND sp.publication_url = sc.author_identifier
+        LEFT JOIN substack_followed_authors sfa
+            ON sc.channel_type = 'substack'
+           AND sfa.publication_url = sc.author_identifier
         WHERE sc.id = %s
           AND %s = ANY(sc.user_ids)
           AND EXISTS (

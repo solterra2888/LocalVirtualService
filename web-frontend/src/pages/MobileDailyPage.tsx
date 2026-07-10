@@ -19,6 +19,8 @@ import {
   getDailyPreset,
   getDailyStats,
   listDailyFeed,
+  readDailyPresetCache,
+  writeDailyPresetCache,
 } from '../services/daily';
 import DailyCard from '../components/daily/DailyCard';
 import SourceBadge from '../components/daily/SourceBadge';
@@ -93,7 +95,9 @@ const MobileDailyPageInner: React.FC = () => {
   const [activeSubtypes, setActiveSubtypes] = useState<DailySourceSubtype[]>([]);
 
   // Preset (per-user persistent filter) — null = 还没拉到, [] = 未设置 (=全部)
-  const [presetSubtypes, setPresetSubtypes] = useState<DailySourceSubtype[] | null>(null);
+  const [presetSubtypes, setPresetSubtypes] = useState<DailySourceSubtype[] | null>(
+    () => readDailyPresetCache(),
+  );
   const [presetModalOpen, setPresetModalOpen] = useState(false);
 
   // 抽屉预览 (卡片点击不再跳转, 而是就地打开 bottom-sheet 预览; 详见 docs §1)
@@ -113,15 +117,21 @@ const MobileDailyPageInner: React.FC = () => {
     return () => window.clearTimeout(t);
   }, [searchInput]);
 
-  // 首次挂载: 优先拉 preset, 拉到再加载 feed
+  // 首次挂载: 有缓存则立即拉 feed；后台刷新 preset
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const r = await getDailyPreset();
-        if (!cancelled) setPresetSubtypes(r.source_subtypes);
+        if (cancelled) return;
+        writeDailyPresetCache(r.source_subtypes);
+        setPresetSubtypes((prev) => {
+          const prevKey = JSON.stringify(prev ?? []);
+          const nextKey = JSON.stringify(r.source_subtypes);
+          return prevKey === nextKey ? prev : r.source_subtypes;
+        });
       } catch {
-        if (!cancelled) setPresetSubtypes([]);
+        if (!cancelled && presetSubtypes === null) setPresetSubtypes([]);
       }
     })();
     return () => {
@@ -145,20 +155,21 @@ const MobileDailyPageInner: React.FC = () => {
   );
 
   const loadFirstPage = useCallback(async () => {
-    if (presetSubtypes === null) return; // 等 preset 拉到
+    if (presetSubtypes === null) return;
     const seq = ++requestSeqRef.current;
     setLoading(true);
     try {
-      const [feed, statsResp] = await Promise.all([
-        listDailyFeed({ ...baseQuery, limit: PAGE_SIZE, offset: 0 }),
-        getDailyStats({ q: baseQuery.q }),
-      ]);
+      const feed = await listDailyFeed({ ...baseQuery, limit: PAGE_SIZE, offset: 0 });
       if (seq !== requestSeqRef.current) return;
       setItems(feed.items);
       setTotal(feed.total);
       setHasMore(feed.has_more);
       offsetRef.current = feed.items.length;
-      setStats(statsResp.by_source);
+      getDailyStats({ q: baseQuery.q })
+        .then((statsResp) => {
+          if (seq === requestSeqRef.current) setStats(statsResp.by_source);
+        })
+        .catch(() => {});
     } catch (e: any) {
       if (seq !== requestSeqRef.current) return;
       message.error(e?.message || 'Failed to load Daily');
@@ -302,6 +313,7 @@ const MobileDailyPageInner: React.FC = () => {
 
   // Preset 保存回调: 同步状态 + 清除落在新 preset 之外的临时 chip 选择
   const handlePresetSaved = useCallback((next: DailySourceSubtype[]) => {
+    writeDailyPresetCache(next);
     setPresetSubtypes(next);
     // 与桌面端一致：保存 preset 后清空 chip 临时筛选，避免仍只传部分 source_subtypes
     setActiveSubtypes([]);
