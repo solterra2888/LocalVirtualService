@@ -64,6 +64,7 @@ import {
   estimateSubscriptionContentReadingMinutes,
 } from '../components/feed/feedUtils';
 import FeedSourceIconPicker, { parsePickerValue } from '../components/feed/FeedSourceIconPicker';
+import { weiboSafeAvatarSrc } from '../components/feed/weiboSafeImage';
 import { getModalStyles } from '../utils/modalStyles';
 import SubscriptionDigestButton from '../components/feed/SubscriptionDigestButton';
 import {
@@ -865,6 +866,10 @@ const MobileFeedsListView: React.FC = () => {
             renderItem={(sub: Subscription) => {
               const newsFavicon =
                 sub.channel_type === 'news' ? getNewsSourceFaviconUrl(sub.channel_identifier) : undefined;
+              const channelAvatarSrc =
+                ['twitter', 'weibo', 'substack'].includes(sub.channel_type) && sub.channel_avatar
+                  ? weiboSafeAvatarSrc(sub.channel_avatar)
+                  : undefined;
               return (
               <List.Item style={{ padding: '8px 0', border: 'none' }}>
                 <div
@@ -884,19 +889,23 @@ const MobileFeedsListView: React.FC = () => {
                 >
                   <Avatar
                     size={40}
-                    src={newsFavicon}
+                    src={channelAvatarSrc ?? newsFavicon}
                     icon={
-                      sub.channel_type === 'news' && newsFavicon
+                      channelAvatarSrc
                         ? undefined
-                        : getChannelIcon(sub.channel_type)
+                        : sub.channel_type === 'news' && newsFavicon
+                          ? undefined
+                          : getChannelIcon(sub.channel_type)
                     }
                     style={{
                       backgroundColor:
-                        sub.channel_type === 'news'
-                          ? newsFavicon
-                            ? '#fff'
-                            : getNewsSourceColor(sub.channel_identifier)
-                          : getChannelColor(sub.channel_type),
+                        channelAvatarSrc
+                          ? 'transparent'
+                          : sub.channel_type === 'news'
+                            ? newsFavicon
+                              ? '#fff'
+                              : getNewsSourceColor(sub.channel_identifier)
+                            : getChannelColor(sub.channel_type),
                     }}
                   />
                   <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
@@ -969,7 +978,7 @@ const MobileFeedsListView: React.FC = () => {
         cancelText="Cancel"
         okButtonProps={{ loading: isSubmittingSubscription }}
         cancelButtonProps={{ disabled: isSubmittingSubscription }}
-        width={520}
+        width="min(900px, calc(100vw - 32px))"
         centered
         destroyOnClose
         maskClosable={!isSubmittingSubscription}

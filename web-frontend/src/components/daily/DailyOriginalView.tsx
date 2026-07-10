@@ -15,6 +15,7 @@
  *   news       → NewsOriginalView       (纯文本 + Read original)
  *   youtube_feed → YoutubeFeedOriginalBlock (YouTube embed + 描述; 字幕见抽屉 Transcript Tab)
  *   zhishixingqiu → ZsxqOriginalView (话题正文 + 图片 + 附件)
+ *   substack      → SubstackOriginalView (文章 HTML / 动态纯文本)
  *
  * 资源 (image/audio/pdf 的 file_url + audio/youtube 的 ASR JSON) 通过
  *   filesAPI.getOriginalFileInfo(file_id)

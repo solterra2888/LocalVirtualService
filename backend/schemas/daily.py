@@ -40,6 +40,7 @@ SourceSubtype = Literal[
     "youtube_feed",  # 区分 Upload youtube 与 Feed youtube
     "zhishixingqiu",  # 知识星球订阅
     "weibo",  # 微博订阅
+    "substack",  # Substack 订阅（文章 post + 动态 note）
 ]
 
 
@@ -252,7 +253,10 @@ class DailyItemDetailFeed(BaseModel):
     """
 
     content_db_id: int = Field(..., description="subscription_content.id")
-    channel_type: str = Field(..., description="twitter / youtube / news / rss / zhishixingqiu")
+    channel_type: str = Field(
+        ...,
+        description="twitter / youtube / news / rss / zhishixingqiu / substack / weibo / podcast",
+    )
     content_id: Optional[str] = Field(
         None, description="平台原生 ID (Twitter tweet_id / YouTube video_id / news guid)"
     )

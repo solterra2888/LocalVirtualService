@@ -77,3 +77,44 @@ class TestBuildFilterClausesPodcast:
         assert "podcast" in params["feed_subtypes"]
         assert "twitter" in params["feed_subtypes"]
         assert "twitter" not in params["upload_subtypes"]
+
+
+class TestFeedChannelTypeMapSubstack:
+    def test_substack_mapped(self):
+        from backend.api.daily import _FEED_CHANNEL_TYPE_MAP
+        assert _FEED_CHANNEL_TYPE_MAP.get("substack") == "substack"
+
+
+class TestBuildFilterClausesSubstack:
+    def _call(self, source_subtypes):
+        from backend.api.daily import _build_filter_clauses
+        return _build_filter_clauses(
+            date_from=None,
+            date_to=None,
+            source_subtypes=source_subtypes,
+            q=None,
+            tickers=None,
+        )
+
+    def test_substack_queries_feed_arm_only(self):
+        _, _, params = self._call(["substack"])
+        assert params["feed_subtypes"] == ("substack",)
+        assert "upload_subtypes" not in params
+
+    def test_mixed_zhishixingqiu_and_substack(self):
+        _, _, params = self._call(["zhishixingqiu", "substack"])
+        assert set(params["feed_subtypes"]) == {"zhishixingqiu", "substack"}
+
+
+class TestExpandPresetForLegacyFeeds:
+    def test_adds_substack_when_legacy_feed_preset(self):
+        from backend.api.daily import _expand_preset_for_legacy_feeds
+        legacy = ["twitter", "news", "youtube_feed", "zhishixingqiu", "weibo"]
+        expanded = _expand_preset_for_legacy_feeds(legacy)
+        assert "substack" in expanded
+        assert expanded.index("substack") == expanded.index("zhishixingqiu") + 1
+
+    def test_noop_when_substack_already_present(self):
+        from backend.api.daily import _expand_preset_for_legacy_feeds
+        preset = ["zhishixingqiu", "substack"]
+        assert _expand_preset_for_legacy_feeds(preset) == preset

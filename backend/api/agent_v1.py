@@ -73,7 +73,8 @@ def agent_daily_feed(
         None,
         description=(
             "Comma-separated source types to include. "
-            "Values: twitter, youtube, youtube_feed, news, zhishixingqiu, pdf, image, audio, text, podcast. "
+            "Values: twitter, youtube, youtube_feed, news, zhishixingqiu, substack, weibo, "
+            "pdf, image, audio, text, podcast. "
             "Omit to use your web-app preset."
         ),
     ),

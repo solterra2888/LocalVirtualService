@@ -618,3 +618,5 @@ class TestMapAgentSource:
         assert self._call("feed", "youtube_feed") == "youtube"
         assert self._call("feed", "news") == "news"
         assert self._call("feed", "zhishixingqiu") == "zhishixingqiu"
+        assert self._call("feed", "substack") == "substack"
+        assert self._call("feed", "weibo") == "weibo"

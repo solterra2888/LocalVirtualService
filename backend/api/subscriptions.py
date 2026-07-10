@@ -172,12 +172,20 @@ async def get_substack_publications(
     current_user: TokenData = Depends(get_current_user)
 ):
     """返回可供用户订阅的 Substack publication 列表（订阅源并集中 enabled=true）。"""
-    from backend.services.substack_credential_service import SubstackCredentialService
+    from backend.services.substack_credential_service import (
+        SubstackCredentialService,
+        resolve_publication_display_name,
+    )
     pubs = SubstackCredentialService().list_publications(enabled_only=True)
     return [
         {
             "publication_url": p["publication_url"],
-            "publication_name": p["publication_name"] or p["publication_url"],
+            "publication_name": resolve_publication_display_name(
+                publication_name=p.get("publication_name"),
+                author_name=p.get("author_name"),
+                publication_url=p["publication_url"],
+            ),
+            "avatar": (p.get("avatar") or "").strip() or None,
             "is_subscribed": p.get("is_subscribed", False),
             "is_followed": p.get("is_followed", False),
         }
@@ -262,6 +270,36 @@ async def get_user_subscriptions(
         
         cursor.close()
         conn.close()
+
+        # Substack：若 channel_name / channel_avatar 缺失，从 publication 元数据补全（不改库，兼容历史订阅）
+        substack_subs = [s for s in subscriptions if s.channel_type == "substack"]
+        if substack_subs:
+            from backend.services.substack_credential_service import (
+                SubstackCredentialService,
+                resolve_publication_display_name,
+            )
+
+            svc = SubstackCredentialService()
+            pub_by_url = {p["publication_url"]: p for p in svc.list_publications(enabled_only=False)}
+            for sub in substack_subs:
+                pub = pub_by_url.get(sub.channel_identifier)
+                if not pub:
+                    continue
+                stored_name = (sub.channel_name or "").strip()
+                if not stored_name or stored_name.lower().startswith("https://"):
+                    resolved = resolve_publication_display_name(
+                        publication_name=pub.get("publication_name"),
+                        author_name=pub.get("author_name"),
+                        publication_url=sub.channel_identifier,
+                    )
+                    if resolved:
+                        sub.channel_name = resolved
+                if not (sub.channel_avatar or "").strip():
+                    avatar = (pub.get("avatar") or "").strip()
+                    if not avatar:
+                        avatar = svc.ensure_publication_avatar(sub.channel_identifier)
+                    if avatar:
+                        sub.channel_avatar = avatar
         
         logger.info(f"Retrieved {len(subscriptions)} subscriptions for user {user_id}")
         return subscriptions
@@ -593,6 +631,7 @@ async def create_subscription(
             from backend.services.substack_credential_service import (
                 SubstackCredentialService,
                 normalize_publication_url,
+                resolve_publication_display_name,
             )
             try:
                 pub_url = normalize_publication_url(request.channel_identifier.strip())
@@ -604,15 +643,25 @@ async def create_subscription(
             request.channel_identifier = pub_url  # 标准化为根 URL
 
             pubs = SubstackCredentialService().list_publications(enabled_only=True)
-            pub_map = {p["publication_url"]: p["publication_name"] for p in pubs}
-            if pub_url not in pub_map:
+            pub_row = next((p for p in pubs if p["publication_url"] == pub_url), None)
+            if pub_row is None:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Substack publication '{pub_url}' 不在可订阅列表中，请联系管理员同步订阅源",
                 )
             if not request.channel_name:
-                request.channel_name = pub_map[pub_url]
-            logger.info(f"Substack 验证成功 | publication_url={pub_url} | name={request.channel_name}")
+                request.channel_name = resolve_publication_display_name(
+                    publication_name=pub_row.get("publication_name"),
+                    author_name=pub_row.get("author_name"),
+                    publication_url=pub_url,
+                )
+            avatar = (pub_row.get("avatar") or "").strip()
+            if not avatar:
+                avatar = SubstackCredentialService().ensure_publication_avatar(pub_url)
+            channel_avatar = avatar or None
+            logger.info(
+                f"Substack 验证成功 | publication_url={pub_url} | name={request.channel_name} | avatar={bool(channel_avatar)}"
+            )
 
         conn = db_manager.get_connection()
         cursor = conn.cursor()

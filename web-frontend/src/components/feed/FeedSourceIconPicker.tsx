@@ -31,6 +31,7 @@ interface ZsxqGroup {
 interface SubstackPublication {
   publication_url: string;
   publication_name: string;
+  avatar?: string | null;
 }
 
 const PLATFORMS: PlatformOption[] = [
@@ -259,6 +260,7 @@ const FeedSourceIconPicker: React.FC<{
             {substackPubs.map((pub) => {
               const tileValue = `substack:${pub.publication_url}`;
               const selected = value === tileValue;
+              const avatarUrl = pub.avatar || undefined;
               return (
                 <Tooltip key={pub.publication_url} title={`${pub.publication_name} — ${pub.publication_url}`}>
                   <div
@@ -276,7 +278,21 @@ const FeedSourceIconPicker: React.FC<{
                       cursor: disabled ? 'not-allowed' : 'pointer',
                     }}
                   >
-                    <span style={{ fontSize: 22, marginBottom: 4 }}><ReadOutlined /></span>
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt=""
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          objectFit: 'cover',
+                          marginBottom: 4,
+                        }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: 22, marginBottom: 4 }}><ReadOutlined /></span>
+                    )}
                     <span
                       style={{
                         display: 'block',

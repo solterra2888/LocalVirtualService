@@ -820,8 +820,21 @@ class DailyMarketReportService:
                 youtube_row = cursor.fetchone()
                 if youtube_row and youtube_row[0]:
                     subscription_markdowns.append(youtube_row[0])
+
+                # Substack
+                cursor.execute(
+                    """
+                    SELECT report_content
+                    FROM substack_user_reports
+                    WHERE user_id = %s AND report_date = %s AND status = 'completed'
+                    """,
+                    (user_id_int, report_date),
+                )
+                substack_row = cursor.fetchone()
+                if substack_row and substack_row[0]:
+                    subscription_markdowns.append(substack_row[0])
             else:
-                zsxq_row = twitter_row = youtube_row = None
+                zsxq_row = twitter_row = youtube_row = substack_row = None
 
             # 拼接三份 Markdown，用分隔线隔开，渲染一次
             if subscription_markdowns:
@@ -833,10 +846,11 @@ class DailyMarketReportService:
             logger.info(
                 f"Summaries: the_close={'✓' if the_close_html else '✗'}, "
                 f"closing_bell={'✓' if closing_bell_html else '✗'}, "
-                f"subscriptions(zsxq/tw/yt)="
+                f"subscriptions(zsxq/tw/yt/ss)="
                 f"{'✓' if zsxq_row and zsxq_row[0] else '✗'}/"
                 f"{'✓' if twitter_row and twitter_row[0] else '✗'}/"
-                f"{'✓' if youtube_row and youtube_row[0] else '✗'}"
+                f"{'✓' if youtube_row and youtube_row[0] else '✗'}/"
+                f"{'✓' if substack_row and substack_row[0] else '✗'}"
             )
 
             # 5. 渲染 HTML

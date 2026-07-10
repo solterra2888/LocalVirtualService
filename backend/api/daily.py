@@ -136,6 +136,11 @@ _LEGACY_UPLOAD_SUBTYPES_NO_PODCAST = frozenset(
     {"document", "image", "audio", "youtube", "web", "text"}
 )
 
+# Substack 上线前 Daily Feeds preset 常见组合（含知识星球，不含 substack）
+_LEGACY_FEED_SUBTYPES_NO_SUBSTACK = frozenset(
+    {"twitter", "news", "youtube_feed", "zhishixingqiu", "weibo"}
+)
+
 
 def _expand_preset_for_legacy_full_upload(subtypes: List[str]) -> List[str]:
     """若 preset 已包含上述 6 类 Upload 但未含 podcast，自动并入 podcast。
@@ -158,6 +163,33 @@ def _expand_preset_for_legacy_full_upload(subtypes: List[str]) -> List[str]:
     if not inserted:
         out.append("podcast")
     return out
+
+
+def _expand_preset_for_legacy_feeds(subtypes: List[str]) -> List[str]:
+    """若 preset 已含知识星球等旧版全量 Feeds 但未含 substack，自动并入 substack。
+
+    避免 Substack 上线后，旧 preset 用户 Daily 时间轴看不到 Substack 内容。
+    """
+    if not subtypes or "substack" in subtypes:
+        return subtypes
+    if not _LEGACY_FEED_SUBTYPES_NO_SUBSTACK.issubset(frozenset(subtypes)):
+        return subtypes
+    out: List[str] = []
+    inserted = False
+    for s in subtypes:
+        out.append(s)
+        if s == "zhishixingqiu" and not inserted:
+            out.append("substack")
+            inserted = True
+    if not inserted:
+        out.append("substack")
+    return out
+
+
+def _expand_preset_subtypes(subtypes: List[str]) -> List[str]:
+    """合并 Upload / Feed 两类 legacy preset 自动扩展。"""
+    subtypes = _expand_preset_for_legacy_full_upload(subtypes)
+    return _expand_preset_for_legacy_feeds(subtypes)
 
 
 def get_db() -> DatabaseManager:
@@ -840,7 +872,7 @@ def list_daily_feed(
         None,
         description=(
             "按来源子类型过滤（多选）: document, image, audio, youtube, web, text, podcast, "
-            "twitter, news, youtube_feed, zhishixingqiu"
+            "twitter, news, youtube_feed, zhishixingqiu, substack, weibo"
         ),
     ),
     q: Optional[str] = Query(None, max_length=200, description="标题/摘要/正文模糊搜索"),
@@ -1215,7 +1247,7 @@ def get_daily_preset(
         raw = list(row[0]) if row and row[0] else []
         # 防御性过滤：剔除非法值（schema 升级或脏数据兜底）
         cleaned = [s for s in raw if s in ALL_SOURCE_SUBTYPES]
-        expanded = _expand_preset_for_legacy_full_upload(cleaned)
+        expanded = _expand_preset_subtypes(cleaned)
         return DailyPresetResponse(source_subtypes=expanded)  # type: ignore[arg-type]
     except Exception as exc:
         logger.error(f"[daily.get_daily_preset] 读取失败: {exc}")

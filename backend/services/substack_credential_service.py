@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 
 import psycopg2
 import psycopg2.extras
+import requests
 
 from backend.utils.database_config import get_database_config
 from backend.utils.env_loader import load_project_env
@@ -58,7 +59,16 @@ def encrypt_cookie(cookie_json: str) -> str:
 
 
 def decrypt_cookie(encrypted: str) -> str:
-    return _get_fernet().decrypt(encrypted.encode()).decode()
+    try:
+        return _get_fernet().decrypt(encrypted.encode()).decode()
+    except Exception as exc:
+        from cryptography.fernet import InvalidToken
+        if isinstance(exc, InvalidToken):
+            raise RuntimeError(
+                "Substack 凭证解密失败：SUBSTACK_COOKIE_ENC_KEY 与录入时不一致。"
+                "请删除该凭证后重新录入 Cookie。"
+            ) from exc
+        raise
 
 
 # ---------- Cookie 清洗（双值） ----------
@@ -193,6 +203,80 @@ def normalize_publication_url(value: str) -> str:
     return f"https://{host}"
 
 
+def resolve_publication_display_name(
+    *,
+    publication_name: Optional[str] = None,
+    author_name: Optional[str] = None,
+    publication_url: Optional[str] = None,
+) -> str:
+    """Feeds 展示名：优先作者名（如「徐老猫」），其次刊物名，最后 URL。"""
+    for candidate in (author_name, publication_name, publication_url):
+        if candidate and str(candidate).strip():
+            return str(candidate).strip()
+    return publication_url or ""
+
+
+def normalize_avatar_url(value: Optional[str]) -> str:
+    """规范化头像 URL（去掉 query，与微博订阅逻辑一致）。"""
+    s = (value or "").strip()
+    if not s:
+        return ""
+    return s.split("?")[0]
+
+
+def _avatar_from_publication_api(pub: Dict[str, Any]) -> str:
+    """从 subscriptions / publication API 对象提取 logo / 作者头像。"""
+    for key in ("author_photo_url", "logo_url", "cover_photo_url"):
+        avatar = normalize_avatar_url(pub.get(key))
+        if avatar:
+            return avatar
+    return ""
+
+
+_PUBLIC_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
+
+
+def fetch_publication_avatar_public(pub_url: str) -> str:
+    """通过公开 API 拉取刊物主作者头像（无需 Cookie）。
+
+    GET {publication_url}/api/v1/publication/users/ranked?public=true
+    """
+    try:
+        url = normalize_publication_url(pub_url)
+    except ValueError:
+        return ""
+    if url == "https://substack.com":
+        return ""
+
+    endpoint = f"{url.rstrip('/')}/api/v1/publication/users/ranked?public=true"
+    try:
+        resp = requests.get(endpoint, headers=_PUBLIC_HEADERS, timeout=20)
+        resp.raise_for_status()
+        authors = resp.json()
+    except Exception as exc:
+        logger.warning("Substack 公开头像拉取失败 url=%s: %s", url, exc)
+        return ""
+
+    if not isinstance(authors, list):
+        return ""
+
+    for author in authors:
+        if author.get("is_byline_only"):
+            continue
+        avatar = normalize_avatar_url(author.get("photo_url"))
+        if avatar:
+            return avatar
+    if authors:
+        return normalize_avatar_url(authors[0].get("photo_url"))
+    return ""
+
+
 def publication_url_from_api(pub: Dict[str, Any]) -> Optional[str]:
     """从 subscriptions API 的 publication 对象解析根 URL。"""
     for field in ("base_url", "custom_domain"):
@@ -264,6 +348,7 @@ def fetch_subscriptions_via_auth(auth) -> List[Dict[str, Any]]:
             "subdomain": pub.get("subdomain"),
             "custom_domain": pub.get("custom_domain"),
             "membership_state": item.get("membership_state") or item.get("type"),
+            "avatar": _avatar_from_publication_api(pub),
         })
 
     for pub in (data.get("publications") or []):
@@ -278,6 +363,7 @@ def fetch_subscriptions_via_auth(auth) -> List[Dict[str, Any]]:
             "subdomain": pub.get("subdomain"),
             "custom_domain": pub.get("custom_domain"),
             "membership_state": pub.get("membership_state"),
+            "avatar": _avatar_from_publication_api(pub),
         })
 
     return results
@@ -328,6 +414,7 @@ def fetch_profile_owner_via_auth(auth, user_id: int) -> Optional[Dict[str, Any]]
         "user_id": user_id,
         "name": owner.get("name") or "",
         "handle": owner.get("handle") or "",
+        "photo_url": normalize_avatar_url(owner.get("photo_url")),
         "publication_id": pub.get("id"),
         "publication_name": pub.get("name") or "",
         "publication_url": pub_url,
@@ -636,17 +723,18 @@ class SubstackCredentialService:
                         cur.execute(
                             """
                             INSERT INTO substack_publications
-                                (publication_url, publication_id, publication_name,
+                                (publication_url, publication_id, publication_name, avatar,
                                  is_subscribed, credential_id, enabled)
-                            VALUES (%s, %s, %s, true, %s, true)
+                            VALUES (%s, %s, %s, %s, true, %s, true)
                             ON CONFLICT (publication_url) DO UPDATE SET
                                 publication_id   = COALESCE(EXCLUDED.publication_id, substack_publications.publication_id),
                                 publication_name = COALESCE(NULLIF(EXCLUDED.publication_name, ''), substack_publications.publication_name),
+                                avatar           = COALESCE(NULLIF(EXCLUDED.avatar, ''), substack_publications.avatar),
                                 is_subscribed    = true,
                                 credential_id    = COALESCE(EXCLUDED.credential_id, substack_publications.credential_id),
                                 updated_at       = now()
                             """,
-                            (url, s.get("publication_id"), s.get("name") or "", cred_id),
+                            (url, s.get("publication_id"), s.get("name") or "", s.get("avatar") or "", cred_id),
                         )
                         synced_subs += 1
 
@@ -657,12 +745,13 @@ class SubstackCredentialService:
                         cur.execute(
                             """
                             INSERT INTO substack_followed_authors
-                                (substack_user_id, author_handle, author_name,
+                                (substack_user_id, author_handle, author_name, avatar,
                                  publication_url, credential_id, enabled)
-                            VALUES (%s, %s, %s, %s, %s, true)
+                            VALUES (%s, %s, %s, %s, %s, %s, true)
                             ON CONFLICT (substack_user_id) DO UPDATE SET
                                 author_handle  = EXCLUDED.author_handle,
                                 author_name    = EXCLUDED.author_name,
+                                avatar         = COALESCE(NULLIF(EXCLUDED.avatar, ''), substack_followed_authors.avatar),
                                 publication_url = EXCLUDED.publication_url,
                                 credential_id  = COALESCE(EXCLUDED.credential_id, substack_followed_authors.credential_id),
                                 updated_at     = now()
@@ -671,26 +760,50 @@ class SubstackCredentialService:
                                 a.get("user_id"),
                                 a.get("handle") or "",
                                 a.get("name") or "",
+                                a.get("photo_url") or "",
                                 pub_url,
                                 cred_id,
                             ),
                         )
                         synced_authors += 1
 
-                    # 把关注作者的主刊也加入 publications 并标 is_followed
+                    # 把关注作者的主刊也加入 publications 并标 is_followed（写入刊物名 + 头像）
+                    pub_url_names: Dict[str, str] = {}
+                    pub_url_avatars: Dict[str, str] = {}
+                    for a in authors:
+                        url = a.get("publication_url") or ""
+                        if not url:
+                            continue
+                        title = (a.get("publication_name") or "").strip()
+                        if title and url not in pub_url_names:
+                            pub_url_names[url] = title
+                        avatar = (a.get("photo_url") or "").strip()
+                        if avatar and url not in pub_url_avatars:
+                            pub_url_avatars[url] = avatar
+
                     for pub_url in followed_pub_urls:
                         cur.execute(
                             """
                             INSERT INTO substack_publications
-                                (publication_url, is_followed, enabled)
-                            VALUES (%s, true, true)
+                                (publication_url, publication_name, avatar, is_followed, enabled)
+                            VALUES (%s, %s, %s, true, true)
                             ON CONFLICT (publication_url) DO UPDATE SET
+                                publication_name = COALESCE(
+                                    NULLIF(EXCLUDED.publication_name, ''),
+                                    substack_publications.publication_name
+                                ),
+                                avatar = COALESCE(
+                                    NULLIF(EXCLUDED.avatar, ''),
+                                    substack_publications.avatar
+                                ),
                                 is_followed = true,
                                 updated_at  = now()
                             """,
-                            (pub_url,),
+                            (pub_url, pub_url_names.get(pub_url, ""), pub_url_avatars.get(pub_url, "")),
                         )
                 conn.commit()
+
+            self._backfill_missing_avatars(limit=30)
 
             logger.info(
                 "Substack 凭证 id=%s 同步: 源A %d publications, 源B %d authors",
@@ -708,6 +821,88 @@ class SubstackCredentialService:
                 pass
 
     # ---- 手动维护 / 查询 ----
+
+    def _backfill_missing_avatars(self, limit: int = 30) -> int:
+        """对尚无头像的 publication 走公开 API 补拉（best-effort）。"""
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT publication_url
+                    FROM substack_publications
+                    WHERE NULLIF(TRIM(avatar), '') IS NULL
+                      AND publication_url <> 'https://substack.com'
+                    ORDER BY updated_at DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                missing = [row[0] for row in cur.fetchall()]
+
+        updated = 0
+        for pub_url in missing:
+            avatar = fetch_publication_avatar_public(pub_url)
+            if not avatar:
+                continue
+            with _get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE substack_publications
+                        SET avatar = %s, updated_at = now()
+                        WHERE publication_url = %s
+                          AND NULLIF(TRIM(avatar), '') IS NULL
+                        """,
+                        (avatar, pub_url),
+                    )
+                conn.commit()
+            updated += 1
+            time.sleep(0.3)
+        return updated
+
+    def ensure_publication_avatar(self, publication_url: str) -> str:
+        """返回 publication 头像；DB 无缓存时走公开 API 拉取并写入。"""
+        url = normalize_publication_url(publication_url)
+        with _get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT p.avatar,
+                           (
+                               SELECT fa.avatar
+                               FROM substack_followed_authors fa
+                               WHERE fa.publication_url = p.publication_url
+                                 AND NULLIF(TRIM(fa.avatar), '') IS NOT NULL
+                               ORDER BY fa.author_name
+                               LIMIT 1
+                           ) AS author_avatar
+                    FROM substack_publications p
+                    WHERE p.publication_url = %s
+                    """,
+                    (url,),
+                )
+                row = cur.fetchone()
+
+        cached = ""
+        if row:
+            cached = normalize_avatar_url(row.get("avatar") or row.get("author_avatar"))
+        if cached:
+            return cached
+
+        avatar = fetch_publication_avatar_public(url)
+        if avatar:
+            with _get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE substack_publications
+                        SET avatar = %s, updated_at = now()
+                        WHERE publication_url = %s
+                        """,
+                        (avatar, url),
+                    )
+                conn.commit()
+        return avatar
 
     def upsert_publication_manual(
         self,
@@ -740,7 +935,26 @@ class SubstackCredentialService:
             SELECT p.id, p.publication_url, p.publication_id, p.publication_name,
                    p.is_subscribed, p.is_followed, p.enabled,
                    p.backfill_complete, p.last_posts_sync_at, p.last_posts_sync_mode,
-                   c.label AS credential_label, c.status AS credential_status
+                   c.label AS credential_label, c.status AS credential_status,
+                   COALESCE(
+                       NULLIF(TRIM(p.avatar), ''),
+                       (
+                           SELECT NULLIF(TRIM(fa.avatar), '')
+                           FROM substack_followed_authors fa
+                           WHERE fa.publication_url = p.publication_url
+                             AND NULLIF(TRIM(fa.avatar), '') IS NOT NULL
+                           ORDER BY fa.author_name
+                           LIMIT 1
+                       )
+                   ) AS avatar,
+                   (
+                       SELECT fa.author_name
+                       FROM substack_followed_authors fa
+                       WHERE fa.publication_url = p.publication_url
+                         AND NULLIF(TRIM(fa.author_name), '') IS NOT NULL
+                       ORDER BY fa.author_name
+                       LIMIT 1
+                   ) AS author_name
             FROM substack_publications p
             LEFT JOIN substack_credentials c ON p.credential_id = c.id
         """
@@ -754,7 +968,7 @@ class SubstackCredentialService:
 
     def list_followed_authors(self, enabled_only: bool = False) -> List[Dict[str, Any]]:
         sql = """
-            SELECT a.id, a.substack_user_id, a.author_handle, a.author_name,
+            SELECT a.id, a.substack_user_id, a.author_handle, a.author_name, a.avatar,
                    a.publication_url, a.enabled, a.backfill_complete,
                    a.recent_note_ids, a.last_notes_sync_at,
                    c.label AS credential_label, c.status AS credential_status

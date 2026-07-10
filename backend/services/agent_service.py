@@ -254,7 +254,7 @@ def _load_preset_subtypes(db: DatabaseManager, user_id: int) -> Optional[List[st
         row = cursor.fetchone()
         raw = list(row[0]) if row and row[0] else []
         cleaned = [s for s in raw if s in daily_api.ALL_SOURCE_SUBTYPES]
-        expanded = daily_api._expand_preset_for_legacy_full_upload(cleaned)
+        expanded = daily_api._expand_preset_subtypes(cleaned)
         if not expanded:
             return None
         return daily_api._normalize_subtypes(expanded)
@@ -294,6 +294,10 @@ def _map_agent_source(
             return "news"
         if source_subtype == "zhishixingqiu":
             return "zhishixingqiu"
+        if source_subtype == "substack":
+            return "substack"
+        if source_subtype == "weibo":
+            return "weibo"
         if source_subtype == "podcast":
             return "podcast"
         return "news"
@@ -1112,7 +1116,10 @@ class AgentService:
             }
 
             for subtype, count in raw_counts.items():
-                if subtype in ("twitter", "youtube", "news", "rss", "zhishixingqiu"):
+                if subtype in (
+                    "twitter", "youtube", "news", "rss",
+                    "zhishixingqiu", "substack", "weibo", "podcast",
+                ):
                     # Feed channel_type — map via feed path
                     mapped = _map_agent_source("feed", subtype)
                     normalised[mapped] = normalised.get(mapped, 0) + count

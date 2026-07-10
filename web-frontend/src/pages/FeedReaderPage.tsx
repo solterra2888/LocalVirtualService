@@ -1177,6 +1177,11 @@ const FeedReaderPageInner: React.FC = () => {
                   subscription.channel_type === 'news'
                     ? getNewsSourceFaviconUrl(subscription.channel_identifier)
                     : undefined;
+                const channelAvatarSrc =
+                  ['twitter', 'weibo', 'substack'].includes(subscription.channel_type) &&
+                  subscription.channel_avatar
+                    ? weiboSafeAvatarSrc(subscription.channel_avatar)
+                    : undefined;
                 const unreadCount = subscription.unread_count ?? 0;
                 const hasUnread = unreadCount > 0;
                 const isChecked = batchSelectedIds.has(subscription.id);
@@ -1296,13 +1301,9 @@ const FeedReaderPageInner: React.FC = () => {
                       avatar={
                         <Avatar
                           size={24}
-                          src={
-                            (subscription.channel_type === 'twitter' || subscription.channel_type === 'weibo') && subscription.channel_avatar
-                              ? weiboSafeAvatarSrc(subscription.channel_avatar)
-                              : newsFavicon
-                          }
+                          src={channelAvatarSrc ?? newsFavicon}
                           icon={
-                            (subscription.channel_type === 'twitter' || subscription.channel_type === 'weibo') && subscription.channel_avatar
+                            channelAvatarSrc
                               ? undefined // 有头像时不显示图标
                               : subscription.channel_type === 'news' && newsFavicon
                                 ? undefined
@@ -1310,7 +1311,7 @@ const FeedReaderPageInner: React.FC = () => {
                           }
                           style={{
                             backgroundColor:
-                              (subscription.channel_type === 'twitter' || subscription.channel_type === 'weibo') && subscription.channel_avatar
+                              channelAvatarSrc
                                 ? 'transparent'
                                 : subscription.channel_type === 'news'
                                   ? newsFavicon
@@ -2061,7 +2062,7 @@ const FeedReaderPageInner: React.FC = () => {
         cancelText="Cancel"
         okButtonProps={{ loading: isSubmittingSubscription }}
         cancelButtonProps={{ disabled: isSubmittingSubscription }}
-        width={720}
+        width={900}
         centered
         destroyOnClose
         maskClosable={!isSubmittingSubscription}

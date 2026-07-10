@@ -373,6 +373,7 @@ const AgentIntegrationPage: React.FC = () => {
     { intent: '我上传的文件里有没有关于 XX 的内容', endpoint: 'daily_feed', params: 'q=XX, sources=pdf' },
     { intent: '只看 Twitter 上的内容', endpoint: 'daily_feed', params: 'sources=twitter' },
     { intent: '只看知识星球的内容', endpoint: 'daily_feed', params: 'sources=zhishixingqiu' },
+    { intent: '只看 Substack 的内容', endpoint: 'daily_feed', params: 'sources=substack' },
     { intent: '只看我上传的文件', endpoint: 'daily_feed', params: 'sources=pdf,image,text,audio' },
     { intent: '帮我同时查 NVDA 和 AAPL 的内容', endpoint: 'daily_feed', params: 'tickers=NVDA.US,AAPL.US' },
     { intent: '展示 AI 概念相关的内容', endpoint: 'daily_feed', params: 'tags=AI' },
@@ -905,6 +906,7 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'youtube / youtube_feed', endpoint: '订阅的 YouTube Feed' },
                 { intent: 'web / news / podcast', endpoint: '订阅的网页 / 新闻 / 播客 Feed' },
                 { intent: 'zhishixingqiu', endpoint: '订阅的知识星球（Knowledge Planet）帖子' },
+                { intent: 'substack', endpoint: '订阅的 Substack 文章与动态' },
                 { intent: 'pdf', endpoint: '用户上传的 PDF' },
                 { intent: 'image', endpoint: '用户上传的图片' },
                 { intent: 'audio', endpoint: '用户上传的音频' },
@@ -1039,7 +1041,7 @@ const AgentIntegrationPage: React.FC = () => {
             <div style={{ height: 12 }} />
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', lineHeight: 1.6 }}>
               <code style={{ color: TEAL, fontSize: 12 }}>source</code> 可能值：
-              twitter · youtube · web · news · podcast · zhishixingqiu · pdf · image · audio · text。
+              twitter · youtube · web · news · podcast · zhishixingqiu · substack · weibo · pdf · image · audio · text。
               默认限速 <strong style={{ color: dark ? '#cbd5e1' : '#475569' }}>60 次 / 分钟</strong> / PAT。
             </p>
 
