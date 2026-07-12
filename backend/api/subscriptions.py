@@ -77,14 +77,12 @@ class SubscriptionResponse(BaseModel):
     channel_avatar: Optional[str] = None  # 频道头像 URL
     enabled: bool
     priority: int
-    fetch_interval_minutes: int
     max_items_per_fetch: int
     filter_config: Dict[str, Any]
     metadata: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
     last_fetched_at: Optional[datetime]
-    next_fetch_at: Optional[datetime]
     total_items_fetched: int
     last_fetch_items_count: int
     consecutive_failures: int
@@ -229,9 +227,9 @@ async def get_user_subscriptions(
             SELECT
                 id, user_id, channel_type, channel_identifier,
                 channel_name, channel_description, channel_avatar, enabled, priority,
-                fetch_interval_minutes, max_items_per_fetch, filter_config,
+                max_items_per_fetch, filter_config,
                 metadata, created_at, updated_at, last_fetched_at,
-                next_fetch_at, total_items_fetched, last_fetch_items_count,
+                total_items_fetched, last_fetch_items_count,
                 consecutive_failures, unread_count, sort_order
             FROM subscription_list
             WHERE {' AND '.join(conditions)}
@@ -253,19 +251,17 @@ async def get_user_subscriptions(
                 channel_avatar=row[6],
                 enabled=row[7],
                 priority=row[8],
-                fetch_interval_minutes=row[9],
-                max_items_per_fetch=row[10],
-                filter_config=row[11] or {},
-                metadata=row[12] or {},
-                created_at=row[13],
-                updated_at=row[14],
-                last_fetched_at=row[15],
-                next_fetch_at=row[16],
-                total_items_fetched=row[17],
-                last_fetch_items_count=row[18],
-                consecutive_failures=row[19],
-                unread_count=row[20] or 0,  # 🔥 新增：未读计数
-                sort_order=row[21]
+                max_items_per_fetch=row[9],
+                filter_config=row[10] or {},
+                metadata=row[11] or {},
+                created_at=row[12],
+                updated_at=row[13],
+                last_fetched_at=row[14],
+                total_items_fetched=row[15],
+                last_fetch_items_count=row[16],
+                consecutive_failures=row[17],
+                unread_count=row[18] or 0,  # 🔥 新增：未读计数
+                sort_order=row[19]
             ))
         
         cursor.close()
@@ -326,9 +322,9 @@ async def get_subscription(
             SELECT
                 id, user_id, channel_type, channel_identifier,
                 channel_name, channel_description, channel_avatar, enabled, priority,
-                fetch_interval_minutes, max_items_per_fetch, filter_config,
+                max_items_per_fetch, filter_config,
                 metadata, created_at, updated_at, last_fetched_at,
-                next_fetch_at, total_items_fetched, last_fetch_items_count,
+                total_items_fetched, last_fetch_items_count,
                 consecutive_failures, unread_count, sort_order
             FROM subscription_list
             WHERE id = %s AND user_id = %s
@@ -350,19 +346,17 @@ async def get_subscription(
             channel_avatar=row[6],
             enabled=row[7],
             priority=row[8],
-            fetch_interval_minutes=row[9],
-            max_items_per_fetch=row[10],
-            filter_config=row[11] or {},
-            metadata=row[12] or {},
-            created_at=row[13],
-            updated_at=row[14],
-            last_fetched_at=row[15],
-            next_fetch_at=row[16],
-            total_items_fetched=row[17],
-            last_fetch_items_count=row[18],
-            consecutive_failures=row[19],
-            unread_count=row[20] or 0,
-            sort_order=row[21]
+            max_items_per_fetch=row[9],
+            filter_config=row[10] or {},
+            metadata=row[11] or {},
+            created_at=row[12],
+            updated_at=row[13],
+            last_fetched_at=row[14],
+            total_items_fetched=row[15],
+            last_fetch_items_count=row[16],
+            consecutive_failures=row[17],
+            unread_count=row[18] or 0,
+            sort_order=row[19]
         )
         
         cursor.close()
@@ -1033,14 +1027,12 @@ async def create_subscription(
             channel_description=request.channel_description,
             enabled=request.enabled,
             priority=0,  # 使用默认值
-            fetch_interval_minutes=30,  # 使用默认值
             max_items_per_fetch=20,  # 使用默认值
             filter_config=request.filter_config or {},
             metadata=request.metadata or {},
             created_at=created_at,
             updated_at=updated_at,
             last_fetched_at=None,
-            next_fetch_at=None,
             total_items_fetched=0,
             last_fetch_items_count=0,
             consecutive_failures=0,
@@ -1189,9 +1181,9 @@ async def update_subscription(
             RETURNING 
                 id, user_id, channel_type, channel_identifier,
                 channel_name, channel_description, channel_avatar, enabled, priority,
-                fetch_interval_minutes, max_items_per_fetch, filter_config,
+                max_items_per_fetch, filter_config,
                 metadata, created_at, updated_at, last_fetched_at,
-                next_fetch_at, total_items_fetched, last_fetch_items_count,
+                total_items_fetched, last_fetch_items_count,
                 consecutive_failures, unread_count, sort_order
         """
         
@@ -1214,19 +1206,17 @@ async def update_subscription(
             channel_avatar=row[6],
             enabled=row[7],
             priority=row[8],
-            fetch_interval_minutes=row[9],
-            max_items_per_fetch=row[10],
-            filter_config=row[11] or {},
-            metadata=row[12] or {},
-            created_at=row[13],
-            updated_at=row[14],
-            last_fetched_at=row[15],
-            next_fetch_at=row[16],
-            total_items_fetched=row[17],
-            last_fetch_items_count=row[18],
-            consecutive_failures=row[19],
-            unread_count=row[20] or 0,
-            sort_order=row[21]
+            max_items_per_fetch=row[9],
+            filter_config=row[10] or {},
+            metadata=row[11] or {},
+            created_at=row[12],
+            updated_at=row[13],
+            last_fetched_at=row[14],
+            total_items_fetched=row[15],
+            last_fetch_items_count=row[16],
+            consecutive_failures=row[17],
+            unread_count=row[18] or 0,
+            sort_order=row[19]
         )
         
     except HTTPException:

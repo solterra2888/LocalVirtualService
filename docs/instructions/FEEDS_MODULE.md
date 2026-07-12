@@ -127,6 +127,8 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 
 定义在 `backend/database/migrations/create_subscription_tables.sql`，后续由 `add_unread_count.sql` 追加 `unread_count` 列。
 
+> **2026-07-12（P2-2）**：删除死字段 `fetch_interval_minutes`、`next_fetch_at`（7 源都不读，仅 schema/API/类型残留），见 `remove_unused_subscription_fields.sql`（修订版，仅删这两列；**保留** `priority` 与 `max_items_per_fetch` —— 旧版迁移误把它们一起列删）。
+
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `id` | serial PK | 订阅 ID |
@@ -136,12 +138,11 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | `channel_name` | varchar | 展示名（Twitter 自动从 API 拉取，YouTube 自 RSS 提取）|
 | `channel_description` | text | 描述 |
 | `enabled` | bool | 是否启用；关闭后不再抓取也不计入列表刷新 |
-| `priority` | int | 预留排序优先级 |
-| `fetch_interval_minutes` | int | 预留：单订阅刷新周期（当前统一由 scheduler 控制）|
-| `max_items_per_fetch` | int | 单次抓取条数上限 |
+| `priority` | int | 排序优先级（订阅列表 `ORDER BY` 用，多数行取默认 0）|
+| `max_items_per_fetch` | int | 单次抓取条数上限（YouTube/Podcast 实际读取）|
 | `filter_config` | jsonb | 过滤配置（如 News 的关键词、YouTube 的最小时长等）|
 | `metadata` | jsonb | 渠道专用元数据 |
-| `last_fetched_at` / `next_fetch_at` | timestamptz | 抓取调度时间戳 |
+| `last_fetched_at` | timestamptz | 上次抓取时间（7 源统一经 `subscription_status_service` 写入，`utcnow`）|
 | `total_items_fetched` | int | 累计抓取条数 |
 | `last_fetch_items_count` | int | 最近一次抓取条数 |
 | `consecutive_failures` | int | 连续失败次数（风控降级用）|

@@ -561,4 +561,79 @@ class TestBackfillSqlAgainstRealSchema:
             cur.fetchall()
 
 
+# ─────────────────────────────────────────────────────────────────────
+# P2-2: 移除 fetch_interval_minutes / next_fetch_at 后, 验证 SubscriptionResponse
+# 的位置索引 row[N] 映射仍正确 (对真实行用 RealDictCursor 做 ground truth 比对)
+# ─────────────────────────────────────────────────────────────────────
+
+_P22_SELECT = """
+    SELECT
+        id, user_id, channel_type, channel_identifier,
+        channel_name, channel_description, channel_avatar, enabled, priority,
+        max_items_per_fetch, filter_config,
+        metadata, created_at, updated_at, last_fetched_at,
+        total_items_fetched, last_fetch_items_count,
+        consecutive_failures, unread_count, sort_order
+    FROM subscription_list
+    ORDER BY id
+    LIMIT 1
+"""
+
+
+@pytest.mark.skipif(not _db_reachable(), reason="无可达 DB")
+class TestSubscriptionListMappingAfterDeadFieldRemoval:
+    def test_positional_mapping_matches_dict_ground_truth(self):
+        """位置 row[N] 映射 (与 api/subscriptions.py 的 SubscriptionResponse 一致)
+        必须与按列名取值(RealDictCursor)逐字段一致 —— 直接抓 renumber 错位."""
+        import psycopg2.extras
+        from backend.database.db_manager import DatabaseManager
+        from backend.utils.database_config import get_database_config
+        db = DatabaseManager(get_database_config())
+        with db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(_P22_SELECT)
+            row = cur.fetchone()
+            assert row is not None, "需要至少一条 subscription_list 行来验证映射"
+            # 与 subscriptions.py 中 SubscriptionResponse(...) 的 row[N] 完全一致
+            mapped = {
+                "id": row[0], "user_id": row[1], "channel_type": row[2],
+                "channel_identifier": row[3], "channel_name": row[4],
+                "channel_description": row[5], "channel_avatar": row[6],
+                "enabled": row[7], "priority": row[8],
+                "max_items_per_fetch": row[9], "filter_config": row[10] or {},
+                "metadata": row[11] or {}, "created_at": row[12],
+                "updated_at": row[13], "last_fetched_at": row[14],
+                "total_items_fetched": row[15], "last_fetch_items_count": row[16],
+                "consecutive_failures": row[17], "unread_count": row[18] or 0,
+                "sort_order": row[19],
+            }
+            dcur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            dcur.execute("SELECT * FROM subscription_list WHERE id = %s", (mapped["id"],))
+            truth = dict(dcur.fetchone())
+
+        # 逐字段比对, 重点覆盖 renumber 影响区 (max_items_per_fetch 及之后)
+        for key in ["priority", "max_items_per_fetch", "filter_config", "metadata",
+                    "last_fetched_at", "total_items_fetched", "last_fetch_items_count",
+                    "consecutive_failures", "unread_count", "sort_order",
+                    "enabled", "channel_name", "channel_identifier", "channel_avatar"]:
+            pv, tv = mapped[key], truth.get(key)
+            ok = pv == tv or (pv in ({}, None) and tv in ({}, None))
+            assert ok, f"字段 {key} 位置映射错位: positional={pv!r} ground_truth={tv!r}"
+
+    def test_no_backend_code_references_to_dead_fields(self):
+        """移除后 subscriptions.py 不应再出现这两个死字段名."""
+        with open("backend/api/subscriptions.py", encoding="utf-8") as f:
+            src = f.read()
+        assert "fetch_interval_minutes" not in src
+        assert "next_fetch_at" not in src
+
+    def test_kept_fields_still_referenced(self):
+        """priority / max_items_per_fetch 必须仍被引用 (确认没有误删)."""
+        with open("backend/api/subscriptions.py", encoding="utf-8") as f:
+            src = f.read()
+        assert "priority" in src
+        assert "max_items_per_fetch" in src
+
+
+
 

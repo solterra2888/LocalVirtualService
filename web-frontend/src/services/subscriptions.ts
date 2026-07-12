@@ -15,14 +15,12 @@ export interface Subscription {
   channel_avatar?: string; // 频道头像 URL
   enabled: boolean;
   priority: number;
-  fetch_interval_minutes: number;
   max_items_per_fetch: number;
   filter_config: Record<string, any>;
   metadata: Record<string, any>;
   created_at: string;
   updated_at: string;
   last_fetched_at?: string;
-  next_fetch_at?: string;
   total_items_fetched: number;
   last_fetch_items_count: number;
   consecutive_failures: number;

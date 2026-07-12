@@ -174,7 +174,7 @@ class TwitterSubscriptionService:
             query = """
                 SELECT 
                     id, user_id, channel_identifier, channel_name,
-                    priority, fetch_interval_minutes, max_items_per_fetch,
+                    priority, max_items_per_fetch,
                     last_fetched_at, filter_config, metadata,
                     total_items_fetched, consecutive_failures
                 FROM subscription_list
@@ -197,13 +197,12 @@ class TwitterSubscriptionService:
                     'channel_identifier': row[2],
                     'channel_name': row[3],
                     'priority': row[4],
-                    'fetch_interval_minutes': row[5],
-                    'max_items_per_fetch': row[6],
-                    'last_fetched_at': row[7],
-                    'filter_config': row[8] or {},
-                    'metadata': row[9] or {},
-                    'total_items_fetched': row[10] or 0,
-                    'consecutive_failures': row[11] or 0
+                    'max_items_per_fetch': row[5],
+                    'last_fetched_at': row[6],
+                    'filter_config': row[7] or {},
+                    'metadata': row[8] or {},
+                    'total_items_fetched': row[9] or 0,
+                    'consecutive_failures': row[10] or 0
                 })
             
             cursor.close()
@@ -240,7 +239,7 @@ class TwitterSubscriptionService:
             query = """
                 SELECT 
                     id, user_id, channel_identifier, channel_name,
-                    priority, fetch_interval_minutes, max_items_per_fetch,
+                    priority, max_items_per_fetch,
                     last_fetched_at, filter_config, metadata
                 FROM subscription_list
                 WHERE channel_type = 'twitter' AND user_id = %s
@@ -262,11 +261,10 @@ class TwitterSubscriptionService:
                     'channel_identifier': row[2],
                     'channel_name': row[3],
                     'priority': row[4],
-                    'fetch_interval_minutes': row[5],
-                    'max_items_per_fetch': row[6],
-                    'last_fetched_at': row[7],
-                    'filter_config': row[8] or {},
-                    'metadata': row[9] or {}
+                    'max_items_per_fetch': row[5],
+                    'last_fetched_at': row[6],
+                    'filter_config': row[7] or {},
+                    'metadata': row[8] or {}
                 })
             
             cursor.close()
