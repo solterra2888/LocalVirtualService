@@ -675,12 +675,16 @@ async def create_subscription(
         if existing:
             raise HTTPException(status_code=400, detail="Subscription already exists")
         
-        # 计算显示排序：追加到当前用户列表末尾
+        # 计算显示排序：插入到当前用户列表最前面
         cursor.execute(
-            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subscription_list WHERE user_id = %s",
+            """
+            UPDATE subscription_list
+            SET sort_order = sort_order + 1
+            WHERE user_id = %s AND sort_order IS NOT NULL
+            """,
             (user_id,)
         )
-        next_sort_order = cursor.fetchone()[0] or 1
+        next_sort_order = 1
 
         # 插入新订阅（使用默认值；channel_url 已移除，channel_name 可选并由 API 自动填充）
         query = """
