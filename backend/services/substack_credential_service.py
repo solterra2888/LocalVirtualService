@@ -203,6 +203,114 @@ def normalize_publication_url(value: str) -> str:
     return f"https://{host}"
 
 
+def publication_url_aliases(value: str) -> List[str]:
+    """为 publication 生成抓取候选 URL（保留顺序、去重）。
+
+    自定义域名常见故障：
+      - 裸域 archive 404，但 www 可用（如 shrubstack.com）
+      - 自定义域名 TCP 超时，但 {slug}.substack.com 可用（如 geopoliticaldispatch.com）
+
+    自定义域名优先试 www / *.substack.com，把可能超时的裸域放到最后。
+    """
+    try:
+        primary = normalize_publication_url(value)
+    except ValueError:
+        return []
+    host = urlparse(primary).netloc.lower()
+    out: List[str] = []
+    seen: set = set()
+
+    def _add(url: str) -> None:
+        u = (url or "").rstrip("/")
+        if not u or u in seen:
+            return
+        seen.add(u)
+        out.append(u)
+
+    if host and host != "substack.com" and not host.endswith(".substack.com"):
+        slug = host.split(".")[0]
+        _add(f"https://www.{host}")
+        if slug and slug not in ("www", "substack"):
+            _add(f"https://{slug}.substack.com")
+        _add(primary)
+    else:
+        _add(primary)
+    return out
+
+
+def is_retryable_archive_error(exc: BaseException) -> bool:
+    """自定义域名 archive 失败时是否值得换候选 URL 重试。"""
+    import requests as _requests
+
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+        return True
+    if isinstance(exc, _requests.exceptions.Timeout):
+        return True
+    if isinstance(exc, _requests.exceptions.ConnectionError):
+        return True
+    if isinstance(exc, _requests.exceptions.HTTPError):
+        resp = getattr(exc, "response", None)
+        status = getattr(resp, "status_code", None)
+        return status in (404, 408, 425, 429, 500, 502, 503, 504)
+    # urllib3 / 包装异常
+    name = type(exc).__name__
+    return name in {
+        "ConnectTimeoutError",
+        "MaxRetryError",
+        "NewConnectionError",
+        "ConnectTimeout",
+        "ReadTimeout",
+    }
+
+
+def host_matches_author_handle(host: str, handle: str) -> bool:
+    """判断 publication host 是否对应该作者 handle（用于 notes 归属对齐）。"""
+    handle = (handle or "").strip().lower()
+    host = (host or "").strip().lower().removeprefix("www.")
+    if not handle or not host:
+        return False
+    if host == f"{handle}.substack.com":
+        return True
+    label = host.split(".")[0]
+    if not label:
+        return False
+    # citrini ↔ citriniresearch.com；capitalflows ↔ capitalflows.substack.com
+    return label == handle or label.startswith(handle) or handle.startswith(label)
+
+
+def resolve_subscribed_publication_url(
+    author_pub_url: str,
+    author_handle: str,
+    user_ids_by_pub: Dict[str, List[int]],
+) -> Tuple[str, List[int]]:
+    """把 notes 归属到用户实际订阅的 publication_url。
+
+    优先精确/别名命中；否则用 handle 匹配已订阅 URL；再否则 orphan 回退。
+    """
+    try:
+        norm = normalize_publication_url(author_pub_url)
+    except ValueError:
+        norm = (author_pub_url or "").strip() or "https://substack.com"
+
+    if norm in user_ids_by_pub:
+        return norm, list(user_ids_by_pub[norm])
+
+    author_aliases = set(publication_url_aliases(norm))
+    for sub_url, uids in user_ids_by_pub.items():
+        if not uids:
+            continue
+        if sub_url in author_aliases:
+            return sub_url, list(uids)
+        if author_aliases.intersection(publication_url_aliases(sub_url)):
+            return sub_url, list(uids)
+        host = urlparse(sub_url).netloc.lower()
+        if host_matches_author_handle(host, author_handle):
+            return sub_url, list(uids)
+
+    all_uids = sorted({uid for ids in user_ids_by_pub.values() for uid in ids})
+    return norm, all_uids
+
+
 def resolve_publication_display_name(
     *,
     publication_name: Optional[str] = None,
@@ -278,7 +386,17 @@ def fetch_publication_avatar_public(pub_url: str) -> str:
 
 
 def publication_url_from_api(pub: Dict[str, Any]) -> Optional[str]:
-    """从 subscriptions API 的 publication 对象解析根 URL。"""
+    """从 subscriptions API 的 publication 对象解析根 URL。
+
+    优先 {subdomain}.substack.com：自定义域名在部分网络环境下不可达（超时/404），
+    而 *.substack.com 更稳定；订阅侧仍可使用用户选择的 custom domain。
+    """
+    subdomain = pub.get("subdomain")
+    if subdomain:
+        try:
+            return normalize_publication_url(f"{subdomain}.substack.com")
+        except ValueError:
+            pass
     for field in ("base_url", "custom_domain"):
         raw = pub.get(field)
         if raw:
@@ -286,12 +404,6 @@ def publication_url_from_api(pub: Dict[str, Any]) -> Optional[str]:
                 return normalize_publication_url(raw)
             except ValueError:
                 pass
-    subdomain = pub.get("subdomain")
-    if subdomain:
-        try:
-            return normalize_publication_url(f"{subdomain}.substack.com")
-        except ValueError:
-            pass
     return None
 
 
@@ -401,14 +513,7 @@ def fetch_profile_owner_via_auth(auth, user_id: int) -> Optional[Dict[str, Any]]
             return None
 
     pub = owner.get("primary_publication") or {}
-    pub_url = ""
-    try:
-        if pub.get("custom_domain"):
-            pub_url = normalize_publication_url(pub["custom_domain"])
-        elif pub.get("subdomain"):
-            pub_url = normalize_publication_url(f"{pub['subdomain']}.substack.com")
-    except ValueError:
-        pub_url = ""
+    pub_url = publication_url_from_api(pub) or ""
 
     return {
         "user_id": user_id,

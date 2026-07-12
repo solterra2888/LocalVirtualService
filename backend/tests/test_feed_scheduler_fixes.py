@@ -385,6 +385,7 @@ class TestSubstackOrphanFallback:
 
         def fake_store_batch(content_service, collected, user_ids, name, report=None):
             captured["user_ids"] = list(user_ids)
+            captured["pub_urls"] = [r.get("publication_url") for r in collected]
             return 1, 0, []
 
         @contextmanager
@@ -394,7 +395,13 @@ class TestSubstackOrphanFallback:
                     class C:
                         def execute(self_inner, *a, **k):
                             pass
+                        def __enter__(self_inner):
+                            return self_inner
+                        def __exit__(self_inner, *a):
+                            pass
                     return C()
+                def commit(self_inner):
+                    pass
             yield FakeConn()
 
         monkeypatch.setattr(sss, "fetch_author_notes_via_auth", fake_fetch_notes)
@@ -412,23 +419,71 @@ class TestSubstackOrphanFallback:
             user_ids_by_pub=user_ids_by_pub,
             report=None, idx=0, total=1,
         )
-        return captured["user_ids"]
+        return captured
 
     def test_orphan_author_attributed_to_all_substack_users(self, monkeypatch):
         # followed author 的 pub 不在任何用户订阅中 -> 回退为所有启用 substack 订阅用户
         user_ids_by_pub = {"https://b.substack.com": [5, 6]}
         got = self._run(monkeypatch, user_ids_by_pub, "https://notesonly.substack.com")
-        assert got == [5, 6]
+        assert got["user_ids"] == [5, 6]
 
     def test_subscribed_pub_with_www_mismatch_matches_via_normalization(self, monkeypatch):
         # 已订阅 pub, 但 author.publication_url 带 www -> 归一化后命中, 不走回退
         user_ids_by_pub = {"https://acme.substack.com": [1, 2]}
         got = self._run(monkeypatch, user_ids_by_pub, "https://www.acme.substack.com")
-        assert got == [1, 2]
+        assert got["user_ids"] == [1, 2]
 
     def test_no_substack_subs_at_all_yields_empty(self, monkeypatch):
         got = self._run(monkeypatch, {}, "https://notesonly.substack.com")
-        assert got == []
+        assert got["user_ids"] == []
+
+    def test_capitalflows_notes_align_to_subscribed_substack_url(self, monkeypatch):
+        user_ids_by_pub = {"https://capitalflows.substack.com": [2]}
+        import backend.services.substack_subscription_service as sss
+
+        author = self._make_author("https://capitalflowsresearch.com")
+        author["author_handle"] = "capitalflows"
+        captured = {}
+
+        def fake_fetch_notes(auth, uid, cursor=None, limit=10):
+            return {"items": [{"entity_key": "c-1", "comment": {"body": "x"}}], "nextCursor": None}
+
+        def fake_store_batch(content_service, collected, user_ids, name, report=None):
+            captured["user_ids"] = list(user_ids)
+            captured["pub_urls"] = [r.get("publication_url") for r in collected]
+            return 1, 0, []
+
+        @contextmanager
+        def fake_get_conn():
+            class FakeConn:
+                def cursor(self_inner):
+                    class C:
+                        def execute(self_inner, *a, **k):
+                            pass
+                        def __enter__(self_inner):
+                            return self_inner
+                        def __exit__(self_inner, *a):
+                            pass
+                    return C()
+                def commit(self_inner):
+                    pass
+            yield FakeConn()
+
+        monkeypatch.setattr(sss, "fetch_author_notes_via_auth", fake_fetch_notes)
+        monkeypatch.setattr(sss, "_store_batch", fake_store_batch)
+        monkeypatch.setattr(sss, "_trigger_tagging", lambda *a, **k: None)
+        monkeypatch.setattr(sss, "_save_author_state", lambda *a, **k: None)
+        monkeypatch.setattr(sss, "_get_conn", fake_get_conn)
+        monkeypatch.setattr(sss.time, "sleep", lambda *a: None)
+
+        sss.SubstackSubscriptionService()._crawl_notes_for_author(
+            auth=mock.MagicMock(),
+            author=author,
+            user_ids_by_pub=user_ids_by_pub,
+            report=None, idx=0, total=1,
+        )
+        assert captured["user_ids"] == [2]
+        assert captured["pub_urls"] == ["https://capitalflows.substack.com"]
 
 
 # ─────────────────────────────────────────────────────────────────────

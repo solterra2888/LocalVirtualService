@@ -33,8 +33,11 @@ from backend.services.substack_credential_service import (
     SID_KEY,
     SubstackCredentialService,
     fetch_author_notes_via_auth,
+    is_retryable_archive_error,
     normalize_publication_url,
     parse_cookie_json,
+    publication_url_aliases,
+    resolve_subscribed_publication_url,
 )
 
 load_project_env()
@@ -155,12 +158,28 @@ def _extract_note_text(body_json: Any) -> str:
 
 # ---------- 半标准化（对应 zsxq _extract_content / 脚本 post_to_row、note_item_to_row） ----------
 
-def _post_to_row(post: Any, pub_url: str, pub_name: str, avatar: str = "") -> Dict[str, Any]:
-    meta = post.get_metadata() or {}
+def _meta_dict_to_row(
+    meta: Dict[str, Any],
+    pub_url: str,
+    pub_name: str,
+    avatar: str = "",
+    *,
+    canonical_fallback: str = "",
+    is_paywalled: Optional[bool] = None,
+) -> Dict[str, Any]:
     post_id = meta.get("id")
-    content = post.get_content() or meta.get("truncated_body_text") or meta.get("description") or ""
+    content = (
+        meta.get("body_html")
+        or meta.get("truncated_body_text")
+        or meta.get("description")
+        or ""
+    )
     authors = meta.get("publishedBylines") or []
-    author = ", ".join(a.get("name", "") for a in authors if a.get("name"))
+    author = ", ".join(
+        a.get("name", "") for a in authors if isinstance(a, dict) and a.get("name")
+    )
+    if is_paywalled is None:
+        is_paywalled = (meta.get("audience") or "") == "only_paid"
     return {
         "_content_kind": "post",
         "post_id": int(post_id) if post_id is not None else None,
@@ -168,14 +187,35 @@ def _post_to_row(post: Any, pub_url: str, pub_name: str, avatar: str = "") -> Di
         "publication_name": pub_name,
         "title": meta.get("title") or "",
         "subtitle": meta.get("subtitle") or "",
-        "canonical_url": meta.get("canonical_url") or getattr(post, "url", "") or "",
+        "canonical_url": meta.get("canonical_url") or canonical_fallback or "",
         "post_date": meta.get("post_date"),
         "author": author,
         "audience": meta.get("audience") or "",
-        "is_paywalled": bool(post.is_paywalled()),
+        "is_paywalled": bool(is_paywalled),
         "content": content or "",
         "author_avatar": avatar,
     }
+
+
+def _post_to_row(post: Any, pub_url: str, pub_name: str, avatar: str = "") -> Dict[str, Any]:
+    meta = post.get_metadata() or {}
+    try:
+        content = post.get_content() or ""
+    except Exception:
+        content = ""
+    if content:
+        meta = dict(meta)
+        meta["body_html"] = content
+    paywalled = None
+    try:
+        paywalled = bool(post.is_paywalled())
+    except Exception:
+        paywalled = None
+    return _meta_dict_to_row(
+        meta, pub_url, pub_name, avatar,
+        canonical_fallback=getattr(post, "url", "") or "",
+        is_paywalled=paywalled,
+    )
 
 
 def _note_to_row(item: Dict[str, Any], profile: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -216,16 +256,134 @@ def _note_to_row(item: Dict[str, Any], profile: Dict[str, Any]) -> Optional[Dict
 # ---------- SubstackClient（轻量封装 substack-api） ----------
 
 class SubstackClient:
-    """对 Newsletter/Post 的轻量封装；auth 由调用方注入。"""
+    """对 Newsletter/Post 的轻量封装；auth 由调用方注入。
+
+    文章列表走 /api/v1/archive（支持 www / *.substack.com 候选）；
+    正文按篇拉取并在 429 时退避，单篇失败不拖垮整刊。
+    """
 
     def __init__(self, auth: Any, pub_url: str):
-        from substack_api import Newsletter
         self.auth = auth
         self.pub_url = pub_url
-        self.newsletter = Newsletter(pub_url, auth=auth)
+        self.fetch_url = pub_url
+
+    def _paginate_archive(self, base_url: str, limit: int, *, timeout: float) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        offset = 0
+        page_size = 15
+        while len(results) < limit:
+            endpoint = (
+                f"{base_url.rstrip('/')}/api/v1/archive"
+                f"?sort=new&offset={offset}&limit={page_size}"
+            )
+            if self.auth and getattr(self.auth, "authenticated", False):
+                resp = self.auth.get(endpoint, timeout=timeout)
+            else:
+                import requests
+                resp = requests.get(endpoint, timeout=timeout)
+            resp.raise_for_status()
+            items = resp.json()
+            if not isinstance(items, list) or not items:
+                break
+            results.extend(items)
+            if len(items) < page_size:
+                break
+            offset += page_size
+        return results[:limit]
+
+    def _fetch_archive_items(self, limit: int) -> List[Dict[str, Any]]:
+        candidates = publication_url_aliases(self.pub_url) or [self.pub_url]
+        last_err: Optional[BaseException] = None
+        for idx, url in enumerate(candidates):
+            timeout = 8 if idx < len(candidates) - 1 else 30
+            try:
+                items = self._paginate_archive(url, limit, timeout=timeout)
+                try:
+                    primary = normalize_publication_url(self.pub_url)
+                except ValueError:
+                    primary = self.pub_url
+                if url.rstrip("/") != primary.rstrip("/"):
+                    logger.warning(
+                        "Substack archive fallback %s -> %s (got %d posts)",
+                        self.pub_url, url, len(items),
+                    )
+                self.fetch_url = url
+                return items
+            except Exception as exc:
+                last_err = exc
+                if not is_retryable_archive_error(exc):
+                    raise
+                logger.warning("Substack archive 候选失败 url=%s: %s", url, exc)
+                continue
+        if last_err is not None:
+            raise last_err
+        return []
+
+    def _enrich_item_body(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """按篇拉全文；429/5xx 退避重试，失败则保留 archive 摘要字段。"""
+        from substack_api.post import Post
+
+        canonical = item.get("canonical_url") or ""
+        if not canonical:
+            return item
+        post = Post(canonical, auth=self.auth)
+        delays = (0, 2, 5)
+        last_exc: Optional[BaseException] = None
+        for delay in delays:
+            if delay:
+                time.sleep(delay)
+            try:
+                data = post.get_metadata(force_refresh=True)
+                if isinstance(data, dict) and data:
+                    merged = dict(item)
+                    merged.update(data)
+                    return merged
+            except Exception as exc:
+                last_exc = exc
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status == 429 or is_retryable_archive_error(exc):
+                    continue
+                break
+        if last_exc is not None:
+            logger.warning(
+                "Substack 正文拉取失败 slug=%s: %s（回退 archive 摘要）",
+                item.get("slug") or canonical, last_exc,
+            )
+        return item
 
     def get_posts(self, limit: int) -> List[Any]:
-        return self.newsletter.get_posts(limit=limit)
+        """兼容旧调用：返回 Post 对象列表。"""
+        from substack_api.post import Post
+        items = self._fetch_archive_items(limit)
+        return [
+            Post(it["canonical_url"], auth=self.auth)
+            for it in items
+            if it.get("canonical_url")
+        ]
+
+    def get_post_rows(
+        self,
+        limit: int,
+        pub_url: str,
+        pub_name: str,
+        avatar: str = "",
+        *,
+        enrich_body: bool = True,
+        body_interval: float = 0.6,
+    ) -> List[Dict[str, Any]]:
+        """拉取 archive 并转半标准化 row；可选按篇补全文。"""
+        items = self._fetch_archive_items(limit)
+        rows: List[Dict[str, Any]] = []
+        for idx, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            meta = item
+            if enrich_body:
+                if idx:
+                    time.sleep(body_interval)
+                meta = self._enrich_item_body(item)
+            rows.append(_meta_dict_to_row(meta, pub_url, pub_name, avatar))
+        return rows
 
 
 # ---------- 入库（对应 zsxq _store_topic_batch） ----------
@@ -514,23 +672,31 @@ class SubstackSubscriptionService:
         if not backfill_done or force_fetch:
             mode = "backfill"
             logger.info("[%d/%d] Substack %s backfill %d 篇", idx, total, pub_name, BACKFILL_POSTS)
-            posts = client.get_posts(BACKFILL_POSTS)
-            rows = [_post_to_row(p, pub_url, pub_name, pub_avatar) for p in posts]
+            rows = client.get_post_rows(
+                BACKFILL_POSTS, pub_url, pub_name, pub_avatar, enrich_body=True,
+            )
             head_ids = [r["post_id"] for r in rows if r.get("post_id") is not None][:20]
         else:
             mode = "incremental"
             logger.info("[%d/%d] Substack %s 增量, 锚点 %d 个", idx, total, pub_name, len(known_ids))
-            posts = client.get_posts(INCREMENT_MAX_POSTS)
+            # 先拉 archive 列表（不按篇打正文），命中锚点后只给新文补全文，降低 429
+            archive_items = client._fetch_archive_items(INCREMENT_MAX_POSTS)
             known = set(known_ids)
             rows = []
             head_ids = []
-            for p in posts:
-                row = _post_to_row(p, pub_url, pub_name, pub_avatar)
-                if row.get("post_id") is not None:
-                    head_ids.append(row["post_id"])
-                    if row["post_id"] in known:
+            for idx_item, item in enumerate(archive_items):
+                if not isinstance(item, dict):
+                    continue
+                light = _meta_dict_to_row(item, pub_url, pub_name, pub_avatar)
+                pid = light.get("post_id")
+                if pid is not None:
+                    head_ids.append(pid)
+                    if pid in known:
                         continue
-                rows.append(row)
+                if idx_item:
+                    time.sleep(0.6)
+                enriched = client._enrich_item_body(item)
+                rows.append(_meta_dict_to_row(enriched, pub_url, pub_name, pub_avatar))
 
         new_count, updated_count, new_ids = _store_batch(
             self.content_service, rows, user_ids, pub_name, report=report
@@ -562,7 +728,11 @@ class SubstackSubscriptionService:
     ) -> int:
         uid = author["substack_user_id"]
         handle = author.get("author_handle") or str(uid)
-        pub_url = author.get("publication_url") or "https://substack.com"
+        raw_pub_url = author.get("publication_url") or "https://substack.com"
+        # 对齐到用户实际订阅的 URL（custom domain vs *.substack.com 双写问题）
+        pub_url, user_ids = resolve_subscribed_publication_url(
+            raw_pub_url, handle, user_ids_by_pub,
+        )
         profile = {
             "substack_user_id": uid,
             "author_handle": handle,
@@ -570,20 +740,11 @@ class SubstackSubscriptionService:
             "publication_url": pub_url,
             "author_avatar": author.get("avatar") or "",
         }
-        # map 的 key 是归一化后的 publication_url (见 _aggregate_publications :455),
-        # 而 author.publication_url 来自 substack_followed_authors 未必归一化 -> 先归一化再查,
-        # 否则已订阅 pub 也可能因 www/尾斜杠/大小写不一致而 miss (第二类孤儿).
-        try:
-            norm_pub_url = normalize_publication_url(pub_url)
-        except ValueError:
-            norm_pub_url = pub_url
-        user_ids = user_ids_by_pub.get(norm_pub_url)
-        if not user_ids:
-            # followed author 的 publication 可能未被任何用户直接订阅 (notes-only 作者,
-            # 或 publication_url 缺省 'https://substack.com') -> 反查为空, note 以 user_ids=[]
-            # 入库后对所有用户不可见 (孤儿). 回退归属给所有启用 substack 订阅的用户 (共享 credential
-            # 架构下无 per-user 归属; 结构性根治 —— 给 substack_followed_authors 加 user 关联 —— 延后).
-            user_ids = sorted({uid for ids in user_ids_by_pub.values() for uid in ids})
+        if pub_url != (raw_pub_url or "").rstrip("/"):
+            logger.info(
+                "Substack notes @%s 归属对齐 %s -> %s (users=%s)",
+                handle, raw_pub_url, pub_url, user_ids,
+            )
         known = {int(x) for x in (author.get("recent_note_ids") or [])}
         backfill_done = bool(author.get("backfill_complete", False))
 
