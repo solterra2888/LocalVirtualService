@@ -1233,6 +1233,17 @@ class SchedulerService:
                 f"CCTV: 爬取 {cctv_result.get('articles_fetched', 0)} 篇，"
                 f"新增 {cctv_result.get('articles_new', 0)} 篇"
             )
+            # 统一回写 subscription_list 状态 + history (P1-1: 原本 news 仅刷 unread_count).
+            # EODHD + CCTV 同一 tick 内均已跑完, 合并计数为该 channel 所有 enabled 订阅写一行.
+            try:
+                from backend.services.subscription_status_service import record_fetch_outcome_for_channel
+                record_fetch_outcome_for_channel(
+                    'news',
+                    status='success' if eodhd_ok else 'failed',
+                    items_new=int(eodhd_result.get('articles_new', 0)) + int(cctv_result.get('articles_new', 0)),
+                )
+            except Exception:
+                pass
             return {
                 'success': eodhd_ok,
                 'message': message,
@@ -1242,6 +1253,11 @@ class SchedulerService:
         except Exception as e:
             error_msg = f"News Feed 任务执行异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
+            try:
+                from backend.services.subscription_status_service import record_fetch_outcome_for_channel
+                record_fetch_outcome_for_channel('news', status='failed', error=str(e))
+            except Exception:
+                pass
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 
     async def _execute_twitter_author_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:

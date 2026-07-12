@@ -570,7 +570,20 @@ class SubstackSubscriptionService:
             "publication_url": pub_url,
             "author_avatar": author.get("avatar") or "",
         }
-        user_ids = user_ids_by_pub.get(pub_url, [])
+        # map 的 key 是归一化后的 publication_url (见 _aggregate_publications :455),
+        # 而 author.publication_url 来自 substack_followed_authors 未必归一化 -> 先归一化再查,
+        # 否则已订阅 pub 也可能因 www/尾斜杠/大小写不一致而 miss (第二类孤儿).
+        try:
+            norm_pub_url = normalize_publication_url(pub_url)
+        except ValueError:
+            norm_pub_url = pub_url
+        user_ids = user_ids_by_pub.get(norm_pub_url)
+        if not user_ids:
+            # followed author 的 publication 可能未被任何用户直接订阅 (notes-only 作者,
+            # 或 publication_url 缺省 'https://substack.com') -> 反查为空, note 以 user_ids=[]
+            # 入库后对所有用户不可见 (孤儿). 回退归属给所有启用 substack 订阅的用户 (共享 credential
+            # 架构下无 per-user 归属; 结构性根治 —— 给 substack_followed_authors 加 user 关联 —— 延后).
+            user_ids = sorted({uid for ids in user_ids_by_pub.values() for uid in ids})
         known = {int(x) for x in (author.get("recent_note_ids") or [])}
         backfill_done = bool(author.get("backfill_complete", False))
 
@@ -768,6 +781,16 @@ class SubstackSubscriptionService:
 
         # 统一清理临时 cookies 文件
         self._cleanup_auth_cache()
+
+        # 统一回写 subscription_list 状态 + history (P1-1: 原本 substack 只写 substack_publications).
+        try:
+            from backend.services.subscription_status_service import record_fetch_outcome_for_channel
+            record_fetch_outcome_for_channel(
+                'substack', status='success',
+                items_new=total_posts_new + total_notes_new,
+            )
+        except Exception:
+            pass
 
         return _result(
             success=True,

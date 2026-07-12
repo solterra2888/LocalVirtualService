@@ -70,6 +70,8 @@ task_routes = {
     'finalize_youtube_feed_task': {'queue': 'file_processing'},  # YouTube Feed 字幕落库回调（家用 Worker → 远程，触发 auto-feed-tagging）
     'tag_feed_content': {'queue': 'file_processing'},            # Feeds 单条内容自动打标 + 摘要
     'batch_tag_feed_content': {'queue': 'file_processing'},      # Feeds 批量打标派发器
+    'trigger_auto_news_processing': {'queue': 'file_processing'},  # News 打标+向量化触发器 (file_tasks glob 亦覆盖, 显式以便发现)
+    'backfill_untagged_news_task': {'queue': 'file_processing'}, # News 漏打标自愈 sweep (feed_tagging_tasks)
     'personalize_feed_summary': {'queue': 'file_processing'},    # PR-6: Feeds per-user 个性化 summary
     'fan_out_personalize_summary': {'queue': 'file_processing'}, # PR-N2: tag 完成后扇出 per-user 个性化派发器
     # 内容主题匹配（tag 完成后链式触发）
@@ -79,6 +81,7 @@ task_routes = {
     'fetch_zhishixingqiu_subscription': {'queue': 'data_fetching'},  # 知识星球订阅抓取
     'fetch_substack_subscription': {'queue': 'data_fetching'},  # Substack 订阅抓取（文章 + 动态）
     'fetch_weibo_subscription': {'queue': 'data_fetching'},  # 微博订阅抓取
+    'backfill_podcast_transcripts_task': {'queue': 'data_fetching'},  # Podcast 历史 (>48h) 剧集回填转写
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
     'smart_wait_and_add_user': {'queue': 'data_fetching'},
     'generate_author_summary': {'queue': 'ai_processing'},
@@ -177,6 +180,12 @@ beat_schedule = {
     'check-hk-worker-health': {
         'task': 'check_hk_worker_health',
         'schedule': crontab(minute='*/10'),
+    },
+    # 每 30 分钟自愈: 补打漏标 news 内容 (trigger_auto_news_processing 因 scheduler 进程被杀 /
+    # Celery 派发失败 / tag 任务失败而漏; save_content 的 ON CONFLICT 去重使漏失不可自恢复).
+    'backfill-untagged-news': {
+        'task': 'backfill_untagged_news_task',
+        'schedule': crontab(minute='*/30'),
     },
     # Theme Report 改由 Scheduler Management「报告生成类」配置（默认每周一 14:00 CST）
 }

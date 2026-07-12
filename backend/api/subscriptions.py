@@ -1411,6 +1411,59 @@ async def get_subscription_history(
         raise HTTPException(status_code=500, detail=f"Failed to retrieve history: {str(e)}")
 
 
+@router.post("/{subscription_id}/backfill-transcripts")
+async def backfill_subscription_transcripts(
+    subscription_id: int,
+    batch_limit: int = Query(default=50, ge=1, le=500, description="单次最多回填剧集数"),
+    current_user: TokenData = Depends(get_current_user),
+):
+    """回填某条 Podcast 订阅的历史剧集 ASR 转写 + 打标.
+
+    PODCAST_ASR_RECENT_HOURS (默认 48h) 之外的剧集入库时只存正文、不转写不打标;
+    本接口派发 Celery task `backfill_podcast_transcripts_task`, 对该订阅下 transcript 为空
+    但有 audio_url 的剧集批量转写, 转写完成后自动打标/向量化. 返回 task_id 供轮询.
+    """
+    user_id = current_user.user_id
+    db_manager = get_db_manager()
+
+    try:
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT channel_type FROM subscription_list WHERE id = %s AND user_id = %s",
+            (subscription_id, user_id),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        if row[0] != 'podcast':
+            raise HTTPException(
+                status_code=400,
+                detail="Backfill transcripts only supported for podcast subscriptions",
+            )
+
+        from backend.tasks.subscription_tasks import backfill_podcast_transcripts_task
+        task = backfill_podcast_transcripts_task.delay(subscription_id, batch_limit)
+
+        logger.info(
+            f"Podcast backfill dispatched: subscription_id={subscription_id}, "
+            f"batch_limit={batch_limit}, task_id={task.id}, user_id={user_id}"
+        )
+        return {
+            "task_id": task.id,
+            "subscription_id": subscription_id,
+            "message": "Podcast transcript backfill started. Poll GET /api/files/tasks/{task_id}/status.",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to dispatch podcast backfill: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to dispatch backfill: {str(e)}")
+
+
 # Test Fetch 功能已弃用
 # 原因：新架构在创建订阅时自动处理内容获取（智能复用或调用API）
 # Scheduler 会定期自动更新内容，无需手动触发

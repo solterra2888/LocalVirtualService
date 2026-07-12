@@ -158,13 +158,19 @@ class EODHDNewsFeedService:
                 logger.warning(f"保存新闻失败: {str(e)[:100]}",
                                title=article.get('title', '')[:60])
 
-        # Step 4: 触发新内容的自动打标 + 向量化
+        # Step 4: 触发新内容的自动打标 + 向量化 (派发为持久化 Celery 消息, 避免 scheduler
+        # 进程被杀导致永久漏打标; 派发失败由 backfill_untagged_news_task 周期兜底)
         if new_content_ids:
             try:
                 from backend.tasks.file_tasks import trigger_auto_news_processing
-                trigger_auto_news_processing(new_content_ids, delay=3)
+                trigger_auto_news_processing.apply_async(
+                    args=[new_content_ids], kwargs={'delay': 3}, queue='file_processing'
+                )
             except Exception as e:
-                logger.warning(f"触发 News 自动处理失败 (不阻断主链路): {e}")
+                logger.warning(
+                    f"触发 News 自动处理派发失败 (不阻断主链路, 由 backfill sweep 兜底): {e}; "
+                    f"content_ids={new_content_ids[:20]}"
+                )
 
         # Step 5: 更新订阅未读计数
         self._update_unread_counts(source_to_users)

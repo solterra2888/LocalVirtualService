@@ -23,7 +23,7 @@ from typing import Optional, List, Dict, Any
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
-from backend.utils.datetime_utils import utcnow
+from backend.utils.datetime_utils import utcnow, day_window_utc
 from backend.utils.logger import get_logger
 from backend.services.content_adapters.news_adapter import NewsAdapter
 from backend.services.subscription_content_service import SubscriptionContentService
@@ -145,13 +145,19 @@ class CCTVNewsFeedService:
                 failed += 1
                 logger.warning(f"保存 CCTV 文章失败: {str(exc)[:100]}", title=article.get("title", "")[:60])
 
-        # 5. 触发新内容的自动打标 (LLM) + 向量化
+        # 5. 触发新内容的自动打标 (LLM) + 向量化 (派发为持久化 Celery 消息, 避免 scheduler
+        # 进程被杀导致永久漏打标; 派发失败由 backfill_untagged_news_task 周期兜底)
         if new_content_ids:
             try:
                 from backend.tasks.file_tasks import trigger_auto_news_processing
-                trigger_auto_news_processing(new_content_ids, delay=3)
+                trigger_auto_news_processing.apply_async(
+                    args=[new_content_ids], kwargs={'delay': 3}, queue='file_processing'
+                )
             except Exception as exc:
-                logger.warning(f"触发 CCTV News 自动处理失败 (不阻断主链路): {exc}")
+                logger.warning(
+                    f"触发 CCTV News 自动处理派发失败 (不阻断主链路, 由 backfill sweep 兜底): {exc}; "
+                    f"content_ids={new_content_ids[:20]}"
+                )
 
         # 6. 更新未读计数
         self._update_unread_counts(user_ids)
@@ -366,7 +372,12 @@ class CCTVNewsFeedService:
         published_at = None
         if pub_date:
             try:
-                published_at = datetime.strptime(pub_date, "%Y-%m-%d").isoformat() + "+00:00"
+                # CCTV 日期为北京时区广播日; 换算为该日北京午夜对应的 aware UTC,
+                # 不能直接 +"+00:00" (会把 +8 北京时间误标 UTC, 偏 8h).
+                # 例: 北京 2026-07-12 → 2026-07-11T16:00:00+00:00
+                published_at = day_window_utc(
+                    datetime.strptime(pub_date, "%Y-%m-%d").date(), "Asia/Shanghai"
+                )[0].isoformat()
             except ValueError:
                 pass
 

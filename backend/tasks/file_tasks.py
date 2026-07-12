@@ -529,6 +529,7 @@ def trigger_auto_feed_tagging(content_ids, username=None, delay=2):
         error(f"触发 Feeds 自动向量化失败 (不阻断主链路): {e}", source="auto_vectorize")
 
 
+@app.task(name='trigger_auto_news_processing', queue='file_processing')
 def trigger_auto_news_processing(content_ids, username=None, delay=2):
     """
     News 内容入库后的自动处理触发器 (打标 + 向量化).
@@ -548,6 +549,12 @@ def trigger_auto_news_processing(content_ids, username=None, delay=2):
         content_ids: subscription_content.id 列表或单个 ID
         username: 触发用户 (仅日志)
         delay: countdown 秒, 确保 DB 事务已提交
+
+    说明: 本函数是 Celery task (queue=file_processing, 由 celery_config 的
+    `backend.tasks.file_tasks.*` glob 路由). 调用方应使用 `.apply_async(...)` 派发,
+    使触发成为持久化 Celery 消息 —— 避免 scheduler 进程在 "DB insert" 与 "触发打标"
+    之间被杀导致永久漏打标 (save_content 的 ON CONFLICT 去重使下一 tick 不再补).
+    兜底: backfill_untagged_news_task (feed_tagging_tasks) 周期补打漏标行.
     """
     news_tag_enabled = os.getenv('NEWS_AUTO_TAG_ENABLED', 'true').lower() == 'true'
     if not news_tag_enabled:
@@ -3972,6 +3979,20 @@ def transcribe_youtube_feed_task(self, content_db_id: int, video_url: str, video
         from backend.services.subscription_content_service import SubscriptionContentService
         content_service = SubscriptionContentService()
         content_service.update_transcript(content_db_id, full_text, transcript_data)
+
+        # 字幕落库后派发统一 finalize 回调 (auto-feed-tagging + 向量化), 与
+        # fetch_youtube_transcripts_batch_task 及 Podcast ASR 路径对齐.
+        # 必须路由到 file_processing (AI worker): 本 ASR task 实际跑在
+        # youtube_transcription 家用 Worker (住宅 IP), 打标/向量化不应落到该 worker.
+        try:
+            from backend.tasks.subscription_tasks import finalize_youtube_feed_task
+            finalize_youtube_feed_task.apply_async(
+                args=[content_db_id], queue='file_processing'
+            )
+        except Exception as e:
+            error(f"ASR 后派发 finalize 失败 (不阻断, 字幕已落库): "
+                  f"content_db_id={content_db_id}, error={e}",
+                  source="youtube_feed_asr")
 
         info(f"YouTube Feed ASR 完成: content_db_id={content_db_id}, video_id={video_id}",
              source="youtube_feed_asr")

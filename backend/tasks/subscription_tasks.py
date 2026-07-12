@@ -3,7 +3,7 @@
 订阅相关的Celery任务
 """
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from backend.celery_app import app
 from backend.utils.datetime_utils import utcnow
@@ -443,6 +443,8 @@ def fetch_youtube_transcripts_batch_task(
         content_service = SubscriptionContentService()
         success_count = 0
         fail_count = 0
+        # 成功落库的 content_id, 循环结束后统一派发 finalize (auto-feed-tagging + 向量化)
+        transcribed_ids: list = []
 
         for item in video_items:
             content_db_id = item["content_db_id"]
@@ -453,6 +455,7 @@ def fetch_youtube_transcripts_batch_task(
                 full_text = YouTubeService.get_full_text(result)
                 content_service.update_transcript(content_db_id, full_text, result)
                 success_count += 1
+                transcribed_ids.append(content_db_id)
                 logger.info(
                     f"[Celery Task] Transcript OK: content_db_id={content_db_id}, "
                     f"video_id={video_id}, language={result.get('language')}"
@@ -467,6 +470,20 @@ def fetch_youtube_transcripts_batch_task(
             f"[Celery Task] Transcript batch done: success={success_count}, "
             f"failed={fail_count}"
         )
+
+        # 字幕落库后派发统一 finalize 回调 (与 Podcast ASR 路径 :1043 对齐):
+        #   finalize_youtube_feed_task → trigger_auto_feed_tagging (tag_feed_content + 向量化).
+        # 必须路由到 file_processing (AI worker) —— 本批处理 task 跑在 youtube_fetching
+        # 家用 Worker (住宅 IP), 打标/向量化不应落到该 worker.
+        for cid in transcribed_ids:
+            try:
+                finalize_youtube_feed_task.apply_async(args=[cid], queue='file_processing')
+            except Exception as e:
+                logger.warning(
+                    f"[Celery Task] 派发 finalize 失败 (不阻断, 字幕已落库): "
+                    f"content_db_id={cid}, error={e}"
+                )
+
         return {
             "success": True,
             "total": len(video_items),
@@ -1091,3 +1108,78 @@ def podcast_transcribe_episode_task(
                 os.rmdir(temp_dir)
             except OSError:
                 pass
+
+
+@app.task(
+    name='backfill_podcast_transcripts_task',
+    queue='data_fetching',
+    max_retries=1,
+    default_retry_delay=120,
+    time_limit=300,
+    soft_time_limit=240,
+)
+def backfill_podcast_transcripts_task(
+    subscription_id: Optional[int] = None,
+    batch_limit: int = 50,
+) -> Dict[str, Any]:
+    """回填 Podcast 历史剧集的 ASR 转写 + 打标.
+
+    PODCAST_ASR_RECENT_HOURS (默认 48h) 之外的剧集入库时只存正文、不转写不打标 (P0-4);
+    本 task 找出 transcript 为空但有 audio_url 的剧集, 逐集派发 podcast_transcribe_episode
+    (复用 PodcastSubscriptionService._dispatch_asr_tasks 的错峰派发). 转写完成后由
+    podcast_transcribe_episode_task 内部自动派发 finalize_youtube_feed_task → 打标/向量化,
+    因此回填后标签与向量会自动补齐, 无需额外接线.
+
+    Args:
+        subscription_id: 限定某条订阅 (按其 channel_identifier 过滤). None = 全部 podcast.
+        batch_limit: 单次最多回填的剧集数 (防一次派发过多 ASR).
+    """
+    from backend.database.db_manager import DatabaseManager
+    from backend.utils.database_config import get_database_config
+    from backend.services.podcast_subscription_service import PodcastSubscriptionService
+
+    db = DatabaseManager(get_database_config())
+    items: List[Dict[str, Any]] = []
+    try:
+        with db.get_connection_context() as conn:
+            cur = conn.cursor()
+            sql = """
+                SELECT sc.id, sc.title, sc.metadata->>'audio_url' AS audio_url
+                FROM subscription_content sc
+                WHERE sc.channel_type = 'podcast'
+                  AND (sc.transcript IS NULL OR sc.transcript = '')
+                  AND sc.metadata->>'audio_url' IS NOT NULL
+                  AND sc.metadata->>'audio_url' <> ''
+            """
+            params: List[Any] = []
+            if subscription_id:
+                sql += (
+                    " AND sc.author_identifier = "
+                    "(SELECT channel_identifier FROM subscription_list WHERE id = %s)"
+                )
+                params.append(subscription_id)
+            sql += " ORDER BY sc.published_at DESC LIMIT %s"
+            params.append(batch_limit)
+            cur.execute(sql, params)
+            for row in cur.fetchall():
+                # 查询列序: sc.id, sc.title, sc.metadata->>'audio_url'
+                items.append({
+                    'content_db_id': row[0],
+                    'episode_title': row[1] or 'unknown',
+                    'audio_url': row[2],
+                })
+    except Exception as e:
+        logger.error("backfill_podcast_transcripts_task 查询失败: %s", e, exc_info=True)
+        return {'success': False, 'error': str(e), 'dispatched': 0}
+
+    if not items:
+        logger.info("backfill_podcast_transcripts_task: 无待回填 podcast 剧集")
+        return {'success': True, 'dispatched': 0}
+
+    # 复用错峰派发 (stagger 60s/集); podcast_transcribe_episode 自带 finalize -> 打标.
+    PodcastSubscriptionService._dispatch_asr_tasks(items)
+    logger.info(
+        "backfill_podcast_transcripts_task: 派发 %d 个 episode 回填转写 (subscription_id=%s)",
+        len(items), subscription_id,
+    )
+    return {'success': True, 'dispatched': len(items)}

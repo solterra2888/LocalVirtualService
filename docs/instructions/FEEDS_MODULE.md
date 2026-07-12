@@ -1,5 +1,14 @@
 # Feeds 订阅模块完整文档
 
+> **2026-07-12 更新（Feeds Scheduler 一致性修复 P0+P1）**
+> 依据 [FEED_SCHEDULER_CONSISTENCY_AUDIT.md](./FEED_SCHEDULER_CONSISTENCY_AUDIT.md) 的逐条代码核对结论，修复 7 个 Feeds 抓取 Scheduler 的功能 bug 与一致性分裂：
+> - **【P0-1】YouTube Feed 现在会自动打标/向量化**：字幕批处理 (`fetch_youtube_transcripts_batch_task`) 与 ASR 兜底 (`transcribe_youtube_feed_task`) 写完字幕后均派发 `finalize_youtube_feed_task`（→ `trigger_auto_feed_tagging` + 向量化，`file_processing` 队列）。**§7.2「Feed 链路没有 finalize 回调」的旧描述已作废。**
+> - **【P0-2】News 打标触发 Celery 化 + 自愈**：`trigger_auto_news_processing` 改为 Celery task（`file_processing`），EODHD/CCTV 改 `.apply_async` 派发（消除 scheduler 进程被杀导致 `save_content` ON CONFLICT 去重后的永久漏打标）；新增 `backfill_untagged_news_task`（beat 每 30min，LEFT JOIN 找漏标行补打）。
+> - **【P0-3】CCTV `published_at` 时区修正**：北京广播日期经 `day_window_utc(..., "Asia/Shanghai")` 换算为 aware UTC（原 naive `+00:00` 误标偏 8h）。见 [§6.4.4](#644-入库字段约定)。
+> - **【P0-4】Podcast 历史剧集回填**：新增 `backfill_podcast_transcripts_task` + `POST /api/subscriptions/{id}/backfill-transcripts`，转写后经既有 finalize 链自动打标。
+> - **【P0-5】Substack notes 不再产生孤儿**：归一化 publication_url 查找键；未命中时回退归属给所有启用 substack 订阅用户。
+> - **【P1】7 源 `subscription_list` 状态 / `subscription_fetch_history` / 时区写法统一**：新建 `backend/services/subscription_status_service.py`（`record_fetch_outcome` 等），7 源统一回写 `last_fetched_at`(utcnow) / `consecutive_failures`(失败自增) / history。见 [§2.3](#23-subscription_fetch_history--未读数维护)。
+>
 > **2026-06-01 更新**
 > - **News 混合打标**：EODHD 新入库走轻量映射（`map_news_tags` → `subscription_content_tags`，`tag_schema_version=news_eodhd_v1`，零 LLM）；CCTV 及 `NEWS_LLM_TAG_SOURCES` 白名单来源走 LLM 真打标（`content_tag_feeds_v1`）。入库后统一 `trigger_auto_news_processing`（打标 + 向量化）。详见 [§6.5](#65-news-混合打标与向量化)。
 >
@@ -165,7 +174,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 
 ### 2.3 `subscription_fetch_history` + 未读数维护
 
-- `subscription_fetch_history`：每次抓取一行（fetched/new/updated/skipped 计数、错误、耗时）。暴露给 `GET /api/subscriptions/{id}/history`。
+- `subscription_fetch_history`：每次抓取一行（fetched/new/updated/skipped 计数、错误、耗时），暴露给 `GET /api/subscriptions/{id}/history`。**2026-07-12 起 7 源统一写入**（经 `backend/services/subscription_status_service.py::record_fetch_outcome`）；此前仅 Twitter 写，其余 6 源的 `/history` 返回空。Group3 源（知识星球/Substack/微博/News）"按源实体抓一次 → user_ids fan-out"，故一次抓取会为该 channel 下每个 enabled 订阅写一行。
 - 数据库函数 `update_subscription_unread_count(user_id, channel_type, author_identifier)` + 触发器：`read_status` 或新内容插入时自动刷新 `subscription_list.unread_count`，前端只需读一列。
 
 ### 2.4 内容复用机制（重要）
@@ -263,7 +272,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 
 ## 6. 定时抓取链路
 
-**Celery Beat 本身只跑 `cleanup_llm_usage_logs`**（见 `backend/celery_config.py::beat_schedule`），Feeds 的周期抓取不在那里。
+**Celery Beat** 跑少量内部维护任务（见 `backend/celery_config.py::beat_schedule`）：`cleanup_llm_usage_logs`（日）、`reconcile_vector_bucket`（日）、`check_hk_worker_health`（10min），以及 **`backfill_untagged_news_task`（30min，News 漏打标自愈，见 [§6.5](#65-news-混合打标与向量化)）**。Feeds 的周期**抓取**不在 beat，仍走下表的 `task_scheduling` + `scheduler_service`。
 
 真正的调度来自 `task_scheduling` 表 + `scheduler_service`（详见 `docs/instructions/SCHEDULER_DEVELOPMENT_GUIDE.md`）：
 
@@ -284,8 +293,11 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | `smart_wait_and_add_user` | `data_fetching` | 120 / 90 | 1 | 等待他人抓取 ≤60s 再合并 |
 | `fetch_youtube_subscription` | `youtube_fetching` | 60 / 30 | 0 | **派发器**：远程服务器上的任务壳，用 `send_task` 把同名任务再扔到 `youtube_fetching` 队列由家用 Worker 消费 |
 | `fetch_all_youtube_subscriptions` | `youtube_fetching` | **4200 / 3600**（70m / 60m）| 2 × 120s | 批量 YouTube 订阅；实际在家用 Worker 上 `concurrency=1` + Webshare 串行跑，详见 local_virtual_service/README.md |
-| `fetch_youtube_transcripts_batch` | `youtube_fetching` | **2400 / 2100**（40m / 35m）| 2 | 批量补抓字幕，失败派发 ASR |
-| `transcribe_youtube_feed_task` | `youtube_transcription` ★ | 由 `.env` 控制 | 1 × 120s | YouTube Fun-ASR 转录（`file_tasks.py` 里写的是 `file_processing` 默认队列，但 `celery_config.CELERY_TASK_ROUTES` 覆盖为 `youtube_transcription`，路由表优先）|
+| `fetch_youtube_transcripts_batch` | `youtube_fetching` | **2400 / 2100**（40m / 35m）| 2 | 批量补抓字幕，失败派发 ASR；**字幕落库后派发 `finalize_youtube_feed_task`（→ 打标+向量化）** |
+| `transcribe_youtube_feed_task` | `youtube_transcription` ★ | 由 `.env` 控制 | 1 × 120s | YouTube Fun-ASR 转录（`file_tasks.py` 里写的是 `file_processing` 默认队列，但 `celery_config.CELERY_TASK_ROUTES` 覆盖为 `youtube_transcription`，路由表优先）；**ASR 落库后同样派发 `finalize_youtube_feed_task`** |
+| `finalize_youtube_feed_task` | `file_processing` | 120 / 90 | 2 | Feed 字幕/ASR 落库后的统一 finalize 回调 → `trigger_auto_feed_tagging`（打标 + 向量化）；YouTube（字幕批处理 + ASR）与 Podcast ASR 共用，函数体 channel-neutral |
+| `backfill_podcast_transcripts_task` | `data_fetching` | 300 / 240 | 1 | Podcast 历史（>48h `PODCAST_ASR_RECENT_HOURS` 外）剧集回填转写，由 `POST /api/subscriptions/{id}/backfill-transcripts` 触发；转写后经 `finalize_youtube_feed_task` 自动打标 |
+| `trigger_auto_news_processing` | `file_processing` | — | — | News 入库后打标 + 向量化触发器（**2026-07-12 起 Celery task**），内部按 author_identifier 路由 CCTV→LLM / EODHD→映射；详见 [§6.5](#65-news-混合打标与向量化) |
 
 ★ `transcribe_youtube_feed_task` 探测视频时长 > 30 min 时会 `apply_async(queue='youtube_transcription_long')` 转发到长队列，详见 `deployment/local_virtual_service/README.md` 的 "长视频自动路由" 一节。
 
@@ -420,7 +432,7 @@ scheduler_service._execute_news_feed_task(params)
 | `author_identifier` / `author_name` | `CCTV` | 来自 `raw_data.source`；Feeds 列表按此过滤 |
 | `title` / `content` | 爬取标题 + 正文段落（`\n` 拼接）| — |
 | `url` | `https://tv.cctv.com/...` | 原文链接 |
-| `published_at` | URL 路径 `/YYYY/MM/DD/` 或 fallback `utcnow()` | — |
+| `published_at` | URL 路径 `/YYYY/MM/DD/` 提取的北京广播日期，经 `day_window_utc(..., "Asia/Shanghai")` 换算为该日北京午夜对应的 **aware UTC**（如北京 `2026-07-12` → `2026-07-11T16:00:00+00:00`）；无日期时 fallback `utcnow()` | 2026-07-12 修正：原把北京日期 naive 误标 `+00:00` 偏 8h |
 | `metadata.symbols` | `[]` | **无 ticker**；不会出现在 Dashboard 个股新闻（依赖 symbols 匹配）|
 | `metadata.api_tags` | `[]` | — |
 | `user_ids` | 所有启用 CCTV 订阅的用户 ID | 第二人订阅同一频道只 merge，不重复爬 |
@@ -481,7 +493,7 @@ scheduler_service._execute_news_feed_task(params)
 
 ### 6.5 News 混合打标与向量化
 
-News 渠道（`channel_type='news'`）在 **新入库** 后由 `trigger_auto_news_processing`（`backend/tasks/file_tasks.py`）统一处理，与 twitter/youtube 的 `trigger_auto_feed_tagging` 并列、互不替代。
+News 渠道（`channel_type='news'`）在 **新入库** 后由 `trigger_auto_news_processing`（`backend/tasks/file_tasks.py`，**2026-07-12 起为 Celery task**，队列 `file_processing`）统一处理，与 twitter/youtube 的 `trigger_auto_feed_tagging` 并列、互不替代。EODHD/CCTV 抓取服务以 `.apply_async` 派发它（持久化 Celery 消息），消除"scheduler 进程在 DB insert 与触发之间被杀 → 因 `save_content` 的 `ON CONFLICT` 去重而永久漏打标"的风险。另有自愈兜底：`backfill_untagged_news_task`（beat 每 30min，`feed_tagging_tasks.py`）以 `LEFT JOIN subscription_content_tags ... IS NULL` 定位漏标行（`created_at` 早 15min，避开刚入库正被打标的）并重新派发。
 
 #### 6.5.1 路由规则
 
@@ -520,8 +532,8 @@ News 渠道（`channel_type='news'`）在 **新入库** 后由 `trigger_auto_new
 | 文件 | 职责 |
 |------|------|
 | `backend/services/feed_content_tagging_service.py` | `_build_tagging_text`（news LLM）、`map_api_tags`（EODHD 映射）|
-| `backend/tasks/feed_tagging_tasks.py` | `map_news_tags_task` |
-| `backend/tasks/file_tasks.py` | `trigger_auto_news_processing` |
+| `backend/tasks/feed_tagging_tasks.py` | `map_news_tags_task`、`backfill_untagged_news_task`（漏标自愈 sweep） |
+| `backend/tasks/file_tasks.py` | `trigger_auto_news_processing`（Celery task） |
 | `backend/services/eodhd_news_feed_service.py` | 抓取后收集 `new_content_ids` 并触发 |
 | `backend/services/cctv_news_feed_service.py` | 同上 |
 
@@ -547,10 +559,10 @@ News 渠道（`channel_type='news'`）在 **新入库** 后由 `trigger_auto_new
 
 | 链路 | 入口 | 主任务 | 落库目标 |
 |------|------|--------|---------|
-| **Feed 订阅（本模块）** | `Scheduler / POST /api/subscriptions` | `fetch_all_youtube_subscriptions` / `fetch_youtube_subscription` → `transcribe_youtube_feed_task` | `subscription_content.transcript / transcript_data` |
+| **Feed 订阅（本模块）** | `Scheduler / POST /api/subscriptions` | `fetch_all_youtube_subscriptions` / `fetch_youtube_subscription` → `fetch_youtube_transcripts_batch_task` / `transcribe_youtube_feed_task` → **`finalize_youtube_feed_task`** | `subscription_content.transcript / transcript_data` + 触发 auto-feed-tagging |
 | **Upload YouTube Link**（非本模块，对比参考）| `/api/files/upload-youtube` | `fetch_youtube_file_transcript_task` → `transcribe_youtube_file_asr_task` → 远程 `finalize_youtube_file_task` | `file_processing_details.content` + 触发 auto-tag/name/classify |
 
-**关键区别**：Feed 链路**没有** finalize 回调、**没有** 自动打标/分类；Upload 链路有。
+**关键区别**（2026-07-12 更新）：YouTube Feed 链路在字幕/ASR 落库后**会**派发 `finalize_youtube_feed_task`（→ `trigger_auto_feed_tagging`：打标 + 向量化，`file_processing` 队列），与 Upload 链路的 `finalize_youtube_file_task` 对称；区别在于 Feed 链路**不做** auto-name / auto-classify（那两者只读 `file_processing_details`，是 Upload 专属）。Podcast ASR 复用同一个 `finalize_youtube_feed_task`（函数体 channel-neutral）。
 
 ### 7.3 Feeds 链路在本地 Worker 的大致走向
 
@@ -662,7 +674,7 @@ fetch_all_youtube_subscriptions / fetch_youtube_subscription   (queue: youtube_f
 | 个性化标签（`personalized_tags`）| 不自动调用，但可作为用户阅读后手动二次处理入口 | 自动调用（详见 `PERSONALIZED_TAGS_IMPLEMENTATION.md`）| 不参与 |
 | 定时触发 | scheduler_service（youtube/twitter/**news_feed**=EODHD+CCTV）| 无（用户触发）| 已移除（原 `news_analysis` / `cctv_news`）|
 
-**如果将来要让 Feeds YouTube 字幕成功后自动打标/分类**，需要在 `subscription_content_service.update_transcript` 成功分支派发类似 `finalize_youtube_file_task` 的回调，并把 `subscription_content` 的 id 适配到 `content_tagging_service`/`content_classify_service`（当前两者只读 `file_processing_details`）。
+**Feeds YouTube 字幕落库后自动打标**（2026-07-12 已实现）：`fetch_youtube_transcripts_batch_task`（字幕批处理）与 `transcribe_youtube_feed_task`（ASR 兜底）写完 `subscription_content.transcript` 后，派发 `finalize_youtube_feed_task`（`file_processing` 队列）→ `trigger_auto_feed_tagging`（打标 + 向量化）。Feed 链路**不**做 auto-name / auto-classify —— 那两者（`content_tagging_service`/`content_classify_service`）只读 `file_processing_details`，仍是 Upload 链路专属；若将来要为 Feed 补上，需把 `subscription_content` id 适配进这两个 service。Podcast 经同一 `finalize_youtube_feed_task` 链路打标。
 
 ## 10. LLM 调用详解
 

@@ -429,27 +429,15 @@ class PodcastSubscriptionService:
                 source="podcast_subscription",
             )
 
-            # 更新订阅统计
-            try:
-                conn = db_manager.get_connection()
-                cursor = conn.cursor()
-
-                cursor.execute("""
-                    UPDATE subscription_list
-                    SET
-                        last_fetched_at = CURRENT_TIMESTAMP,
-                        total_items_fetched = total_items_fetched + %s,
-                        last_fetch_items_count = %s,
-                        consecutive_failures = 0
-                    WHERE id = %s
-                """, (episodes_new, episodes_new, subscription_id))
-
-                conn.commit()
-                cursor.close()
-                conn.close()
-
-            except Exception as e:
-                error(f"更新订阅统计失败: {str(e)}", source="podcast_subscription")
+            # 更新订阅统计 + 写抓取历史 (统一 helper: utcnow + 失败自增 + history)
+            from backend.services.subscription_status_service import record_fetch_outcome_auto
+            record_fetch_outcome_auto(
+                subscription_id,
+                status='success',
+                items_fetched=episodes_new + episodes_existing,
+                items_new=episodes_new,
+                execution_duration_ms=execution_time,
+            )
 
             return {
                 'success': True,
@@ -462,6 +450,14 @@ class PodcastSubscriptionService:
 
         except Exception as e:
             error(f"获取并存储 Podcast episode 失败: {str(e)}", source="podcast_subscription")
+            # 失败也回写状态 (consecutive_failures+1) + history, 与 Twitter 对齐 (P1-2)
+            from backend.services.subscription_status_service import record_fetch_outcome_auto
+            record_fetch_outcome_auto(
+                subscription_id,
+                status='failed',
+                error=str(e),
+                execution_duration_ms=int((time.time() - start_time) * 1000),
+            )
             return {
                 'success': False,
                 'message': f'Failed to fetch episodes: {str(e)}',
@@ -634,16 +630,14 @@ class PodcastSubscriptionService:
                         cursor = conn.cursor()
 
                         new_count = len(new_episode_items)
+                        from backend.services.subscription_status_service import record_fetch_outcome
                         for sub_id in feed_info['subscription_ids']:
-                            cursor.execute("""
-                                UPDATE subscription_list
-                                SET
-                                    last_fetched_at = CURRENT_TIMESTAMP,
-                                    total_items_fetched = total_items_fetched + %s,
-                                    last_fetch_items_count = %s,
-                                    consecutive_failures = 0
-                                WHERE id = %s
-                            """, (new_count, new_count, sub_id))
+                            record_fetch_outcome(
+                                cursor, sub_id,
+                                status='success',
+                                items_new=new_count,
+                                items_fetched=new_count,
+                            )
 
                         conn.commit()
                         cursor.close()
@@ -657,6 +651,13 @@ class PodcastSubscriptionService:
                     error(f"获取 Feed 失败: {feed_url}, error={str(e)}",
                           source="podcast_subscription")
                     feeds_failed += 1
+                    # 失败回写 (consecutive_failures+1 + history) for each affected sub (P1-2)
+                    try:
+                        from backend.services.subscription_status_service import record_fetch_outcome_auto
+                        for sub_id in feed_info.get('subscription_ids', []):
+                            record_fetch_outcome_auto(sub_id, status='failed', error=str(e))
+                    except Exception:
+                        pass
                     continue
 
             execution_time = int((time.time() - start_time) * 1000)

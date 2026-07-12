@@ -936,6 +936,13 @@ class WeiboSubscriptionService:
             if report:
                 report.record_warning(f"截断清扫异常: {repair_exc}")
 
+        # 统一回写 subscription_list 状态 + history (P1-1: 原本 weibo 只写 weibo_accounts).
+        try:
+            from backend.services.subscription_status_service import record_fetch_outcome_for_channel
+            record_fetch_outcome_for_channel('weibo', status='success', items_new=total_new)
+        except Exception:
+            pass
+
         return _result(
             success=True,
             accounts_processed=len(accounts) - len(failed_accounts),

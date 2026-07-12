@@ -4,7 +4,6 @@ Twitter订阅服务 - 基于用户订阅列表获取Twitter推文
 """
 
 import os
-import uuid
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -804,27 +803,9 @@ class TwitterSubscriptionService:
         始终被规整为 UTC 进库（详见 backend/utils/datetime_utils.py
         ::install_psycopg2_utc_adapter）。
         """
-        now = utcnow()
-        try:
-            if status == 'success':
-                cursor.execute('''
-                UPDATE subscription_list
-                SET last_fetched_at = %s,
-                    last_fetch_items_count = %s,
-                    total_items_fetched = total_items_fetched + %s,
-                    consecutive_failures = 0
-                WHERE id = %s
-                ''', (now, items_count, items_count, subscription_id))
-            else:
-                cursor.execute('''
-                UPDATE subscription_list
-                SET last_fetched_at = %s,
-                    last_fetch_items_count = 0,
-                    consecutive_failures = consecutive_failures + 1
-                WHERE id = %s
-                ''', (now, subscription_id))
-        except Exception as e:
-            logger.error("更新订阅状态失败", subscription_id=subscription_id, exception=str(e))
+        # 委托给共享 helper (subscription_status_service), 与 YouTube/Podcast/... 7 源统一.
+        from backend.services.subscription_status_service import _update_subscription_status as _shared
+        _shared(cursor, subscription_id, items_count, status)
     
     def _record_fetch_history(self, cursor, subscription_id: int,
                              items_fetched: int = 0,
@@ -834,30 +815,13 @@ class TwitterSubscriptionService:
                              error_message: str = None,
                              execution_duration_ms: int = None):
         """记录获取历史。订阅已删除时跳过；INSERT 用 SAVEPOINT 隔离，避免单条 FK 失败中止整批事务。"""
-        cursor.execute(
-            "SELECT 1 FROM subscription_list WHERE id = %s",
-            (subscription_id,),
+        from backend.services.subscription_status_service import _record_fetch_history as _shared
+        _shared(
+            cursor, subscription_id,
+            items_fetched=items_fetched,
+            items_new=items_new,
+            items_duplicated=items_duplicated,
+            status=status,
+            error_message=error_message,
+            execution_duration_ms=execution_duration_ms,
         )
-        if not cursor.fetchone():
-            logger.warning(
-                "跳过抓取历史记录：订阅不存在（可能已删除）",
-                subscription_id=subscription_id,
-            )
-            return
-        sp = f"sp_rf_{uuid.uuid4().hex[:16]}"
-        try:
-            cursor.execute(f"SAVEPOINT {sp}")
-            cursor.execute('''
-            INSERT INTO subscription_fetch_history
-            (subscription_id, items_fetched, items_new, items_duplicated,
-             status, error_message, execution_duration_ms)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ''', (subscription_id, items_fetched, items_new, items_duplicated,
-                  status, error_message, execution_duration_ms))
-            cursor.execute(f"RELEASE SAVEPOINT {sp}")
-        except Exception as e:
-            try:
-                cursor.execute(f"ROLLBACK TO SAVEPOINT {sp}")
-            except Exception:
-                pass
-            logger.error("记录获取历史失败", subscription_id=subscription_id, exception=str(e))

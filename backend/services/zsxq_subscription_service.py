@@ -883,6 +883,16 @@ class ZsxqSubscriptionService:
             if idx < len(groups) - 1:
                 time.sleep(GROUP_INTERVAL)
 
+        # 统一回写 subscription_list 状态 + history (P1-1: 原本 zsxq 只写 zsxq_groups,
+        # subscription_list.last_fetched_at 恒为 NULL). 为该 channel 所有 enabled 订阅写一行.
+        try:
+            from backend.services.subscription_status_service import record_fetch_outcome_for_channel
+            record_fetch_outcome_for_channel(
+                'zhishixingqiu', status='success', items_new=total_new,
+            )
+        except Exception:
+            pass
+
         return _result(
             success=True,
             groups_processed=len(groups) - len(failed_groups),

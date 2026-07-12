@@ -422,3 +422,55 @@ def map_news_tags_task(
             source="celery_feed_tagging",
         )
         raise
+
+
+@app.task(name='backfill_untagged_news_task', queue='file_processing')
+def backfill_untagged_news_task(batch_limit: int = 500, age_minutes: int = 15):
+    """自愈 sweep: 找出已入库但无标签的 news 内容并重新派发打标.
+
+    兜底 `trigger_auto_news_processing` 因 scheduler 进程被杀 / Celery 派发失败 / tag 任务
+    执行失败 而漏打的行. 关键点: `save_content` 用 ON CONFLICT 去重, 一旦 insert 与 trigger
+    之间断裂, 下一 tick 返回 is_new=False 不会补打标 → 漏失是永久性的; 本 task 通过
+    "LEFT JOIN subscription_content_tags ... IS NULL" 直接定位漏标行, 不依赖 is_new.
+
+    age_minutes: 仅补打 created_at 早于该分钟数的内容, 避开刚入库、正被正常 trigger 打标的行.
+    """
+    db = DatabaseManager(get_database_config())
+    try:
+        with db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT sc.id
+                FROM subscription_content sc
+                LEFT JOIN subscription_content_tags t
+                       ON t.subscription_content_id = sc.id
+                WHERE sc.channel_type = 'news'
+                  AND t.id IS NULL
+                  AND sc.fetched_at < now() - (%s || ' minutes')::interval
+                ORDER BY sc.fetched_at DESC
+                LIMIT %s
+                """,
+                (str(age_minutes), batch_limit),
+            )
+            ids = [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        error(f"backfill_untagged_news_task 查询失败: {e}", source="news_auto_tagging")
+        return {"success": False, "error": str(e), "count": 0}
+
+    if not ids:
+        info("backfill_untagged_news_task: 无漏打标 news 内容", source="news_auto_tagging")
+        return {"success": True, "count": 0}
+
+    info(f"backfill_untagged_news_task: 补打标 {len(ids)} 条 news 内容", source="news_auto_tagging")
+    try:
+        # 复用 trigger_auto_news_processing 的 author_identifier/symbols/categories 路由
+        # (CCTV→LLM, EODHD→轻量映射). 直接调用 (eager) 在本 worker 完成 metadata 查询 +
+        # 子任务派发; 真正的 LLM/映射由其内部 apply_async 异步执行.
+        from backend.tasks.file_tasks import trigger_auto_news_processing
+        trigger_auto_news_processing(ids, delay=2)
+    except Exception as e:
+        error(f"backfill_untagged_news_task 派发失败: {e}", source="news_auto_tagging")
+        return {"success": False, "error": str(e), "count": len(ids)}
+
+    return {"success": True, "count": len(ids)}
