@@ -1,5 +1,9 @@
 # Feeds 订阅模块完整文档
 
+> **2026-07-13 更新（P2-2 + P3-a）**
+> - **【P2-2】删除 `subscription_list` 死字段**：移除 `fetch_interval_minutes` / `next_fetch_at`（7 源都不读），修订 `remove_unused_subscription_fields.sql` 仅删这两列（**保留** `priority` / `max_items_per_fetch`，旧版迁移误删）。见 §2.1。
+> - **【P3-a】disabled 订阅在任何路径都不再被抓取/写状态**：YouTube/Podcast 单订阅路径（`fetch_and_store_videos` / `fetch_and_store_episodes`）新增 enabled 校验，跳过 disabled 订阅；微博 `_aggregate_accounts` 用 `NOT EXISTS` 排除 `weibo_accounts.enabled=false` 的博主（管理员禁用即时生效）。此前仅批量路径过滤 enabled，单订阅手动路径会绕过。
+>
 > **2026-07-12 更新（Feeds Scheduler 一致性修复 P0+P1）**
 > 依据 [FEED_SCHEDULER_CONSISTENCY_AUDIT.md](./FEED_SCHEDULER_CONSISTENCY_AUDIT.md) 的逐条代码核对结论，修复 7 个 Feeds 抓取 Scheduler 的功能 bug 与一致性分裂：
 > - **【P0-1】YouTube Feed 现在会自动打标/向量化**：字幕批处理 (`fetch_youtube_transcripts_batch_task`) 与 ASR 兜底 (`transcribe_youtube_feed_task`) 写完字幕后均派发 `finalize_youtube_feed_task`（→ `trigger_auto_feed_tagging` + 向量化，`file_processing` 队列）。**§7.2「Feed 链路没有 finalize 回调」的旧描述已作废。**
@@ -207,6 +211,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | `GET` | `/contents/{content_db_id}/transcript` | **YouTube 字幕懒加载**：JSON `{ "transcript": "<正文>" }`。正文**优先**取库内 `transcript_cleaned`，为空则回退 `transcript`（详见 `docs/instructions/YOUTUBE_TRANSCRIPT_CLEANING.md`）|
 | `GET` | `/contents/tweet/{tweet_id}` | Twitter：按 `content_id` 取一条（用于引用/回复上下文）|
 | `POST` | `/contents/{content_db_id}/transcribe` | **YouTube 手动重转 ASR**，派发 `transcribe_youtube_feed_task`，返回 `task_id` 供前端轮询 |
+| `POST` | `/{subscription_id}/backfill-transcripts` | **Podcast 历史剧集（>48h）批量回填转写**（2026-07-12 新增），派发 `backfill_podcast_transcripts_task`，转写后经 `finalize_youtube_feed_task` 自动打标；仅 podcast 订阅，返回 `task_id` |
 
 > ⚠ **路由顺序坑**：`GET /{subscription_id}` 注册在 `GET /stats/overview` 前面，FastAPI 会把 `stats` 当作非法 int 参数报 `422`。如要启用 stats 接口，需在路由定义里把 `/stats/overview` 放到 `/{subscription_id}` 之前。
 

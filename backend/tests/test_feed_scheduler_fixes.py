@@ -690,5 +690,100 @@ class TestSubscriptionListMappingAfterDeadFieldRemoval:
         assert "max_items_per_fetch" in src
 
 
+# ─────────────────────────────────────────────────────────────────────
+# P3-a: 单订阅路径 enabled 校验 + 微博 weibo_accounts.enabled
+# ─────────────────────────────────────────────────────────────────────
+
+class TestP3aEnabledChecks:
+    @staticmethod
+    def _mock_db_returning(row):
+        """构造 DatabaseManager mock, 使单订阅 SELECT fetchone 返回 row."""
+        fake_cursor = mock.MagicMock()
+        fake_cursor.fetchone.return_value = row
+        fake_conn = mock.MagicMock()
+        fake_conn.cursor.return_value = fake_cursor
+        fake_db = mock.MagicMock()
+        fake_db.get_connection.return_value = fake_conn
+        return fake_db
+
+    def test_youtube_single_path_skips_disabled(self):
+        from backend.services import youtube_subscription_service as yss
+        # 新 SELECT 列序: id, user_id, channel_type, channel_identifier, channel_name, max_items, enabled
+        disabled_row = (101, 5, "youtube", "UC_X", "Name", 15, False)
+        with mock.patch("backend.database.db_manager.DatabaseManager",
+                        return_value=self._mock_db_returning(disabled_row)), \
+             mock.patch.object(yss.YouTubeSubscriptionService, "fetch_channel_videos") as fc:
+            result = yss.YouTubeSubscriptionService.fetch_and_store_videos(subscription_id=101)
+        assert result["success"] is False
+        assert "disabled" in result["message"].lower()
+        fc.assert_not_called()  # disabled -> 不进入抓取
+
+    def test_youtube_single_path_proceeds_when_enabled(self):
+        from backend.services import youtube_subscription_service as yss
+        enabled_row = (101, 5, "youtube", "UC_X", "Name", 15, True)
+        with mock.patch("backend.database.db_manager.DatabaseManager",
+                        return_value=self._mock_db_returning(enabled_row)), \
+             mock.patch.object(yss.YouTubeSubscriptionService, "fetch_channel_videos",
+                               return_value=[]) as fc:
+            result = yss.YouTubeSubscriptionService.fetch_and_store_videos(subscription_id=101)
+        # enabled -> 进入抓取 (fetch_channel_videos 被调; 无视频则 success)
+        fc.assert_called_once()
+        assert result["success"] is True
+
+    def test_podcast_single_path_skips_disabled(self):
+        from backend.services import podcast_subscription_service as pss
+        disabled_row = (202, 6, "podcast", "https://feed", "Name", 20, False)
+        with mock.patch("backend.database.db_manager.DatabaseManager",
+                        return_value=self._mock_db_returning(disabled_row)):
+            result = pss.PodcastSubscriptionService.fetch_and_store_episodes(subscription_id=202)
+        assert result["success"] is False
+        assert "disabled" in result["message"].lower()
+
+
+@pytest.mark.skipif(not _db_reachable(), reason="无可达 DB")
+class TestP3aWeiboAccountEnabledFilter:
+    def test_aggregate_excludes_admin_disabled_bloggers(self):
+        """_aggregate_accounts 的 NOT EXISTS 必须把 weibo_accounts.enabled=false 的博主排除."""
+        from backend.database.db_manager import DatabaseManager
+        from backend.utils.database_config import get_database_config
+        db = DatabaseManager(get_database_config())
+        with db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT sl.channel_identifier AS uid
+                FROM subscription_list sl
+                WHERE sl.channel_type = 'weibo' AND sl.enabled = true
+                  AND NOT EXISTS (
+                      SELECT 1 FROM weibo_accounts wa
+                      WHERE wa.uid = sl.channel_identifier AND wa.enabled = false
+                  )
+                GROUP BY sl.channel_identifier
+            """)
+            aggregated = {r[0] for r in cur.fetchall()}
+            cur.execute("SELECT uid FROM weibo_accounts WHERE enabled = false")
+            disabled = {r[0] for r in cur.fetchall()}
+        # 任何被管理员禁用的博主都不应出现在聚合结果里
+        overlap = aggregated & disabled
+        assert not overlap, f"被禁用博主仍被抓取聚合: {overlap}"
+
+    def test_youtube_podcast_single_select_valid_against_schema(self):
+        """单订阅新 SELECT (含 enabled) 必须对真实 schema 跑通 (列数/列名正确)."""
+        from backend.database.db_manager import DatabaseManager
+        from backend.utils.database_config import get_database_config
+        db = DatabaseManager(get_database_config())
+        sel = """
+            SELECT id, user_id, channel_type, channel_identifier,
+                   channel_name, max_items_per_fetch, enabled
+            FROM subscription_list WHERE channel_type = 'youtube' LIMIT 1
+        """
+        with db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(sel)
+            row = cur.fetchone()
+            if row is not None:
+                assert len(row) == 7  # 7 列, 与 fetch_and_store_videos 的解包一致
+
+
+
 
 

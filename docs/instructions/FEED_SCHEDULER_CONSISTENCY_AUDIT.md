@@ -8,7 +8,8 @@
 > - **已修复（P0）**：P0-1 YouTube Feed 打标接入（`fetch_youtube_transcripts_batch_task` + `transcribe_youtube_feed_task` → `finalize_youtube_feed_task`，审计漏报的 ASR 路径一并修）；P0-2 `trigger_auto_news_processing` Celery 化 + `backfill_untagged_news_task` 自愈 sweep（防 `save_content` ON CONFLICT 去重后的永久漏标）；P0-3② CCTV `published_at` 北京日→UTC（`day_window_utc`）；P0-4 `backfill_podcast_transcripts_task` + `POST /api/subscriptions/{id}/backfill-transcripts`；P0-5 Substack notes 归一化查找键 + 未命中回退归属。
 > - **已修复（P1）**：P1-1/P1-2/P1-3/P1-4 合并 —— 新建 `backend/services/subscription_status_service.py`（`record_fetch_outcome` / `_auto` / `_for_channel`），7 源统一回写 `subscription_list` 状态（`last_fetched_at`=utcnow、`consecutive_failures` 失败自增）+ `subscription_fetch_history`。
 > - **核对修正（与原文档判断不同）**：P0-3①（`datetime.now()` 拼 CCTV URL）**非 bug**（HK 服务器 +8 恰为北京日），未改；P1-4 现网**无数据损坏**（`db_manager` 每连接 `SET TimeZone=UTC`，`CURRENT_TIMESTAMP` 已是 UTC），仅统一为 `utcnow()` 硬化；P3-f（Twitter 大小写）**驳回** —— L394/L628 已用 `lower()=lower()`，非缺陷。
-> - **延后（未做）**：P2（死字段 / filter_config / force_fetch 语义 / users.is_active）、P3（enabled 校验、finalize 改名、分页、Twitter 切片、删陈旧文件）、P2-4（微博/Podcast/News 新建日报 Scheduler）。
+> - **已修复（P2/P3 摘选，2026-07-13）**：P2-2 删除死字段 `fetch_interval_minutes` / `next_fetch_at`（修订 `remove_unused_subscription_fields.sql` 仅删这两列，**保留** `priority` / `max_items_per_fetch`）；P3-a 单订阅路径 enabled 校验（YouTube/Podcast `fetch_and_store_*` 跳过 disabled 订阅、不抓取不写状态）+ 微博 `_aggregate_accounts` 用 `NOT EXISTS` 排除 `weibo_accounts.enabled=false` 的博主（管理员禁用生效）。
+> - **延后（未做）**：P2（filter_config / force_fetch 语义 / users.is_active）、P3（finalize 改名、分页、Twitter 切片、删陈旧文件）、P2-4（微博/Podcast/News 新建日报 Scheduler）。
 
 **相关文档**
 
@@ -231,3 +232,4 @@
 |------|------|
 | 2026-07-12 | 初版:7 源 16 维度一致性矩阵 + P0/P1/P2/P3 分级问题 + 优化方向(仅排查,未改代码) |
 | 2026-07-12 | **P0+P1 修复实施**:P0-1/P0-2/P0-3②/P0-4/P0-5 + P1-1~P1-4(统一 `subscription_status_service`)。修正 P0-3①/P1-4/P3-f 的误判。详见顶部「修复状态」与 FEEDS_MODULE.md。P2/P3/P2-4 延后。 |
+| 2026-07-13 | **P2-2 + P3-a 修复实施**:P2-2 删死字段 `fetch_interval_minutes`/`next_fetch_at`(保留 priority/max_items_per_fetch,修订迁移);P3-a 单订阅路径 enabled 校验 + 微博 `weibo_accounts.enabled` 生效(`NOT EXISTS`)。新增真实 DB 集成测试。剩余 P2/P3/P2-4 延后。 |

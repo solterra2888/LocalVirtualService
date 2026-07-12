@@ -301,7 +301,7 @@ class PodcastSubscriptionService:
                 cursor.execute("""
                     SELECT
                         id, user_id, channel_type, channel_identifier,
-                        channel_name, max_items_per_fetch
+                        channel_name, max_items_per_fetch, enabled
                     FROM subscription_list
                     WHERE id = %s
                 """, (subscription_id,))
@@ -317,8 +317,18 @@ class PodcastSubscriptionService:
                         'episodes_existing': 0,
                     }
 
-                sub_id, uid, channel_type, channel_identifier, channel_name, max_items = subscription
+                sub_id, uid, channel_type, channel_identifier, channel_name, max_items, enabled = subscription
                 user_id = uid
+
+                # P3-a: disabled 订阅不抓取、不写状态 (单订阅手动路径此前绕过 enabled 校验)
+                if not enabled:
+                    info(f"订阅已禁用, 跳过抓取: subscription_id={subscription_id}", source="podcast_subscription")
+                    return {
+                        'success': False,
+                        'message': f'Subscription disabled (id={subscription_id})',
+                        'episodes_new': 0,
+                        'episodes_existing': 0,
+                    }
             else:
                 error("必须提供 subscription_id", source="podcast_subscription")
                 return {

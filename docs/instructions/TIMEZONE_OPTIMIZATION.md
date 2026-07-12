@@ -357,7 +357,7 @@ def install_psycopg2_utc_adapter() -> None:
 |---|---|---|
 | `file_processing_details` | `created_at` | 全表 -8h（Phase 1，所有行确认 HK 本地） |
 | `subscription_content` | `fetched_at`, `published_at` | `> NOW() AT TIME ZONE 'UTC'` 的行 -8h |
-| `subscription_list` | `created_at`, `updated_at`, `last_fetched_at`, `next_fetch_at` | 同上 |
+| `subscription_list` | `created_at`, `updated_at`, `last_fetched_at` | 同上（`next_fetch_at` 已于 2026-07-13 P2-2 删除） |
 | `subscription_content_tags`, `file_tags` | `created_at`, `tagged_at`, `updated_at` | 同上 |
 | `user_daily_preferences`, `user_template_preferences`, `user_news_filter_presets` | `*_at` | 同上 |
 | `user_execution_folders`, `file_folders`, `file_shares`, `users` | `created_at` | 同上 |

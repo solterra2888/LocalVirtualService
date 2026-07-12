@@ -586,6 +586,10 @@ class WeiboSubscriptionService:
                     FROM subscription_list sl
                     WHERE sl.channel_type = 'weibo'
                       AND sl.enabled = true
+                      AND NOT EXISTS (
+                          SELECT 1 FROM weibo_accounts wa
+                          WHERE wa.uid = sl.channel_identifier AND wa.enabled = false
+                      )
                 """
                 params: List[Any] = []
                 if subscription_id:
