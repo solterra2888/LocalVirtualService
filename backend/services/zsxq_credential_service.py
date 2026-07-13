@@ -118,6 +118,27 @@ def _mask_cookie(cookie: str) -> str:
     return "***"
 
 
+def normalize_avatar_url(value: Optional[str]) -> str:
+    url = (value or "").strip()
+    if not url:
+        return ""
+    # 知识星球偶发返回 builtin://N 占位符，非可加载图片
+    if not url.startswith(("http://", "https://")):
+        return ""
+    return url
+
+
+def extract_group_avatar(group: Dict[str, Any]) -> str:
+    """从 /v2/groups 单条记录提取头像：优先星球封面，回退主理人头像。"""
+    avatar = normalize_avatar_url(group.get("background_url"))
+    if avatar:
+        return avatar
+    owner = group.get("owner") or {}
+    if isinstance(owner, dict):
+        return normalize_avatar_url(owner.get("avatar_url"))
+    return ""
+
+
 # ---------- 凭证 CRUD ----------
 
 class ZsxqCredentialService:
@@ -362,25 +383,31 @@ class ZsxqCredentialService:
                 for g in groups:
                     group_id = str(g.get("group_id") or "")
                     group_name = g.get("name") or g.get("group_name") or ""
+                    avatar = extract_group_avatar(g)
                     if not group_id:
                         continue
                     cur.execute(
                         """
-                        INSERT INTO zsxq_groups (group_id, group_name, credential_id, enabled)
-                        VALUES (%s, %s, %s, true)
+                        INSERT INTO zsxq_groups (group_id, group_name, avatar, credential_id, enabled)
+                        VALUES (%s, %s, %s, %s, true)
                         ON CONFLICT (group_id) DO UPDATE SET
-                            group_name   = EXCLUDED.group_name,
+                            group_name    = EXCLUDED.group_name,
+                            avatar        = COALESCE(NULLIF(EXCLUDED.avatar, ''), zsxq_groups.avatar),
                             credential_id = EXCLUDED.credential_id,
                             updated_at    = now()
                         """,
-                        (group_id, group_name, cred_id),
+                        (group_id, group_name, avatar, cred_id),
                     )
                     synced += 1
             conn.commit()
 
         logger.info("知识星球凭证 id=%s 同步星球 %d 个", cred_id, synced)
         return {"success": True, "synced": synced, "groups": [
-            {"group_id": str(g.get("group_id", "")), "group_name": g.get("name") or g.get("group_name", "")}
+            {
+                "group_id": str(g.get("group_id", "")),
+                "group_name": g.get("name") or g.get("group_name", ""),
+                "avatar": extract_group_avatar(g) or None,
+            }
             for g in groups
         ]}
 
@@ -398,18 +425,70 @@ class ZsxqCredentialService:
                         group_name = EXCLUDED.group_name,
                         enabled    = EXCLUDED.enabled,
                         updated_at = now()
-                    RETURNING id
+                    RETURNING id, avatar
                     """,
                     (group_id, group_name, enabled),
                 )
-                gid = cur.fetchone()[0]
+                row = cur.fetchone()
+                gid, avatar = row[0], (row[1] or "") if row else ""
             conn.commit()
-        return {"id": gid, "group_id": group_id, "group_name": group_name}
+        # Best-effort: 若头像仍空，用任一有效凭证 refresh 一次补齐
+        if not (avatar or "").strip():
+            avatar = self.ensure_group_avatar(group_id)
+        return {
+            "id": gid,
+            "group_id": group_id,
+            "group_name": group_name,
+            "avatar": avatar or None,
+        }
+
+    def ensure_group_avatar(self, group_id: str) -> str:
+        """返回星球头像；DB 无缓存时尝试用有效凭证 refresh_groups 补拉。"""
+        gid = str(group_id or "").strip()
+        if not gid:
+            return ""
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT NULLIF(TRIM(avatar), '')
+                    FROM zsxq_groups
+                    WHERE group_id = %s
+                    """,
+                    (gid,),
+                )
+                row = cur.fetchone()
+        cached = (row[0] or "") if row else ""
+        if cached:
+            return cached
+
+        # 用所有 valid 凭证各 sync 一次（与 Substack ensure 对齐，best-effort）
+        for cred in self.list_credentials():
+            if cred.get("status") != "valid":
+                continue
+            result = self.refresh_groups(int(cred["id"]))
+            if not result.get("success"):
+                continue
+            with _get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT NULLIF(TRIM(avatar), '')
+                        FROM zsxq_groups
+                        WHERE group_id = %s
+                        """,
+                        (gid,),
+                    )
+                    row = cur.fetchone()
+            avatar = (row[0] or "") if row else ""
+            if avatar:
+                return avatar
+        return ""
 
     def list_groups(self, enabled_only: bool = True) -> List[Dict[str, Any]]:
         """返回可供用户订阅的星球列表。"""
         sql = """
-            SELECT g.id, g.group_id, g.group_name, g.enabled,
+            SELECT g.id, g.group_id, g.group_name, g.avatar, g.enabled,
                    g.backfill_complete, g.last_sync_at, g.last_sync_mode,
                    c.label AS credential_label, c.status AS credential_status
             FROM zsxq_groups g

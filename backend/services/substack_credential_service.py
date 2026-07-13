@@ -354,6 +354,7 @@ def fetch_publication_avatar_public(pub_url: str) -> str:
     """通过公开 API 拉取刊物主作者头像（无需 Cookie）。
 
     GET {publication_url}/api/v1/publication/users/ranked?public=true
+    对自定义域名会按 publication_url_aliases 回退（www / *.substack.com）。
     """
     try:
         url = normalize_publication_url(pub_url)
@@ -362,26 +363,35 @@ def fetch_publication_avatar_public(pub_url: str) -> str:
     if url == "https://substack.com":
         return ""
 
-    endpoint = f"{url.rstrip('/')}/api/v1/publication/users/ranked?public=true"
-    try:
-        resp = requests.get(endpoint, headers=_PUBLIC_HEADERS, timeout=20)
-        resp.raise_for_status()
-        authors = resp.json()
-    except Exception as exc:
-        logger.warning("Substack 公开头像拉取失败 url=%s: %s", url, exc)
-        return ""
+    last_err: Optional[BaseException] = None
+    for candidate in publication_url_aliases(url) or [url]:
+        endpoint = f"{candidate.rstrip('/')}/api/v1/publication/users/ranked?public=true"
+        try:
+            resp = requests.get(endpoint, headers=_PUBLIC_HEADERS, timeout=20)
+            resp.raise_for_status()
+            authors = resp.json()
+        except Exception as exc:
+            last_err = exc
+            if is_retryable_archive_error(exc):
+                continue
+            logger.warning("Substack 公开头像拉取失败 url=%s: %s", candidate, exc)
+            return ""
 
-    if not isinstance(authors, list):
-        return ""
-
-    for author in authors:
-        if author.get("is_byline_only"):
+        if not isinstance(authors, list):
             continue
-        avatar = normalize_avatar_url(author.get("photo_url"))
-        if avatar:
-            return avatar
-    if authors:
-        return normalize_avatar_url(authors[0].get("photo_url"))
+
+        for author in authors:
+            if author.get("is_byline_only"):
+                continue
+            avatar = normalize_avatar_url(author.get("photo_url"))
+            if avatar:
+                return avatar
+        if authors:
+            return normalize_avatar_url(authors[0].get("photo_url"))
+        return ""
+
+    if last_err is not None:
+        logger.warning("Substack 公开头像拉取失败 url=%s: %s", url, last_err)
     return ""
 
 
@@ -1033,7 +1043,14 @@ class SubstackCredentialService:
                 )
                 pid = cur.fetchone()[0]
             conn.commit()
-        return {"id": pid, "publication_url": url, "publication_name": publication_name}
+        # Best-effort: fill avatar for newly added / still-empty pubs
+        avatar = self.ensure_publication_avatar(url)
+        return {
+            "id": pid,
+            "publication_url": url,
+            "publication_name": publication_name,
+            "avatar": avatar or None,
+        }
 
     def list_publications(self, enabled_only: bool = False) -> List[Dict[str, Any]]:
         sql = """

@@ -873,7 +873,7 @@ const MobileFeedsListView: React.FC = () => {
               const newsFavicon =
                 sub.channel_type === 'news' ? getNewsSourceFaviconUrl(sub.channel_identifier) : undefined;
               const channelAvatarSrc =
-                ['twitter', 'weibo', 'substack'].includes(sub.channel_type) && sub.channel_avatar
+                ['twitter', 'weibo', 'substack', 'zhishixingqiu'].includes(sub.channel_type) && sub.channel_avatar
                   ? weiboSafeAvatarSrc(sub.channel_avatar)
                   : undefined;
               return (

@@ -3,7 +3,7 @@ import { substackHtmlToPlainText } from '../../utils/substackHtmlUtils';
 import { getSubstackContentKind } from './SubstackFeedBadges';
 import { weiboSafeAvatarSrc } from './weiboSafeImage';
 
-/** 列表/详情作者头像（Twitter / 微博 / Substack）。 */
+/** 列表/详情作者头像（Twitter / 微博 / Substack / 知识星球）。 */
 export function getFeedAuthorAvatarSrc(c: {
   channel_type?: string;
   source_subtype?: string;
@@ -11,7 +11,7 @@ export function getFeedAuthorAvatarSrc(c: {
 }): string | undefined {
   if (!c.author_avatar) return undefined;
   const kind = c.channel_type ?? c.source_subtype;
-  if (kind === 'twitter' || kind === 'weibo' || kind === 'substack') {
+  if (kind === 'twitter' || kind === 'weibo' || kind === 'substack' || kind === 'zhishixingqiu') {
     return weiboSafeAvatarSrc(c.author_avatar);
   }
   return undefined;

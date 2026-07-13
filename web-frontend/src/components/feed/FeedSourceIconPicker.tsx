@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Tooltip, Typography, Spin } from 'antd';
 import { TwitterOutlined, YoutubeOutlined, StarOutlined, CustomerServiceOutlined, MessageOutlined, ReadOutlined } from '@ant-design/icons';
 import { NEWS_SOURCES, getNewsSourceFaviconUrl } from './feedChannelConfig';
+import { weiboSafeAvatarSrc, weiboSafeImageUrl } from './weiboSafeImage';
 import api from '../../services/api';
 
 const { Text } = Typography;
@@ -26,6 +27,7 @@ interface PlatformOption {
 interface ZsxqGroup {
   group_id: string;
   group_name: string;
+  avatar?: string | null;
 }
 
 interface SubstackPublication {
@@ -54,30 +56,80 @@ const tileBase: React.CSSProperties = {
   userSelect: 'none',
 };
 
-/** sRGB relative luminance (0–1). Used so near-black brand colors stay readable on dark modal backgrounds. */
-function hexLuminance(hex: string): number {
-  const h = hex.replace('#', '');
-  if (h.length !== 6) return 0.5;
-  const r = parseInt(h.slice(0, 2), 16) / 255;
-  const g = parseInt(h.slice(2, 4), 16) / 255;
-  const b = parseInt(h.slice(4, 6), 16) / 255;
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function newsTileUnselectedLabelColor(brandColor: string, isDark: boolean): string {
-  if (!isDark) return brandColor;
-  if (hexLuminance(brandColor) < 0.28) return 'rgba(255, 255, 255, 0.88)';
-  return brandColor;
-}
-
-function newsTileUnselectedBackground(brandColor: string, isDark: boolean): string {
-  if (!isDark) return `${brandColor}18`;
-  if (hexLuminance(brandColor) < 0.28) return 'rgba(255, 255, 255, 0.08)';
-  return `${brandColor}18`;
-}
-
 const ZSXQ_COLOR = '#FF6B00';
 const SUBSTACK_COLOR = '#FF6719';
+
+const listCardGrid: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+  gap: 10,
+  marginBottom: 16,
+};
+
+function listCardChrome(
+  selected: boolean,
+  accent: string,
+  isDark: boolean,
+  disabled?: boolean,
+): React.CSSProperties {
+  const borderColor = selected
+    ? accent
+    : isDark
+      ? 'rgba(255,255,255,0.14)'
+      : '#E5E7EB';
+  const bgColor = selected
+    ? `${accent}14`
+    : isDark
+      ? 'rgba(255,255,255,0.04)'
+      : '#FFFFFF';
+  const labelColor = selected
+    ? accent
+    : isDark
+      ? 'rgba(255,255,255,0.88)'
+      : '#374151';
+  return {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 52,
+    padding: '10px 14px',
+    borderRadius: 10,
+    border: `${selected ? 2 : 1}px solid ${borderColor}`,
+    backgroundColor: bgColor,
+    color: labelColor,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    transition: 'border-color .2s, background-color .2s',
+    userSelect: 'none',
+    opacity: disabled ? 0.5 : 1,
+    filter: disabled ? 'grayscale(1)' : undefined,
+  };
+}
+
+const listCardIconBox = (isDark: boolean, accent: string): React.CSSProperties => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 32,
+  height: 32,
+  borderRadius: 6,
+  flexShrink: 0,
+  background: isDark ? 'rgba(255,255,255,0.08)' : '#F3F4F6',
+  color: accent,
+  fontSize: 16,
+  overflow: 'hidden',
+});
+
+const listCardLabel: React.CSSProperties = {
+  display: 'block',
+  fontSize: 13,
+  fontWeight: 500,
+  lineHeight: 1.3,
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
 
 const FeedSourceIconPicker: React.FC<{
   value?: string;
@@ -99,7 +151,15 @@ const FeedSourceIconPicker: React.FC<{
       .get('/subscriptions/zsxq-groups')
       .then((res) => {
         const data = res.data ?? res;
-        setZsxqGroups(Array.isArray(data) ? data : []);
+        const groups: ZsxqGroup[] = Array.isArray(data) ? data : [];
+        setZsxqGroups(groups);
+        groups.forEach((grp) => {
+          const url = weiboSafeImageUrl(grp.avatar);
+          if (!url) return;
+          const img = new Image();
+          img.decoding = 'async';
+          img.src = url;
+        });
       })
       .catch(() => setZsxqGroups([]))
       .finally(() => setZsxqLoading(false));
@@ -109,7 +169,16 @@ const FeedSourceIconPicker: React.FC<{
       .get('/subscriptions/substack-publications')
       .then((res) => {
         const data = res.data ?? res;
-        setSubstackPubs(Array.isArray(data) ? data : []);
+        const pubs: SubstackPublication[] = Array.isArray(data) ? data : [];
+        setSubstackPubs(pubs);
+        // Preload avatar images so Add New Feed cards paint without pop-in
+        pubs.forEach((pub) => {
+          const url = (pub.avatar || '').trim();
+          if (!url) return;
+          const img = new Image();
+          img.decoding = 'async';
+          img.src = url;
+        });
       })
       .catch(() => setSubstackPubs([]))
       .finally(() => setSubstackLoading(false));
@@ -192,10 +261,11 @@ const FeedSourceIconPicker: React.FC<{
           >
             知识星球
           </Text>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+          <div style={listCardGrid}>
             {zsxqGroups.map((grp) => {
               const tileValue = `zsxq:${grp.group_id}`;
               const selected = value === tileValue;
+              const avatarUrl = weiboSafeAvatarSrc(grp.avatar);
               return (
                 <Tooltip key={grp.group_id} title={grp.group_name}>
                   <div
@@ -203,33 +273,27 @@ const FeedSourceIconPicker: React.FC<{
                     tabIndex={disabled ? -1 : 0}
                     onClick={() => !disabled && handleSelect(tileValue)}
                     onKeyDown={(e) => !disabled && (e.key === 'Enter' || e.key === ' ') && handleSelect(tileValue)}
-                    style={{
-                      ...tileBase,
-                      width: 80,
-                      height: 72,
-                      border: `2px solid ${selected ? ZSXQ_COLOR : 'transparent'}`,
-                      backgroundColor: selected ? `${ZSXQ_COLOR}18` : newsTileUnselectedBackground(ZSXQ_COLOR, isDark),
-                      color: selected ? ZSXQ_COLOR : newsTileUnselectedLabelColor(ZSXQ_COLOR, isDark),
-                      cursor: disabled ? 'not-allowed' : 'pointer',
-                    }}
+                    style={listCardChrome(selected, ZSXQ_COLOR, isDark, disabled)}
                   >
-                    <span style={{ fontSize: 22, marginBottom: 4 }}><StarOutlined /></span>
-                    <span
-                      style={{
-                        display: 'block',
-                        fontSize: 11,
-                        fontWeight: 600,
-                        width: '100%',
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        textAlign: 'center',
-                        padding: '0 4px',
-                      }}
-                    >
-                      {grp.group_name}
-                    </span>
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt=""
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 6,
+                          objectFit: 'cover',
+                          flexShrink: 0,
+                          background: isDark ? 'rgba(255,255,255,0.08)' : '#F3F4F6',
+                        }}
+                      />
+                    ) : (
+                      <span style={listCardIconBox(isDark, ZSXQ_COLOR)}>
+                        <StarOutlined />
+                      </span>
+                    )}
+                    <span style={listCardLabel}>{grp.group_name}</span>
                   </div>
                 </Tooltip>
               );
@@ -256,7 +320,7 @@ const FeedSourceIconPicker: React.FC<{
           >
             Substack
           </Text>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+          <div style={listCardGrid}>
             {substackPubs.map((pub) => {
               const tileValue = `substack:${pub.publication_url}`;
               const selected = value === tileValue;
@@ -268,46 +332,28 @@ const FeedSourceIconPicker: React.FC<{
                     tabIndex={disabled ? -1 : 0}
                     onClick={() => !disabled && handleSelect(tileValue)}
                     onKeyDown={(e) => !disabled && (e.key === 'Enter' || e.key === ' ') && handleSelect(tileValue)}
-                    style={{
-                      ...tileBase,
-                      width: 80,
-                      height: 72,
-                      border: `2px solid ${selected ? SUBSTACK_COLOR : 'transparent'}`,
-                      backgroundColor: selected ? `${SUBSTACK_COLOR}18` : newsTileUnselectedBackground(SUBSTACK_COLOR, isDark),
-                      color: selected ? SUBSTACK_COLOR : newsTileUnselectedLabelColor(SUBSTACK_COLOR, isDark),
-                      cursor: disabled ? 'not-allowed' : 'pointer',
-                    }}
+                    style={listCardChrome(selected, SUBSTACK_COLOR, isDark, disabled)}
                   >
                     {avatarUrl ? (
                       <img
                         src={avatarUrl}
                         alt=""
                         style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: '50%',
+                          width: 32,
+                          height: 32,
+                          borderRadius: 6,
                           objectFit: 'cover',
-                          marginBottom: 4,
+                          flexShrink: 0,
+                          background: isDark ? 'rgba(255,255,255,0.08)' : '#F3F4F6',
                         }}
                       />
                     ) : (
-                      <span style={{ fontSize: 22, marginBottom: 4 }}><ReadOutlined /></span>
+                      <span style={listCardIconBox(isDark, SUBSTACK_COLOR)}>
+                        <ReadOutlined />
+                      </span>
                     )}
-                    <span
-                      style={{
-                        display: 'block',
-                        fontSize: 11,
-                        fontWeight: 600,
-                        width: '100%',
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        textAlign: 'center',
-                        padding: '0 4px',
-                      }}
-                    >
-                      {pub.publication_name}
+                    <span style={listCardLabel}>
+                      {pub.publication_name || pub.publication_url}
                     </span>
                   </div>
                 </Tooltip>
@@ -329,13 +375,12 @@ const FeedSourceIconPicker: React.FC<{
       >
         News Sources
       </Text>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      <div style={{ ...listCardGrid, marginBottom: 0 }}>
         {NEWS_SOURCES.map((src) => {
           const tileValue = `news:${src.identifier}`;
           const selected = value === tileValue;
           const isSrcDisabled = Boolean(src.disabled) || disabled;
-          const bgColor = src.color;
-          const textColor = bgColor === '#FFC107' ? '#333' : '#fff';
+          const accent = src.color;
           const faviconUrl = getNewsSourceFaviconUrl(src.identifier);
 
           return (
@@ -348,74 +393,26 @@ const FeedSourceIconPicker: React.FC<{
                 onKeyDown={(e) =>
                   !isSrcDisabled && (e.key === 'Enter' || e.key === ' ') && handleSelect(tileValue)
                 }
-                style={{
-                  ...tileBase,
-                  width: 80,
-                  height: 56,
-                  border: `2px solid ${selected && !isSrcDisabled ? bgColor : 'transparent'}`,
-                  backgroundColor: isSrcDisabled
-                    ? isDark
-                      ? 'rgba(255,255,255,0.04)'
-                      : 'rgba(0,0,0,0.04)'
-                    : selected
-                      ? bgColor
-                      : newsTileUnselectedBackground(bgColor, isDark),
-                  color: isSrcDisabled
-                    ? isDark
-                      ? 'rgba(255,255,255,0.35)'
-                      : 'rgba(0,0,0,0.35)'
-                    : selected
-                      ? textColor
-                      : newsTileUnselectedLabelColor(bgColor, isDark),
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textAlign: 'center',
-                  lineHeight: 1.2,
-                  padding: '0 4px',
-                  cursor: isSrcDisabled ? 'not-allowed' : 'pointer',
-                  opacity: isSrcDisabled ? 0.55 : 1,
-                  filter: isSrcDisabled ? 'grayscale(1)' : undefined,
-                }}
+                style={listCardChrome(selected && !isSrcDisabled, accent, isDark, isSrcDisabled)}
               >
                 {faviconUrl ? (
-                  <span
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 22,
-                      height: 22,
-                      marginBottom: 2,
-                      borderRadius: 4,
-                      background: isSrcDisabled ? 'rgba(255,255,255,0.65)' : '#fff',
-                      overflow: 'hidden',
-                      flexShrink: 0,
-                    }}
-                  >
+                  <span style={listCardIconBox(isDark, accent)}>
                     <img
                       src={faviconUrl}
                       alt=""
-                      width={18}
-                      height={18}
+                      width={20}
+                      height={20}
                       style={{ objectFit: 'contain' }}
                       loading="lazy"
                       decoding="async"
                     />
                   </span>
-                ) : null}
-                <span
-                  style={{
-                    width: '100%',
-                    minWidth: 0,
-                    maxWidth: '100%',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    display: 'block',
-                  }}
-                >
-                  {src.label}
-                </span>
+                ) : (
+                  <span style={listCardIconBox(isDark, accent)}>
+                    <ReadOutlined />
+                  </span>
+                )}
+                <span style={listCardLabel}>{src.label}</span>
               </div>
             </Tooltip>
           );

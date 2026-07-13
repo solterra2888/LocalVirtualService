@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS zsxq_groups (
     id SERIAL PRIMARY KEY,
     group_id VARCHAR(50) NOT NULL UNIQUE,               -- 知识星球 group_id（如 "15555452148452"）
     group_name VARCHAR(255) NOT NULL DEFAULT '',        -- 星球名称（显示用）
+    avatar TEXT NOT NULL DEFAULT '',                    -- 星球头像（background_url / owner.avatar_url）
     credential_id INTEGER REFERENCES zsxq_credentials(id) ON DELETE SET NULL,
                                                         -- 关联的凭证（NULL 表示管理员手动添加）
     enabled BOOLEAN NOT NULL DEFAULT true,              -- 是否对用户开放订阅
@@ -34,6 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_zsxq_groups_credential_id
 
 COMMENT ON TABLE zsxq_groups IS '知识星球列表缓存 + 增量抓取同步状态';
 COMMENT ON COLUMN zsxq_groups.group_id IS '知识星球平台 group_id';
+COMMENT ON COLUMN zsxq_groups.avatar IS '星球头像 URL（优先 background_url，回退 owner.avatar_url）';
 COMMENT ON COLUMN zsxq_groups.credential_id IS '关联的管理员凭证；NULL 表示手动维护';
 COMMENT ON COLUMN zsxq_groups.enabled IS '是否在 Feeds 界面对普通用户开放订阅';
 COMMENT ON COLUMN zsxq_groups.backfill_complete IS '是否已完成历史补全';

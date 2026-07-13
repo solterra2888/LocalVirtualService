@@ -8,6 +8,7 @@ import React from 'react';
 import { Space, Typography } from 'antd';
 import { LinkOutlined } from '@ant-design/icons';
 import { DAILY_THEME_COLORS } from '../../../daily/dailyTheme';
+import { weiboSafeImageUrl } from '../../../feed/weiboSafeImage';
 
 const { Text } = Typography;
 
@@ -78,25 +79,28 @@ const ZsxqOriginalView: React.FC<ZsxqOriginalViewProps> = ({
 
       {images.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {images.map((imgUrl, idx) => (
-            <a
-              key={`${imgUrl}-${idx}`}
-              href={imgUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <img
-                src={imgUrl}
-                alt=""
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: 320,
-                  borderRadius: 8,
-                  border: `1px solid ${colors.divider}`,
-                }}
-              />
-            </a>
-          ))}
+          {images.map((imgUrl, idx) => {
+            const safeSrc = weiboSafeImageUrl(imgUrl) || imgUrl;
+            return (
+              <a
+                key={`${imgUrl}-${idx}`}
+                href={imgUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <img
+                  src={safeSrc}
+                  alt=""
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: 320,
+                    borderRadius: 8,
+                    border: `1px solid ${colors.divider}`,
+                  }}
+                />
+              </a>
+            );
+          })}
         </div>
       )}
 

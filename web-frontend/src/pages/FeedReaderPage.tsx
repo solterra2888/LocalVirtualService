@@ -1182,7 +1182,7 @@ const FeedReaderPageInner: React.FC = () => {
                     ? getNewsSourceFaviconUrl(subscription.channel_identifier)
                     : undefined;
                 const channelAvatarSrc =
-                  ['twitter', 'weibo', 'substack'].includes(subscription.channel_type) &&
+                  ['twitter', 'weibo', 'substack', 'zhishixingqiu'].includes(subscription.channel_type) &&
                   subscription.channel_avatar
                     ? weiboSafeAvatarSrc(subscription.channel_avatar)
                     : undefined;

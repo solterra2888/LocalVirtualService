@@ -525,6 +525,7 @@ def _store_topic_batch(
     gname: str,
     user_ids: List[int],
     report: Optional[ZsxqRunReport] = None,
+    group_avatar: str = "",
 ) -> Tuple[int, int, List[int]]:
     """入库一页话题，返回 (new_count, updated_count, new_content_ids)。"""
     new_count = 0
@@ -533,6 +534,8 @@ def _store_topic_batch(
     for t in batch:
         t["group_id"] = gid
         t["group_name"] = gname
+        if group_avatar:
+            t["avatar"] = group_avatar
         try:
             content_db_id, is_new = content_service.save_content(
                 channel_type="zhishixingqiu",
@@ -722,6 +725,7 @@ class ZsxqSubscriptionService:
             meta = self._get_group_meta(gid)
             if meta.get("group_name"):
                 gname = meta["group_name"]
+            group_avatar = (meta.get("avatar") or "").strip()
 
             try:
                 cred_id, cookie = self._get_credential_for_group(meta)
@@ -771,6 +775,7 @@ class ZsxqSubscriptionService:
                                 gname,
                                 user_ids,
                                 report=report,
+                                group_avatar=group_avatar,
                             )
                             group_new += batch_new
                             total_new += batch_new
@@ -844,6 +849,7 @@ class ZsxqSubscriptionService:
                     gname,
                     user_ids,
                     report=report,
+                    group_avatar=group_avatar,
                 )
                 total_new += batch_new
                 total_updated += batch_updated

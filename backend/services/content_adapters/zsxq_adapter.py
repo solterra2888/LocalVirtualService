@@ -84,6 +84,10 @@ class ZsxqAdapter(BaseContentAdapter):
             "content": content,
             "author_name": group_name,
             "author_identifier": group_id,
+            "author_avatar": (
+                str(raw_data.get("avatar") or raw_data.get("author_avatar") or "").strip()
+                or None
+            ),
             "url": url,
             "media_urls": media_urls,
             "published_at": published_at,

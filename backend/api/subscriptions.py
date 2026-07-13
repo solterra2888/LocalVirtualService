@@ -18,6 +18,7 @@ from backend.utils.database_config import get_database_config
 from backend.utils.logger import get_logger
 from backend.utils.datetime_utils import ensure_utc
 from backend.utils.weibo_image_proxy import fetch_weibo_cdn_image, is_weibo_cdn_url
+from backend.utils.zsxq_image_proxy import fetch_zsxq_cdn_image, is_zsxq_cdn_url
 
 logger = get_logger("subscriptions_api")
 
@@ -121,15 +122,23 @@ def get_db_manager():
     return DatabaseManager(db_params)
 
 
-@router.get("/proxy-image", summary="代理微博 CDN 图片（防盗链绕过）")
-async def proxy_weibo_image(
-    url: str = Query(..., description="sinaimg.cn 图片 URL"),
+@router.get("/proxy-image", summary="代理微博 / 知识星球 CDN 图片（防盗链绕过）")
+async def proxy_feed_cdn_image(
+    url: str = Query(..., description="sinaimg.cn 或 images.zsxq.com 图片 URL"),
 ):
-    """浏览器直连微博 CDN 会因 Referer / UA 被拒；由服务端带 weibo.com Referer 拉取。"""
-    if not is_weibo_cdn_url(url):
-        raise HTTPException(status_code=400, detail="Only HTTPS sinaimg.cn image URLs are allowed")
+    """浏览器直连微博 / 知识星球 CDN 会因 Referer 被拒；由服务端带合法 Referer 拉取。"""
     try:
-        data, content_type = fetch_weibo_cdn_image(url)
+        if is_weibo_cdn_url(url):
+            data, content_type = fetch_weibo_cdn_image(url)
+        elif is_zsxq_cdn_url(url):
+            data, content_type = fetch_zsxq_cdn_image(url)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Only HTTPS sinaimg.cn or images.zsxq.com image URLs are allowed",
+            )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("proxy-image fetch failed | url=%s | err=%s", url[:160], e)
         raise HTTPException(status_code=502, detail="Failed to fetch image") from e
@@ -154,12 +163,13 @@ async def get_zsxq_groups(
     current_user: TokenData = Depends(get_current_user)
 ):
     """返回可供用户订阅的知识星球列表（管理员已开启 enabled=true 的星球）。"""
-    from backend.services.zsxq_credential_service import ZsxqCredentialService
+    from backend.services.zsxq_credential_service import ZsxqCredentialService, normalize_avatar_url
     groups = ZsxqCredentialService().list_groups(enabled_only=True)
     return [
         {
             "group_id": g["group_id"],
             "group_name": g["group_name"],
+            "avatar": normalize_avatar_url(g.get("avatar")) or None,
         }
         for g in groups
     ]
@@ -296,6 +306,25 @@ async def get_user_subscriptions(
                     avatar = (pub.get("avatar") or "").strip()
                     if avatar:
                         sub.channel_avatar = avatar
+
+        # 知识星球：若 channel_avatar 缺失，从 zsxq_groups 缓存补全（不改库）
+        zsxq_subs = [s for s in subscriptions if s.channel_type == "zhishixingqiu"]
+        if zsxq_subs:
+            from backend.services.zsxq_credential_service import ZsxqCredentialService
+
+            group_by_id = {
+                g["group_id"]: g
+                for g in ZsxqCredentialService().list_groups(enabled_only=False)
+            }
+            for sub in zsxq_subs:
+                if (sub.channel_avatar or "").strip():
+                    continue
+                grp = group_by_id.get(sub.channel_identifier)
+                if not grp:
+                    continue
+                avatar = (grp.get("avatar") or "").strip()
+                if avatar:
+                    sub.channel_avatar = avatar
         
         logger.info(f"Retrieved {len(subscriptions)} subscriptions for user {user_id}")
         return subscriptions
@@ -531,7 +560,7 @@ async def create_subscription(
             from backend.services.zsxq_credential_service import ZsxqCredentialService
             zsxq_svc = ZsxqCredentialService()
             groups = zsxq_svc.list_groups(enabled_only=True)
-            group_map = {g["group_id"]: g["group_name"] for g in groups}
+            group_map = {g["group_id"]: g for g in groups}
 
             group_id = request.channel_identifier.strip()
             if group_id not in group_map:
@@ -539,11 +568,18 @@ async def create_subscription(
                     status_code=400,
                     detail=f"知识星球 group_id '{group_id}' 不在可订阅列表中，请联系管理员添加",
                 )
-            # 自动填充星球名
+            grp = group_map[group_id]
+            # 自动填充星球名 / 头像（对齐 Substack）
             if not request.channel_name:
-                request.channel_name = group_map[group_id]
+                request.channel_name = grp.get("group_name") or group_id
+            avatar = (grp.get("avatar") or "").strip()
+            if not avatar:
+                avatar = zsxq_svc.ensure_group_avatar(group_id)
+            channel_avatar = avatar or None
 
-            logger.info(f"知识星球验证成功 | group_id={group_id} | name={request.channel_name}")
+            logger.info(
+                f"知识星球验证成功 | group_id={group_id} | name={request.channel_name} | avatar={bool(channel_avatar)}"
+            )
 
         # 🔥 如果是微博订阅，解析 UID、校验博主、回填昵称头像、upsert weibo_accounts
         elif request.channel_type == 'weibo':
