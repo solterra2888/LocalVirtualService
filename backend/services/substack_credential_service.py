@@ -22,7 +22,7 @@ import tempfile
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import psycopg2
 import psycopg2.extras
@@ -325,11 +325,47 @@ def resolve_publication_display_name(
 
 
 def normalize_avatar_url(value: Optional[str]) -> str:
-    """规范化头像 URL（去掉 query，与微博订阅逻辑一致）。"""
+    """规范化头像 URL。
+
+    - 去掉 query string（与微博订阅逻辑一致）。
+    - Substack 旧版图片桶 ``bucketeer-*.s3.amazonaws.com`` 已被官方下线，
+      直接访问返回 HTTP 403；改写到 ``substackcdn.com/image/fetch/`` 包装
+      （Substack 自家 image CDN 仍能 server-side 取图后对外吐，已验证 403→200）。
+      幂等：已是 substackcdn / 非 bucketeer 的 URL 原样返回。
+    """
     s = (value or "").strip()
     if not s:
         return ""
-    return s.split("?")[0]
+    s = s.split("?")[0]
+    return _rewrite_legacy_substack_bucket(s)
+
+
+# 旧版 Substack 图片桶前缀（已被官方下线，直接访问 403）
+_LEGACY_SUBSTACK_BUCKET_PREFIX = "bucketeer-"
+
+# substackcdn /image/fetch/ 包装：transform 参数 + url-encoded 源 URL 作为最后一段 path
+_SUBSTACKCDN_FETCH_PREFIX = (
+    "https://substackcdn.com/image/fetch/"
+    "f_auto,q_auto:good,fl_progressive:steep/"
+)
+
+
+def _rewrite_legacy_substack_bucket(url: str) -> str:
+    """把失效的 Substack 旧版 S3 桶 URL 改写到 substackcdn 包装。
+
+    按 hostname 判定（不是子串匹配），因此已经包装过的 URL（host 为 substackcdn.com，
+    编码后的 bucketeer 路径只出现在 path 里）不会被二次包装 → 幂等。
+    """
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return url
+    if not (
+        host.startswith(_LEGACY_SUBSTACK_BUCKET_PREFIX)
+        and host.endswith(".s3.amazonaws.com")
+    ):
+        return url
+    return _SUBSTACKCDN_FETCH_PREFIX + quote(url, safe="")
 
 
 def _avatar_from_publication_api(pub: Dict[str, Any]) -> str:

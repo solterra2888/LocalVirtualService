@@ -3,6 +3,7 @@ import { Tooltip, Typography, Spin } from 'antd';
 import { TwitterOutlined, YoutubeOutlined, StarOutlined, CustomerServiceOutlined, MessageOutlined, ReadOutlined } from '@ant-design/icons';
 import { NEWS_SOURCES, getNewsSourceFaviconUrl } from './feedChannelConfig';
 import { weiboSafeAvatarSrc, weiboSafeImageUrl } from './weiboSafeImage';
+import AvatarImage from './AvatarImage';
 import api from '../../services/api';
 
 const { Text } = Typography;
@@ -276,17 +277,14 @@ const FeedSourceIconPicker: React.FC<{
                     style={listCardChrome(selected, ZSXQ_COLOR, isDark, disabled)}
                   >
                     {avatarUrl ? (
-                      <img
+                      <AvatarImage
                         src={avatarUrl}
-                        alt=""
-                        style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: 6,
-                          objectFit: 'cover',
-                          flexShrink: 0,
-                          background: isDark ? 'rgba(255,255,255,0.08)' : '#F3F4F6',
-                        }}
+                        isDark={isDark}
+                        fallback={
+                          <span style={listCardIconBox(isDark, ZSXQ_COLOR)}>
+                            <StarOutlined />
+                          </span>
+                        }
                       />
                     ) : (
                       <span style={listCardIconBox(isDark, ZSXQ_COLOR)}>
@@ -335,17 +333,14 @@ const FeedSourceIconPicker: React.FC<{
                     style={listCardChrome(selected, SUBSTACK_COLOR, isDark, disabled)}
                   >
                     {avatarUrl ? (
-                      <img
+                      <AvatarImage
                         src={avatarUrl}
-                        alt=""
-                        style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: 6,
-                          objectFit: 'cover',
-                          flexShrink: 0,
-                          background: isDark ? 'rgba(255,255,255,0.08)' : '#F3F4F6',
-                        }}
+                        isDark={isDark}
+                        fallback={
+                          <span style={listCardIconBox(isDark, SUBSTACK_COLOR)}>
+                            <ReadOutlined />
+                          </span>
+                        }
                       />
                     ) : (
                       <span style={listCardIconBox(isDark, SUBSTACK_COLOR)}>
