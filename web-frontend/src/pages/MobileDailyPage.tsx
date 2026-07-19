@@ -126,7 +126,11 @@ const MobileDailyPageInner: React.FC = () => {
         if (cancelled) return;
         writeDailyPresetCache(r.source_subtypes);
         setPresetSubtypes((prev) => {
-          const prevKey = JSON.stringify(prev ?? []);
+          // null = "尚未拉到 preset" 与 [] = "已拉到, 用户未设置" 是两种语义,
+          // 不能用 `prev ?? []` 合并 —— 否则首次拿到 [] 会判为"无变化"返回 null,
+          // loadFirstPage 的 null gate 永不解开, 首页永远不加载.
+          if (prev === null) return r.source_subtypes;
+          const prevKey = JSON.stringify(prev);
           const nextKey = JSON.stringify(r.source_subtypes);
           return prevKey === nextKey ? prev : r.source_subtypes;
         });
