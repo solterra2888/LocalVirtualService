@@ -41,10 +41,8 @@ import {
   Typography,
 } from 'antd';
 import {
-  AppstoreOutlined,
   ArrowDownOutlined,
   ArrowUpOutlined,
-  BranchesOutlined,
   BulbOutlined,
   CloseOutlined,
   GlobalOutlined,
@@ -324,15 +322,6 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
     const authorName = detail?.author_name || item.author_name;
     const people = detail?.feed?.tags?.people ?? detail?.upload?.tags?.people ?? null;
     const countries = detail?.feed?.tags?.countries ?? detail?.upload?.tags?.countries ?? null;
-    const matchedThemes = item.matched_themes ?? [];
-    // 去重: 同一 theme_name 可能通过 ticker + vector 两种模式匹配
-    const seenThemeNames = new Set<string>();
-    const dedupedThemes = matchedThemes.filter(t => {
-      if (seenThemeNames.has(t.theme_name)) return false;
-      seenThemeNames.add(t.theme_name);
-      return true;
-    });
-    const subThemes = Array.from(new Set(matchedThemes.map(t => t.category).filter(Boolean) as string[]));
     const tagSchemaVersion =
       detail?.feed?.tags?.tag_schema_version ?? detail?.upload?.tags?.tag_schema_version ?? null;
     const tweetSignal = detail?.feed?.tags?.additional_tags?.tweet_signal as
@@ -512,74 +501,6 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
                   {c}
                 </Tag>
               ))}
-            </div>
-          )}
-
-          {dedupedThemes.length > 0 && (
-            <div
-              style={{
-                marginTop: 8,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                flexWrap: 'wrap',
-              }}
-            >
-              <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-                <AppstoreOutlined /> Themes:
-              </Text>
-              {dedupedThemes.slice(0, 6).map((theme) => (
-                <Tooltip
-                  key={theme.theme_id || theme.theme_name}
-                  title={theme.confidence ? `${(theme.confidence * 100).toFixed(0)}%` : undefined}
-                  mouseEnterDelay={0.4}
-                >
-                  <Tag bordered={false} style={aiTagChipStyle('theme', themeMode)}>
-                    {theme.theme_name}
-                  </Tag>
-                </Tooltip>
-              ))}
-              {dedupedThemes.length > 6 && (
-                <Tooltip
-                  title={dedupedThemes.slice(6).map(t => t.theme_name).join(', ')}
-                  mouseEnterDelay={0.3}
-                >
-                  <Tag bordered={false} style={aiTagChipStyle('overflow', themeMode)}>
-                    +{dedupedThemes.length - 6}
-                  </Tag>
-                </Tooltip>
-              )}
-            </div>
-          )}
-
-          {subThemes.length > 0 && (
-            <div
-              style={{
-                marginTop: 6,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                flexWrap: 'wrap',
-              }}
-            >
-              <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-                <BranchesOutlined /> Sub-Themes:
-              </Text>
-              {subThemes.slice(0, 6).map((cat) => (
-                <Tag key={cat} bordered={false} style={aiTagChipStyle('concept', themeMode)}>
-                  {cat}
-                </Tag>
-              ))}
-              {subThemes.length > 6 && (
-                <Tooltip
-                  title={subThemes.slice(6).join(', ')}
-                  mouseEnterDelay={0.3}
-                >
-                  <Tag bordered={false} style={aiTagChipStyle('overflow', themeMode)}>
-                    +{subThemes.length - 6}
-                  </Tag>
-                </Tooltip>
-              )}
             </div>
           )}
 
