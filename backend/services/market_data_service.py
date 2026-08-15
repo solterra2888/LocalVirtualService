@@ -24,13 +24,23 @@ logger = get_logger("market_data_service")
 # 市场数据映射配置
 INDEX_MAP = {
     "S&P 500": ("SPY.US", "index", "us_equity"),
+    "S&P 500 Index": ("GSPC.INDX", "index", "us_equity"),
     "Nasdaq 100": ("QQQ.US", "index", "us_equity"),
+    "Nasdaq 100 Index": ("NDX.INDX", "index", "us_equity"),
     "Dow Jones": ("DIA.US", "index", "us_equity"),
     "STOXX 50": ("FEZ.US", "index", "eu_equity"),
     "DAX (Germany)": ("EWG.US", "index", "eu_equity"),
+    "DAX Index": ("GDAXI.INDX", "index", "eu_equity"),
     "CAC 40 (France)": ("EWQ.US", "index", "eu_equity"),
     "Nikkei 225": ("EWJ.US", "index", "asia_equity"),
+    "Nikkei 225 Index": ("N225.INDX", "index", "asia_equity"),
+    "KOSPI": ("KS11.INDX", "index", "asia_equity"),
     "Hang Seng": ("2800.HK", "index", "asia_equity"),
+    "SSE 50": ("SSE50.INDX", "index", "china_equity"),
+    "CSI 300": ("CSI300.INDX", "index", "china_equity"),
+    "CSI 500": ("CSI500.INDX", "index", "china_equity"),
+    "CSI 1000": ("CSI1000.INDX", "index", "china_equity"),
+    "VIX": ("VIX.INDX", "index", "volatility"),
 }
 
 FOREX_MAP = {
@@ -41,18 +51,21 @@ FOREX_MAP = {
 }
 
 COMMODITY_MAP = {
-    "Gold": ("XAUUSD.FOREX", "commodity", "precious_metal"),
-    "Silver": ("XAGUSD.FOREX", "commodity", "precious_metal"),
-    "Copper": ("HG.US", "commodity", "industrial_metal"),
+    "Gold (GLD ETF)": ("GLD.US", "commodity", "precious_metal"),
+    "Silver (SLV ETF)": ("SLV.US", "commodity", "precious_metal"),
+    "Copper (CPER ETF)": ("CPER.US", "commodity", "industrial_metal"),
+    "WTI Crude Oil (USO ETF)": ("USO.US", "commodity", "energy"),
     "Brent Oil (BNO ETF)": ("BNO.US", "commodity", "energy"),
-    "Natural Gas": ("NG.US", "commodity", "energy"),
+    "Natural Gas (UNG ETF)": ("UNG.US", "commodity", "energy"),
 }
 
 BOND_YIELD_MAP = {
     "3-Month Treasury": ("US3M.INDX", "bond", "us_treasury"),
     "1-Year Treasury": ("US1Y.INDX", "bond", "us_treasury"),
+    "2-Year Treasury": ("US2Y.INDX", "bond", "us_treasury"),
     "5-Year Treasury": ("US5Y.INDX", "bond", "us_treasury"),
     "10-Year Treasury": ("US10Y.INDX", "bond", "us_treasury"),
+    "30-Year Treasury": ("US30Y.INDX", "bond", "us_treasury"),
 }
 
 SECTOR_MAP = {
