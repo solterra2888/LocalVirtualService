@@ -627,6 +627,94 @@ tbody tr.chart-active { background: var(--bg-hover); }
     font-weight: 600;
 }
 
+/* === MARKET TEMPERATURE === */
+.mt-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+.mt-toolbar-hint {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+.mt-country-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin: 14px 0 8px;
+}
+.mt-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+}
+.mt-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    box-shadow: var(--shadow-card);
+    padding: 12px 14px 8px;
+    display: flex;
+    flex-direction: column;
+}
+.mt-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.mt-card-title {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+}
+.mt-card-label {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+.mt-card-sub {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.mt-card-quote {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    white-space: nowrap;
+}
+.mt-card-last {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+.mt-card-quote .val-pos, .mt-card-quote .val-neg, .mt-card-quote .val-neutral {
+    font-size: 0.74rem;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+.mt-chart {
+    height: 160px;
+    width: 100%;
+}
+.mt-chart-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    border: 1px dashed var(--border-subtle);
+    border-radius: 6px;
+}
+
 /* === FOOTER === */
 .footer {
     max-width: 1280px;
@@ -652,6 +740,8 @@ tbody tr.chart-active { background: var(--bg-hover); }
     .table-scroll > table { min-width: 720px; }
     /* Markdown tables (Home / Stockview / Subscription) also swipe when too wide */
     .summary-content table { display: block; max-width: 100%; overflow-x: auto; }
+    /* Market Temperature: single-column cards on mobile */
+    .mt-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -666,7 +756,8 @@ tbody tr.chart-active { background: var(--bg-hover); }
 </div>
 
 <div class="tab-nav">
-    <button class="tab-btn active" data-tab="home" onclick="switchTab('home')">Close Brief</button>
+    <button class="tab-btn active" data-tab="temperature" onclick="switchTab('temperature')">Temperature</button>
+    <button class="tab-btn" data-tab="home" onclick="switchTab('home')">Close Brief</button>
     <button class="tab-btn" data-tab="stockview" onclick="switchTab('stockview')">Stock Pulse</button>
     <button class="tab-btn" data-tab="my-subscription" onclick="switchTab('my-subscription')">Feed Digest</button>
     <button class="tab-btn" data-tab="market-overview" onclick="switchTab('market-overview')">Market Movers</button>
@@ -674,8 +765,88 @@ tbody tr.chart-active { background: var(--bg-hover); }
 
 <div class="content">
 
+{# ── Temperature Tab: Market Temperature (市场温度感知) ── #}
+<div class="tab-panel active" id="panel-temperature">
+<div class="mt-toolbar">
+    <span class="mt-toolbar-hint">Global daily trends by asset class</span>
+    <div class="chart-controls" id="mt-range">
+        <button class="chart-range-btn active" data-range="3m" onclick="setTempRange('3m', this)">3M</button>
+        <button class="chart-range-btn" data-range="6m" onclick="setTempRange('6m', this)">6M</button>
+        <button class="chart-range-btn" data-range="1y" onclick="setTempRange('1y', this)">1Y</button>
+    </div>
+</div>
+
+{% for group in temperature_groups %}
+<div class="market-section" id="mt-section-{{ group.key }}">
+    <div class="table-title">{{ group.label }}</div>
+    {% if group.countries is defined %}
+        {% for country in group.countries %}
+    <div class="mt-country-label">{{ country.label }}</div>
+    <div class="mt-grid">
+        {% for card_id, label, code, sublabel in country.cards %}
+        {% set card = temperature_cards | selectattr('id', 'equalto', card_id) | first %}
+        <div class="mt-card" data-mt-id="{{ card_id }}">
+            <div class="mt-card-head">
+                <div class="mt-card-title">
+                    <span class="mt-card-label">{{ label }}</span>
+                    {% if sublabel %}<span class="mt-card-sub">{{ sublabel }}</span>{% endif %}
+                </div>
+                <div class="mt-card-quote">
+                    {% if card and card.last is not none %}
+                    <span class="mt-card-last">{{ '%.2f' | format(card.last) }}</span>
+                    {% if card.chg_pct is not none %}
+                    <span class="{{ 'val-pos' if card.chg_pct > 0 else ('val-neg' if card.chg_pct < 0 else 'val-neutral') }}">{{ '+' if card.chg_pct > 0 }}{{ '%.2f' | format(card.chg_pct) }}%</span>
+                    {% endif %}
+                    {% else %}
+                    <span class="val-na">N/A</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% if card and card.bars %}
+            <div class="mt-chart" id="mt-chart-{{ card_id }}"></div>
+            {% else %}
+            <div class="mt-chart mt-chart-empty">No data</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+        {% endfor %}
+    {% else %}
+    <div class="mt-grid">
+        {% for card_id, label, code, sublabel in group.cards %}
+        {% set card = temperature_cards | selectattr('id', 'equalto', card_id) | first %}
+        <div class="mt-card" data-mt-id="{{ card_id }}">
+            <div class="mt-card-head">
+                <div class="mt-card-title">
+                    <span class="mt-card-label">{{ label }}</span>
+                    {% if sublabel %}<span class="mt-card-sub">{{ sublabel }}</span>{% endif %}
+                </div>
+                <div class="mt-card-quote">
+                    {% if card and card.last is not none %}
+                    <span class="mt-card-last">{{ '%.2f' | format(card.last) }}</span>
+                    {% if card.chg_pct is not none %}
+                    <span class="{{ 'val-pos' if card.chg_pct > 0 else ('val-neg' if card.chg_pct < 0 else 'val-neutral') }}">{{ '+' if card.chg_pct > 0 }}{{ '%.2f' | format(card.chg_pct) }}%</span>
+                    {% endif %}
+                    {% else %}
+                    <span class="val-na">N/A</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% if card and card.bars %}
+            <div class="mt-chart" id="mt-chart-{{ card_id }}"></div>
+            {% else %}
+            <div class="mt-chart mt-chart-empty">No data</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+</div>
+
 {# ── Home Tab: Bloomberg The Close Summary ── #}
-<div class="tab-panel active" id="panel-home">
+<div class="tab-panel" id="panel-home">
 {% if the_close_html %}
     <div class="summary-content">
         {{ the_close_html | safe }}
@@ -1126,6 +1297,11 @@ const CHART_DATA = {{ chart_data_json | safe }};
 // ── Ticker display names for chart header ──
 const DISPLAY_NAMES = {{ display_names_json | safe }};
 
+// ── Market Temperature card data (daily OHLCV from market_data_eod) ──
+const TEMP_CARDS = {{ temperature_json | safe }};
+const TEMP_DATA = {};
+TEMP_CARDS.forEach(c => { if (c.bars && c.bars.length) TEMP_DATA[c.id] = c.bars; });
+
 // ── Chart state per panel ──
 const chartState = {
     'us-assets': { chart: null, candleSeries: null, volSeries: null, maSeries: {}, currentTicker: null, currentRange: '3m', scrollY: 0, maEnabled: {20: true, 50: true, 200: false} },
@@ -1158,12 +1334,17 @@ function switchTab(tabId) {
             });
         }, 50);
     }
+    // Temperature is the default tab; re-render its cards when returning
+    if (tabId === 'temperature') {
+        setTimeout(() => renderTempCharts(), 50);
+    }
 }
 
-// ── Auto-render performance charts on load ──
+// ── Auto-render charts on load ──
 window.addEventListener('load', () => {
+    // Temperature is the default tab, so its cards render immediately on load.
     // Performance charts render on tab switch to avoid hidden-container sizing issues.
-    // The Overview tab is the default, so no chart rendering needed on load.
+    renderTempCharts();
 });
 
 // ── Sortable columns ──
@@ -1226,6 +1407,8 @@ function toggleTheme() {
     // Re-render performance charts
     renderPerfSection('index');
     renderPerfSection('sector');
+    // Re-render Market Temperature cards
+    renderTempCharts();
 }
 
 // Restore theme
@@ -1529,7 +1712,95 @@ window.addEventListener('resize', function() {
             if (c) perfCharts[g].chart.applyOptions({ width: c.clientWidth });
         }
     });
+    Object.keys(tempCharts).forEach(id => {
+        const c = document.getElementById('mt-chart-' + id);
+        if (c && tempCharts[id]) tempCharts[id].applyOptions({ width: c.clientWidth });
+    });
 });
+
+// ═══════════════════════════════════════════════
+// ── MARKET TEMPERATURE ──
+// ═══════════════════════════════════════════════
+
+// Chart instances per card id
+const tempCharts = {};
+let tempRange = '3m';
+
+function tempFilterByRange(data, range) {
+    if (!data || !data.length) return data;
+    const lastDate = new Date(data[data.length - 1].time);
+    let startDate;
+    if (range === '3m') {
+        startDate = new Date(lastDate); startDate.setMonth(startDate.getMonth() - 3);
+    } else if (range === '6m') {
+        startDate = new Date(lastDate); startDate.setMonth(startDate.getMonth() - 6);
+    } else if (range === '1y') {
+        startDate = new Date(lastDate); startDate.setFullYear(startDate.getFullYear() - 1);
+    }
+    if (!startDate) return data;
+    return data.filter(d => d.time >= startDate.toISOString().split('T')[0]);
+}
+
+function renderTempCharts() {
+    const panel = document.getElementById('panel-temperature');
+    if (!panel || !panel.classList.contains('active')) return;
+
+    const dark = isDarkMode();
+
+    Object.keys(tempCharts).forEach(id => {
+        if (tempCharts[id]) { tempCharts[id].remove(); tempCharts[id] = null; }
+    });
+
+    document.querySelectorAll('#panel-temperature .mt-chart:not(.mt-chart-empty)').forEach(el => {
+        const id = el.id.replace('mt-chart-', '');
+        const bars = TEMP_DATA[id];
+        if (!bars || !bars.length) return;
+
+        const chart = LightweightCharts.createChart(el, {
+            width: el.clientWidth,
+            height: 160,
+            layout: {
+                background: { color: 'transparent' },
+                textColor: dark ? '#a3adbc' : '#3d4f5f',
+                fontSize: 9,
+            },
+            grid: {
+                vertLines: { visible: false },
+                horzLines: { color: dark ? 'rgba(60,70,90,0.25)' : 'rgba(224,224,224,0.35)' },
+            },
+            crosshair: { mode: 0 },
+            rightPriceScale: {
+                borderVisible: false,
+                scaleMargins: { top: 0.08, bottom: 0.08 },
+            },
+            timeScale: { borderVisible: false, timeVisible: false },
+            handleScale: false,
+            handleScroll: false,
+        });
+
+        const visible = tempFilterByRange(bars, tempRange);
+
+        // Candlestick series (colors match the Market Movers viewer)
+        const series = chart.addCandlestickSeries({
+            upColor: dark ? '#00e676' : '#0a7c42',
+            downColor: dark ? '#ff5252' : '#c41230',
+            borderUpColor: dark ? '#00e676' : '#0a7c42',
+            borderDownColor: dark ? '#ff5252' : '#c41230',
+            wickUpColor: dark ? '#00e676' : '#0a7c42',
+            wickDownColor: dark ? '#ff5252' : '#c41230',
+        });
+        series.setData(visible);
+        chart.timeScale().fitContent();
+        tempCharts[id] = chart;
+    });
+}
+
+function setTempRange(range, btn) {
+    tempRange = range;
+    document.querySelectorAll('#mt-range .chart-range-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderTempCharts();
+}
 
 // ═══════════════════════════════════════════════
 // ── PERFORMANCE CHARTS ──

@@ -382,6 +382,110 @@ THEMATIC_NOTES: Dict[str, Dict[str, str]] = {
 }
 
 # ──────────────────────────────────────────────
+# Market Temperature 分组定义（首个 Tab「市场温度感知」）
+# ──────────────────────────────────────────────
+# 每张卡片: (card_id, 显示名, EODHD code, 副标签)
+# 数据全部来自 market_data_eod（asset_type 覆盖 index/forex/commodity/bond）。
+# IH/IF/IC/IM 为中金所股指期货，按「期货→标的指数」映射展示
+# （SSE50/CSI300/CSI500/CSI1000，见 EODHD_MARKET_DATA_DEVELOPMENT_GUIDE 案例 4）。
+# 商品用 ETF 代理（案例 5 选型）；FTSE 100 暂缺（EODHD 不覆盖，备选 ISF.LSE /
+# BUK100P.INDX 见指南案例 3）。
+
+MT_CARD = Tuple[str, str, str, str]
+
+MARKET_TEMPERATURE_GROUPS: List[Dict[str, Any]] = [
+    {
+        "key": "risk",
+        "label": "Risk",
+        "cards": [
+            ("vix", "VIX", "VIX.INDX", "CBOE Volatility Index"),
+        ],
+    },
+    {
+        "key": "equity",
+        "label": "Equity Indexes",
+        "countries": [
+            {
+                "label": "United States",
+                "cards": [
+                    ("gspc", "S&P 500", "GSPC.INDX", ""),
+                    ("ndx", "NASDAQ 100", "NDX.INDX", ""),
+                ],
+            },
+            {
+                "label": "China",
+                "cards": [
+                    ("ih", "IH · SSE 50", "SSE50.INDX", ""),
+                    ("if", "IF · CSI 300", "CSI300.INDX", ""),
+                    ("ic", "IC · CSI 500", "CSI500.INDX", ""),
+                    ("im", "IM · CSI 1000", "CSI1000.INDX", ""),
+                ],
+            },
+            {
+                "label": "Japan",
+                "cards": [("nikkei", "Nikkei 225", "N225.INDX", "")],
+            },
+            {
+                "label": "Korea",
+                "cards": [("kospi", "KOSPI", "KS11.INDX", "")],
+            },
+            {
+                "label": "Germany",
+                "cards": [("dax", "DAX", "GDAXI.INDX", "")],
+            },
+        ],
+    },
+    {
+        "key": "fx",
+        "label": "Foreign Exchange",
+        "cards": [
+            ("usdjpy", "USD/JPY", "USDJPY.FOREX", "Japanese Yen"),
+            ("usdcnh", "USD/CNH", "USDCNH.FOREX", "Chinese Yuan"),
+            ("gbpusd", "GBP/USD", "GBPUSD.FOREX", "British Pound"),
+            ("eurusd", "EUR/USD", "EURUSD.FOREX", "Euro"),
+        ],
+    },
+    {
+        "key": "commodities",
+        "label": "Commodities",
+        "cards": [
+            ("gold", "Gold", "GLD.US", "GLD ETF"),
+            ("wti", "WTI Crude", "USO.US", "USO ETF"),
+            ("brent", "Brent Crude", "BNO.US", "BNO ETF"),
+            ("silver", "Silver", "SLV.US", "SLV ETF"),
+            ("copper", "Copper", "CPER.US", "CPER ETF"),
+            ("natgas", "Natural Gas", "UNG.US", "UNG ETF"),
+        ],
+    },
+    {
+        "key": "treasuries",
+        "label": "US Treasuries",
+        "cards": [
+            ("us2y", "2Y Yield", "US2Y.INDX", ""),
+            ("us5y", "5Y Yield", "US5Y.INDX", ""),
+            ("us10y", "10Y Yield", "US10Y.INDX", ""),
+            ("us30y", "30Y Yield", "US30Y.INDX", ""),
+        ],
+    },
+]
+
+
+def _flatten_mt_cards(group: Dict[str, Any]) -> List[MT_CARD]:
+    """展平一组的卡片：有 countries 子分组取子分组，否则取顶层 cards。"""
+    if "countries" in group:
+        return [c for sub in group["countries"] for c in sub["cards"]]
+    return list(group.get("cards", []))
+
+
+MARKET_TEMPERATURE_CARDS: List[MT_CARD] = [
+    c for g in MARKET_TEMPERATURE_GROUPS for c in _flatten_mt_cards(g)
+]
+MARKET_TEMPERATURE_CODES: List[str] = [c[2] for c in MARKET_TEMPERATURE_CARDS]
+
+# 每张卡片内嵌的最大 bar 数（约 1 年交易日）；模板默认展示 3M，可切换 6M/1Y。
+MT_MAX_BARS = 260
+
+# ──────────────────────────────────────────────
 # Ticker → EODHD code 映射（chart 数据用）
 # ──────────────────────────────────────────────
 
@@ -568,13 +672,14 @@ def _compute_index_performers(cursor) -> Dict[str, Any]:
     }
 
 
-def _fetch_chart_data(cursor, tickers: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+def _fetch_chart_data_by_code(
+    cursor, codes: List[str], min_bars: int = 10
+) -> Dict[str, List[Dict[str, Any]]]:
     """
-    从 market_data_eod 和 stock_prices_eod 批量查询 OHLCV 日线数据。
-    优先使用 market_data_eod（~232 bars），不够时 fallback 到 stock_prices_eod。
+    按 EODHD code 批量查询 OHLCV 日线，返回 {code: [{time,open,high,low,close,volume}]}。
+    优先 market_data_eod，bars 不足 min_bars 时 fallback 到 stock_prices_eod（period='d'）。
     """
-    eodhd_codes = [TICKER_EODHD_MAP[t] for t in tickers]
-    result: Dict[str, List[Dict[str, Any]]] = {t: [] for t in tickers}
+    result: Dict[str, List[Dict[str, Any]]] = {code: [] for code in codes}
 
     # 1. 查询 market_data_eod（数据量大，优先）
     cursor.execute(
@@ -584,7 +689,7 @@ def _fetch_chart_data(cursor, tickers: List[str]) -> Dict[str, List[Dict[str, An
         WHERE code = ANY(%s)
         ORDER BY code, date
         """,
-        (eodhd_codes,),
+        (codes,),
     )
     mde_data: Dict[str, List] = {}
     for row in cursor.fetchall():
@@ -598,15 +703,13 @@ def _fetch_chart_data(cursor, tickers: List[str]) -> Dict[str, List[Dict[str, An
             "volume": int(row[6]) if row[6] else 0,
         })
 
-    # 2. 收集需要 fallback 的 tickers
-    fallback_codes = []
-    for t in tickers:
-        code = TICKER_EODHD_MAP[t]
-        bars = mde_data.get(code, [])
-        if len(bars) >= 10:
-            result[t] = bars
-        else:
-            fallback_codes.append(code)
+    # 2. 收集需要 fallback 的 codes
+    fallback_codes = [
+        code for code in codes if len(mde_data.get(code, [])) < min_bars
+    ]
+    for code in codes:
+        if code not in fallback_codes:
+            result[code] = mde_data.get(code, [])
 
     # 3. Fallback: 查询 stock_prices_eod
     if fallback_codes:
@@ -630,23 +733,68 @@ def _fetch_chart_data(cursor, tickers: List[str]) -> Dict[str, List[Dict[str, An
                 "close": float(row[5]) if row[5] else None,
                 "volume": int(row[6]) if row[6] else 0,
             })
-
-        for t in tickers:
-            if result[t]:  # 已从 market_data_eod 获得
-                continue
-            code = TICKER_EODHD_MAP[t]
-            spe_bars = spe_data.get(code, [])
-            if spe_bars:
-                result[t] = spe_bars
+        for code in fallback_codes:
+            if spe_data.get(code):
+                result[code] = spe_data[code]
 
     # 4. 过滤掉 None 值的 bars，保证 Lightweight Charts 数据完整
-    for t in tickers:
-        result[t] = [
-            b for b in result[t]
+    for code in codes:
+        result[code] = [
+            b for b in result[code]
             if all(b.get(k) is not None for k in ("time", "open", "high", "low", "close"))
         ]
 
     return result
+
+
+def _fetch_chart_data(cursor, tickers: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    从 market_data_eod 和 stock_prices_eod 批量查询 OHLCV 日线数据（按 ticker 键返回）。
+    优先使用 market_data_eod（~232 bars），不够时 fallback 到 stock_prices_eod。
+    """
+    by_code = _fetch_chart_data_by_code(
+        cursor, [TICKER_EODHD_MAP[t] for t in tickers]
+    )
+    return {t: by_code[TICKER_EODHD_MAP[t]] for t in tickers}
+
+
+def _build_temperature_cards(
+    by_code: Dict[str, List[Dict[str, Any]]]
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """
+    构建 Market Temperature 卡片列表。
+
+    Args:
+        by_code: {EODHD code: bars}（来自 _fetch_chart_data_by_code）
+
+    Returns:
+        (cards, missing_codes)
+        cards: [{id, code, label, sublabel, last, chg_pct, bars}]，
+               bars 截断为最近 MT_MAX_BARS 条；无数据的 code 仍产出卡片
+               （bars 为空，模板渲染 "No data" 占位），并计入 missing_codes。
+    """
+    cards: List[Dict[str, Any]] = []
+    missing: List[str] = []
+    for card_id, label, code, sublabel in MARKET_TEMPERATURE_CARDS:
+        bars = by_code.get(code, [])[-MT_MAX_BARS:]
+        if not bars:
+            missing.append(code)
+        last = bars[-1]["close"] if bars else None
+        prev = bars[-2]["close"] if len(bars) >= 2 else None
+        if last is not None and prev:
+            chg_pct = (last - prev) / prev * 100.0
+        else:
+            chg_pct = None
+        cards.append({
+            "id": card_id,
+            "code": code,
+            "label": label,
+            "sublabel": sublabel,
+            "last": last,
+            "chg_pct": round(chg_pct, 2) if chg_pct is not None else None,
+            "bars": bars,
+        })
+    return cards, missing
 
 
 class DailyMarketReportService:
@@ -742,6 +890,15 @@ class DailyMarketReportService:
             chart_data = _fetch_chart_data(cursor, ALL_TICKERS)
             chart_tickers_found = sum(1 for v in chart_data.values() if v)
             logger.info(f"Chart data: {chart_tickers_found}/{len(ALL_TICKERS)} tickers have OHLCV data")
+
+            # 4a-0. Market Temperature：按 EODHD code 查询全球资产日线并构建卡片
+            mt_data = _fetch_chart_data_by_code(cursor, MARKET_TEMPERATURE_CODES)
+            temperature_cards, temperature_missing = _build_temperature_cards(mt_data)
+            logger.info(
+                f"Market Temperature: "
+                f"{len(temperature_cards) - len(temperature_missing)}/"
+                f"{len(temperature_cards)} cards have data"
+            )
 
             # 4a. 计算 Index Performers（S&P 500 / Nasdaq 100 / Dow Jones Top/Bottom）
             index_performers = _compute_index_performers(cursor)
@@ -870,6 +1027,7 @@ class DailyMarketReportService:
                 the_close_html=the_close_html,
                 closing_bell_html=closing_bell_html,
                 my_subscriptions_html=my_subscriptions_html,
+                temperature_cards=temperature_cards,
             )
 
             # 6. 保存到本地文件
@@ -889,6 +1047,8 @@ class DailyMarketReportService:
                 "has_the_close_summary": bool(the_close_html),
                 "has_closing_bell_summary": bool(closing_bell_html),
                 "has_my_subscriptions": bool(my_subscriptions_html),
+                "temperature_cards_found": len(temperature_cards) - len(temperature_missing),
+                "temperature_missing_codes": temperature_missing,
             }
 
             share_token = uuid4().hex
@@ -961,6 +1121,7 @@ class DailyMarketReportService:
         the_close_html: str = "",
         closing_bell_html: str = "",
         my_subscriptions_html: str = "",
+        temperature_cards: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """通过 Jinja2 渲染自包含 HTML。"""
         from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -1021,6 +1182,9 @@ class DailyMarketReportService:
             the_close_html=the_close_html,
             closing_bell_html=closing_bell_html,
             my_subscriptions_html=my_subscriptions_html,
+            temperature_groups=MARKET_TEMPERATURE_GROUPS,
+            temperature_cards=temperature_cards or [],
+            temperature_json=json.dumps(temperature_cards or []),
         )
         return html
 

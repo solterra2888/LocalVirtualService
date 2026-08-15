@@ -68,6 +68,7 @@ Market Overview 的数据在 `daily_report_{date}.html` 生成时已**内嵌**�
 
 | Tab | 核心问题 | 主数据源 | 存储格式 | 左侧导航要点 | 本项目状态 |
 |-----|---------|---------|---------|-------------|-----------|
+| **Market Temperature** | 全球资产温度如何？（本地新增，非参考系统功能） | `market_data_eod` 表（EODHD） | 内嵌 HTML + Lightweight Charts 迷你卡片 | Risk / Equity Indexes（按国家）/ FX / Commodities / US Treasuries | ✅ 已实现（2026-08） |
 | **Home** | 今天市场发生了什么？PM 怎么看？ | Bloomberg **The Close** 转录 | `the_close_summary.json` | Narrative, Drivers, Cross-Asset, Positioning, Disagreements, PM Takeaway | ❌ 未实现 |
 | **Stock News** | 哪些股票在动？为什么？ | CNBC **Closing Bell**（+ Overtime）转录 | `closing_bell_summary.json` | Stock Movers, Deep Dives, Sectors, Positioning, Tomorrow, Scorecard | ❌ 未实现 |
 | **Market Overview** | 资产/板块/主题表现如何？ | **Finviz Elite** + 历史价格 | 内嵌 HTML + Plotly | Today's Perf, Charts, Performers, Internals, Overnight/Intraday | ⚠️ 部分实现 |
@@ -78,6 +79,24 @@ Market Overview 的数据在 `daily_report_{date}.html` 生成时已**内嵌**�
 ```json
 { "date": "2026-06-09", "content": "## Markdown 正文..." }
 ```
+
+### 2.1 Market Temperature（本项目新增，2026-08）
+
+参考系统没有此 Tab；为本地新增的**首个默认 Tab**（市场温度感知）。每品种一张迷你走势图卡片（网格排列，卡片含名称/最新收盘/日涨跌幅 + 1 年日线折线，全局 3M/6M/1Y 切换），分组与代码定义见 `daily_market_report_service.py` 的 `MARKET_TEMPERATURE_GROUPS`：
+
+| 分组 | 品种（EODHD code） |
+|------|-------------------|
+| Risk | VIX（`VIX.INDX`） |
+| Equity Indexes | 美国 S&P 500 / NASDAQ 100（`GSPC.INDX`/`NDX.INDX`）；中国 IH/IF/IC/IM 四大股指期货 → 标的指数（`SSE50/CSI300/CSI500/CSI1000.INDX`）；日本 Nikkei 225（`N225.INDX`）；韩国 KOSPI（`KS11.INDX`）；德国 DAX（`GDAXI.INDX`） |
+| Foreign Exchange | USD/JPY、USD/CNH、GBP/USD、EUR/USD（`*.FOREX`） |
+| Commodities | Gold/WTI/Brent/Silver/Copper/Natural Gas（`GLD/USO/BNO/SLV/CPER/UNG.US` ETF 代理） |
+| US Treasuries | 2Y/5Y/10Y/30Y 收益率（`US2Y/US5Y/US10Y/US30Y.INDX`） |
+
+要点：
+
+- 数据全部来自 `market_data_eod`（`_fetch_chart_data_by_code` 按 code 直查；与 Market Movers 的 ETF 走势共用底层查询，fallback `stock_prices_eod`）；**英国 FTSE 100 暂缺**（EODHD 不覆盖，备选 `ISF.LSE` / `BUK100P.INDX` 见 [EODHD_MARKET_DATA_DEVELOPMENT_GUIDE.md](./EODHD_MARKET_DATA_DEVELOPMENT_GUIDE.md) 案例 3）；
+- 每卡片内嵌最近 260 个交易日（`MT_MAX_BARS`），线色按可见区间涨跌绿/红；
+- 卡片数据缺失不失败——渲染 "No data" 占位，`metadata.temperature_cards_found` / `temperature_missing_codes` 记录覆盖情况。
 
 ---
 
