@@ -27,6 +27,8 @@ INDEX_MAP = {
     "S&P 500 Index": ("GSPC.INDX", "index", "us_equity"),
     "Nasdaq 100": ("QQQ.US", "index", "us_equity"),
     "Nasdaq 100 Index": ("NDX.INDX", "index", "us_equity"),
+    "Nasdaq Composite Index": ("IXIC.INDX", "index", "us_equity"),
+    "PHLX Semiconductor Index": ("SOX.INDX", "index", "us_equity"),
     "Dow Jones": ("DIA.US", "index", "us_equity"),
     "STOXX 50": ("FEZ.US", "index", "eu_equity"),
     "DAX (Germany)": ("EWG.US", "index", "eu_equity"),
@@ -66,6 +68,41 @@ BOND_YIELD_MAP = {
     "5-Year Treasury": ("US5Y.INDX", "bond", "us_treasury"),
     "10-Year Treasury": ("US10Y.INDX", "bond", "us_treasury"),
     "30-Year Treasury": ("US30Y.INDX", "bond", "us_treasury"),
+}
+
+# DMR Market Movers 图表依赖的 ETF（SHY/IEF/TLT/... 与 ARKK/SMH/SOXX/... 等）。
+# 历史上这些只做过一次性手动回填（2026-06-11），未注册前 market_data 定时任务不覆盖，
+# 导致 DMR 行点击展开的 K 线图停在回填日。注册到独立的 'etf' 类型：
+# - 不影响 market_weekly_report（其 SQL 显式过滤 index/sector/forex/commodity/bond）
+# - asset_types=None 时随默认列表一起采集
+ETF_MAP = {
+    "2Y Treasury ETF": ("SHY.US", "etf", "us_bond_etf"),
+    "7-10Y Treasury ETF": ("IEF.US", "etf", "us_bond_etf"),
+    "20Y Treasury ETF": ("TLT.US", "etf", "us_bond_etf"),
+    "US Dollar ETF": ("UUP.US", "etf", "us_macro_etf"),
+    "Russell 2000 ETF": ("IWM.US", "etf", "us_equity_etf"),
+    "S&P 500 Equal Weight ETF": ("RSP.US", "etf", "us_equity_etf"),
+    "High Yield Credit ETF": ("HYG.US", "etf", "us_credit_etf"),
+    "IG Credit ETF": ("LQD.US", "etf", "us_credit_etf"),
+    "ARK Innovation ETF": ("ARKK.US", "etf", "thematic_etf"),
+    "ARK Autonomous ETF": ("ARKQ.US", "etf", "thematic_etf"),
+    "AI & Robotics ETF": ("BOTZ.US", "etf", "thematic_etf"),
+    "Cybersecurity ETF (BUG)": ("BUG.US", "etf", "thematic_etf"),
+    "Cybersecurity ETF (CIBR)": ("CIBR.US", "etf", "thematic_etf"),
+    "Cloud Computing ETF": ("CLOU.US", "etf", "thematic_etf"),
+    "Autonomous Driving ETF": ("DRIV.US", "etf", "thematic_etf"),
+    "FinTech ETF": ("FINX.US", "etf", "thematic_etf"),
+    "Cybersecurity ETF (HACK)": ("HACK.US", "etf", "thematic_etf"),
+    "Clean Energy ETF": ("ICLN.US", "etf", "thematic_etf"),
+    "Lithium & Battery ETF": ("LIT.US", "etf", "thematic_etf"),
+    "E-Commerce ETF": ("ONLN.US", "etf", "thematic_etf"),
+    "Water Resources ETF": ("PHO.US", "etf", "thematic_etf"),
+    "Robotics ETF": ("ROBO.US", "etf", "thematic_etf"),
+    "Cloud Computing ETF (SKYY)": ("SKYY.US", "etf", "thematic_etf"),
+    "Semiconductor ETF (SMH)": ("SMH.US", "etf", "thematic_etf"),
+    "Semiconductor ETF (SOXX)": ("SOXX.US", "etf", "thematic_etf"),
+    "Semiconductor ETF (SOXQ)": ("SOXQ.US", "etf", "thematic_etf"),
+    "Solar ETF": ("TAN.US", "etf", "thematic_etf"),
 }
 
 SECTOR_MAP = {
@@ -1002,7 +1039,7 @@ class MarketDataService:
         🚀 主要业务逻辑：并发获取并批量存储市场数据
         
         Args:
-            asset_types: 要获取的资产类型列表 ['index', 'forex', 'commodity', 'bond', 'sector']
+            asset_types: 要获取的资产类型列表 ['index', 'forex', 'commodity', 'bond', 'sector', 'etf']
             fetch_realtime: 是否获取实时数据
             fetch_eod: 是否获取EOD历史数据
             eod_days: 获取最近几天的EOD数据
@@ -1021,11 +1058,11 @@ class MarketDataService:
         try:
             # 如果未指定资产类型，则获取所有类型
             if not asset_types:
-                asset_types = ['index', 'forex', 'commodity', 'bond', 'sector']
-            
+                asset_types = ['index', 'forex', 'commodity', 'bond', 'sector', 'etf']
+
             # 合并所有资产
             all_assets = {}
-            
+
             if 'index' in asset_types:
                 all_assets.update({name: (code, 'index', cat) for name, (code, _, cat) in INDEX_MAP.items()})
             if 'forex' in asset_types:
@@ -1036,6 +1073,8 @@ class MarketDataService:
                 all_assets.update({name: (code, 'bond', cat) for name, (code, _, cat) in BOND_YIELD_MAP.items()})
             if 'sector' in asset_types:
                 all_assets.update({name: (code, 'sector', cat) for name, (code, _, cat) in SECTOR_MAP.items()})
+            if 'etf' in asset_types:
+                all_assets.update({name: (code, 'etf', cat) for name, (code, _, cat) in ETF_MAP.items()})
             
             total_assets = len(all_assets)
             logger.info(f"准备并发获取{total_assets}个资产的数据 (max_workers={self.max_workers})")

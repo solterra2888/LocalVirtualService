@@ -2636,7 +2636,7 @@ class SchedulerService:
         
         Args:
             params: 任务参数
-                - asset_types: 资产类型列表 ['index', 'forex', 'commodity', 'bond', 'sector']
+                - asset_types: 资产类型列表 ['index', 'forex', 'commodity', 'bond', 'sector', 'etf']
                 - fetch_realtime: 是否获取实时数据（默认: True）
                 - fetch_eod: 是否获取EOD历史数据（默认: True）
                 - eod_days: 获取最近几天的EOD数据（默认: 5）

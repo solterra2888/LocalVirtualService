@@ -82,12 +82,12 @@ Market Overview 的数据在 `daily_report_{date}.html` 生成时已**内嵌**�
 
 ### 2.1 Market Temperature（本项目新增，2026-08）
 
-参考系统没有此 Tab；为本地新增的**首个默认 Tab**（市场温度感知）。每品种一张迷你走势图卡片（网格排列，卡片含名称/最新收盘/日涨跌幅 + 1 年日线折线，全局 3M/6M/1Y 切换），分组与代码定义见 `daily_market_report_service.py` 的 `MARKET_TEMPERATURE_GROUPS`：
+参考系统没有此 Tab；为本地新增的**首个默认 Tab**（市场温度感知）。每品种一张迷你走势图卡片（网格排列，卡片含名称/最新收盘/日涨跌幅 + 1 年日线蜡烛图，全局 3M/6M/1Y 切换），分组与代码定义见 `daily_market_report_service.py` 的 `MARKET_TEMPERATURE_GROUPS`：
 
 | 分组 | 品种（EODHD code） |
 |------|-------------------|
 | Risk | VIX（`VIX.INDX`） |
-| Equity Indexes | 美国 S&P 500 / NASDAQ 100（`GSPC.INDX`/`NDX.INDX`）；中国 IH/IF/IC/IM 四大股指期货 → 标的指数（`SSE50/CSI300/CSI500/CSI1000.INDX`）；日本 Nikkei 225（`N225.INDX`）；韩国 KOSPI（`KS11.INDX`）；德国 DAX（`GDAXI.INDX`） |
+| Equity Indexes | 美国 S&P 500 / NASDAQ Composite / NASDAQ 100 / PHLX Semiconductor（`GSPC.INDX`/`IXIC.INDX`/`NDX.INDX`/`SOX.INDX`）；中国 IH/IF/IC/IM 四大股指期货 → 标的指数（`SSE50/CSI300/CSI500/CSI1000.INDX`）；Others（日本 Nikkei 225 `N225.INDX`、韩国 KOSPI `KS11.INDX`、德国 DAX `GDAXI.INDX`，卡片副标注明国家） |
 | Foreign Exchange | USD/JPY、USD/CNH、GBP/USD、EUR/USD（`*.FOREX`） |
 | Commodities | Gold/WTI/Brent/Silver/Copper/Natural Gas（`GLD/USO/BNO/SLV/CPER/UNG.US` ETF 代理） |
 | US Treasuries | 2Y/5Y/10Y/30Y 收益率（`US2Y/US5Y/US10Y/US30Y.INDX`） |
@@ -95,7 +95,8 @@ Market Overview 的数据在 `daily_report_{date}.html` 生成时已**内嵌**�
 要点：
 
 - 数据全部来自 `market_data_eod`（`_fetch_chart_data_by_code` 按 code 直查；与 Market Movers 的 ETF 走势共用底层查询，fallback `stock_prices_eod`）；**英国 FTSE 100 暂缺**（EODHD 不覆盖，备选 `ISF.LSE` / `BUK100P.INDX` 见 [EODHD_MARKET_DATA_DEVELOPMENT_GUIDE.md](./EODHD_MARKET_DATA_DEVELOPMENT_GUIDE.md) 案例 3）；
-- 每卡片内嵌最近 260 个交易日（`MT_MAX_BARS`），线色按可见区间涨跌绿/红；
+- 每卡片内嵌最近 260 个交易日（`MT_MAX_BARS`），蜡烛图配色与 Market Movers 查看器一致（涨绿跌红）；
+- 卡片标题为链接，点击跳转 TradingView 对应 symbol 的图表页（日线 + `range=6M`），映射为 `MARKET_TEMPERATURE_GROUPS` 每张卡片的第 5 个字段（如 `TVC:SPX`、`SSE:000300`、`AMEX:GLD`、`TVC:US02Y`）；同时卡片图表已关闭 Lightweight Charts 的 attribution logo（`layout.attributionLogo: false`）——许可证要求的 TradingView 归属链接由标题链接承担；
 - 卡片数据缺失不失败——渲染 "No data" 占位，`metadata.temperature_cards_found` / `temperature_missing_codes` 记录覆盖情况。
 
 ---

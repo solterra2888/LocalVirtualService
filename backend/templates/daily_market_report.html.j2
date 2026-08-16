@@ -678,6 +678,24 @@ tbody tr.chart-active { background: var(--bg-hover); }
     color: var(--text-primary);
     white-space: nowrap;
 }
+a.mt-card-label {
+    color: var(--text-primary);
+    text-decoration: none;
+    cursor: pointer;
+}
+a.mt-card-label:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+a.mt-card-label::after {
+    content: '↗';
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    margin-left: 3px;
+    text-decoration: none;
+    display: inline-block;
+    transform: translateY(-1px);
+}
 .mt-card-sub {
     font-size: 0.68rem;
     color: var(--text-muted);
@@ -783,12 +801,12 @@ tbody tr.chart-active { background: var(--bg-hover); }
         {% for country in group.countries %}
     <div class="mt-country-label">{{ country.label }}</div>
     <div class="mt-grid">
-        {% for card_id, label, code, sublabel in country.cards %}
+        {% for card_id, label, code, sublabel, tv_symbol in country.cards %}
         {% set card = temperature_cards | selectattr('id', 'equalto', card_id) | first %}
         <div class="mt-card" data-mt-id="{{ card_id }}">
             <div class="mt-card-head">
                 <div class="mt-card-title">
-                    <span class="mt-card-label">{{ label }}</span>
+                    <a class="mt-card-label" href="https://www.tradingview.com/chart/?symbol={{ tv_symbol | urlencode }}&interval=D&range=6M" target="_blank" rel="noopener noreferrer" title="Open {{ label }} in TradingView">{{ label }}</a>
                     {% if sublabel %}<span class="mt-card-sub">{{ sublabel }}</span>{% endif %}
                 </div>
                 <div class="mt-card-quote">
@@ -813,12 +831,12 @@ tbody tr.chart-active { background: var(--bg-hover); }
         {% endfor %}
     {% else %}
     <div class="mt-grid">
-        {% for card_id, label, code, sublabel in group.cards %}
+        {% for card_id, label, code, sublabel, tv_symbol in group.cards %}
         {% set card = temperature_cards | selectattr('id', 'equalto', card_id) | first %}
         <div class="mt-card" data-mt-id="{{ card_id }}">
             <div class="mt-card-head">
                 <div class="mt-card-title">
-                    <span class="mt-card-label">{{ label }}</span>
+                    <a class="mt-card-label" href="https://www.tradingview.com/chart/?symbol={{ tv_symbol | urlencode }}&interval=D&range=6M" target="_blank" rel="noopener noreferrer" title="Open {{ label }} in TradingView">{{ label }}</a>
                     {% if sublabel %}<span class="mt-card-sub">{{ sublabel }}</span>{% endif %}
                 </div>
                 <div class="mt-card-quote">
@@ -1763,6 +1781,7 @@ function renderTempCharts() {
                 background: { color: 'transparent' },
                 textColor: dark ? '#a3adbc' : '#3d4f5f',
                 fontSize: 9,
+                attributionLogo: false,
             },
             grid: {
                 vertLines: { visible: false },

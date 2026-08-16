@@ -391,14 +391,15 @@ THEMATIC_NOTES: Dict[str, Dict[str, str]] = {
 # 商品用 ETF 代理（案例 5 选型）；FTSE 100 暂缺（EODHD 不覆盖，备选 ISF.LSE /
 # BUK100P.INDX 见指南案例 3）。
 
-MT_CARD = Tuple[str, str, str, str]
+# (card_id, 显示名, EODHD code, 副标签, TradingView symbol)
+MT_CARD = Tuple[str, str, str, str, str]
 
 MARKET_TEMPERATURE_GROUPS: List[Dict[str, Any]] = [
     {
         "key": "risk",
         "label": "Risk",
         "cards": [
-            ("vix", "VIX", "VIX.INDX", "CBOE Volatility Index"),
+            ("vix", "VIX", "VIX.INDX", "CBOE Volatility Index", "TVC:VIX"),
         ],
     },
     {
@@ -408,30 +409,28 @@ MARKET_TEMPERATURE_GROUPS: List[Dict[str, Any]] = [
             {
                 "label": "United States",
                 "cards": [
-                    ("gspc", "S&P 500", "GSPC.INDX", ""),
-                    ("ndx", "NASDAQ 100", "NDX.INDX", ""),
+                    ("gspc", "S&P 500", "GSPC.INDX", "", "TVC:SPX"),
+                    ("comp", "NASDAQ Composite", "IXIC.INDX", "", "NASDAQ:IXIC"),
+                    ("ndx", "NASDAQ 100", "NDX.INDX", "", "NASDAQ:NDX"),
+                    ("sox", "PHLX Semiconductor", "SOX.INDX", "", "NASDAQ:SOX"),
                 ],
             },
             {
                 "label": "China",
                 "cards": [
-                    ("ih", "IH · SSE 50", "SSE50.INDX", ""),
-                    ("if", "IF · CSI 300", "CSI300.INDX", ""),
-                    ("ic", "IC · CSI 500", "CSI500.INDX", ""),
-                    ("im", "IM · CSI 1000", "CSI1000.INDX", ""),
+                    ("ih", "IH · SSE 50", "SSE50.INDX", "", "SSE:000016"),
+                    ("if", "IF · CSI 300", "CSI300.INDX", "", "SSE:000300"),
+                    ("ic", "IC · CSI 500", "CSI500.INDX", "", "SSE:000905"),
+                    ("im", "IM · CSI 1000", "CSI1000.INDX", "", "SSE:000852"),
                 ],
             },
             {
-                "label": "Japan",
-                "cards": [("nikkei", "Nikkei 225", "N225.INDX", "")],
-            },
-            {
-                "label": "Korea",
-                "cards": [("kospi", "KOSPI", "KS11.INDX", "")],
-            },
-            {
-                "label": "Germany",
-                "cards": [("dax", "DAX", "GDAXI.INDX", "")],
+                "label": "Others",
+                "cards": [
+                    ("nikkei", "Nikkei 225", "N225.INDX", "Japan", "TVC:NI225"),
+                    ("kospi", "KOSPI", "KS11.INDX", "Korea", "KRX:KOSPI"),
+                    ("dax", "DAX", "GDAXI.INDX", "Germany", "XETR:DAX"),
+                ],
             },
         ],
     },
@@ -439,32 +438,32 @@ MARKET_TEMPERATURE_GROUPS: List[Dict[str, Any]] = [
         "key": "fx",
         "label": "Foreign Exchange",
         "cards": [
-            ("usdjpy", "USD/JPY", "USDJPY.FOREX", "Japanese Yen"),
-            ("usdcnh", "USD/CNH", "USDCNH.FOREX", "Chinese Yuan"),
-            ("gbpusd", "GBP/USD", "GBPUSD.FOREX", "British Pound"),
-            ("eurusd", "EUR/USD", "EURUSD.FOREX", "Euro"),
+            ("usdjpy", "USD/JPY", "USDJPY.FOREX", "Japanese Yen", "OANDA:USDJPY"),
+            ("usdcnh", "USD/CNH", "USDCNH.FOREX", "Chinese Yuan", "OANDA:USDCNH"),
+            ("gbpusd", "GBP/USD", "GBPUSD.FOREX", "British Pound", "OANDA:GBPUSD"),
+            ("eurusd", "EUR/USD", "EURUSD.FOREX", "Euro", "OANDA:EURUSD"),
         ],
     },
     {
         "key": "commodities",
         "label": "Commodities",
         "cards": [
-            ("gold", "Gold", "GLD.US", "GLD ETF"),
-            ("wti", "WTI Crude", "USO.US", "USO ETF"),
-            ("brent", "Brent Crude", "BNO.US", "BNO ETF"),
-            ("silver", "Silver", "SLV.US", "SLV ETF"),
-            ("copper", "Copper", "CPER.US", "CPER ETF"),
-            ("natgas", "Natural Gas", "UNG.US", "UNG ETF"),
+            ("gold", "Gold", "GLD.US", "GLD ETF", "AMEX:GLD"),
+            ("wti", "WTI Crude", "USO.US", "USO ETF", "AMEX:USO"),
+            ("brent", "Brent Crude", "BNO.US", "BNO ETF", "AMEX:BNO"),
+            ("silver", "Silver", "SLV.US", "SLV ETF", "AMEX:SLV"),
+            ("copper", "Copper", "CPER.US", "CPER ETF", "AMEX:CPER"),
+            ("natgas", "Natural Gas", "UNG.US", "UNG ETF", "AMEX:UNG"),
         ],
     },
     {
         "key": "treasuries",
         "label": "US Treasuries",
         "cards": [
-            ("us2y", "2Y Yield", "US2Y.INDX", ""),
-            ("us5y", "5Y Yield", "US5Y.INDX", ""),
-            ("us10y", "10Y Yield", "US10Y.INDX", ""),
-            ("us30y", "30Y Yield", "US30Y.INDX", ""),
+            ("us2y", "2Y Yield", "US2Y.INDX", "", "TVC:US02Y"),
+            ("us5y", "5Y Yield", "US5Y.INDX", "", "TVC:US05Y"),
+            ("us10y", "10Y Yield", "US10Y.INDX", "", "TVC:US10Y"),
+            ("us30y", "30Y Yield", "US30Y.INDX", "", "TVC:US30Y"),
         ],
     },
 ]
@@ -769,13 +768,13 @@ def _build_temperature_cards(
 
     Returns:
         (cards, missing_codes)
-        cards: [{id, code, label, sublabel, last, chg_pct, bars}]，
+        cards: [{id, code, label, sublabel, tv_symbol, last, chg_pct, bars}]，
                bars 截断为最近 MT_MAX_BARS 条；无数据的 code 仍产出卡片
                （bars 为空，模板渲染 "No data" 占位），并计入 missing_codes。
     """
     cards: List[Dict[str, Any]] = []
     missing: List[str] = []
-    for card_id, label, code, sublabel in MARKET_TEMPERATURE_CARDS:
+    for card_id, label, code, sublabel, tv_symbol in MARKET_TEMPERATURE_CARDS:
         bars = by_code.get(code, [])[-MT_MAX_BARS:]
         if not bars:
             missing.append(code)
@@ -790,6 +789,7 @@ def _build_temperature_cards(
             "code": code,
             "label": label,
             "sublabel": sublabel,
+            "tv_symbol": tv_symbol,
             "last": last,
             "chg_pct": round(chg_pct, 2) if chg_pct is not None else None,
             "bars": bars,

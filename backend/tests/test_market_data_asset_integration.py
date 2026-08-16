@@ -59,7 +59,7 @@ def find_registration(codes: list):
 
     maps = {
         "index": mds.INDEX_MAP, "forex": mds.FOREX_MAP, "commodity": mds.COMMODITY_MAP,
-        "bond": mds.BOND_YIELD_MAP, "sector": mds.SECTOR_MAP,
+        "bond": mds.BOND_YIELD_MAP, "sector": mds.SECTOR_MAP, "etf": mds.ETF_MAP,
     }
     found = {}
     for code in codes:
