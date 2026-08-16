@@ -79,6 +79,11 @@ task_routes = {
     'match_content_themes_vector': {'queue': 'ai_processing'},    # Phase 2: 向量语义匹配（Qwen embedding）
     'backfill_content_theme_matches': {'queue': 'ai_processing'}, # 批量回填历史内容
     'fetch_zhishixingqiu_subscription': {'queue': 'data_fetching'},  # 知识星球订阅抓取
+    # 知识星球附件文件下载/上传（专用单并发 worker rc-celery-zsxq-files）
+    'process_zsxq_file': {'queue': 'zsxq_file_processing'},
+    # dispatcher / reaper 走 data_fetching（轻量控制任务）
+    'dispatch_zsxq_file_downloads': {'queue': 'data_fetching'},
+    'reap_zsxq_stale_files': {'queue': 'data_fetching'},
     'fetch_substack_subscription': {'queue': 'data_fetching'},  # Substack 订阅抓取（文章 + 动态）
     'fetch_weibo_subscription': {'queue': 'data_fetching'},  # 微博订阅抓取
     'backfill_podcast_transcripts_task': {'queue': 'data_fetching'},  # Podcast 历史 (>48h) 剧集回填转写
@@ -187,6 +192,9 @@ beat_schedule = {
         'task': 'backfill_untagged_news_task',
         'schedule': crontab(minute='*/30'),
     },
+    # 注意: 知识星球文件 dispatch/reap 不走 beat —— 由 fetch_zhishixingqiu_subscription
+    # 抓取完成后链式触发 (见 backend/tasks/zsxq_file_tasks.py)。
+    # 另: 本 beat_schedule 从未有 beat 进程执行 (见 docs/develop/BEAT_SCHEDULE_NOT_RUNNING.md)。
     # Theme Report 改由 Scheduler Management「报告生成类」配置（默认每周一 14:00 CST）
 }
 

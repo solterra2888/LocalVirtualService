@@ -37,8 +37,10 @@ import type { FeedThemeColors } from './feedTheme';
 import type {
   SubscriptionContent,
   SubscriptionContentTagsLite,
+  ZsxqFile,
 } from '../../services/subscriptions';
 import { subscriptionsAPI, getTweetById } from '../../services/subscriptions';
+import ZsxqFileList from '../shared/ZsxqFileList';
 import ReportTickerTags from '../ReportTickerTags';
 import { aiTagChipStyle, AI_TAG_CHIP_FONT_SIZE } from '../shared/aiTagChipStyles';
 // PR-7: 个性化 summary picker
@@ -1099,6 +1101,20 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                   style={{ width: '100%', borderRadius: 12, marginBottom: 12 }}
                 />
               ))}
+            </div>
+          )}
+
+          {selectedContent.channel_type === 'zhishixingqiu' &&
+            Array.isArray(selectedContent.metadata?.files) &&
+            (selectedContent.metadata?.files as unknown[]).length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+                附件
+              </Text>
+              <ZsxqFileList
+                files={selectedContent.metadata!.files as unknown as ZsxqFile[]}
+                mutedColor={themeColors.textSecondary}
+              />
             </div>
           )}
 

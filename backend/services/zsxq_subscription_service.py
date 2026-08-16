@@ -303,7 +303,17 @@ def _extract_content(topic: Dict[str, Any]) -> Dict[str, Any]:
 
     talk = topic.get("talk") or {}
     files_raw = talk.get("files") or content.get("files") or []
-    files = [f.get("name", "") for f in files_raw if f.get("name")]
+    # 保留 file_id/name/size（对齐 download_test/get_file_id.py），供下载消费者异步处理。
+    # 旧实现只取文件名、丢弃 file_id，导致无法下载附件。
+    files = [
+        {
+            "file_id": f.get("file_id") or f.get("id"),
+            "name": f.get("name", ""),
+            "size": f.get("size", 0),
+        }
+        for f in files_raw
+        if (f.get("file_id") or f.get("id"))
+    ]
 
     return {
         "topic_id": topic.get("topic_id"),
@@ -547,6 +557,25 @@ def _store_topic_batch(
                 new_ids.append(content_db_id)
             else:
                 updated_count += 1
+            # 附件文件入下载队列（pending）。ON CONFLICT DO NOTHING 保证重抓不重置已下载状态。
+            files = t.get("files") or []
+            if files:
+                try:
+                    from backend.services.zsxq_file_service import ZsxqFileService
+                    ZsxqFileService().upsert_pending_batch(
+                        group_id=gid,
+                        topic_id=str(t.get("topic_id") or ""),
+                        files=files,
+                    )
+                except Exception as fexc:
+                    logger.warning(
+                        "ZSXQ 话题 %s 附件入 zsxq_files 失败: %s",
+                        t.get("topic_id"), fexc,
+                    )
+                    if report:
+                        report.record_warning(
+                            f"{gname} 话题 {t.get('topic_id')} 附件入下载队失败: {fexc}"
+                        )
         except Exception as exc:
             logger.exception("ZSXQ 话题 %s 入库失败", t.get("topic_id"))
             if report:

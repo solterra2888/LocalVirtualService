@@ -1732,6 +1732,22 @@ def _fetch_feed_detail(
         if isinstance(cats, list):
             categories = [str(c) for c in cats if c]
 
+    # 知识星球附件文件下载状态合并进 metadata.files（零侵入 subscription_content）
+    if channel_type == "zhishixingqiu" and content_id_raw is not None:
+        try:
+            from backend.services.zsxq_file_service import ZsxqFileService, build_files_view
+            records = (
+                ZsxqFileService().get_by_topic_ids([str(content_id_raw)]).get(str(content_id_raw))
+                or []
+            )
+            existing = metadata.get("files") if isinstance(metadata, dict) else None
+            if records or existing:
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                metadata["files"] = build_files_view(records, existing)
+        except Exception as fexc:
+            logger.warning("合并 ZSXQ 文件状态失败（不影响主流程）: %s", fexc)
+
     feed_payload = DailyItemDetailFeed(
         content_db_id=item_id,
         channel_type=channel_type,

@@ -213,6 +213,10 @@ from backend.tasks import daily_market_report_tasks
 
 本项目的 Celery worker **依赖显式导入** 注册任务；仅 `autodiscover_tasks(['backend.tasks'])` 不足以保证所有子模块在 worker 启动时被加载。
 
+**复发案例（2026-08，知识星球文件下载任务）**
+
+`zsxq_file_tasks.py` 新增后同样漏了 `celery_app.py` 显式 import，且验证时**先 import 模块再查注册**掩盖了问题（import 副作用即注册）。干净验证方式：只 `from backend.celery_app import app` 后查 `'task_name' in app.tasks`。消息已进队列但 worker 未注册时，表现为消费者侧 `NotRegistered`、队列消息被拒收，而上游「调度成功」日志完全正常。
+
 **修复**
 
 1. 在 `celery_app.py` 增加显式 import 与成功日志。
@@ -281,6 +285,22 @@ rg "task_handlers\s*=" backend/services/scheduler_service.py -A 30
 rg "def _execute_" backend/services/scheduler_service.py
 # 对比 keys 与 def 名称是否一一对应
 ```
+
+### 7. beat_schedule 从未被任何进程执行 — 定时条目静默失效
+
+**现象**
+
+`backend/celery_config.py` 的 `beat_schedule` 里配置了定时任务（清理/对账/健康探测/自愈补标），文档也描述其在运行，但对应业务从未发生过：LLM 日志不清理、HK worker 掉线无告警、新闻漏标无自愈补打。
+
+**根因**
+
+生产部署只有 `rc-webapp` / `rc-celery-ai` / `rc-celery-data` / `rc-scheduler` 四个 systemd unit，**没有任何 celery beat 进程**（无 beat unit、worker 未带 `-B`）；`rc-scheduler` 是 APScheduler + DB 配置驱动，不读取 celery `beat_schedule`。历次往 `beat_schedule` 加条目时都默认 beat 在跑，实际是死配置。
+
+**规避**
+
+- 往 `beat_schedule` 加条目前，先确认 beat 进程存在：`pgrep -af "celery.*beat"`（注意 `ps aux | grep` 会匹配到 grep 自身，易误判）。
+- 本项目定时调度的事实标准是 **rc-scheduler（DB 驱动）** 或 **任务链式触发**（如 `fetch_zhishixingqiu_subscription` 完成后链式触发文件下载 dispatch），新增周期任务优先这两种机制。
+- 详细记录与后续选项见 [docs/develop/BEAT_SCHEDULE_NOT_RUNNING.md](../../develop/BEAT_SCHEDULE_NOT_RUNNING.md)。
 
 ---
 

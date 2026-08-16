@@ -44,6 +44,7 @@ import TwitterOriginalView from '../shared/content-viewer/original-views/Twitter
 import NewsOriginalView from '../shared/content-viewer/original-views/NewsOriginalView';
 import ZsxqOriginalView from '../shared/content-viewer/original-views/ZsxqOriginalView';
 import SubstackOriginalView from '../shared/content-viewer/original-views/SubstackOriginalView';
+import type { ZsxqFile } from '../../services/subscriptions';
 import {
   getSubstackDisplayAuthorFromItem,
   getSubstackPublicationDisplayNameFromItem,
@@ -167,7 +168,7 @@ const DailyOriginalView: React.FC<DailyOriginalViewProps> = ({
             }
             files={
               Array.isArray(f.metadata?.files)
-                ? (f.metadata!.files as unknown[]).map(String).filter(Boolean)
+                ? (f.metadata!.files as unknown as ZsxqFile[])
                 : []
             }
             themeMode={themeMode}

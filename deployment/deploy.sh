@@ -255,7 +255,7 @@ echo ""
 echo "📦 安装到系统..."
 
 # systemd services (rc-frontend 已由 Docker Nginx 静态文件替代，不再安装)
-for svc in rc-webapp rc-celery-ai rc-celery-data rc-scheduler; do
+for svc in rc-webapp rc-celery-ai rc-celery-data rc-celery-zsxq-files rc-scheduler; do
     src="$GENERATED_DIR/${svc}.service"
     if [ -f "$src" ]; then
         cp "$src" "/etc/systemd/system/${svc}.service"

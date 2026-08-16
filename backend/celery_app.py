@@ -155,6 +155,12 @@ try:
 except ImportError as e:
     print(f"❌ 导入内容主题匹配任务模块失败: {e}")
 
+try:
+    from backend.tasks import zsxq_file_tasks
+    print(f"✅ 成功导入知识星球文件下载任务模块: {zsxq_file_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入知识星球文件下载任务模块失败: {e}")
+
 # 设置Celery日志
 @worker_init.connect
 def setup_worker_logging(sender=None, **kwargs):

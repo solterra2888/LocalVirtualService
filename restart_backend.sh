@@ -36,12 +36,13 @@ echo "📋 重启范围（后端相关服务）:"
 echo "   - Web应用 (rc-webapp)"
 echo "   - Celery AI Worker (rc-celery-ai)"
 echo "   - Celery Data Worker (rc-celery-data)"
+echo "   - Celery ZSXQ Files Worker (rc-celery-zsxq-files)"
 echo "   - 调度器服务 (rc-scheduler)"
 echo ""
 echo "   ℹ️  以下服务保持不动: PostgreSQL / Redis / 前端 / Nginx"
 echo ""
 
-BACKEND_SERVICES=("rc-webapp" "rc-celery-ai" "rc-celery-data" "rc-scheduler")
+BACKEND_SERVICES=("rc-webapp" "rc-celery-ai" "rc-celery-data" "rc-celery-zsxq-files" "rc-scheduler")
 
 for service in "${BACKEND_SERVICES[@]}"; do
     echo "🔄 重启 $service ..."

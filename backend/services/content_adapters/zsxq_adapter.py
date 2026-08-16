@@ -48,7 +48,7 @@ class ZsxqAdapter(BaseContentAdapter):
         "author": str,           # 帖子作者（非星球名）
         "text": str,             # 已去除 <e> 标签的正文
         "images": [url, ...],
-        "files": ["filename.pdf", ...],
+        "files": [{"file_id":..., "name":..., "size":...}, ...],
         # 以下两字段由 ZsxqSubscriptionService 补充
         "group_id": str,
         "group_name": str,
@@ -69,7 +69,9 @@ class ZsxqAdapter(BaseContentAdapter):
         content = _strip_html_tags(raw_data.get("text") or "")
         post_author = raw_data.get("author") or ""
         media_urls: List[str] = list(raw_data.get("images") or [])
-        files: List[str] = list(raw_data.get("files") or [])
+        # files 现为对象数组 [{file_id, name, size}]（_extract_content 保留 file_id 后）。
+        # 兼容历史 string[]：API 读取层会按 topic_id 从 zsxq_files 合并下载状态。
+        files: List[Any] = list(raw_data.get("files") or [])
 
         # 发布时间解析（知识星球时间带 +0800）
         create_time_raw = raw_data.get("create_time") or ""

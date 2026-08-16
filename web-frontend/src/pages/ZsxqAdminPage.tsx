@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
   Button, Card, Form, Input, Modal, Popconfirm, Space, Table, Tag, Typography, App,
-  Divider, Switch, Row, Col, Alert,
+  Divider, Switch, Row, Col, Alert, Image,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, QuestionCircleOutlined,
   PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { useDeviceDetection } from '../hooks/useDeviceDetection';
 import api from '../services/api';
 
 const { Title, Text } = Typography;
@@ -51,6 +52,8 @@ const ZsxqAdminPage: React.FC = () => {
   const { themeMode } = useDashboardSettings();
   const { message: msg, modal } = App.useApp();
   const isDark = themeMode === 'dark';
+  const { isMobile } = useDeviceDetection();
+  const [guidePreviewOpen, setGuidePreviewOpen] = useState(false);
 
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [groups, setGroups] = useState<ZsxqGroup[]>([]);
@@ -290,6 +293,17 @@ const ZsxqAdminPage: React.FC = () => {
           <span>
             在 <b>wx.zsxq.com</b> 登录后按 F12 → Network，找到 api.zsxq.com 的请求，复制完整 Cookie 头粘贴到下方。
             Cookie 通常有效数周至数月，过期后状态变红，点击「校验」或「编辑」重新粘贴即可恢复。
+            <br />
+            {isMobile ? (
+              <Typography.Link href="/zsxq_cookie_guide.png" target="_blank" rel="noopener noreferrer">查看图文操作指引</Typography.Link>
+            ) : (
+              <Typography.Link onClick={() => setGuidePreviewOpen(true)}>查看图文操作指引</Typography.Link>
+            )}
+            <Image
+              src="/zsxq_cookie_guide.png"
+              preview={{ visible: guidePreviewOpen, onVisibleChange: setGuidePreviewOpen }}
+              style={{ display: 'none' }}
+            />
           </span>
         }
         type="info"

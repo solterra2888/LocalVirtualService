@@ -155,6 +155,15 @@ else
     echo "⚠️  Celery Data Worker启动失败（数据获取任务将无法执行）"
 fi
 
+# ── 5b. Celery ZSXQ Files Worker (zsxq_file_processing, 单并发) ──
+echo "📎 启动Celery ZSXQ Files Worker..."
+systemctl start rc-celery-zsxq-files
+if wait_for_service rc-celery-zsxq-files 15; then
+    echo "✅ Celery ZSXQ Files Worker已启动"
+else
+    echo "⚠️  Celery ZSXQ Files Worker启动失败（知识星球附件下载将无法执行）"
+fi
+
 # ── 6. 调度器服务 ─────────────────────────────────────────────
 echo "🕒 启动调度器服务..."
 systemctl start rc-scheduler
@@ -195,3 +204,4 @@ echo "   - Web应用:    journalctl -u rc-webapp -f"
 echo "   - 调度器:     journalctl -u rc-scheduler -f"
 echo "   - Celery AI:  journalctl -u rc-celery-ai -f"
 echo "   - Celery Data:journalctl -u rc-celery-data -f"
+echo "   - Celery ZSXQ Files: journalctl -u rc-celery-zsxq-files -f"

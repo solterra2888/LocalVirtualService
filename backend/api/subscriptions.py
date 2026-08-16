@@ -8,6 +8,7 @@ from fastapi.responses import Response
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from datetime import datetime
+import os
 import pytz
 import json
 
@@ -1853,9 +1854,16 @@ async def get_subscription_contents(
         
         cursor.close()
         conn.close()
-        
+
         logger.info(f"Retrieved {len(contents)} contents for subscription {subscription_id}")
-        
+
+        # 知识星球附件文件下载状态合并进 metadata.files（零侵入 subscription_content）
+        try:
+            from backend.services.zsxq_file_service import enrich_contents_files
+            enrich_contents_files(contents)
+        except Exception as fexc:
+            logger.warning("合并 ZSXQ 文件下载状态失败（不影响主流程）: %s", fexc)
+
         # 直接返回数据对象，前端会自动包装
         return {
             "contents": contents,
@@ -1869,6 +1877,67 @@ async def get_subscription_contents(
     except Exception as e:
         logger.error(f"Error fetching contents for subscription {subscription_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/zsxq-files/{file_id}/download")
+async def download_zsxq_file(
+    file_id: str,
+    current_user: TokenData = Depends(get_current_user),
+):
+    """
+    知识星球附件下载代理：即时签名 OSS URL，返回 JSON（前端用带 token 的 axios 调用后打开）。
+
+    - 链接每次点击即时签名（1 小时有效），对用户而言"永不过期"
+    - 可鉴权：用户需订阅该文件所属星球（enabled zhishixingqiu subscription）
+    - 仅 status='uploaded' 的文件可下载
+    返回：{url, filename, inline}
+    """
+    from backend.services.zsxq_file_service import ZsxqFileService
+    from backend.services.oss_service import OSSService
+
+    rec = ZsxqFileService().get_by_file_id(file_id)
+    if not rec or str(rec.get("status")) != "uploaded" or not rec.get("oss_object_name"):
+        raise HTTPException(status_code=404, detail="文件尚未就绪或不存在")
+
+    # 鉴权：用户需订阅该文件所属星球
+    user_id = current_user.user_id
+    db_manager = get_db_manager()
+    conn = db_manager.get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT 1 FROM subscription_list
+            WHERE user_id = %s
+              AND channel_type = 'zhishixingqiu'
+              AND enabled = true
+              AND channel_identifier = %s
+            LIMIT 1
+            """,
+            (user_id, str(rec.get("group_id"))),
+        )
+        allowed = cursor.fetchone() is not None
+        cursor.close()
+    finally:
+        conn.close()
+
+    if not allowed:
+        raise HTTPException(status_code=403, detail="无权访问该文件")
+
+    # PDF/图片 inline（可预览），其余 attachment（下载）
+    ext = os.path.splitext(rec.get("name") or "")[1].lower()
+    force_inline = ext in ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']
+    signed_url = OSSService().get_signed_url(
+        rec["oss_object_name"], expires=3600, force_inline=force_inline
+    )
+    if not signed_url:
+        raise HTTPException(status_code=500, detail="生成下载链接失败")
+
+    return {
+        "url": signed_url,
+        "filename": rec.get("name") or "",
+        "inline": force_inline,
+    }
 
 
 @router.get("/{subscription_id}/digest")

@@ -9,6 +9,8 @@ import { Space, Typography } from 'antd';
 import { LinkOutlined } from '@ant-design/icons';
 import { DAILY_THEME_COLORS } from '../../../daily/dailyTheme';
 import { weiboSafeImageUrl } from '../../../feed/weiboSafeImage';
+import ZsxqFileList from '../../ZsxqFileList';
+import type { ZsxqFile } from '../../../../services/subscriptions';
 
 const { Text } = Typography;
 
@@ -19,7 +21,7 @@ export interface ZsxqOriginalViewProps {
   media_urls?: string[] | null;
   post_author?: string | null;
   group_name?: string | null;
-  files?: string[];
+  files?: ZsxqFile[];
   themeMode: 'light' | 'dark';
 }
 
@@ -109,13 +111,11 @@ const ZsxqOriginalView: React.FC<ZsxqOriginalViewProps> = ({
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
             附件
           </Text>
-          <Space direction="vertical" size={4}>
-            {files.map((name) => (
-              <Text key={name} style={{ fontSize: 13, color: colors.textSecondary }}>
-                {name}
-              </Text>
-            ))}
-          </Space>
+          <ZsxqFileList
+            files={files}
+            mutedColor={colors.textSecondary}
+            accentColor={colors.accent}
+          />
         </div>
       )}
 

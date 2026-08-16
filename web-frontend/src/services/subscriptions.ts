@@ -827,3 +827,26 @@ export const getTweetById = async (tweetId: string, userId: number): Promise<Sub
     return null;
   }
 };
+
+// 知识星球附件文件（API 读取层合并后的视图，见 backend enrich_contents_files）
+export interface ZsxqFile {
+  file_id: string;
+  name: string;
+  size: number;
+  ext: string;
+  ready: boolean; // status === 'uploaded'
+}
+
+/**
+ * 获取知识星球附件的即时签名下载链接。
+ * 后端按 file_id 即时签名（1h 有效），返回 {url, filename, inline}。
+ * 前端拿到 url 后自行打开/下载（鉴权走 axios 的 Authorization 头）。
+ */
+export const getZsxqFileDownloadUrl = async (
+  fileId: string,
+): Promise<{ url: string; filename: string; inline: boolean }> => {
+  return api.get<{ url: string; filename: string; inline: boolean }>(
+    `/subscriptions/zsxq-files/${encodeURIComponent(fileId)}/download`,
+  );
+};
+

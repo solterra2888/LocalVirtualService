@@ -605,6 +605,19 @@ def fetch_zhishixingqiu_subscription_task(
         )
         if is_scheduler_run:
             send_zsxq_scheduler_report(result)
+
+        # 抓取链式触发附件文件下载(不用 beat):本任务写入 zsxq_files pending 行后,
+        # 立即派发 dispatch 扫描入队。失败不影响抓取结果,下轮调度自动补上。
+        try:
+            from backend.tasks.zsxq_file_tasks import dispatch_zsxq_file_downloads_task
+            dispatch_zsxq_file_downloads_task.delay()
+            logger.info("[Celery Task] 已链式触发 zsxq 文件下载 dispatch")
+        except Exception as dispatch_exc:
+            logger.warning(
+                "[Celery Task] 链式触发 zsxq 文件 dispatch 失败(不影响抓取): %s",
+                dispatch_exc,
+            )
+
         return result
 
     except Exception as exc:

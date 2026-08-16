@@ -92,6 +92,7 @@ fi
 stop_service rc-scheduler
 stop_service rc-celery-ai
 stop_service rc-celery-data
+stop_service rc-celery-zsxq-files
 stop_service rc-webapp
 
 # ── 清理残留进程 ──────────────────────────────────────────────

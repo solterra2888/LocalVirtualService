@@ -286,6 +286,98 @@ class OSSService:
         
         return object_name
     
+    def upload_local_file_fixed_key(
+        self,
+        file_path: str,
+        object_name: str,
+        filename: str,
+        content_type: str = None,
+        max_retries: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        上传本地文件到【固定】object_name（PUT 幂等，重传安全）。
+
+        用于知识星球附件等需要确定性 OSS key 的场景：相同 file_id 多次上传到同一 key，
+        覆盖即可，不产生孤儿对象。
+
+        与 upload_file 的区别：
+          - object_name 由调用方指定（确定性），而非 generate_object_name（含 uuid/时间戳）
+          - 大文件自动走 oss2.resumable_upload 分片续传（断点可恢复）
+          - 对 OssError 做有限退避重试（满足 OSS 重连/自动重试要求）
+          - 不返回签名 URL（按需走 get_signed_url / 下载代理端点即时签）
+
+        Returns:
+            {success, object_name, bucket, file_size, error}
+        """
+        import time as _time
+
+        result = {
+            "success": False,
+            "object_name": object_name,
+            "bucket": self.bucket_name,
+            "file_size": 0,
+            "error": None,
+        }
+
+        if not self.is_configured():
+            result["error"] = "OSS 服务未配置，请在 .env 中设置 OSS_ACCESS_KEY_ID/SECRET"
+            return result
+        if not os.path.exists(file_path):
+            result["error"] = f"文件不存在: {file_path}"
+            return result
+
+        file_size = os.path.getsize(file_path)
+        result["file_size"] = file_size
+        if file_size > self.MAX_FILE_SIZE:
+            result["error"] = f"文件过大: {file_size / (1024 ** 3):.2f}GB，最大 2GB"
+            return result
+
+        if not content_type:
+            content_type = self._get_content_type(filename)
+
+        # Content-Disposition：PDF/图片 inline（可预览），其余 attachment（下载，中文文件名编码）
+        file_ext = os.path.splitext(filename)[1].lower()
+        if file_ext in ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']:
+            content_disposition = 'inline'
+        else:
+            from urllib.parse import quote
+            content_disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
+
+        headers = {
+            'Content-Type': content_type,
+            'Content-Disposition': content_disposition,
+        }
+
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                if file_size >= 10 * 1024 * 1024:
+                    # 大文件：分片续传（断点可恢复）
+                    oss2.resumable_upload(
+                        self.bucket, object_name, file_path,
+                        store=oss2.ResumableStore(),
+                        headers=headers,
+                    )
+                else:
+                    with open(file_path, 'rb') as f:
+                        self.bucket.put_object(object_name, f, headers=headers)
+                result["success"] = True
+                info(f"OSS 固定 key 上传成功: {filename} -> {object_name} ({file_size} bytes)")
+                return result
+            except oss2.exceptions.OssError as e:
+                last_err = f"oss_error status={getattr(e, 'status', '?')} code={getattr(e, 'code', '?')}"
+                warning(f"OSS 上传失败（第 {attempt + 1}/{max_retries}）object={object_name}: {last_err}")
+            except Exception as e:
+                last_err = f"exception: {str(e)[:200]}"
+                warning(f"OSS 上传异常（第 {attempt + 1}/{max_retries}）object={object_name}: {last_err}")
+
+            if attempt < max_retries - 1:
+                _time.sleep(2 * (attempt + 1))
+
+        result["error"] = last_err or "OSS 上传失败"
+        error(f"OSS 固定 key 上传最终失败 object={object_name}: {result['error']}")
+        return result
+
     def upload_file(
         self,
         file_path: str,

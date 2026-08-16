@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
   Button, Card, Form, Input, Modal, Popconfirm, Space, Table, Tag, Typography, App,
-  Divider, Switch, Alert,
+  Divider, Switch, Alert, Image,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, QuestionCircleOutlined,
   PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import { useDeviceDetection } from '../hooks/useDeviceDetection';
 import api from '../services/api';
 
 const { Title, Text } = Typography;
@@ -68,6 +69,8 @@ const SubstackAdminPage: React.FC = () => {
   const { themeMode } = useDashboardSettings();
   const { message: msg } = App.useApp();
   const isDark = themeMode === 'dark';
+  const { isMobile } = useDeviceDetection();
+  const [guidePreviewOpen, setGuidePreviewOpen] = useState(false);
 
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [publications, setPublications] = useState<Publication[]>([]);
@@ -342,6 +345,17 @@ const SubstackAdminPage: React.FC = () => {
             在 <b>substack.com</b> 登录后按 F12 → Application → Cookies，复制 <code>substack.sid</code>（必需，长期有效）与
             <code> substack.lli</code>（建议，刷新会变属正常）。「同步订阅源」会拉取 <b>源A 订阅 newsletter</b> 与
             <b> 源B 关注作者主刊</b>的并集。
+            <br />
+            {isMobile ? (
+              <Typography.Link href="/substack_cookie_guide.png" target="_blank" rel="noopener noreferrer">查看图文操作指引</Typography.Link>
+            ) : (
+              <Typography.Link onClick={() => setGuidePreviewOpen(true)}>查看图文操作指引</Typography.Link>
+            )}
+            <Image
+              src="/substack_cookie_guide.png"
+              preview={{ visible: guidePreviewOpen, onVisibleChange: setGuidePreviewOpen }}
+              style={{ display: 'none' }}
+            />
           </span>
         }
         type="info"
