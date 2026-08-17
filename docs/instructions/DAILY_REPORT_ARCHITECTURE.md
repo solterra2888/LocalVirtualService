@@ -87,14 +87,15 @@ Market Overview 的数据在 `daily_report_{date}.html` 生成时已**内嵌**�
 | 分组 | 品种（EODHD code） |
 |------|-------------------|
 | Risk | VIX（`VIX.INDX`） |
-| Equity Indexes | 美国 S&P 500 / NASDAQ Composite / NASDAQ 100 / PHLX Semiconductor / Russell 2000（`GSPC.INDX`/`IXIC.INDX`/`NDX.INDX`/`SOX.INDX`/`RUT.INDX`）；中国 IH/IF/IC/IM 四大股指期货 → 标的指数（`SSE50/CSI300/CSI500/CSI1000.INDX`）；Others（日本 Nikkei 225 `N225.INDX`、韩国 KOSPI `KS11.INDX`、德国 DAX `GDAXI.INDX`，卡片副标注明国家） |
-| Foreign Exchange | USD/JPY、USD/CNH、GBP/USD、EUR/USD（`*.FOREX`） |
+| Equity Indexes | 美国 S&P 500 / NASDAQ Composite / NASDAQ 100 / PHLX Semiconductor / Russell 2000（`GSPC.INDX`/`IXIC.INDX`/`NDX.INDX`/`SOX.INDX`/`RUT.INDX`）；中国 IH/IF/IC/IM 四大股指期货 → 标的指数（`SSE50/CSI300/CSI500/CSI1000.INDX`）；Others（日本 Nikkei 225 `N225.INDX`、韩国 KOSPI `KS11.INDX`、英国 FTSE 100 `FTSE.INDX`、德国 DAX `GDAXI.INDX`，卡片副标注明国家） |
+| Foreign Exchange | JPY/USD（`JPYUSD.FOREX`）、CNH/USD（`CNHUSD.FOREX`）、GBP/USD、EUR/USD（`*.FOREX`）；倒序对拉正向对本地倒数（见下） |
 | Commodities | Gold/WTI/Brent/Silver/Copper/Natural Gas（`GC1/CL1/BZ1/SI1/HG1/NG1.COMMODITY` 期货连续合约，Yahoo 路由，副标注交易所 COMEX/NYMEX） |
 | US Treasuries | 2Y/5Y/10Y/30Y 收益率（`US2Y/US5Y/US10Y/US30Y.INDX`） |
 
 要点：
 
-- 数据全部来自 `market_data_eod`（`_fetch_chart_data_by_code` 按 code 直查；与 Market Movers 的 ETF 走势共用底层查询，fallback `stock_prices_eod`）；**英国 FTSE 100 暂缺**（EODHD 不覆盖，备选 `ISF.LSE` / `BUK100P.INDX` 见 [EODHD_MARKET_DATA_DEVELOPMENT_GUIDE.md](./EODHD_MARKET_DATA_DEVELOPMENT_GUIDE.md) 案例 3）；**Russell 2000（`RUT.INDX`）与 6 个商品期货连续合约（`GC1/CL1/BZ1/SI1/HG1/NG1.COMMODITY`，对应 Finviz futures 同口径）例外来自 Yahoo Finance chart API**（EODHD 无 FTSE Russell 授权、无 futures 数据）——`market_data_service.YAHOO_CHART_CODES` 定义路由，`fetch_realtime_data` / `fetch_eod_data` 按分码走 Yahoo，入库与其他资产同表同 upsert，定时采集与回填（`backfill_market_data_eod.py` 同样识别该路由）均自动覆盖；商品卡片 TradingView symbol 用交易所连续合约（`COMEX:GC1!` 等）；
+- 数据全部来自 `market_data_eod`（`_fetch_chart_data_by_code` 按 code 直查；与 Market Movers 的 ETF 走势共用底层查询，fallback `stock_prices_eod`）；**Russell 2000（`RUT.INDX`）、英国 FTSE 100（`FTSE.INDX`）与 6 个商品期货连续合约（`GC1/CL1/BZ1/SI1/HG1/NG1.COMMODITY`，对应 Finviz futures 同口径）例外来自 Yahoo Finance chart API**（EODHD 无 FTSE Russell 授权、无 futures 数据）——`market_data_service.YAHOO_CHART_CODES` 定义路由，`fetch_realtime_data` / `fetch_eod_data` 按分码走 Yahoo，入库与其他资产同表同 upsert，定时采集与回填（`backfill_market_data_eod.py` 同样识别该路由）均自动覆盖；商品卡片 TradingView symbol 用交易所连续合约（`COMEX:GC1!` 等）；
+- **倒序货币对（JPY/USD、CNH/USD）拉高精度正向对后本地倒数**：EODHD 直供 `JPYUSD.FOREX` / `CNHUSD.FOREX` 但只存 4 位小数（JPYUSD≈0.0063 仅 2 位有效数字，日波动被量化抹平），因此 `market_data_service.INVERTED_FX_CODES` 路由到 `USDJPY.FOREX` / `USDCNH.FOREX`（5 位有效数字），`fetch_realtime_data` / `fetch_eod_data` 倒数变换后按倒序 code 入库（high/low 互换，涨跌幅符号不变）；回填脚本同步识别；卡片数值与蜡烛图精度按量级自适应（<0.01 显示 6 位小数，<1 显示 4 位）；TradingView symbol 用 `FX_IDC:JPYUSD` / `FX_IDC:CNHUSD`（OANDA 无倒序对）；
 - 每卡片内嵌最近 260 个交易日（`MT_MAX_BARS`），蜡烛图配色与 Market Movers 查看器一致（涨绿跌红）；
 - 卡片标题为链接，点击跳转 TradingView 对应 symbol 的图表页（日线 + `range=6M`），映射为 `MARKET_TEMPERATURE_GROUPS` 每张卡片的第 5 个字段（如 `TVC:SPX`、`SSE:000300`、`AMEX:GLD`、`TVC:US02Y`）；同时卡片图表已关闭 Lightweight Charts 的 attribution logo（`layout.attributionLogo: false`）——许可证要求的 TradingView 归属链接由标题链接承担；
 - 卡片数据缺失不失败——渲染 "No data" 占位，`metadata.temperature_cards_found` / `temperature_missing_codes` 记录覆盖情况。

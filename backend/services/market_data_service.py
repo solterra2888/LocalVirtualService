@@ -37,6 +37,7 @@ INDEX_MAP = {
     "Nikkei 225": ("EWJ.US", "index", "asia_equity"),
     "Nikkei 225 Index": ("N225.INDX", "index", "asia_equity"),
     "KOSPI": ("KS11.INDX", "index", "asia_equity"),
+    "FTSE 100 Index": ("FTSE.INDX", "index", "eu_equity"),
     "Hang Seng": ("2800.HK", "index", "asia_equity"),
     "SSE 50": ("SSE50.INDX", "index", "china_equity"),
     "CSI 300": ("CSI300.INDX", "index", "china_equity"),
@@ -46,11 +47,12 @@ INDEX_MAP = {
     "VIX": ("VIX.INDX", "index", "volatility"),
 }
 
-# Yahoo Finance chart API 路由表：EODHD 无授权的指数（如 Russell 系，FTSE Russell IP）
+# Yahoo Finance chart API 路由表：EODHD 无授权的指数（如 Russell/FTSE 系，FTSE Russell IP）
 # 与商品期货连续合约（Finviz futures 同口径，EODHD 无 futures 数据）从 Yahoo 免费
 # chart 端点补充。code 仍用 EODHD 风格命名，入库 market_data_eod 同一张表、同一套 upsert。
 YAHOO_CHART_CODES = {
     "RUT.INDX": "^RUT",       # Russell 2000 Index
+    "FTSE.INDX": "^FTSE",     # FTSE 100 Index
     "GC1.COMMODITY": "GC=F",  # Gold front-month continuous (COMEX)
     "CL1.COMMODITY": "CL=F",  # WTI Crude front-month continuous (NYMEX)
     "BZ1.COMMODITY": "BZ=F",  # Brent Crude front-month continuous (NYMEX)
@@ -64,6 +66,16 @@ FOREX_MAP = {
     "EUR/USD": ("EURUSD.FOREX", "forex", "major_pair"),
     "GBP/USD": ("GBPUSD.FOREX", "forex", "major_pair"),
     "USD/JPY": ("USDJPY.FOREX", "forex", "major_pair"),
+    "JPY/USD": ("JPYUSD.FOREX", "forex", "major_pair"),
+    "CNH/USD": ("CNHUSD.FOREX", "forex", "major_pair"),
+}
+
+# 倒序货币对路由：EODHD 直接提供 JPYUSD/CNHUSD 报价但精度只有 4 位小数
+# （JPYUSD ≈ 0.0063 仅 2 位有效数字，日波动不可见），因此拉取高精度的正向对
+# 在本地做倒数变换后按倒序 code 入库。high/low 随倒数互换，涨跌幅数值不变。
+INVERTED_FX_CODES = {
+    "JPYUSD.FOREX": "USDJPY.FOREX",
+    "CNHUSD.FOREX": "USDCNH.FOREX",
 }
 
 COMMODITY_MAP = {
@@ -290,13 +302,40 @@ class MarketDataService:
             "gmtoffset": meta.get("gmtoffset", 0),
         }
 
+    @staticmethod
+    def _invert_price(v) -> Optional[float]:
+        """倒数变换单个价格值（None 安全）。"""
+        if v is None:
+            return None
+        v = float(v)
+        return (1.0 / v) if v else None
+
+    def _invert_realtime_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """把正向货币对的实时 dict 倒数变换成倒序对（high/low 互换）。"""
+        out = dict(record)
+        for k in ("open", "high", "low", "close", "previousClose"):
+            out[k] = self._invert_price(record.get(k))
+        out["high"], out["low"] = out["low"], out["high"]
+        # 倒数后差值与涨跌幅由倒数值重算（符号不变：正向涨 → 倒序涨）
+        if out.get("close") is not None and out.get("previousClose"):
+            out["change"] = out["close"] - out["previousClose"]
+            out["change_p"] = out["change"] / out["previousClose"] * 100
+        else:
+            out["change"] = None
+            out["change_p"] = None
+        return out
+
     def fetch_realtime_data(self, ticker: str) -> Optional[Dict[str, Any]]:
-        """获取实时数据（YAHOO_CHART_CODES 中的 code 路由到 Yahoo）"""
+        """获取实时数据（YAHOO_CHART_CODES 中的 code 路由到 Yahoo；
+        INVERTED_FX_CODES 拉正向对后倒数变换）"""
         if ticker in YAHOO_CHART_CODES:
             chart = self._fetch_yahoo_chart(YAHOO_CHART_CODES[ticker], days=5)
             if chart:
                 return self._yahoo_realtime_record(ticker, chart)
             return None
+        if ticker in INVERTED_FX_CODES:
+            rec = self.fetch_realtime_data(INVERTED_FX_CODES[ticker])
+            return self._invert_realtime_record(rec) if rec else None
         try:
             url = f"{self.realtime_base_url}/{ticker}"
             params = {
@@ -317,10 +356,25 @@ class MarketDataService:
             return None
     
     def fetch_eod_data(self, ticker: str, days: int = 1) -> Optional[List[Dict[str, Any]]]:
-        """获取EOD历史数据（YAHOO_CHART_CODES 中的 code 路由到 Yahoo）"""
+        """获取EOD历史数据（YAHOO_CHART_CODES 中的 code 路由到 Yahoo；
+        INVERTED_FX_CODES 拉正向对后倒数变换）"""
         if ticker in YAHOO_CHART_CODES:
             chart = self._fetch_yahoo_chart(YAHOO_CHART_CODES[ticker], days=max(days, 5))
             return chart.get("bars") if chart else None
+        if ticker in INVERTED_FX_CODES:
+            rows = self.fetch_eod_data(INVERTED_FX_CODES[ticker], days=days)
+            if not rows:
+                return None
+            inverted = []
+            for r in rows:
+                if r.get("close") is None:
+                    continue
+                inv = dict(r)
+                for k in ("open", "high", "low", "close", "adjusted_close"):
+                    inv[k] = self._invert_price(r.get(k))
+                inv["high"], inv["low"] = inv["low"], inv["high"]
+                inverted.append(inv)
+            return inverted
         try:
             # 用 utcnow 而非 datetime.now: 服务器在 HK (UTC+8), 跨日时段 datetime.now()
             # 取本地日期会比 UTC 早 1 天, 导致 EODHD 返回不全/空数据.

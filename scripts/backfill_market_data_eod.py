@@ -40,6 +40,7 @@ BASE_URL = "https://eodhd.com/api"
 # 与 market_data_service.YAHOO_CHART_CODES 一致：EODHD 无授权的指数/期货走 Yahoo chart API
 YAHOO_CHART_CODES = {
     "RUT.INDX": "^RUT",       # Russell 2000 Index
+    "FTSE.INDX": "^FTSE",     # FTSE 100 Index
     "GC1.COMMODITY": "GC=F",  # Gold front-month continuous
     "CL1.COMMODITY": "CL=F",  # WTI Crude
     "BZ1.COMMODITY": "BZ=F",  # Brent Crude
@@ -47,6 +48,19 @@ YAHOO_CHART_CODES = {
     "HG1.COMMODITY": "HG=F",  # Copper
     "NG1.COMMODITY": "NG=F",  # Natural Gas
 }
+
+# 与 market_data_service.INVERTED_FX_CODES 一致：倒序货币对拉高精度正向对后本地倒数
+INVERTED_FX_CODES = {
+    "JPYUSD.FOREX": "USDJPY.FOREX",
+    "CNHUSD.FOREX": "USDCNH.FOREX",
+}
+
+
+def invert_price(v):
+    if v is None:
+        return None
+    v = float(v)
+    return (1.0 / v) if v else None
 
 
 def fetch_yahoo_history(yahoo_symbol: str, from_date, to_date) -> list:
@@ -170,6 +184,17 @@ def main() -> None:
         try:
             if code in YAHOO_CHART_CODES:
                 rows = fetch_yahoo_history(YAHOO_CHART_CODES[code], from_date, to_date)
+            elif code in INVERTED_FX_CODES:
+                rows = fetch_eod_history(token, INVERTED_FX_CODES[code], from_date, to_date)
+                rows = [
+                    {**r,
+                     "open": invert_price(r.get("open")), "high": invert_price(r.get("high")),
+                     "low": invert_price(r.get("low")), "close": invert_price(r.get("close")),
+                     "adjusted_close": invert_price(r.get("adjusted_close"))}
+                    for r in rows if r.get("close")
+                ]
+                for r in rows:
+                    r["high"], r["low"] = r["low"], r["high"]
             else:
                 rows = fetch_eod_history(token, code, from_date, to_date)
         except Exception as e:

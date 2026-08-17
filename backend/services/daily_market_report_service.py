@@ -430,6 +430,7 @@ MARKET_TEMPERATURE_GROUPS: List[Dict[str, Any]] = [
                 "cards": [
                     ("nikkei", "Nikkei 225", "N225.INDX", "Japan", "TVC:NI225"),
                     ("kospi", "KOSPI", "KS11.INDX", "Korea", "KRX:KOSPI"),
+                    ("ftse", "FTSE 100", "FTSE.INDX", "UK", "TVC:UKX"),
                     ("dax", "DAX", "GDAXI.INDX", "Germany", "XETR:DAX"),
                 ],
             },
@@ -439,8 +440,8 @@ MARKET_TEMPERATURE_GROUPS: List[Dict[str, Any]] = [
         "key": "fx",
         "label": "Foreign Exchange",
         "cards": [
-            ("usdjpy", "USD/JPY", "USDJPY.FOREX", "Japanese Yen", "OANDA:USDJPY"),
-            ("usdcnh", "USD/CNH", "USDCNH.FOREX", "Chinese Yuan", "OANDA:USDCNH"),
+            ("jpyusd", "JPY/USD", "JPYUSD.FOREX", "Japanese Yen", "FX_IDC:JPYUSD"),
+            ("cnhusd", "CNH/USD", "CNHUSD.FOREX", "Chinese Yuan", "FX_IDC:CNHUSD"),
             ("gbpusd", "GBP/USD", "GBPUSD.FOREX", "British Pound", "OANDA:GBPUSD"),
             ("eurusd", "EUR/USD", "EURUSD.FOREX", "Euro", "OANDA:EURUSD"),
         ],

@@ -811,7 +811,7 @@ a.mt-card-label::after {
                 </div>
                 <div class="mt-card-quote">
                     {% if card and card.last is not none %}
-                    <span class="mt-card-last">{{ '%.2f' | format(card.last) }}</span>
+                    <span class="mt-card-last">{{ ('%.6f' if card.last < 0.01 else ('%.4f' if card.last < 1 else '%.2f')) | format(card.last) }}</span>
                     {% if card.chg_pct is not none %}
                     <span class="{{ 'val-pos' if card.chg_pct > 0 else ('val-neg' if card.chg_pct < 0 else 'val-neutral') }}">{{ '+' if card.chg_pct > 0 }}{{ '%.2f' | format(card.chg_pct) }}%</span>
                     {% endif %}
@@ -841,7 +841,7 @@ a.mt-card-label::after {
                 </div>
                 <div class="mt-card-quote">
                     {% if card and card.last is not none %}
-                    <span class="mt-card-last">{{ '%.2f' | format(card.last) }}</span>
+                    <span class="mt-card-last">{{ ('%.6f' if card.last < 0.01 else ('%.4f' if card.last < 1 else '%.2f')) | format(card.last) }}</span>
                     {% if card.chg_pct is not none %}
                     <span class="{{ 'val-pos' if card.chg_pct > 0 else ('val-neg' if card.chg_pct < 0 else 'val-neutral') }}">{{ '+' if card.chg_pct > 0 }}{{ '%.2f' | format(card.chg_pct) }}%</span>
                     {% endif %}
@@ -1800,7 +1800,11 @@ function renderTempCharts() {
         const visible = tempFilterByRange(bars, tempRange);
 
         // Candlestick series (colors match the Market Movers viewer)
+        // priceFormat precision adapts to value magnitude (JPY/USD ≈ 0.0063 needs 6 digits)
+        const lastClose = bars[bars.length - 1].close;
+        const prec = lastClose < 0.01 ? 6 : (lastClose < 1 ? 4 : 2);
         const series = chart.addCandlestickSeries({
+            priceFormat: { type: 'price', precision: prec, minMove: Math.pow(10, -prec) },
             upColor: dark ? '#00e676' : '#0a7c42',
             downColor: dark ? '#ff5252' : '#c41230',
             borderUpColor: dark ? '#00e676' : '#0a7c42',
