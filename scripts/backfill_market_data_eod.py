@@ -49,19 +49,6 @@ YAHOO_CHART_CODES = {
     "NG1.COMMODITY": "NG=F",  # Natural Gas
 }
 
-# 与 market_data_service.INVERTED_FX_CODES 一致：倒序货币对拉高精度正向对后本地倒数
-INVERTED_FX_CODES = {
-    "JPYUSD.FOREX": "USDJPY.FOREX",
-    "CNHUSD.FOREX": "USDCNH.FOREX",
-}
-
-
-def invert_price(v):
-    if v is None:
-        return None
-    v = float(v)
-    return (1.0 / v) if v else None
-
 
 def fetch_yahoo_history(yahoo_symbol: str, from_date, to_date) -> list:
     """调用 Yahoo v8 chart 端点，返回与 EODHD /api/eod 同构的记录列表（升序）。"""
@@ -184,17 +171,6 @@ def main() -> None:
         try:
             if code in YAHOO_CHART_CODES:
                 rows = fetch_yahoo_history(YAHOO_CHART_CODES[code], from_date, to_date)
-            elif code in INVERTED_FX_CODES:
-                rows = fetch_eod_history(token, INVERTED_FX_CODES[code], from_date, to_date)
-                rows = [
-                    {**r,
-                     "open": invert_price(r.get("open")), "high": invert_price(r.get("high")),
-                     "low": invert_price(r.get("low")), "close": invert_price(r.get("close")),
-                     "adjusted_close": invert_price(r.get("adjusted_close"))}
-                    for r in rows if r.get("close")
-                ]
-                for r in rows:
-                    r["high"], r["low"] = r["low"], r["high"]
             else:
                 rows = fetch_eod_history(token, code, from_date, to_date)
         except Exception as e:

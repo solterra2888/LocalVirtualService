@@ -440,8 +440,8 @@ MARKET_TEMPERATURE_GROUPS: List[Dict[str, Any]] = [
         "key": "fx",
         "label": "Foreign Exchange",
         "cards": [
-            ("jpyusd", "JPY/USD", "JPYUSD.FOREX", "Japanese Yen", "FX_IDC:JPYUSD"),
-            ("cnhusd", "CNH/USD", "CNHUSD.FOREX", "Chinese Yuan", "FX_IDC:CNHUSD"),
+            ("usdjpy", "USD/JPY", "USDJPY.FOREX", "Japanese Yen", "OANDA:USDJPY"),
+            ("usdcnh", "USD/CNH", "USDCNH.FOREX", "Chinese Yuan", "OANDA:USDCNH"),
             ("gbpusd", "GBP/USD", "GBPUSD.FOREX", "British Pound", "OANDA:GBPUSD"),
             ("eurusd", "EUR/USD", "EURUSD.FOREX", "Euro", "OANDA:EURUSD"),
         ],
