@@ -788,8 +788,8 @@ a.mt-card-label::after {
 <div class="mt-toolbar">
     <span class="mt-toolbar-hint">Global daily trends by asset class</span>
     <div class="chart-controls" id="mt-range">
-        <button class="chart-range-btn active" data-range="3m" onclick="setTempRange('3m', this)">3M</button>
-        <button class="chart-range-btn" data-range="6m" onclick="setTempRange('6m', this)">6M</button>
+        <button class="chart-range-btn" data-range="3m" onclick="setTempRange('3m', this)">3M</button>
+        <button class="chart-range-btn active" data-range="6m" onclick="setTempRange('6m', this)">6M</button>
         <button class="chart-range-btn" data-range="1y" onclick="setTempRange('1y', this)">1Y</button>
     </div>
 </div>
@@ -1742,7 +1742,7 @@ window.addEventListener('resize', function() {
 
 // Chart instances per card id
 const tempCharts = {};
-let tempRange = '3m';
+let tempRange = '6m';
 
 function tempFilterByRange(data, range) {
     if (!data || !data.length) return data;

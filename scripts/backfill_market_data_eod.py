@@ -37,9 +37,15 @@ from backend.utils.datetime_utils import utcnow                  # noqa: E402
 
 BASE_URL = "https://eodhd.com/api"
 
-# 与 market_data_service.YAHOO_CHART_CODES 一致：EODHD 无授权的指数走 Yahoo chart API
+# 与 market_data_service.YAHOO_CHART_CODES 一致：EODHD 无授权的指数/期货走 Yahoo chart API
 YAHOO_CHART_CODES = {
-    "RUT.INDX": "^RUT",  # Russell 2000 Index
+    "RUT.INDX": "^RUT",       # Russell 2000 Index
+    "GC1.COMMODITY": "GC=F",  # Gold front-month continuous
+    "CL1.COMMODITY": "CL=F",  # WTI Crude
+    "BZ1.COMMODITY": "BZ=F",  # Brent Crude
+    "SI1.COMMODITY": "SI=F",  # Silver
+    "HG1.COMMODITY": "HG=F",  # Copper
+    "NG1.COMMODITY": "NG=F",  # Natural Gas
 }
 
 

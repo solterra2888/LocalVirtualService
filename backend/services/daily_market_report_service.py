@@ -449,12 +449,12 @@ MARKET_TEMPERATURE_GROUPS: List[Dict[str, Any]] = [
         "key": "commodities",
         "label": "Commodities",
         "cards": [
-            ("gold", "Gold", "GLD.US", "GLD ETF", "AMEX:GLD"),
-            ("wti", "WTI Crude", "USO.US", "USO ETF", "AMEX:USO"),
-            ("brent", "Brent Crude", "BNO.US", "BNO ETF", "AMEX:BNO"),
-            ("silver", "Silver", "SLV.US", "SLV ETF", "AMEX:SLV"),
-            ("copper", "Copper", "CPER.US", "CPER ETF", "AMEX:CPER"),
-            ("natgas", "Natural Gas", "UNG.US", "UNG ETF", "AMEX:UNG"),
+            ("gold", "Gold", "GC1.COMMODITY", "COMEX", "COMEX:GC1!"),
+            ("wti", "WTI Crude", "CL1.COMMODITY", "NYMEX", "NYMEX:CL1!"),
+            ("brent", "Brent Crude", "BZ1.COMMODITY", "NYMEX", "NYMEX:BZ1!"),
+            ("silver", "Silver", "SI1.COMMODITY", "COMEX", "COMEX:SI1!"),
+            ("copper", "Copper", "HG1.COMMODITY", "COMEX", "COMEX:HG1!"),
+            ("natgas", "Natural Gas", "NG1.COMMODITY", "NYMEX", "NYMEX:NG1!"),
         ],
     },
     {

@@ -47,10 +47,16 @@ INDEX_MAP = {
 }
 
 # Yahoo Finance chart API 路由表：EODHD 无授权的指数（如 Russell 系，FTSE Russell IP）
-# 从 Yahoo 免费 chart 端点补充。code 仍用 EODHD 风格命名（RUT.INDX），
-# 入库 market_data_eod 与其他指数同一张表、同一套 upsert。
+# 与商品期货连续合约（Finviz futures 同口径，EODHD 无 futures 数据）从 Yahoo 免费
+# chart 端点补充。code 仍用 EODHD 风格命名，入库 market_data_eod 同一张表、同一套 upsert。
 YAHOO_CHART_CODES = {
-    "RUT.INDX": "^RUT",  # Russell 2000 Index
+    "RUT.INDX": "^RUT",       # Russell 2000 Index
+    "GC1.COMMODITY": "GC=F",  # Gold front-month continuous (COMEX)
+    "CL1.COMMODITY": "CL=F",  # WTI Crude front-month continuous (NYMEX)
+    "BZ1.COMMODITY": "BZ=F",  # Brent Crude front-month continuous (NYMEX)
+    "SI1.COMMODITY": "SI=F",  # Silver front-month continuous (COMEX)
+    "HG1.COMMODITY": "HG=F",  # Copper front-month continuous (COMEX)
+    "NG1.COMMODITY": "NG=F",  # Natural Gas front-month continuous (NYMEX)
 }
 
 FOREX_MAP = {
@@ -67,6 +73,13 @@ COMMODITY_MAP = {
     "WTI Crude Oil (USO ETF)": ("USO.US", "commodity", "energy"),
     "Brent Oil (BNO ETF)": ("BNO.US", "commodity", "energy"),
     "Natural Gas (UNG ETF)": ("UNG.US", "commodity", "energy"),
+    # 期货连续合约（Yahoo 路由，DMR Temperature 商品卡片使用；ETF 条目保留供其他消费方）
+    "Gold Futures": ("GC1.COMMODITY", "commodity", "precious_metal"),
+    "WTI Crude Futures": ("CL1.COMMODITY", "commodity", "energy"),
+    "Brent Crude Futures": ("BZ1.COMMODITY", "commodity", "energy"),
+    "Silver Futures": ("SI1.COMMODITY", "commodity", "precious_metal"),
+    "Copper Futures": ("HG1.COMMODITY", "commodity", "industrial_metal"),
+    "Natural Gas Futures": ("NG1.COMMODITY", "commodity", "energy"),
 }
 
 BOND_YIELD_MAP = {
