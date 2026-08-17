@@ -97,6 +97,7 @@ Market Overview 的数据在 `daily_report_{date}.html` 生成时已**内嵌**�
 - 数据全部来自 `market_data_eod`（`_fetch_chart_data_by_code` 按 code 直查；与 Market Movers 的 ETF 走势共用底层查询，fallback `stock_prices_eod`）；**Russell 2000（`RUT.INDX`）、英国 FTSE 100（`FTSE.INDX`）与 6 个商品期货连续合约（`GC1/CL1/BZ1/SI1/HG1/NG1.COMMODITY`，对应 Finviz futures 同口径）例外来自 Yahoo Finance chart API**（EODHD 无 FTSE Russell 授权、无 futures 数据）——`market_data_service.YAHOO_CHART_CODES` 定义路由，`fetch_realtime_data` / `fetch_eod_data` 按分码走 Yahoo，入库与其他资产同表同 upsert，定时采集与回填（`backfill_market_data_eod.py` 同样识别该路由）均自动覆盖；商品卡片 TradingView symbol 用交易所连续合约（`COMEX:GC1!` 等）；
 - 每卡片内嵌最近 260 个交易日（`MT_MAX_BARS`），蜡烛图配色与 Market Movers 查看器一致（涨绿跌红）；
 - 卡片标题为链接，点击跳转 TradingView 对应 symbol 的图表页（日线 + `range=6M`），映射为 `MARKET_TEMPERATURE_GROUPS` 每张卡片的第 5 个字段（如 `TVC:SPX`、`SSE:000300`、`AMEX:GLD`、`TVC:US02Y`）；同时卡片图表已关闭 Lightweight Charts 的 attribution logo（`layout.attributionLogo: false`）——许可证要求的 TradingView 归属链接由标题链接承担；
+- 工具栏 3M/6M/1Y 旁有 **MA5 / MA10 / MA30 叠加开关**（`toggleTempMA`，默认全关；SMA 从全量 bars 计算再切到可见区间，复用 `calcSMA`；配色与 Market Movers 的 MA 按钮一致）和 **− / + 卡片大小按钮**（`adjustTempCols`，调整 `--mt-cols` CSS 变量 2~4 列，默认 3；列变化后 `requestAnimationFrame` 重渲染图表以适配新宽度）；
 - 卡片数据缺失不失败——渲染 "No data" 占位，`metadata.temperature_cards_found` / `temperature_missing_codes` 记录覆盖情况。
 
 ---

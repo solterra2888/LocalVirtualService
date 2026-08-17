@@ -639,6 +639,23 @@ tbody tr.chart-active { background: var(--bg-hover); }
     font-size: 0.8rem;
     color: var(--text-muted);
 }
+.mt-size-sep {
+    width: 1px;
+    height: 16px;
+    background: var(--border);
+    margin: 0 4px;
+}
+.mt-size-btn {
+    padding: 3px 9px;
+    font-size: 0.85rem;
+    line-height: 1;
+}
+.mt-size-val {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    min-width: 10px;
+    text-align: center;
+}
 .mt-country-label {
     font-size: 0.78rem;
     font-weight: 600;
@@ -647,7 +664,7 @@ tbody tr.chart-active { background: var(--bg-hover); }
 }
 .mt-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(var(--mt-cols, 3), 1fr);
     gap: 14px;
 }
 .mt-card {
@@ -791,6 +808,13 @@ a.mt-card-label::after {
         <button class="chart-range-btn" data-range="3m" onclick="setTempRange('3m', this)">3M</button>
         <button class="chart-range-btn active" data-range="6m" onclick="setTempRange('6m', this)">6M</button>
         <button class="chart-range-btn" data-range="1y" onclick="setTempRange('1y', this)">1Y</button>
+        <button class="chart-ma-btn" data-ma="5" onclick="toggleTempMA(5, this)" style="color:#f59e0b">MA5</button>
+        <button class="chart-ma-btn" data-ma="10" onclick="toggleTempMA(10, this)" style="color:#3b82f6">MA10</button>
+        <button class="chart-ma-btn" data-ma="30" onclick="toggleTempMA(30, this)" style="color:#a855f7">MA30</button>
+        <span class="mt-size-sep"></span>
+        <button class="chart-range-btn mt-size-btn" onclick="adjustTempCols(-1)" title="Larger cards">−</button>
+        <span class="mt-size-val" id="mt-cols-val">3</span>
+        <button class="chart-range-btn mt-size-btn" onclick="adjustTempCols(1)" title="Smaller cards">+</button>
     </div>
 </div>
 
@@ -1320,6 +1344,12 @@ const TEMP_CARDS = {{ temperature_json | safe }};
 const TEMP_DATA = {};
 TEMP_CARDS.forEach(c => { if (c.bars && c.bars.length) TEMP_DATA[c.id] = c.bars; });
 
+// ── Market Temperature chart state (range + optional MA overlays, off by default) ──
+const tempCharts = {};
+let tempRange = '6m';
+const tempMAEnabled = { 5: false, 10: false, 30: false };
+const tempMAColors = { 5: '#f59e0b', 10: '#3b82f6', 30: '#a855f7' };
+
 // ── Chart state per panel ──
 const chartState = {
     'us-assets': { chart: null, candleSeries: null, volSeries: null, maSeries: {}, currentTicker: null, currentRange: '3m', scrollY: 0, maEnabled: {20: true, 50: true, 200: false} },
@@ -1740,9 +1770,7 @@ window.addEventListener('resize', function() {
 // ── MARKET TEMPERATURE ──
 // ═══════════════════════════════════════════════
 
-// Chart instances per card id
-const tempCharts = {};
-let tempRange = '6m';
+// Chart instances per card id (tempCharts/tempRange/tempMAEnabled declared with TEMP_DATA above)
 
 function tempFilterByRange(data, range) {
     if (!data || !data.length) return data;
@@ -1809,6 +1837,24 @@ function renderTempCharts() {
             wickDownColor: dark ? '#ff5252' : '#c41230',
         });
         series.setData(visible);
+
+        // MA overlays — computed from ALL bars for accuracy, sliced to visible range
+        [5, 10, 30].forEach(period => {
+            if (!tempMAEnabled[period]) return;
+            const maFull = calcSMA(bars, period);
+            if (!maFull.length) return;
+            const maVisible = tempFilterByRange(maFull, tempRange);
+            if (!maVisible.length) return;
+            const maSeries = chart.addLineSeries({
+                color: tempMAColors[period],
+                lineWidth: 1,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+            });
+            maSeries.setData(maVisible);
+        });
+
         chart.timeScale().fitContent();
         tempCharts[id] = chart;
     });
@@ -1819,6 +1865,25 @@ function setTempRange(range, btn) {
     document.querySelectorAll('#mt-range .chart-range-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     renderTempCharts();
+}
+
+function toggleTempMA(period, btn) {
+    tempMAEnabled[period] = !tempMAEnabled[period];
+    btn.classList.toggle('active', tempMAEnabled[period]);
+    renderTempCharts();
+}
+
+// ── Market Temperature: card size (columns per row) ──
+const MT_COLS_MIN = 2, MT_COLS_MAX = 4;
+let tempCols = 3;
+function adjustTempCols(delta) {
+    const next = Math.min(MT_COLS_MAX, Math.max(MT_COLS_MIN, tempCols + delta));
+    if (next === tempCols) return;
+    tempCols = next;
+    document.getElementById('mt-cols-val').textContent = String(tempCols);
+    document.getElementById('panel-temperature').style.setProperty('--mt-cols', tempCols);
+    // Charts pin their canvas width at creation — re-render after the grid reflows
+    requestAnimationFrame(() => renderTempCharts());
 }
 
 // ═══════════════════════════════════════════════
