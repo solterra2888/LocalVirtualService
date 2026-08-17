@@ -42,7 +42,15 @@ INDEX_MAP = {
     "CSI 300": ("CSI300.INDX", "index", "china_equity"),
     "CSI 500": ("CSI500.INDX", "index", "china_equity"),
     "CSI 1000": ("CSI1000.INDX", "index", "china_equity"),
+    "Russell 2000 Index": ("RUT.INDX", "index", "us_equity"),
     "VIX": ("VIX.INDX", "index", "volatility"),
+}
+
+# Yahoo Finance chart API 路由表：EODHD 无授权的指数（如 Russell 系，FTSE Russell IP）
+# 从 Yahoo 免费 chart 端点补充。code 仍用 EODHD 风格命名（RUT.INDX），
+# 入库 market_data_eod 与其他指数同一张表、同一套 upsert。
+YAHOO_CHART_CODES = {
+    "RUT.INDX": "^RUT",  # Russell 2000 Index
 }
 
 FOREX_MAP = {
@@ -205,8 +213,77 @@ class MarketDataService:
         except (ValueError, TypeError):
             return None
     
+    # ==== Yahoo Finance chart API 补充源（EODHD 无授权的指数） ====
+
+    def _fetch_yahoo_chart(self, yahoo_symbol: str, days: int) -> Optional[Dict[str, Any]]:
+        """
+        调用 Yahoo v8 chart 端点，返回与 EODHD 实时/EOD 解析兼容的结构。
+
+        一次请求同时供 realtime（末条 bar）和 eod（整段 bar 列表）两条链路使用：
+        返回 {'meta': {...}, 'bars': [{'date','open','high','low','close','volume','timestamp'}, ...]}
+        失败返回 None（与 fetch_realtime_data/fetch_eod_data 的容错语义一致）。
+        """
+        try:
+            from backend.utils.datetime_utils import utcnow
+            period1 = int((utcnow() - timedelta(days=days + 5)).timestamp())  # 多取5天余量
+            period2 = int(utcnow().timestamp())
+            resp = self.session.get(
+                "https://query1.finance.yahoo.com/v8/finance/chart/" + requests.utils.quote(yahoo_symbol),
+                params={"period1": period1, "period2": period2, "interval": "1d"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            result = resp.json()["chart"]["result"][0]
+            timestamps = result.get("timestamp") or []
+            quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+            meta = result.get("meta", {})
+
+            bars = []
+            for i, ts in enumerate(timestamps):
+                close = quote.get("close", [None] * len(timestamps))[i]
+                if close is None:
+                    continue
+                bars.append({
+                    "date": datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d"),
+                    "open": quote.get("open", [])[i] if quote.get("open") else None,
+                    "high": quote.get("high", [])[i] if quote.get("high") else None,
+                    "low": quote.get("low", [])[i] if quote.get("low") else None,
+                    "close": close,
+                    "volume": quote.get("volume", [])[i] if quote.get("volume") else None,
+                    "timestamp": ts,
+                })
+            return {"meta": meta, "bars": bars}
+        except Exception as e:
+            logger.error(f"获取 {yahoo_symbol} Yahoo数据失败: {str(e)}")
+            return None
+
+    def _yahoo_realtime_record(self, code: str, chart: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """把 Yahoo chart 末条 bar 转成 EODHD realtime 解析兼容的 dict。"""
+        bars = chart.get("bars") or []
+        if not bars:
+            return None
+        meta = chart.get("meta", {})
+        last = bars[-1]
+        prev_close = meta.get("chartPreviousClose") or meta.get("previousClose")
+        if len(bars) >= 2:
+            prev_close = bars[-2]["close"]
+        change_amount = (last["close"] - prev_close) if prev_close is not None else None
+        return {
+            "open": last["open"], "high": last["high"], "low": last["low"], "close": last["close"],
+            "volume": last["volume"], "previousClose": prev_close,
+            "change": change_amount,
+            "change_p": (change_amount / prev_close * 100) if (change_amount is not None and prev_close) else None,
+            "timestamp": last["timestamp"],
+            "gmtoffset": meta.get("gmtoffset", 0),
+        }
+
     def fetch_realtime_data(self, ticker: str) -> Optional[Dict[str, Any]]:
-        """获取实时数据"""
+        """获取实时数据（YAHOO_CHART_CODES 中的 code 路由到 Yahoo）"""
+        if ticker in YAHOO_CHART_CODES:
+            chart = self._fetch_yahoo_chart(YAHOO_CHART_CODES[ticker], days=5)
+            if chart:
+                return self._yahoo_realtime_record(ticker, chart)
+            return None
         try:
             url = f"{self.realtime_base_url}/{ticker}"
             params = {
@@ -227,7 +304,10 @@ class MarketDataService:
             return None
     
     def fetch_eod_data(self, ticker: str, days: int = 1) -> Optional[List[Dict[str, Any]]]:
-        """获取EOD历史数据"""
+        """获取EOD历史数据（YAHOO_CHART_CODES 中的 code 路由到 Yahoo）"""
+        if ticker in YAHOO_CHART_CODES:
+            chart = self._fetch_yahoo_chart(YAHOO_CHART_CODES[ticker], days=max(days, 5))
+            return chart.get("bars") if chart else None
         try:
             # 用 utcnow 而非 datetime.now: 服务器在 HK (UTC+8), 跨日时段 datetime.now()
             # 取本地日期会比 UTC 早 1 天, 导致 EODHD 返回不全/空数据.

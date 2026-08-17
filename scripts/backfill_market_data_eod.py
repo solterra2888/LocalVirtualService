@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg2.extras
@@ -36,6 +36,52 @@ from backend.utils.database_config import get_database_config    # noqa: E402
 from backend.utils.datetime_utils import utcnow                  # noqa: E402
 
 BASE_URL = "https://eodhd.com/api"
+
+# 与 market_data_service.YAHOO_CHART_CODES 一致：EODHD 无授权的指数走 Yahoo chart API
+YAHOO_CHART_CODES = {
+    "RUT.INDX": "^RUT",  # Russell 2000 Index
+}
+
+
+def fetch_yahoo_history(yahoo_symbol: str, from_date, to_date) -> list:
+    """调用 Yahoo v8 chart 端点，返回与 EODHD /api/eod 同构的记录列表（升序）。"""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(yahoo_symbol)}"
+    params = {
+        "period1": int(datetimecombine_utc(from_date).timestamp()),
+        "period2": int(datetimecombine_utc(to_date).timestamp()) + 86399,
+        "interval": "1d",
+    }
+    resp = requests.get(url, params=params, timeout=60,
+                        headers={"User-Agent": "Mozilla/5.0"})
+    resp.raise_for_status()
+    result = resp.json()["chart"]["result"][0]
+    timestamps = result.get("timestamp") or []
+    quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+
+    records = []
+    for i, ts in enumerate(timestamps):
+        close = quote["close"][i] if quote.get("close") and i < len(quote["close"]) else None
+        if close is None:
+            continue
+
+        def q(key):
+            vals = quote.get(key) or []
+            return vals[i] if i < len(vals) else None
+
+        records.append({
+            "date": datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"),
+            "open": q("open"), "high": q("high"), "low": q("low"),
+            "close": close, "volume": q("volume"),
+            "adjusted_close": close,  # 指数无分红，adj = close
+        })
+    records.sort(key=lambda r: r["date"])
+    return records
+
+
+def datetimecombine_utc(d) -> "datetime":
+    """date → UTC 0 点的 datetime（Yahoo period 参数接受 unix 秒）。"""
+    from datetime import datetime as _dt
+    return _dt(d.year, d.month, d.day, tzinfo=timezone.utc)
 
 
 def load_env_if_present() -> None:
@@ -116,7 +162,10 @@ def main() -> None:
     for code in codes:
         print(f"拉取 {code} {from_date} ~ {to_date} 日线...")
         try:
-            rows = fetch_eod_history(token, code, from_date, to_date)
+            if code in YAHOO_CHART_CODES:
+                rows = fetch_yahoo_history(YAHOO_CHART_CODES[code], from_date, to_date)
+            else:
+                rows = fetch_eod_history(token, code, from_date, to_date)
         except Exception as e:
             print(f"❌ {code} 拉取失败: {e}", file=sys.stderr)
             if len(codes) == 1:

@@ -87,14 +87,14 @@ Market Overview 的数据在 `daily_report_{date}.html` 生成时已**内嵌**�
 | 分组 | 品种（EODHD code） |
 |------|-------------------|
 | Risk | VIX（`VIX.INDX`） |
-| Equity Indexes | 美国 S&P 500 / NASDAQ Composite / NASDAQ 100 / PHLX Semiconductor（`GSPC.INDX`/`IXIC.INDX`/`NDX.INDX`/`SOX.INDX`）；中国 IH/IF/IC/IM 四大股指期货 → 标的指数（`SSE50/CSI300/CSI500/CSI1000.INDX`）；Others（日本 Nikkei 225 `N225.INDX`、韩国 KOSPI `KS11.INDX`、德国 DAX `GDAXI.INDX`，卡片副标注明国家） |
+| Equity Indexes | 美国 S&P 500 / NASDAQ Composite / NASDAQ 100 / PHLX Semiconductor / Russell 2000（`GSPC.INDX`/`IXIC.INDX`/`NDX.INDX`/`SOX.INDX`/`RUT.INDX`）；中国 IH/IF/IC/IM 四大股指期货 → 标的指数（`SSE50/CSI300/CSI500/CSI1000.INDX`）；Others（日本 Nikkei 225 `N225.INDX`、韩国 KOSPI `KS11.INDX`、德国 DAX `GDAXI.INDX`，卡片副标注明国家） |
 | Foreign Exchange | USD/JPY、USD/CNH、GBP/USD、EUR/USD（`*.FOREX`） |
 | Commodities | Gold/WTI/Brent/Silver/Copper/Natural Gas（`GLD/USO/BNO/SLV/CPER/UNG.US` ETF 代理） |
 | US Treasuries | 2Y/5Y/10Y/30Y 收益率（`US2Y/US5Y/US10Y/US30Y.INDX`） |
 
 要点：
 
-- 数据全部来自 `market_data_eod`（`_fetch_chart_data_by_code` 按 code 直查；与 Market Movers 的 ETF 走势共用底层查询，fallback `stock_prices_eod`）；**英国 FTSE 100 暂缺**（EODHD 不覆盖，备选 `ISF.LSE` / `BUK100P.INDX` 见 [EODHD_MARKET_DATA_DEVELOPMENT_GUIDE.md](./EODHD_MARKET_DATA_DEVELOPMENT_GUIDE.md) 案例 3）；
+- 数据全部来自 `market_data_eod`（`_fetch_chart_data_by_code` 按 code 直查；与 Market Movers 的 ETF 走势共用底层查询，fallback `stock_prices_eod`）；**英国 FTSE 100 暂缺**（EODHD 不覆盖，备选 `ISF.LSE` / `BUK100P.INDX` 见 [EODHD_MARKET_DATA_DEVELOPMENT_GUIDE.md](./EODHD_MARKET_DATA_DEVELOPMENT_GUIDE.md) 案例 3）；**Russell 2000（`RUT.INDX`）例外来自 Yahoo Finance chart API**（EODHD 无 FTSE Russell 授权，`RUT` 不在 INDX 交易所列表）——`market_data_service.YAHOO_CHART_CODES` 定义路由，`fetch_realtime_data` / `fetch_eod_data` 按分码走 Yahoo，入库与其他指数同表同 upsert，定时采集与回填（`backfill_market_data_eod.py` 同样识别该路由）均自动覆盖；
 - 每卡片内嵌最近 260 个交易日（`MT_MAX_BARS`），蜡烛图配色与 Market Movers 查看器一致（涨绿跌红）；
 - 卡片标题为链接，点击跳转 TradingView 对应 symbol 的图表页（日线 + `range=6M`），映射为 `MARKET_TEMPERATURE_GROUPS` 每张卡片的第 5 个字段（如 `TVC:SPX`、`SSE:000300`、`AMEX:GLD`、`TVC:US02Y`）；同时卡片图表已关闭 Lightweight Charts 的 attribution logo（`layout.attributionLogo: false`）——许可证要求的 TradingView 归属链接由标题链接承担；
 - 卡片数据缺失不失败——渲染 "No data" 占位，`metadata.temperature_cards_found` / `temperature_missing_codes` 记录覆盖情况。

@@ -413,6 +413,7 @@ MARKET_TEMPERATURE_GROUPS: List[Dict[str, Any]] = [
                     ("comp", "NASDAQ Composite", "IXIC.INDX", "", "NASDAQ:IXIC"),
                     ("ndx", "NASDAQ 100", "NDX.INDX", "", "NASDAQ:NDX"),
                     ("sox", "PHLX Semiconductor", "SOX.INDX", "", "NASDAQ:SOX"),
+                    ("rut", "Russell 2000", "RUT.INDX", "", "TVC:RUT"),
                 ],
             },
             {
