@@ -76,6 +76,7 @@ echo "📋 重启服务列表（保留 PostgreSQL/Redis Docker 容器不重启�
 echo "   - Web应用"
 echo "   - Celery Worker (AI/文件处理)"
 echo "   - Celery Worker (数据获取)"
+echo "   - Celery Worker (知识星球附件 zsxq_file_processing)"
 echo "   - 调度器服务"
 echo "   - Nginx代理 (Docker)"
 echo ""
@@ -111,7 +112,7 @@ PYEOF
 fi
 echo ""
 
-SERVICES=("rc-webapp" "rc-celery-ai" "rc-celery-data" "rc-scheduler")
+SERVICES=("rc-webapp" "rc-celery-ai" "rc-celery-data" "rc-celery-zsxq-files" "rc-scheduler")
 
 for service in "${SERVICES[@]}"; do
     echo "🔄 重启 $service ..."
@@ -165,6 +166,7 @@ else
     echo "   journalctl -u rc-webapp -f"
     echo "   journalctl -u rc-celery-ai -f"
     echo "   journalctl -u rc-celery-data -f"
+    echo "   journalctl -u rc-celery-zsxq-files -f"
     echo "   journalctl -u rc-scheduler -f"
     echo "   docker logs nginx --tail 50"
 fi

@@ -192,8 +192,8 @@ beat_schedule = {
         'task': 'backfill_untagged_news_task',
         'schedule': crontab(minute='*/30'),
     },
-    # 注意: 知识星球文件 dispatch/reap 不走 beat —— 由 fetch_zhishixingqiu_subscription
-    # 抓取完成后链式触发 (见 backend/tasks/zsxq_file_tasks.py)。
+    # 注意: 知识星球文件 dispatch 由 fetch 完成后链式触发，
+    # 单文件处理完成后也会补货；另有 scheduler 类型 zsxq_file_dispatch 每 5 分钟兜底。
     # 另: 本 beat_schedule 从未有 beat 进程执行 (见 docs/develop/BEAT_SCHEDULE_NOT_RUNNING.md)。
     # Theme Report 改由 Scheduler Management「报告生成类」配置（默认每周一 14:00 CST）
 }

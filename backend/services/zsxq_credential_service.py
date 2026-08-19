@@ -274,6 +274,29 @@ class ZsxqCredentialService:
             return None
         return row[0], decrypt_cookie(row[1])
 
+    def get_cookie_for_group(self, group_id: str) -> Optional[Tuple[int, str]]:
+        """
+        按星球绑定的 credential_id 取 Cookie；不可用时回退到首个有效凭证。
+        """
+        gid = str(group_id or "").strip()
+        if gid:
+            with _get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT c.id, c.encrypted_cookie
+                        FROM zsxq_groups g
+                        JOIN zsxq_credentials c ON c.id = g.credential_id
+                        WHERE g.group_id = %s
+                          AND c.status IN ('valid', 'unknown')
+                        """,
+                        (gid,),
+                    )
+                    row = cur.fetchone()
+            if row:
+                return row[0], decrypt_cookie(row[1])
+        return self.get_first_valid_cookie()
+
     def mark_expired(self, cred_id: int, error: str) -> None:
         """将凭证标记为 expired（由 401 触发）。"""
         with _get_conn() as conn:

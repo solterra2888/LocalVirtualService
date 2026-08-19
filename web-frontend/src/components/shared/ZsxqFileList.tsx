@@ -3,7 +3,9 @@
  *
  * 由 API 读取层合并后的 metadata.files 驱动：每个文件 {file_id, name, size, ext, ready}。
  *  - ready=true：点击调用 getZsxqFileDownloadUrl 即时签名 → 新标签预览(pdf/image) 或下载(其余)
- *  - ready=false：显示文件名 + "处理中"灰字
+ *  - status=processing：显示「处理中」
+ *  - status=skipped：音频等不下载
+ *  - status=failed：下载失败（含 1030）
  *
  * 复用于 ZsxqOriginalView（Daily 抽屉）与 FeedArticleBody（Feed 详情，含移动端）。
  */
@@ -91,6 +93,10 @@ const ZsxqFileList: React.FC<ZsxqFileListProps> = ({
               >
                 {isLoading ? <LoadingOutlined /> : <DownloadOutlined />} 下载
               </a>
+            ) : file.status === 'skipped' ? (
+              <span style={{ color: mutedColor, fontSize: 11, whiteSpace: 'nowrap' }}>音频未下载</span>
+            ) : file.status === 'failed' ? (
+              <span style={{ color: mutedColor, fontSize: 11, whiteSpace: 'nowrap' }}>下载失败</span>
             ) : (
               <span style={{ color: mutedColor, fontSize: 11, whiteSpace: 'nowrap' }}>处理中</span>
             )}

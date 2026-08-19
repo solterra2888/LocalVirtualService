@@ -15,11 +15,12 @@
   - reset_stale          : reaper 崩溃恢复
 
 状态机：pending → downloading → downloaded → uploaded（终态成功）
-       blocked（1030 硬限制）/ failed（重试耗尽）
+       blocked（1030 硬限制）/ failed（重试耗尽）/ skipped（音频等不下载）
 """
 
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 import psycopg2
@@ -33,9 +34,20 @@ load_project_env()
 logger = logging.getLogger(__name__)
 
 # 终态：不再被消费者/dispatcher 处理
-TERMINAL_STATUSES = ("uploaded", "blocked", "failed")
+TERMINAL_STATUSES = ("uploaded", "blocked", "failed", "skipped")
 # 可被消费者继续推进的状态（dispatcher 入队 + begin_processing 接受）
 RESUMABLE_STATUSES = ("pending", "downloaded")
+
+# 知识星球附件里的音视频不入库下载队列（用户侧不需要）
+_AUDIO_EXT_RE = re.compile(
+    r"\.(mp3|m4a|mp4|wav|aac|flac|ogg|wma|amr|opus|mov|mkv|avi|webm)$",
+    re.IGNORECASE,
+)
+_AUDIO_SQL_RE = r"\.(mp3|m4a|mp4|wav|aac|flac|ogg|wma|amr|opus|mov|mkv|avi|webm)$"
+
+
+def is_audio_filename(name: str) -> bool:
+    return bool(_AUDIO_EXT_RE.search(name or ""))
 
 
 def _get_conn():
@@ -88,13 +100,15 @@ class ZsxqFileService:
         with _get_conn() as conn:
             with conn.cursor() as cur:
                 for params in rows:
+                    status = "skipped" if is_audio_filename(params[3]) else "pending"
+                    error = "audio_not_downloaded" if status == "skipped" else ""
                     cur.execute(
                         """
-                        INSERT INTO zsxq_files (file_id, group_id, topic_id, name, size, status)
-                        VALUES (%s, %s, %s, %s, %s, 'pending')
+                        INSERT INTO zsxq_files (file_id, group_id, topic_id, name, size, status, error)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (file_id) DO NOTHING
                         """,
-                        params,
+                        params + (status, error),
                     )
                     inserted += cur.rowcount
             conn.commit()
@@ -192,6 +206,43 @@ class ZsxqFileService:
                 )
             conn.commit()
 
+    def mark_skipped(self, file_id: str, error: str = "audio_not_downloaded") -> None:
+        """主动跳过（音频等不下载）：终态，不再入队。"""
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE zsxq_files
+                    SET status = 'skipped', error = %s, locked_at = NULL, updated_at = now()
+                    WHERE file_id = %s
+                      AND status <> ALL(%s)
+                    """,
+                    ((error or "")[:500], str(file_id), list(("uploaded",))),
+                )
+            conn.commit()
+
+    def skip_audio_backlog(self) -> int:
+        """把尚未成功上传的音视频标为 skipped，避免占下载队列。"""
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE zsxq_files
+                    SET status = 'skipped',
+                        error = CASE WHEN error = '' THEN 'audio_not_downloaded' ELSE error END,
+                        locked_at = NULL,
+                        updated_at = now()
+                    WHERE status <> ALL(%s)
+                      AND name ~* %s
+                    """,
+                    (list(("uploaded", "skipped")), _AUDIO_SQL_RE),
+                )
+                affected = cur.rowcount
+            conn.commit()
+        if affected:
+            logger.info("ZSXQ 跳过音频积压 %d 个", affected)
+        return affected
+
     def bump_retry(self, file_id: str, error: str) -> int:
         """下载阶段失败：retry_count+1，回退 pending 并清空 local_path（需重新下载）。返回新 retry_count。"""
         with _get_conn() as conn:
@@ -287,32 +338,49 @@ class ZsxqFileService:
     # ---------- dispatcher / reaper ----------
 
     def fetch_resumable_ids(self, limit: int = 20) -> List[str]:
-        """返回待入队的 file_id 列表（pending 或 downloaded，且未锁定）。"""
+        """返回待入队的 file_id 列表（非音频、pending/downloaded、未锁定）。"""
+        return self.claim_for_dispatch(limit=limit)
+
+    def claim_for_dispatch(self, limit: int = 40) -> List[str]:
+        """
+        原子领取待处理文件：加上 locked_at，避免重复入队。
+        只领非音频的 pending/downloaded。
+        """
+        ids: List[str] = []
         with _get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT file_id FROM zsxq_files
-                    WHERE status = ANY(%s)
-                      AND locked_at IS NULL
-                    ORDER BY updated_at
-                    LIMIT %s
+                    UPDATE zsxq_files AS f
+                    SET locked_at = now(), updated_at = now()
+                    WHERE f.file_id IN (
+                        SELECT file_id FROM zsxq_files
+                        WHERE status = ANY(%s)
+                          AND locked_at IS NULL
+                          AND name !~* %s
+                        ORDER BY updated_at
+                        LIMIT %s
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    RETURNING f.file_id
                     """,
-                    (list(RESUMABLE_STATUSES), int(limit)),
+                    (list(RESUMABLE_STATUSES), _AUDIO_SQL_RE, int(limit)),
                 )
-                rows = cur.fetchall()
-        return [r[0] for r in rows]
+                ids = [r[0] for r in cur.fetchall()]
+            conn.commit()
+        return ids
 
     def count_in_flight(self) -> int:
-        """当前已派发但未到终态的数量（dispatcher 据此控制 in-flight 上限）。"""
+        """已领取/处理中、尚未到终态的数量（含已入队但 worker 未开始的行）。"""
         with _get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT COUNT(*) FROM zsxq_files
-                    WHERE status = ANY(%s) AND locked_at IS NOT NULL
+                    WHERE locked_at IS NOT NULL
+                      AND status <> ALL(%s)
                     """,
-                    (list(("downloading", "downloaded")),),
+                    (list(TERMINAL_STATUSES),),
                 )
                 row = cur.fetchone()
         return int(row[0]) if row else 0
@@ -322,6 +390,8 @@ class ZsxqFileService:
         reaper：把卡住超过 timeout_minutes 的行回退。
           - downloading（下载中断，本地文件可能不完整）→ 回退 pending，清 local_path
           - downloaded（下载已完成，上传中断）→ 仅释放锁，保留 downloaded，等重新派发上传
+          - pending 已领取但 worker 未开始 → 仅释放锁
+          - downloading 且 locked_at 为空（历史僵死）→ 回退 pending
         返回受影响行数。
         """
         with _get_conn() as conn:
@@ -329,14 +399,24 @@ class ZsxqFileService:
                 cur.execute(
                     """
                     UPDATE zsxq_files
-                    SET status = CASE WHEN status = 'downloading' THEN 'pending' ELSE status END,
-                        local_path = CASE WHEN status = 'downloading' THEN '' ELSE local_path END,
+                    SET status = CASE
+                            WHEN status = 'downloading' THEN 'pending'
+                            ELSE status
+                        END,
+                        local_path = CASE
+                            WHEN status = 'downloading' THEN ''
+                            ELSE local_path
+                        END,
                         locked_at = NULL,
                         updated_at = now()
-                    WHERE locked_at IS NOT NULL
-                      AND locked_at < now() - (%s || ' minutes')::interval
+                    WHERE status <> ALL(%s)
+                      AND (
+                            (locked_at IS NOT NULL
+                             AND locked_at < now() - (%s || ' minutes')::interval)
+                         OR (status = 'downloading' AND locked_at IS NULL)
+                      )
                     """,
-                    (str(timeout_minutes),),
+                    (list(TERMINAL_STATUSES), str(timeout_minutes)),
                 )
                 affected = cur.rowcount
             conn.commit()
@@ -351,27 +431,41 @@ def _file_ext(name: str) -> str:
     return os.path.splitext(name or "")[1].lower().lstrip(".")
 
 
+def _ui_status(db_status: str, name: str = "") -> str:
+    """前端展示用状态：uploaded / processing / skipped / failed。"""
+    st = str(db_status or "")
+    if st == "uploaded":
+        return "uploaded"
+    if st == "skipped" or is_audio_filename(name):
+        return "skipped"
+    if st in ("blocked", "failed"):
+        return "failed"
+    return "processing"
+
+
 def build_files_view(
     records: List[Dict[str, Any]],
     meta_files: Any,
 ) -> List[Dict[str, Any]]:
     """
     构造前端可消费的 metadata.files 视图：
-      [{file_id, name, size, ext, ready}]
+      [{file_id, name, size, ext, ready, status}]
 
-    - records（来自 zsxq_files）非空时：以 records 为准，ready = (status == 'uploaded')
-    - 否则：从 metadata.files 兜底（兼容历史 string[] / 对象数组），均 ready=False
+    - records（来自 zsxq_files）非空时：以 records 为准
+    - 否则：从 metadata.files 兜底（兼容历史 string[] / 对象数组）
     """
     out: List[Dict[str, Any]] = []
     if records:
         for r in records:
             name = str(r.get("name") or "")
+            ui = _ui_status(str(r.get("status") or ""), name)
             out.append({
                 "file_id": str(r.get("file_id") or ""),
                 "name": name,
                 "size": int(r.get("size") or 0),
                 "ext": _file_ext(name),
-                "ready": str(r.get("status")) == "uploaded",
+                "ready": ui == "uploaded",
+                "status": ui,
             })
         return out
 
@@ -382,20 +476,24 @@ def build_files_view(
     for f in meta_files:
         if isinstance(f, dict):
             name = str(f.get("name") or "")
+            ui = _ui_status("", name)
             out.append({
                 "file_id": str(f.get("file_id") or ""),
                 "name": name,
                 "size": int(f.get("size") or 0),
                 "ext": _file_ext(name),
                 "ready": False,
+                "status": ui,
             })
         elif isinstance(f, str) and f.strip():
+            ui = _ui_status("", f)
             out.append({
                 "file_id": "",
                 "name": f,
                 "size": 0,
                 "ext": _file_ext(f),
                 "ready": False,
+                "status": ui,
             })
     return out
 

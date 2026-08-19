@@ -21,6 +21,7 @@ download_url 有 TTL，必须拿到后立刻下，不要存起来稍后用。
 """
 
 import logging
+import os
 import random
 import re
 import time
@@ -256,7 +257,7 @@ def download_to_file(
 
     size = 0
     with open(dest_path, "wb") as f:
-        for chunk in resp.iter_content(8192):
+        for chunk in resp.iter_content(262144):
             if chunk:
                 f.write(chunk)
                 size += len(chunk)
@@ -273,7 +274,22 @@ def download_to_file(
     return True, size
 
 
-# ---------- 文件名安全化（OSS key 用） ----------
+# ---------- 文件名安全化（OSS key / 本地临时文件） ----------
+
+# ext4 NAME_MAX：单个路径分量最多 255 字节（UTF-8 汉字 3 字节，180 字会超限）
+FS_NAME_MAX_BYTES = 255
+
+
+def truncate_utf8_bytes(s: str, max_bytes: int) -> str:
+    """按 UTF-8 字节截断，不切开码点。max_bytes<=0 时返回空串。"""
+    if max_bytes <= 0:
+        return ""
+    text = s or ""
+    raw = text.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text
+    return raw[:max_bytes].decode("utf-8", errors="ignore")
+
 
 def sanitize_filename(name: str) -> str:
     """OSS object key 安全化：去路径分隔符与空白，保留可读名。"""
@@ -286,6 +302,32 @@ def sanitize_filename(name: str) -> str:
     # 折叠多余空白
     name = re.sub(r"\s+", "_", name)
     return name[:180] or "file"
+
+
+def local_download_basename(group_id: str, file_id: str, name: str) -> str:
+    """
+    本地临时文件名（路径最后一个分量）。
+
+    必须整段 ≤255 字节，否则 open() 抛 Errno 36 File name too long。
+    保留扩展名；标题过长时只截断 stem。
+    """
+    gid = str(group_id or "")
+    fid = str(file_id or "")
+    safe = sanitize_filename(name)
+    stem, ext = os.path.splitext(safe)
+    if not ext:
+        ext = os.path.splitext(name or "")[1] or ".bin"
+        ext = re.sub(r"[^A-Za-z0-9.]", "", ext)[:12] or ".bin"
+    if not ext.startswith("."):
+        ext = f".{ext}"
+
+    prefix = f"{gid}_{fid}_"
+    budget = FS_NAME_MAX_BYTES - len(prefix.encode("utf-8")) - len(ext.encode("utf-8"))
+    if budget < 1:
+        fallback = f"{fid}{ext}"
+        return truncate_utf8_bytes(fallback, FS_NAME_MAX_BYTES) or f"{fid}.bin"
+    stem = truncate_utf8_bytes(stem, budget) or "f"
+    return f"{prefix}{stem}{ext}"
 
 
 def build_oss_object_name(group_id: str, file_id: str, name: str) -> str:

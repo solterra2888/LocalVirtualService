@@ -835,6 +835,8 @@ export interface ZsxqFile {
   size: number;
   ext: string;
   ready: boolean; // status === 'uploaded'
+  /** uploaded | processing | skipped | failed；缺省时按 ready 推断 */
+  status?: 'uploaded' | 'processing' | 'skipped' | 'failed';
 }
 
 /**

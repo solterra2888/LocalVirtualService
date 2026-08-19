@@ -78,6 +78,7 @@ class OSSService:
         # 验证配置
         if not self.access_key_id or not self.access_key_secret:
             self.bucket = None
+            self.internal_bucket = None
             if not OSSService._startup_logged:
                 warning("OSS 配置不完整，请在 .env 中设置 OSS_ACCESS_KEY_ID 和 OSS_ACCESS_KEY_SECRET")
                 OSSService._startup_logged = True
@@ -85,13 +86,41 @@ class OSSService:
             try:
                 auth = oss2.Auth(self.access_key_id, self.access_key_secret)
                 self.bucket = oss2.Bucket(auth, self.endpoint, self.bucket_name)
+                self.internal_bucket = None
+                internal_ep = os.getenv("OSS_INTERNAL_ENDPOINT", "").strip()
+                if (
+                    not internal_ep
+                    and self.endpoint
+                    and "internal" not in self.endpoint
+                    and self.endpoint.endswith(".aliyuncs.com")
+                ):
+                    internal_ep = self.endpoint.replace(
+                        ".aliyuncs.com", "-internal.aliyuncs.com"
+                    )
+                if internal_ep and internal_ep != self.endpoint:
+                    try:
+                        self.internal_bucket = oss2.Bucket(
+                            auth, internal_ep, self.bucket_name
+                        )
+                    except Exception as ie:
+                        warning(f"OSS 内网 endpoint 初始化失败，回落公网: {ie}")
+                        self.internal_bucket = None
                 if not OSSService._startup_logged:
                     if self.custom_domain:
                         info(f"OSS 自定义域名已配置: {self.custom_domain}")
-                    info(f"OSS 服务初始化成功: bucket={self.bucket_name}, endpoint={self.endpoint}")
+                    info(
+                        f"OSS 服务初始化成功: bucket={self.bucket_name}, "
+                        f"endpoint={self.endpoint}"
+                        + (
+                            f", internal={internal_ep}"
+                            if self.internal_bucket is not None
+                            else ""
+                        )
+                    )
                     OSSService._startup_logged = True
             except Exception as e:
                 self.bucket = None
+                self.internal_bucket = None
                 if not OSSService._startup_logged:
                     error(f"OSS 服务初始化失败: {str(e)}")
                     OSSService._startup_logged = True
@@ -349,27 +378,49 @@ class OSSService:
         }
 
         last_err = None
+        buckets = []
+        if getattr(self, "internal_bucket", None) is not None:
+            buckets.append(("internal", self.internal_bucket))
+        buckets.append(("public", self.bucket))
+
         for attempt in range(max_retries):
-            try:
-                if file_size >= 10 * 1024 * 1024:
-                    # 大文件：分片续传（断点可恢复）
-                    oss2.resumable_upload(
-                        self.bucket, object_name, file_path,
-                        store=oss2.ResumableStore(),
-                        headers=headers,
+            last_oss_err = None
+            uploaded = False
+            for bucket_label, bucket in buckets:
+                try:
+                    if file_size >= 10 * 1024 * 1024:
+                        oss2.resumable_upload(
+                            bucket, object_name, file_path,
+                            store=oss2.ResumableStore(),
+                            headers=headers,
+                            num_threads=4,
+                        )
+                    else:
+                        with open(file_path, 'rb') as f:
+                            bucket.put_object(object_name, f, headers=headers)
+                    uploaded = True
+                    info(
+                        f"OSS 固定 key 上传成功({bucket_label}): "
+                        f"{filename} -> {object_name} ({file_size} bytes)"
                     )
-                else:
-                    with open(file_path, 'rb') as f:
-                        self.bucket.put_object(object_name, f, headers=headers)
+                    break
+                except Exception as e:
+                    last_oss_err = e
+                    warning(
+                        f"OSS 上传失败 endpoint={bucket_label} "
+                        f"object={object_name}: {str(e)[:200]}"
+                    )
+            if uploaded:
                 result["success"] = True
-                info(f"OSS 固定 key 上传成功: {filename} -> {object_name} ({file_size} bytes)")
                 return result
-            except oss2.exceptions.OssError as e:
-                last_err = f"oss_error status={getattr(e, 'status', '?')} code={getattr(e, 'code', '?')}"
-                warning(f"OSS 上传失败（第 {attempt + 1}/{max_retries}）object={object_name}: {last_err}")
-            except Exception as e:
-                last_err = f"exception: {str(e)[:200]}"
-                warning(f"OSS 上传异常（第 {attempt + 1}/{max_retries}）object={object_name}: {last_err}")
+
+            last_err = f"exception: {str(last_oss_err)[:200]}" if last_oss_err else "OSS 上传失败"
+            if isinstance(last_oss_err, oss2.exceptions.OssError):
+                last_err = (
+                    f"oss_error status={getattr(last_oss_err, 'status', '?')} "
+                    f"code={getattr(last_oss_err, 'code', '?')}"
+                )
+            warning(f"OSS 上传失败（第 {attempt + 1}/{max_retries}）object={object_name}: {last_err}")
 
             if attempt < max_retries - 1:
                 _time.sleep(2 * (attempt + 1))

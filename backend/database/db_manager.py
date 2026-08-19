@@ -1010,6 +1010,7 @@ class DatabaseManager:
                 'watchlist_news',
                 'zhishixingqiu_subscription',
                 'substack_subscription',
+                'zsxq_file_dispatch',
             ]
             
             # 合并现有类型和新类型（去重）

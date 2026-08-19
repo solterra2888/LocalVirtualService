@@ -60,6 +60,7 @@ class SchedulerService:
             'ipo_calendar': self._execute_ipo_calendar_task,
             'news_feed': self._execute_news_feed_task,  # EODHD + CCTV Feed 订阅任务
             'zhishixingqiu_subscription': self._execute_zhishixingqiu_subscription_task,
+            'zsxq_file_dispatch': self._execute_zsxq_file_dispatch_task,
             'substack_subscription': self._execute_substack_subscription_task,
             'weibo_subscription': self._execute_weibo_subscription_task,
             'twitter_author_summary': self._execute_twitter_author_summary_task,
@@ -1031,6 +1032,22 @@ class SchedulerService:
                 'message': f"❌ {error_msg}",
                 'error': str(e)
             }
+
+    async def _execute_zsxq_file_dispatch_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """扫描知识星球附件 pending 队列并入队下载（每 5 分钟兜底，不依赖抓取）。"""
+        try:
+            from backend.tasks.zsxq_file_tasks import dispatch_zsxq_file_downloads_task
+
+            task = dispatch_zsxq_file_downloads_task.delay()
+            message = (
+                f"✅ 知识星球附件下载 dispatch 已提交 Celery，task_id={task.id}"
+            )
+            logger.info("知识星球附件 dispatch 已提交", celery_task_id=task.id)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+        except Exception as e:
+            error_msg = f"知识星球附件 dispatch 分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 
     async def _execute_substack_subscription_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
