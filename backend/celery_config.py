@@ -131,6 +131,12 @@ task_routes = {
     'fetch_podcast_subscription': {'queue': 'data_fetching'},
     'fetch_all_podcast_subscriptions': {'queue': 'data_fetching'},
     'podcast_transcribe_episode': {'queue': 'data_fetching'},
+    # 央行 Dashboard — Fed FOMC 抓取链（data_fetching）+ LLM 概括（ai_processing）
+    'fomc_poll_updates': {'queue': 'data_fetching'},
+    'fomc_fetch_document': {'queue': 'data_fetching'},
+    'fomc_backfill_2026': {'queue': 'data_fetching'},
+    'fomc_retry_pending': {'queue': 'data_fetching'},
+    'fomc_summarize': {'queue': 'ai_processing'},
 }
 
 # Worker配置

@@ -22,7 +22,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 class CreateCronTaskRequest(BaseModel):
     """创建Cron定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|zhishixingqiu_subscription|zsxq_file_dispatch|substack_subscription|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar|news_feed|twitter_author_summary|youtube_author_summary|theme_report|market_weekly_report|daily_market_report|the_close_summary|cnbc_closing_bell|zhishixingqiu_summary|substack_summary|podcast_subscription|weibo_subscription)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|zhishixingqiu_subscription|zsxq_file_dispatch|substack_subscription|economic_events|macro_indicators|eodhd_fundamentals|watchlist_fundamentals|finviz_screener|eodhd_stock_prices|market_data|earnings_calendar|ipo_calendar|news_feed|twitter_author_summary|youtube_author_summary|theme_report|market_weekly_report|daily_market_report|the_close_summary|cnbc_closing_bell|fed_dashboard|zhishixingqiu_summary|substack_summary|podcast_subscription|weibo_subscription)$")
     cron_expression: str = Field(..., description="Cron表达式 (分 时 日 月 星期)")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -32,7 +32,7 @@ class CreateCronTaskRequest(BaseModel):
 class CreateIntervalTaskRequest(BaseModel):
     """创建间隔定时任务请求模型"""
     name: str = Field(..., description="任务名称")
-    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|zhishixingqiu_subscription|zsxq_file_dispatch|substack_subscription|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|news_feed|twitter_author_summary|youtube_author_summary|theme_report|market_weekly_report|daily_market_report|the_close_summary|cnbc_closing_bell|zhishixingqiu_summary|substack_summary|podcast_subscription|weibo_subscription)$")
+    task_type: str = Field(..., description="任务类型", pattern="^(twitter_subscription|youtube_subscription|zhishixingqiu_subscription|zsxq_file_dispatch|substack_subscription|economic_events|macro_indicators|eodhd_fundamentals|finviz_screener|eodhd_stock_prices|market_data|news_feed|twitter_author_summary|youtube_author_summary|theme_report|market_weekly_report|daily_market_report|the_close_summary|cnbc_closing_bell|fed_dashboard|zhishixingqiu_summary|substack_summary|podcast_subscription|weibo_subscription)$")
     interval_minutes: int = Field(..., gt=0, description="间隔分钟数")
     timezone: str = Field(default="America/New_York", description="时区")
     enabled: bool = Field(default=True, description="是否启用")

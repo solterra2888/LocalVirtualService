@@ -73,6 +73,7 @@ class SchedulerService:
             'zhishixingqiu_summary': self._execute_zhishixingqiu_summary_task,
             'substack_summary': self._execute_substack_summary_task,
             'podcast_subscription': self._execute_podcast_subscription_task,
+            'fed_dashboard': self._execute_fed_dashboard_task,
         }
         
         # 添加事件监听器
@@ -1560,6 +1561,39 @@ class SchedulerService:
             error_msg = f"The Close Summary 任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_fed_dashboard_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        央行 Dashboard — Fed FOMC 抓取链（全局）。
+
+        默认 mode=poll: 轮询 press_all.xml RSS（updates 流 + 发现新声明/纪要
+        + 派发抓取/概括 + 兜底重试 failed 文档）。
+        每 30 分钟一次；纪要发布（会议+3周）由该轮询自动发现。
+
+        Args:
+            params:
+                - mode: 'poll'（默认）| 'retry'（仅兜底重试）
+        """
+        try:
+            logger.info("分发央行 Dashboard Celery 任务", params=params)
+            from backend.tasks.fomc_tasks import (
+                fomc_poll_updates_task, fomc_retry_pending_task,
+            )
+
+            mode = params.get('mode', 'poll')
+            if mode == 'retry':
+                task = fomc_retry_pending_task.delay()
+                message = f"✅ 央行 Dashboard: 已提交兜底重试任务 {task.id}"
+            else:
+                task = fomc_poll_updates_task.delay()
+                message = f"✅ 央行 Dashboard: 已提交 RSS 轮询任务 {task.id}"
+            logger.info(message)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"央行 Dashboard 任务分发异常: {str(e)}"
+            logger.error(error_msg)
+            return {'success': False, 'message': error_msg}
 
     async def _execute_cnbc_closing_bell_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """

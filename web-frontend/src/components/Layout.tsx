@@ -27,6 +27,7 @@ import {
   ProfileOutlined,
   GlobalOutlined,
   ThunderboltOutlined,
+  BankOutlined,
   AppleOutlined,
   ApiOutlined,
   CloseOutlined,
@@ -138,6 +139,11 @@ const Layout: React.FC = () => {
       key: '/dashboard',
       icon: <StockOutlined />,
       label: 'Watchlist',
+    },
+    {
+      key: '/central-bank',
+      icon: <BankOutlined />,
+      label: 'Central Banks',
     },
     {
       key: '/projects',

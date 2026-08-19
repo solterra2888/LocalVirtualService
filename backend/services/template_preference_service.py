@@ -48,6 +48,8 @@ class TemplatePreferenceService:
         'news_classification': 'news_classification',
         # —— Theme 模块 ——
         'theme_description':  'theme_description_generator_v1',
+        # —— 央行 Dashboard 模块 ——
+        'fomc_summary':    'fomc_summary_v1',        # FOMC 声明/纪要中文概括 (全局共享)
     }
 
     # 固定使用系统模板的模块，不允许用户配置 (Phase 2 双态模型: SYSTEM_FIXED)
@@ -63,6 +65,7 @@ class TemplatePreferenceService:
         'file_classify',        # PR-A: 文件自动归类为系统级
         'feed_tagging',         # PR-A: feed tag 全局共享 (hybrid 决策)
         'tweet_signal',         # 短推信号提取，系统级路由目标
+        'fomc_summary',         # 央行 Dashboard: FOMC 概括为全局共享
     })
 
     # 用户可拥有私有模板的模块 (Phase 2: USER_OWNED, 每用户每模块 1 行)

@@ -627,6 +627,9 @@ class DatabaseManager:
             
             # 创建 IPO 日历相关表
             self._create_ipo_calendar_tables(conn)
+
+            # 创建央行 Dashboard 相关表（FOMC 声明/纪要/决议/概括/Fed updates）
+            self._create_fomc_tables(conn)
             
             # 创建文件夹相关表 + 迁移 folder_id 字段
             self._create_file_folders_table(conn.cursor())
@@ -1004,6 +1007,7 @@ class DatabaseManager:
                 'substack_summary',
                 'podcast_subscription',
                 'weibo_subscription',
+                'fed_dashboard',
                 # legacy rows in some deployments
                 'cctv_news',
                 'eodhd_news',
@@ -1857,5 +1861,27 @@ class DatabaseManager:
             # 脚本不存在时静默跳过，不打印警告
         except Exception as e:
             print(f"❌ 创建 IPO 日历表时出错: {str(e)}")
+            # 不抛出异常，让系统继续运行
+            pass
+
+    def _create_fomc_tables(self, conn):
+        """创建央行 Dashboard 相关表（FOMC 原文/决议/概括 + Fed updates）"""
+        cursor = conn.cursor()
+
+        try:
+            # 读取并执行SQL迁移脚本
+            migration_file = os.path.join(
+                os.path.dirname(__file__),
+                'migrations/create_fomc_dashboard.sql'
+            )
+
+            if os.path.exists(migration_file):
+                with open(migration_file, 'r', encoding='utf-8') as f:
+                    sql = f.read()
+                cursor.execute(sql)
+                print("✅ 央行 Dashboard 相关表创建/更新完成")
+            # 脚本不存在时静默跳过，不打印警告
+        except Exception as e:
+            print(f"❌ 创建央行 Dashboard 表时出错: {str(e)}")
             # 不抛出异常，让系统继续运行
             pass
