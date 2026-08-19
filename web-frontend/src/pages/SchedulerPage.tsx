@@ -136,7 +136,7 @@ type SchedulerCategory = 'data_fetch' | 'report_generation';
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'substack_summary' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'other';
   category: SchedulerCategory;
   description: string;
   enabled: boolean;
@@ -508,6 +508,26 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
       ]
     },
     {
+      id: 'fed_dashboard',
+      name: 'Fed Dashboard (FOMC)',
+      type: 'fed_dashboard',
+      category: 'data_fetch',
+      sortOrder: 160,
+      description: 'Poll Federal Reserve press RSS every 30 min: discover new FOMC statements/minutes, extract rate decisions (range/votes/dissents), generate AI summaries, and maintain the Fed updates feed.',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_fed_dashboard_schedule',
+          name: 'Configure Fed Dashboard Poll',
+          description: 'Set up periodic Fed RSS polling (default: every 30 min)',
+          endpoint: '/scheduler/tasks/fed-dashboard',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
       id: 'eodhd_stock_prices',
       name: 'EODHD Stock Prices',
       type: 'eodhd_stock_prices',
@@ -823,6 +843,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'cnbc_closing_bell' && taskType === 'cnbc_closing_bell') ||
           (sourceIdLower === 'zhishixingqiu_summary' && taskType === 'zhishixingqiu_summary') ||
           (sourceIdLower === 'substack_summary' && taskType === 'substack_summary') ||
+          (sourceIdLower === 'fed_dashboard' && taskType === 'fed_dashboard') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
@@ -1120,6 +1141,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'cnbc_closing_bell' && taskType === 'cnbc_closing_bell') ||
           (sourceIdLower === 'zhishixingqiu_summary' && taskType === 'zhishixingqiu_summary') ||
           (sourceIdLower === 'substack_summary' && taskType === 'substack_summary') ||
+          (sourceIdLower === 'fed_dashboard' && taskType === 'fed_dashboard') ||
           (sourceIdLower === 'eodhd_stock_prices' && taskType === 'eodhd_stock_prices') ||
           (sourceIdLower === 'eodhd_eod_stock_prices' && taskType === 'eodhd_eod_stock_prices') ||
           (sourceIdLower === 'market_data' && taskType === 'market_data') ||
@@ -1239,7 +1261,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'podcast_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'weibo_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'daily_market_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'cnbc_closing_bell' || dataSource.id === 'zhishixingqiu_summary' || dataSource.id === 'substack_subscription' || dataSource.id === 'substack_summary' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'podcast_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'weibo_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'daily_market_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'cnbc_closing_bell' || dataSource.id === 'zhishixingqiu_summary' || dataSource.id === 'substack_subscription' || dataSource.id === 'substack_summary' || dataSource.id === 'fed_dashboard' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1603,6 +1625,7 @@ const SchedulerPage: React.FC = () => {
                         (sourceIdLower === 'cnbc_closing_bell' && taskType === 'cnbc_closing_bell') ||
           (sourceIdLower === 'zhishixingqiu_summary' && taskType === 'zhishixingqiu_summary') ||
           (sourceIdLower === 'substack_summary' && taskType === 'substack_summary') ||
+          (sourceIdLower === 'fed_dashboard' && taskType === 'fed_dashboard') ||
                         (sourceIdLower === 'market_data' && taskType === 'market_data') ||
                         (sourceIdLower === 'earnings_calendar' && taskType === 'earnings_calendar') ||
                         (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
@@ -1890,7 +1913,7 @@ const SchedulerPage: React.FC = () => {
               setSelectedDataSource(null);
             }}
             onSuccess={handleDataSourceConfigSuccess}
-            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'substack_summary'}
+            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard'}
             dataSourceName={selectedDataSource.name}
             initialCronExpression={existingTask?.cron_expression}
             initialTimezone={existingTask?.timezone}
