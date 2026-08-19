@@ -684,17 +684,29 @@ class MarketDataService:
         )
         """)
         
-        # 确保唯一约束存在
+        # 确保唯一约束存在且定义正确（含 comparison, NULLS NOT DISTINCT 使 NULL=NULL 视为重复）
+        # 旧环境若仍是 4 列约束（不含 comparison），自动替换——作为漏跑迁移 SQL 的自愈兜底
         cursor.execute("""
-        DO $$ 
+        DO $$
         BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint 
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint
                 WHERE conname = 'economic_events_unique_constraint'
+                  AND conrelid = 'economic_events'::regclass
+                  AND (pg_get_constraintdef(oid) NOT LIKE '%comparison%'
+                       OR pg_get_constraintdef(oid) NOT LIKE '%NULLS NOT DISTINCT%')
             ) THEN
-                ALTER TABLE economic_events 
-                ADD CONSTRAINT economic_events_unique_constraint 
-                UNIQUE (date, time, country, event);
+                ALTER TABLE economic_events DROP CONSTRAINT economic_events_unique_constraint;
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'economic_events_unique_constraint'
+                  AND conrelid = 'economic_events'::regclass
+            ) THEN
+                ALTER TABLE economic_events
+                ADD CONSTRAINT economic_events_unique_constraint
+                UNIQUE NULLS NOT DISTINCT (date, "time", country, event, comparison);
             END IF;
         END $$;
         """)
@@ -851,9 +863,9 @@ class MarketDataService:
             ON CONFLICT ON CONSTRAINT economic_events_unique_constraint
             DO UPDATE SET
                 period = EXCLUDED.period,
-                actual = EXCLUDED.actual,
-                previous = EXCLUDED.previous,
-                forecast = EXCLUDED.forecast,
+                actual = COALESCE(EXCLUDED.actual, economic_events.actual),
+                previous = COALESCE(EXCLUDED.previous, economic_events.previous),
+                forecast = COALESCE(EXCLUDED.forecast, economic_events.forecast),
                 change_val = EXCLUDED.change_val,
                 change_percentage = EXCLUDED.change_percentage,
                 impact = EXCLUDED.impact,
@@ -861,7 +873,7 @@ class MarketDataService:
                 updated_at = CURRENT_TIMESTAMP
             RETURNING id, (xmax = 0) AS inserted_flag;
             """
-            
+
             cursor.execute(insert_sql, normalized)
             fetch_result = cursor.fetchone()
             conn.commit()
@@ -911,11 +923,14 @@ class MarketDataService:
         # 记录去重前的数量
         total_before_dedup = len(normalized_records)
         
-        # 去重：基于 (date, time, country, event) 的唯一性
-        # 保留最后一个重复记录（通常是最新的数据）
+        # 去重：基于 (date, time, country, event, comparison) 的唯一性（与唯一约束一致）
+        # 保留最后一个重复记录（通常是最新的数据）。
+        # 注意: comparison 必须进 key——EODHD 同一事件返回指数级/yoy/mom 最多 3 条记录，
+        # 否则应用层就先把口径压成 1 条；且新约束下同批多行命中同一行会触发
+        # "ON CONFLICT DO UPDATE command cannot affect row a second time"
         unique_records = {}
         for record in normalized_records:
-            key = (record['date'], record['time'], record['country'], record['event'])
+            key = (record['date'], record['time'], record['country'], record['event'], record['comparison'])
             unique_records[key] = record
         
         normalized_records = list(unique_records.values())
@@ -945,9 +960,9 @@ class MarketDataService:
             ON CONFLICT ON CONSTRAINT economic_events_unique_constraint
             DO UPDATE SET
                 period = EXCLUDED.period,
-                actual = EXCLUDED.actual,
-                previous = EXCLUDED.previous,
-                forecast = EXCLUDED.forecast,
+                actual = COALESCE(EXCLUDED.actual, economic_events.actual),
+                previous = COALESCE(EXCLUDED.previous, economic_events.previous),
+                forecast = COALESCE(EXCLUDED.forecast, economic_events.forecast),
                 change_val = EXCLUDED.change_val,
                 change_percentage = EXCLUDED.change_percentage,
                 impact = EXCLUDED.impact,
@@ -955,7 +970,7 @@ class MarketDataService:
                 updated_at = CURRENT_TIMESTAMP
             RETURNING (xmax = 0) AS inserted_flag;
             """
-            
+
             values = [
                 (
                     record['date'],

@@ -12,6 +12,8 @@ export interface EconomicEvent {
   actual?: string | number;
   previous?: string | number;
   forecast?: string | number;
+  /** 对比口径: null/undefined=指数级 / 'yoy' 同比 / 'mom' 环比 */
+  comparison?: string | null;
   calculated_change?: number;
   calculated_change_pct?: number;
   impact?: number;
@@ -53,6 +55,8 @@ export interface EconomicEventParams {
   from_date?: string;
   to_date?: string;
   country?: string;
+  /** 对比口径: 'index'=指数级(默认) / 'yoy' / 'mom' / 'all'=全部 */
+  comparison?: string;
   limit?: number;
   offset?: number;
 }

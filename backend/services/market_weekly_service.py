@@ -655,12 +655,14 @@ class MarketWeeklyService:
         to_date = end_date.date().strftime('%Y-%m-%d')
         
         # 首选：通过EconomicEventsService读取已存储的数据
+        # comparison='index'：同一事件可能存有指数级/yoy/mom 最多 3 条口径记录，周报只取指数级
         try:
             events_service = EconomicEventsService()
             raw_events = events_service.get_economic_events_from_db(
                 from_date=from_date,
                 to_date=to_date,
                 country=",".join(target_countries),
+                comparison='index',
                 limit=200
             )
             formatted = self._format_economic_events(raw_events, target_countries)

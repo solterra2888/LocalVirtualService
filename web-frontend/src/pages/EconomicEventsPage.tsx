@@ -20,6 +20,7 @@ import {
   ReloadOutlined,
   CalendarOutlined
 } from '@ant-design/icons';
+import { Segmented } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
 import { marketsAPI, EconomicEvent, CountryInfo } from '../services/markets';
 import { useAuthStore } from '../store/authStore';
@@ -68,6 +69,8 @@ const EconomicEventsPage: React.FC = () => {
   const [selectedCountries, setSelectedCountries] = useState<string[]>(['US', 'CN', 'HK']);
   const [searchText, setSearchText] = useState<string>('');
   const [selectedImpact, setSelectedImpact] = useState<number | undefined>(undefined);
+  // 对比口径: 'index'=指数级(默认) / 'yoy' 同比 / 'mom' 环比 / 'all' 全部
+  const [comparison, setComparison] = useState<string>('index');
 
   // 获取经济事件数据
   const fetchEvents = useCallback(async () => {
@@ -77,9 +80,10 @@ const EconomicEventsPage: React.FC = () => {
         from_date: dateRange[0].format('YYYY-MM-DD'),
         to_date: dateRange[1].format('YYYY-MM-DD'),
         country: selectedCountries.length > 0 ? selectedCountries.join(',') : undefined,
+        comparison,
         limit: 500
       };
-      
+
       const data = await marketsAPI.getEconomicEvents(params);
       setEvents(data);
     } catch (error) {
@@ -88,7 +92,7 @@ const EconomicEventsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [dateRange, selectedCountries]);
+  }, [dateRange, selectedCountries, comparison]);
 
   // 获取经济事件国家列表
   const fetchCountries = useCallback(async () => {
@@ -220,6 +224,27 @@ const EconomicEventsPage: React.FC = () => {
           {event || '-'}
         </Tooltip>
       )
+    },
+    {
+      title: 'Basis',
+      dataIndex: 'comparison',
+      key: 'comparison',
+      width: 80,
+      render: (comparison: string | null | undefined) => {
+        if (comparison === 'yoy') return <Tag color="blue">YoY</Tag>;
+        if (comparison === 'mom') return <Tag color="purple">MoM</Tag>;
+        return (
+          <Tag
+            style={{
+              backgroundColor: colors.neutralTagBg,
+              color: colors.neutralTagColor,
+              border: `1px solid ${colors.neutralTagBorder}`
+            }}
+          >
+            Index
+          </Tag>
+        );
+      }
     },
     {
       title: 'Actual',
@@ -422,6 +447,21 @@ const EconomicEventsPage: React.FC = () => {
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
                 style={{ width: '100%' }}
+              />
+            </Space>
+          </Col>
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+              <Text strong>Basis (对比口径):</Text>
+              <Segmented
+                value={comparison}
+                onChange={(value) => setComparison(value as string)}
+                options={[
+                  { label: 'Index', value: 'index' },
+                  { label: 'YoY', value: 'yoy' },
+                  { label: 'MoM', value: 'mom' },
+                  { label: 'All', value: 'all' }
+                ]}
               />
             </Space>
           </Col>

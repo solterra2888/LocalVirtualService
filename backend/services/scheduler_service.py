@@ -1800,6 +1800,9 @@ class SchedulerService:
                 - end_date: 结束日期 (YYYY-MM-DD)，可选
                 - days: 从今天开始的天数，可选（默认30天）
                 - fetch_next_week: 是否获取下周数据，可选（默认False）
+                - lookback_days: 回看天数，可选。把相对窗口(days/默认/fetch_next_week)的
+                  from_date 前推 N 天，用于回填已发布事件的 actual 值。
+                  显式 start_date/end_date 视为精确范围，不受影响
                 - country: 国家代码，可选
         
         Returns:
@@ -1852,7 +1855,19 @@ class SchedulerService:
                     today = utcnow()
                     from_date = today.strftime('%Y-%m-%d')
                     to_date = (today + timedelta(days=30)).strftime('%Y-%m-%d')
-                
+
+                # 回看窗口：把相对窗口的起点前推 lookback_days 天，覆盖近期已发布事件，
+                # 让 upsert 回填 actual/estimate（调度历史上只抓未来窗口，已发布事件 actual 永远缺失）。
+                # 显式 start_date/end_date 是精确范围（如手动修复触发），不做偏移。
+                try:
+                    lookback_days = int(params.get('lookback_days') or 0)
+                except (TypeError, ValueError):
+                    lookback_days = 0
+                if lookback_days > 0 and 'start_date' not in params:
+                    lookback_from = (utcnow() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+                    if from_date is None or lookback_from < from_date:
+                        from_date = lookback_from
+
                 # 处理多个国家的情况
                 countries = []
                 if 'country' in params:
@@ -1869,30 +1884,43 @@ class SchedulerService:
                 logger.info(f"经济事件请求参数: from_date={from_date}, to_date={to_date}, countries={countries if countries else 'All'}")
                 
                 # 收集所有国家的数据
-                all_events_data = []
-                
-                if countries:
-                    # 对每个国家分别请求
-                    for country in countries:
+                def _fetch_window_with_pagination(country=None):
+                    """抓取一个窗口的数据，结果数等于 limit 时用 offset 翻页（EODHD offset 上限 1000，最多 2000 条/窗口）"""
+                    collected = []
+                    for offset in (0, 1000):
                         api_params = {
                             'from_date': from_date,
                             'to_date': to_date,
-                            'country': country,
                             'limit': 1000
                         }
+                        if offset:
+                            api_params['offset'] = offset
+                        if country:
+                            api_params['country'] = country
+                        batch = api_client.get_economic_events(**api_params) or []
+                        collected.extend(batch)
+                        if len(batch) < 1000:
+                            break
+                        if offset == 1000:
+                            logger.warning(
+                                f"经济事件窗口 {from_date}~{to_date} "
+                                f"(country={country or 'ALL'}) 结果达 2000 条上限，可能被截断"
+                            )
+                    return collected
+
+                all_events_data = []
+
+                if countries:
+                    # 对每个国家分别请求
+                    for country in countries:
                         logger.info(f"获取国家 {country} 的经济事件数据")
-                        country_events = api_client.get_economic_events(**api_params)
+                        country_events = _fetch_window_with_pagination(country)
                         if country_events:
                             all_events_data.extend(country_events)
                             logger.info(f"国家 {country} 获取到 {len(country_events)} 条数据")
                 else:
                     # 没有指定国家，获取所有国家
-                    api_params = {
-                        'from_date': from_date,
-                        'to_date': to_date,
-                        'limit': 1000
-                    }
-                    all_events_data = api_client.get_economic_events(**api_params)
+                    all_events_data = _fetch_window_with_pagination()
                 
                 if not all_events_data:
                     return {
@@ -1905,25 +1933,12 @@ class SchedulerService:
                 events_data = all_events_data
                 
                 # 格式化数据并计算impact
+                # 使用与手动 fetch (api/markets.py) 一致的完整事件名匹配实现，统一口径
+                from backend.services.economic_events_service import calculate_event_impact
                 formatted_data = []
                 for event in events_data:
                     formatted_event = api_client.format_event_data(event)
-                    
-                    # 计算impact值
-                    event_name = formatted_event.get('event', '')
-                    # 简单的impact计算：根据事件名称判断重要性
-                    formatted_event['impact'] = 1  # 默认值
-                    if event_name:
-                        # 重要事件关键词
-                        high_impact_keywords = ['Interest Rate', 'Non-Farm Payrolls', 'GDP', 'CPI', 'Inflation', 'Unemployment', 'FOMC', 'Fed', 'Central Bank']
-                        medium_impact_keywords = ['PMI', 'Employment', 'Retail Sales', 'Consumer', 'Trade Balance']
-                        
-                        event_lower = event_name.lower()
-                        if any(kw.lower() in event_lower for kw in high_impact_keywords):
-                            formatted_event['impact'] = 3
-                        elif any(kw.lower() in event_lower for kw in medium_impact_keywords):
-                            formatted_event['impact'] = 2
-                    
+                    formatted_event['impact'] = calculate_event_impact(formatted_event.get('event', ''))
                     formatted_data.append(formatted_event)
                 
                 # 保存到数据库

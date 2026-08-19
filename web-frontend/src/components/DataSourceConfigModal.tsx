@@ -153,10 +153,10 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     },
     eodhd_events: {
       icon: <ScheduleOutlined style={{ color: '#52c41a' }} />,
-      params: ['days', 'fetch_next_week', 'start_date', 'end_date', 'country'],
-      defaultSchedule: '0 6 * * 0',
+      params: ['days', 'lookback_days', 'fetch_next_week', 'start_date', 'end_date', 'country'],
+      defaultSchedule: '0 12 * * *',
       defaultName: 'Economic Events Auto Fetch',
-      description: 'Get economic calendar event data including GDP, CPI and other important indicators (similar to Earnings Calendar parameters)'
+      description: 'Get economic calendar event data including GDP, CPI and other important indicators; daily run with lookback window to backfill actual values of published events'
     },
     eodhd_macro: {
       icon: <BarChartOutlined style={{ color: '#722ed1' }} />,
@@ -1128,10 +1128,24 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                 extra="Number of days ahead to fetch (1-90 days). Default is 30 days."
                 initialValue={30}
               >
-                <InputNumber 
-                  min={1} 
-                  max={90} 
-                  placeholder="30" 
+                <InputNumber
+                  min={1}
+                  max={90}
+                  placeholder="30"
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+
+              <Form.Item
+                label="Lookback Days"
+                name={['taskParams', 'lookback_days']}
+                extra="Days to look back to backfill actual values of published events (0-90). Default is 14. Ignored when explicit start/end dates are set."
+                initialValue={14}
+              >
+                <InputNumber
+                  min={0}
+                  max={90}
+                  placeholder="14"
                   style={{ width: '100%' }}
                 />
               </Form.Item>
