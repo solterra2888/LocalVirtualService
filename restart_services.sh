@@ -61,6 +61,7 @@ if docker_running "redis"; then
     echo "   ✅ Redis (Docker) 运行中"
 else
     echo "   ❌ Redis (Docker) 未运行 — 请先执行: docker start redis"
+    echo "   若反复 Restarting：检查 /opt/redis/conf 权限（需 root:1000 750/640，镜像会降权到 uid 999）"
     DOCKER_OK=false
 fi
 
@@ -69,6 +70,26 @@ if [ "$DOCKER_OK" = false ]; then
     echo "❌ 基础服务不可用，Celery/调度器无法正常工作，中止重启"
     echo "   修复方法: docker start postgres redis"
     exit 1
+fi
+
+# Redis 容器 Running 不足以证明可用（crash loop 会短暂 Running）
+SCRIPT_DIR_RS="$(cd "$(dirname "$0")" && pwd)"
+ENV_FILE_RS="$SCRIPT_DIR_RS/.env"
+REDIS_URL_RS="redis://localhost:6379/0"
+[ -f "$ENV_FILE_RS" ] && REDIS_URL_RS=$(grep -E '^REDIS_URL=' "$ENV_FILE_RS" | cut -d= -f2- | tr -d '"'"'" | head -1 || echo "$REDIS_URL_RS")
+PYTHON_BIN_PING="$(grep -E '^CONDA_ENV=' "$ENV_FILE_RS" 2>/dev/null | cut -d= -f2 || true)/bin/python"
+[ ! -x "$PYTHON_BIN_PING" ] && PYTHON_BIN_PING="$(command -v python3 2>/dev/null || echo "")"
+if [ -n "$PYTHON_BIN_PING" ] && [ -x "$PYTHON_BIN_PING" ] && "$PYTHON_BIN_PING" -c "import redis" 2>/dev/null; then
+    if ! "$PYTHON_BIN_PING" - "$REDIS_URL_RS" <<'PY'
+import sys, redis
+redis.from_url(sys.argv[1], socket_connect_timeout=3).ping()
+PY
+    then
+        echo "   ❌ Redis PING 失败 — 容器可能在 crash loop（检查 redis.conf 是否为 root:1000 640）"
+        docker logs --tail 10 redis 2>/dev/null || true
+        exit 1
+    fi
+    echo "   ✅ Redis PING 成功"
 fi
 
 echo ""
@@ -91,10 +112,6 @@ fi
 # ── 重启前清理 Redis 任务元数据 ───────────────────────────────
 # 防止上次异常停止留下的损坏 meta 导致 Celery worker 重启后立即崩溃
 echo "🧹 清理 Redis 旧任务元数据..."
-SCRIPT_DIR_RS="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE_RS="$SCRIPT_DIR_RS/.env"
-REDIS_URL_RS="redis://localhost:6379/0"
-[ -f "$ENV_FILE_RS" ] && REDIS_URL_RS=$(grep -E '^REDIS_URL=' "$ENV_FILE_RS" | cut -d= -f2- | tr -d '"'"'" | head -1 || echo "$REDIS_URL_RS")
 PYTHON_BIN_RS="$(grep -E '^CONDA_ENV=' "$ENV_FILE_RS" 2>/dev/null | cut -d= -f2 || true)/bin/python"
 [ ! -x "$PYTHON_BIN_RS" ] && PYTHON_BIN_RS="$(command -v python3 2>/dev/null || echo "")"
 if [ -n "$PYTHON_BIN_RS" ] && [ -x "$PYTHON_BIN_RS" ] && "$PYTHON_BIN_RS" -c "import redis" 2>/dev/null; then

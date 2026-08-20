@@ -299,6 +299,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultName: 'CNBC Closing Bell Summary',
       description: 'Generate daily Stock News summary from CNBC "Closing Bell" transcript (weekdays 7 AM Beijing / 7 PM ET)'
     },
+    fed_dashboard: {
+      icon: <BankOutlined style={{ color: '#1d4ed8' }} />,
+      params: ['mode'],
+      defaultSchedule: '*/30 * * * *',
+      defaultName: 'Fed Dashboard RSS Poll',
+      description: 'Poll Fed press RSS for FOMC statements and minutes, then fetch, extract decisions, and summarize (every 30 minutes UTC)'
+    },
     zhishixingqiu_summary: {
       icon: <StockOutlined style={{ color: '#52c41a' }} />,
       params: [],
@@ -576,6 +583,15 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           result = await schedulerAPI.createCronTask({
             task_type: 'cnbc_closing_bell',
             ...cnbcClosingBellParams,
+          });
+        } else if (dataSourceType === 'fed_dashboard') {
+          result = await schedulerAPI.createCronTask({
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            task_type: 'fed_dashboard',
+            params: { mode: data.taskParams?.mode || 'poll' },
           });
         } else if (dataSourceType === 'zhishixingqiu_summary') {
           const zhishixingqiuSummaryParams = {
@@ -2299,6 +2315,21 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
 
         case 'cnbc_closing_bell':
           return null;
+
+        case 'fed_dashboard':
+          return (
+            <Form.Item
+              label="Mode"
+              name={['taskParams', 'mode']}
+              extra="poll: RSS discovery + fetch + summarize + retry failed docs. retry: only retry pending/failed documents."
+              initialValue="poll"
+            >
+              <Select>
+                <Option value="poll">Poll RSS (full chain)</Option>
+                <Option value="retry">Retry pending/failed only</Option>
+              </Select>
+            </Form.Item>
+          );
 
         case 'zhishixingqiu_summary':
           return null;

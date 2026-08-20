@@ -47,6 +47,46 @@ docker_running() {
     docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null | grep -q "^true$"
 }
 
+# Official redis:* image drops to uid 999/gid 1000 before opening redis.conf.
+# Keep requirepass group-readable by gid 1000, never world-readable / root:root 640.
+ensure_redis_conf_readable() {
+    local conf_dir="/opt/redis/conf"
+    local conf="$conf_dir/redis.conf"
+    if [ ! -f "$conf" ]; then
+        return 0
+    fi
+    chown root:1000 "$conf_dir" "$conf"
+    chmod 750 "$conf_dir"
+    chmod 640 "$conf"
+}
+
+read_redis_url() {
+    local env_file="$(cd "$(dirname "$0")" && pwd)/.env"
+    local url="redis://localhost:6379/0"
+    if [ -f "$env_file" ]; then
+        url=$(grep -E '^REDIS_URL=' "$env_file" | cut -d= -f2- | tr -d '"'"'" | head -1 || echo "$url")
+    fi
+    echo "$url"
+}
+
+# Crash-looping containers can look Running for a fraction of a second; require a real PING.
+ping_redis() {
+    local redis_url="$1"
+    local python_bin
+    python_bin="$(grep -E '^CONDA_ENV=' "$(cd "$(dirname "$0")" && pwd)/.env" 2>/dev/null | cut -d= -f2 || true)/bin/python"
+    [ ! -x "$python_bin" ] && python_bin="$(command -v python3 2>/dev/null || echo "")"
+    if [ -z "$python_bin" ] || [ ! -x "$python_bin" ] || ! "$python_bin" -c "import redis" 2>/dev/null; then
+        echo "⚠️  无法用 Python redis 客户端做 PING，跳过连通性检查"
+        return 0
+    fi
+    "$python_bin" - "$redis_url" <<'PY'
+import sys, redis
+url = sys.argv[1]
+r = redis.from_url(url, socket_connect_timeout=3)
+r.ping()
+PY
+}
+
 # 确保 Docker 容器已运行（不存在则报错，已停止则尝试启动）
 ensure_docker_container() {
     local container=$1
@@ -100,10 +140,27 @@ fi
 
 # ── 2. Redis (Docker) ─────────────────────────────────────────
 echo "🔴 检查Redis缓存..."
+ensure_redis_conf_readable
 if ! ensure_docker_container "redis" "Redis"; then
     echo "❌ Redis不可用，Celery和调度器无法工作，中止启动"
+    echo "   若日志为 Permission denied opening redis.conf：检查 /opt/redis/conf 是否为 root:1000 750/640"
     exit 1
 fi
+REDIS_URL_SS="$(read_redis_url)"
+redis_ping_ok=0
+for _ in 1 2 3 4 5 6; do
+    if ping_redis "$REDIS_URL_SS" 2>/dev/null; then
+        redis_ping_ok=1
+        break
+    fi
+    sleep 2
+done
+if [ "$redis_ping_ok" -ne 1 ]; then
+    echo "❌ Redis 容器在跑但 PING 失败（常见于配置权限导致的 crash loop）"
+    docker logs --tail 15 redis 2>/dev/null || true
+    exit 1
+fi
+echo "✅ Redis PING 成功"
 
 # ── 3. Web应用 ───────────────────────────────────────────────
 echo "🌐 启动Web应用..."
@@ -120,8 +177,6 @@ fi
 echo "🧹 清理 Redis 旧任务元数据..."
 SCRIPT_DIR_SS="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE_SS="$SCRIPT_DIR_SS/.env"
-REDIS_URL_SS="redis://localhost:6379/0"
-[ -f "$ENV_FILE_SS" ] && REDIS_URL_SS=$(grep -E '^REDIS_URL=' "$ENV_FILE_SS" | cut -d= -f2- | tr -d '"'"'" | head -1 || echo "$REDIS_URL_SS")
 PYTHON_BIN_SS="$(grep -E '^CONDA_ENV=' "$ENV_FILE_SS" 2>/dev/null | cut -d= -f2 || true)/bin/python"
 [ ! -x "$PYTHON_BIN_SS" ] && PYTHON_BIN_SS="$(command -v python3 2>/dev/null || echo "")"
 if [ -n "$PYTHON_BIN_SS" ] && [ -x "$PYTHON_BIN_SS" ] && "$PYTHON_BIN_SS" -c "import redis" 2>/dev/null; then

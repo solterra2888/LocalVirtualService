@@ -168,6 +168,16 @@ docker run -d \
 
 > **配置要点**：`bind 0.0.0.0` 允许容器内监听所有网卡（Docker 内必需）；`protected-mode yes` 配合 `requirepass` 确保密码保护；`daemonize no` 保持前台运行（Docker 要求）。
 >
+> **配置文件权限（必做）**：`redis:7.4.6-alpine` 启动时会 `gosu` 成 uid `999` / gid `1000` 再读 `redis.conf`。宿主机 bind-mount 必须让该用户可读，且不要把 `requirepass` 改成全局可读：
+>
+> ```bash
+> chown root:1000 /opt/redis/conf /opt/redis/conf/redis.conf
+> chmod 750 /opt/redis/conf
+> chmod 640 /opt/redis/conf/redis.conf
+> ```
+>
+> 不要使用 `640 root:root`。进程已在跑时改权限不会立刻失败，**主机重启后**才会 Permission denied 并 crash loop，Celery/Scheduler 全部 `Connection refused`。
+>
 > **安全提示**：Redis 通过 `-p 6379:6379` 映射到宿主机。应通过服务器防火墙 / 安全组**限制 6379 端口的访问来源**，仅允许本机或可信 IP，切勿对公网完全开放。
 
 ### 2.3 Nginx 配置目录准备
