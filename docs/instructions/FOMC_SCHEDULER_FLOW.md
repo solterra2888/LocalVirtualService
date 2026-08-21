@@ -30,13 +30,14 @@ flowchart TB
         POLL --> NEWDOC{"② RSS 里出现<br/>声明/纪要 URL 模式？"}
         NEWDOC -->|"否 ★最常见（95%窗口）<br/>只有普通新闻/无条目"| RETRY
         NEWDOC -->|"是（决议日/纪要日/页面修正）"| FD[("🗂 fomc_documents<br/>新增行 status=pending<br/>✓仅此场景写")]
-        RETRY["③ retry_pending_documents<br/>重试 failed 文档"]
+        RETRY["③ 派发 fomc_fetch_document<br/>pending + failed"]
         RETRY --> HASFAILED{"有 failed/pending<br/>文档？"}
-        HASFAILED -->|"无"| Q3
+        HASFAILED -->|"无"| HEAL
         HASFAILED -->|"有（纪要未挂网 404 等）"| FETCH
-        FD --> Q2["派发 fomc_fetch_document<br/>（每个 pending 一个任务）"]
+        FD --> Q2["派发 fomc_fetch_document"]
         Q2 --> FETCH
-        RETRY --> Q3["④ 派发 fomc_compute_probabilities<br/>（无论有无新文档都派发）"]
+        RETRY --> HEAL["③b 补派发 fomc_summarize<br/>fetched 但无 completed 概括"]
+        HEAL --> Q3["④ 派发 fomc_compute_probabilities<br/>（无论有无新文档都派发）"]
     end
 
     %% ═══ 阶段② 抓取 ═══
@@ -46,8 +47,8 @@ flowchart TB
         FETCH --> FETCHOK{"抓取+清洗<br/>成功？"}
         FETCHOK -->|"否（404 页面未挂/网络）"| FDFAIL[("🗂 fomc_documents<br/>status=failed<br/>→ 等下个窗口自愈重试")]
         FETCHOK -->|"是"| HASH{"content_hash<br/>与上次比变了？"}
-        HASH -->|"没变（Fed 没改内容）<br/>⛔ 跳过抽取和 LLM 省 token"| ENDS2["该文档链路结束"]
-        HASH -->|"变了（新文档或 Fed 修正）"| FDU[("🗂 fomc_documents<br/>status=fetched 全文入库 ✓")]
+        HASH -->|"没变且已有 completed 概括<br/>⛔ 跳过 LLM 省 token"| ENDS2["该文档链路结束"]
+        HASH -->|"变了，或仍无 completed 概括"| FDU[("🗂 fomc_documents<br/>status=fetched 全文入库 ✓")]
         FDU --> ISSTMT{"doc_type 是<br/>statement？"}
         ISSTMT -->|"是"| EXTRACT["extract_decision<br/>纯 regex 零 LLM<br/>区间/票型/异议者/change_bp"]
         EXTRACT --> DEC[("🗂 fomc_decisions<br/>✓仅声明写")]
@@ -143,8 +144,9 @@ RSS 发现声明或纪要 URL → fomc_documents(pending)
 ```
 纪要 URL 按固定模式提前入库 pending → 抓取 404
   → fomc_documents 标 status=failed
-  → 之后每个窗口的 retry 分支反复重试
-  → Fed 挂出页面那一刻（约会后 3 周）自动走完 B 场景，无需人工
+  → 之后每个窗口派发 fomc_fetch_document（pending + failed 同一条链）
+  → Fed 挂出页面那一刻走完抓取 + 概括，无需人工
+  → 若曾漏派发概括：poll 还会对 fetched 且无 completed summary 的文档补派发
 ```
 
 ## 四、表与写入时机速查（按场景对号）
@@ -171,5 +173,5 @@ RSS 发现声明或纪要 URL → fomc_documents(pending)
 ## 六、省钱 / 自愈 / 幂等三设计
 
 1. **content_hash 去重**（场景 C）：Fed 偶尔修正页面重新挂网——hash 没变则跳过 LLM 概括，不烧 token
-2. **双重自愈**（场景 D）：纪要 URL 按固定模式提前入库为 pending，Fed 未挂网时抓取 failed → 每 30 分钟 retry 分支反复重试 → Fed 挂出页面那一刻链路自动走完，无需人工
+2. **双重自愈**（场景 D）：纪要 URL 按固定模式提前入库为 pending，Fed 未挂网时抓取 failed → 每 30 分钟对 pending+failed 派发 `fomc_fetch_document`（与新文档同一条抽取/概括链）→ 另对已 fetched 但无 completed 概括补派发 `fomc_summarize`。不要在 poll 内联 `retry_pending_documents`（会与 Celery 抢抓 pending，hash 写入后跳过概括）。
 3. **全链幂等**：所有表写入均 `ON CONFLICT DO UPDATE` + UNIQUE 约束——任何一步重跑、任何任务重复派发，结果收敛到同一份数据，不会重复入库

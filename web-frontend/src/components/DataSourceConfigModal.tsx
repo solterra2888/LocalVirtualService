@@ -320,13 +320,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultName: 'Substack Daily Summary',
       description: 'Two-phase daily summary: per-publication LLM (articles + notes, cached) then per-user mechanical concat (default: 10 PM Beijing)'
     },
-    fed_dashboard: {
-      icon: <BankOutlined style={{ color: '#722ed1' }} />,
-      params: [],
-      defaultSchedule: '*/30 * * * *',
-      defaultName: 'Fed Dashboard RSS Poll',
-      description: 'Poll Federal Reserve press RSS to discover FOMC statements/minutes, extract rate decisions and generate AI summaries (default: every 30 min)'
-    },
   };
 
   const currentConfig = dataSourceConfigs[dataSourceType];
@@ -2332,9 +2325,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           );
 
         case 'zhishixingqiu_summary':
-          return null;
-
-        case 'fed_dashboard':
           return null;
 
         default:

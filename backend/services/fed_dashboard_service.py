@@ -1238,7 +1238,11 @@ class FedDashboardService:
     # ── 兜底重试 ───────────────────────────────────────────────────────────
 
     def retry_pending_documents(self) -> int:
-        """重试 failed/pending 的文档（每日兜底任务调用）"""
+        """重试 failed/pending 的文档（mode=retry 兜底任务调用）。
+
+        常规 poll 不再内联调用本方法，改为派发 fomc_fetch_document，
+        以便抓取成功后走同一套概括链。本方法只抓正文/抽声明，不派发 LLM。
+        """
         rows = self.db_manager.fetch_all(
             "SELECT id FROM fomc_documents "
             "WHERE fetch_status IN ('pending', 'failed') "

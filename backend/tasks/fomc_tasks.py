@@ -44,6 +44,50 @@ def _dispatch(task_name: str, **kwargs):
         logger.warning(f"[FOMC] 派发 {task_name} 失败: {e}")
 
 
+_UNSUMMARIZED_ORDERS = {
+    "id": "d.id",
+    "meeting": "d.meeting_date, d.doc_type",
+}
+
+
+def _needs_summary(svc, doc_id: int) -> bool:
+    """已抓取文档是否还没有 completed 概括。"""
+    rows = svc.db_manager.fetch_all(
+        """
+        SELECT 1 FROM fomc_summaries
+        WHERE document_id = %s AND status = 'completed'
+        LIMIT 1
+        """,
+        (doc_id,),
+    )
+    return not rows
+
+
+def _dispatch_unsummarized(svc, *, order: str = "id", limit: int = 10):
+    """给已 fetched 但无 completed 概括的文档补派发 fomc_summarize。
+
+    覆盖：纪要 404 自愈后漏派发、回填后未概括、以及 poll 与内联 retry 竞态遗留。
+    generate_summary 对已 completed 幂等跳过，重复派发安全。
+    """
+    order_sql = _UNSUMMARIZED_ORDERS.get(order, "d.id")
+    rows = svc.db_manager.fetch_all(
+        f"""
+        SELECT d.id FROM fomc_documents d
+        WHERE d.fetch_status = 'fetched'
+          AND NOT EXISTS (
+              SELECT 1 FROM fomc_summaries s
+              WHERE s.document_id = d.id AND s.status = 'completed'
+          )
+        ORDER BY {order_sql}
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    for (doc_id,) in rows:
+        _dispatch("fomc_summarize", doc_id=doc_id)
+    return [doc_id for (doc_id,) in rows]
+
+
 @app.task(bind=True, name="fomc_poll_updates", queue="data_fetching", max_retries=1)
 def fomc_poll_updates_task(self):
     """轮询 Fed press_all.xml RSS: 写 updates 流 + 发现新 FOMC 文档 + 派发抓取"""
@@ -51,16 +95,19 @@ def fomc_poll_updates_task(self):
         svc = _get_service()
         result = svc.poll_fed_updates()
 
-        # 对 pending 文档派发抓取
+        # pending + failed 统一走 fomc_fetch_document（抽取 + 概括派发）。
+        # 不内联 retry_pending_documents：避免与 Celery 抢抓 pending，
+        # 导致 content_hash 已写入、后续任务判定 unchanged 而跳过概括。
         rows = svc.db_manager.fetch_all(
-            "SELECT id, doc_type FROM fomc_documents "
-            "WHERE fetch_status = 'pending' ORDER BY id LIMIT 10"
+            "SELECT id FROM fomc_documents "
+            "WHERE fetch_status IN ('pending', 'failed') "
+            "ORDER BY id LIMIT 10"
         )
-        for doc_id, doc_type in rows:
+        for (doc_id,) in rows:
             _dispatch("fomc_fetch_document", doc_id=doc_id)
 
-        # 每次轮询顺带兜底重试少量 failed（纪要 404 未发布场景靠这里自愈）
-        svc.retry_pending_documents()
+        # 已 fetched 但无 completed 概括（404 自愈漏派发）→ 补派发
+        _dispatch_unsummarized(svc)
 
         # 概率快照: 每天首个轮询窗口顺带执行（service 内按日节流，
         # 已有当日快照时 no-op；task_scheduling UNIQUE(type) 决定不单设调度行）
@@ -84,8 +131,8 @@ def fomc_fetch_document_task(self, doc_id: int):
         if doc and doc["doc_type"] == "statement":
             svc.extract_decision(doc_id)
 
-        # 抓取成功且内容有变化 → 派发概括（ai_processing 队列）
-        if not result.get("unchanged"):
+        # 内容有变化，或已抓取但从未完成概括（404 自愈 / 竞态遗留）→ 派发 LLM
+        if not result.get("unchanged") or _needs_summary(svc, doc_id):
             _dispatch("fomc_summarize", doc_id=doc_id)
 
         return {"doc_id": doc_id, **result}
@@ -117,20 +164,7 @@ def fomc_retry_pending_task(self):
     try:
         svc = _get_service()
         count = svc.retry_pending_documents()
-        # 重试成功的派发概括
-        rows = svc.db_manager.fetch_all(
-            """
-            SELECT d.id FROM fomc_documents d
-            WHERE d.fetch_status = 'fetched'
-              AND NOT EXISTS (
-                  SELECT 1 FROM fomc_summaries s
-                  WHERE s.document_id = d.id AND s.status = 'completed'
-              )
-            ORDER BY d.id LIMIT 10
-            """
-        )
-        for (doc_id,) in rows:
-            _dispatch("fomc_summarize", doc_id=doc_id)
+        _dispatch_unsummarized(svc)
         return {"retried": count}
     except Exception as exc:
         logger.error(f"[FOMC] retry_pending 失败: {exc}", exc_info=True)
@@ -144,20 +178,7 @@ def fomc_backfill_2026_task(self, summarize: bool = True):
         svc = _get_service()
         stats = svc.backfill_2026()
         if summarize:
-            # 回填完成后对全部未概括文档派发 LLM
-            rows = svc.db_manager.fetch_all(
-                """
-                SELECT d.id FROM fomc_documents d
-                WHERE d.fetch_status = 'fetched'
-                  AND NOT EXISTS (
-                      SELECT 1 FROM fomc_summaries s
-                      WHERE s.document_id = d.id AND s.status = 'completed'
-                  )
-                ORDER BY d.meeting_date, d.doc_type
-                """
-            )
-            for (doc_id,) in rows:
-                _dispatch("fomc_summarize", doc_id=doc_id)
+            _dispatch_unsummarized(svc, order="meeting", limit=20)
         return stats
     except Exception as exc:
         logger.error(f"[FOMC] backfill_2026 失败: {exc}", exc_info=True)
