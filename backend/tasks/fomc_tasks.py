@@ -62,6 +62,10 @@ def fomc_poll_updates_task(self):
         # 每次轮询顺带兜底重试少量 failed（纪要 404 未发布场景靠这里自愈）
         svc.retry_pending_documents()
 
+        # 概率快照: 每天首个轮询窗口顺带执行（service 内按日节流，
+        # 已有当日快照时 no-op；task_scheduling UNIQUE(type) 决定不单设调度行）
+        _dispatch("fomc_compute_probabilities")
+
         return result
     except Exception as exc:
         logger.error(f"[FOMC] poll_updates 失败: {exc}", exc_info=True)
@@ -157,4 +161,29 @@ def fomc_backfill_2026_task(self, summarize: bool = True):
         return stats
     except Exception as exc:
         logger.error(f"[FOMC] backfill_2026 失败: {exc}", exc_info=True)
+        raise
+
+
+@app.task(bind=True, name="fomc_compute_probabilities", queue="data_fetching", max_retries=1)
+def fomc_compute_probabilities_task(self, force: bool = False):
+    """每日概率快照: 同步会议日历 + ZQ 期货 + EFFR → 未来 4 次会议概率入库
+
+    默认按日节流（poll 链派发时已跑过则跳过）；force=True 供手动刷新。
+    """
+    try:
+        svc = _get_service()
+        return svc.compute_probabilities(force=force)
+    except Exception as exc:
+        logger.error(f"[FOMC] compute_probabilities 失败: {exc}", exc_info=True)
+        raise
+
+
+@app.task(bind=True, name="fomc_backfill_probabilities", queue="data_fetching", max_retries=1)
+def fomc_backfill_probabilities_task(self, start: str = "2026-01-01"):
+    """一次性回填历史概率（ZQ=F 连续合约 + EFFR 日序列，幂等）"""
+    try:
+        svc = _get_service()
+        return svc.backfill_probabilities(start=start)
+    except Exception as exc:
+        logger.error(f"[FOMC] backfill_probabilities 失败: {exc}", exc_info=True)
         raise

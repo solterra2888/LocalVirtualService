@@ -7,6 +7,7 @@ FOMC API - 央行 Dashboard 接口
 """
 
 import json
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query, status
@@ -85,14 +86,16 @@ class DashboardResponse(BaseModel):
     updates: List[UpdateItem] = []
     updates_total: int = 0
     probabilities: Optional[Dict[str, Any]] = Field(
-        None, description="加息/降息概率 — V1 缓做，恒为 null")
+        None, description="加息/降息概率（ZQ 期货自算）: next_meetings 最新快照"
+                          " + expectations_vs_actual 预期差对照 + method_note")
 
 
 class RefreshRequest(BaseModel):
     type: str = Field(
         "poll",
         description="poll=轮询RSS+发现 / fetch=抓取单文档 / summarize=概括单文档 / "
-                    "backfill=回填2026 / retry=重试failed",
+                    "backfill=回填2026 / retry=重试failed / "
+                    "probabilities=概率快照 / probabilities_backfill=回填历史概率",
     )
     document_id: Optional[int] = None
     force: bool = False
@@ -115,7 +118,7 @@ async def get_dashboard(current_user=Depends(get_current_user)):
     - **statement_summary / minutes_summary**: 最近声明与纪要的 AI 概括
     - **recent_meetings**: 近期会议列表（决议+文档状态）
     - **updates**: Fed updates 流（默认前 20 条）
-    - **probabilities**: 恒为 null（V1 缓做，数据源调研中）
+    - **probabilities**: 未来会议概率快照 + 历史预期差对照（ZQ 期货自算）
     """
     try:
         info(f"获取央行 Dashboard: user={current_user.username}", source="fomc_api")
@@ -175,6 +178,33 @@ async def get_updates(
         )
 
 
+@router.get("/probabilities", summary="单会议概率完整趋势（折线图数据源）")
+async def get_probability_trend(
+    meeting_date: str = Query(..., description="会议日期（会议末日 YYYY-MM-DD）"),
+    days: int = Query(90, ge=7, le=365, description="趋势窗口天数"),
+    current_user=Depends(get_current_user),
+):
+    """指定会议的概率时序（每日快照），含 p_cut/p_hold/p_hike/implied_rate"""
+    try:
+        svc = get_fed_dashboard_service()
+        try:
+            datetime.strptime(meeting_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="meeting_date 格式须为 YYYY-MM-DD",
+            )
+        return svc.get_probability_trend(meeting_date, days=days)
+    except HTTPException:
+        raise
+    except Exception as e:
+        error(f"获取概率趋势失败: {str(e)}", source="fomc_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取概率趋势失败: {str(e)}",
+        )
+
+
 @router.post("/refresh", response_model=RefreshResponse,
              summary="手动刷新（派发 Celery 任务）")
 async def refresh(
@@ -189,6 +219,8 @@ async def refresh(
     - **summarize**: 对指定 document_id 生成/重生成概括（force 可强制）
     - **backfill**: 回填 2026 年五次会议
     - **retry**: 重试 failed/pending 文档
+    - **probabilities**: 概率快照（ZQ 期货 + EFFR，忽略当日节流强制执行）
+    - **probabilities_backfill**: 回填历史概率（ZQ=F 连续合约）
     """
     try:
         from backend.celery_app import app as celery_app
@@ -200,6 +232,8 @@ async def refresh(
                           {"doc_id": req.document_id, "force": req.force}),
             "backfill": ("fomc_backfill_2026", {}),
             "retry": ("fomc_retry_pending", {}),
+            "probabilities": ("fomc_compute_probabilities", {"force": True}),
+            "probabilities_backfill": ("fomc_backfill_probabilities", {}),
         }
         if req.type not in task_map:
             raise HTTPException(

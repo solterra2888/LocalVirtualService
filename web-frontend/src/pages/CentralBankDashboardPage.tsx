@@ -15,6 +15,8 @@ import {
   Switch,
   Pagination,
   Collapse,
+  Select,
+  Table,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -26,7 +28,13 @@ import {
   RobotOutlined,
   FileTextOutlined,
 } from '@ant-design/icons';
-import { fomcAPI, DashboardData, SummaryInfo, UpdateItem } from '../services/fomc';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
+  ResponsiveContainer, Legend,
+} from 'recharts';
+import {
+  fomcAPI, DashboardData, SummaryInfo, UpdateItem, ProbabilitiesPayload,
+} from '../services/fomc';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import MarkdownRenderer from '../components/MarkdownRenderer';
@@ -140,11 +148,14 @@ const CentralBankDashboardPage: React.FC = () => {
     };
   }, [data]);
 
-  // 手动刷新（派发 poll 任务）
+  // 手动刷新（派发 poll + 概率快照任务）
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await fomcAPI.refresh('poll');
+      await Promise.all([
+        fomcAPI.refresh('poll'),
+        fomcAPI.refresh('probabilities'),
+      ]);
       message.success('Refresh dispatched — new data will appear shortly');
       setTimeout(() => {
         fetchDashboard();
@@ -411,21 +422,8 @@ const CentralBankDashboardPage: React.FC = () => {
             </Spin>
           </Card>
 
-          {/* ═══ 卡片 4: 概率占位（V1 缓做）═══ */}
-          <Card
-            size="small"
-            style={{ background: colors.cardBg, borderColor: colors.cardBorder }}
-            title={<Text strong style={{ color: colors.text }}>Rate Probabilities (next meeting)</Text>}
-          >
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={
-                <Text type="secondary">
-                  Data source under research (CME FedWatch / ZQ futures) — coming in a later version
-                </Text>
-              }
-            />
-          </Card>
+          {/* ═══ 卡片 4: 概率（ZQ 期货自算）═══ */}
+          <ProbabilitiesCard probabilities={data.probabilities} colors={colors} />
         </>
       )}
     </div>
@@ -524,6 +522,239 @@ const SummarySection: React.FC<{
         onChange={loadDoc}
       />
     </div>
+  );
+};
+
+// ═══ 卡片 4: 概率（ZQ 期货自算）═══
+
+const ProbabilitiesCard: React.FC<{
+  probabilities: ProbabilitiesPayload | null;
+  colors: ThemeColors;
+}> = ({ probabilities, colors }) => {
+  const { themeMode } = useDashboardSettings();
+  const [selectedMeeting, setSelectedMeeting] = useState<string | undefined>(undefined);
+  const [trend, setTrend] = useState<{
+    meeting_date: string; days: number;
+    series: { date: string; p_cut: number | null; p_hold: number | null; p_hike: number | null }[];
+  } | null>(null);
+  const [trendLoading, setTrendLoading] = useState(false);
+
+  const meetings = probabilities?.next_meetings ?? [];
+  const selected = selectedMeeting ?? meetings[0]?.meeting_date;
+
+  // 走势（懒加载: 默认用 payload 内联 trend，选中其他会议再拉全量）
+  useEffect(() => {
+    if (!selected) return;
+    const inline = meetings.find((m) => m.meeting_date === selected);
+    if (inline && inline.trend.length >= 2) {
+      setTrend({ meeting_date: selected, days: 90, series: inline.trend });
+      return;
+    }
+    if (inline && inline.trend.length < 2) {
+      // 只有 1 点（当日首跑）→ 拉历史端点也无更多数据，直接展示
+      setTrend({ meeting_date: selected, days: 90, series: inline.trend });
+      return;
+    }
+    setTrendLoading(true);
+    fomcAPI.getProbabilityTrend(selected, 90)
+      .then(setTrend)
+      .catch(() => {})
+      .finally(() => setTrendLoading(false));
+  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!probabilities) {
+    return (
+      <Card
+        size="small"
+        style={{ background: colors.cardBg, borderColor: colors.cardBorder }}
+        title={<Text strong style={{ color: colors.text }}>Rate Probabilities (ZQ futures implied)</Text>}
+      >
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No probability data yet — click Refresh" />
+      </Card>
+    );
+  }
+
+  const fmtPct = (v?: number | null) =>
+    v === null || v === undefined ? '—' : `${(v * 100).toFixed(0)}%`;
+
+  const gridColor = themeMode === 'dark' ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.06)';
+  const axisColor = themeMode === 'dark' ? '#94a3b8' : 'rgba(0,0,0,0.45)';
+  const tooltipBg = themeMode === 'dark' ? '#1a2234' : '#fff';
+
+  return (
+    <Card
+      size="small"
+      style={{ background: colors.cardBg, borderColor: colors.cardBorder }}
+      title={
+        <Space>
+          <Text strong style={{ color: colors.text }}>Rate Probabilities (ZQ futures implied)</Text>
+          {probabilities.asof_date && (
+            <Tag style={{ background: colors.neutralTagBg, color: colors.neutralTagColor }}>
+              as of {probabilities.asof_date}
+            </Tag>
+          )}
+        </Space>
+      }
+    >
+      {/* 未来会议分布横条 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
+        {meetings.map((m) => {
+          const l = m.latest;
+          return (
+            <div
+              key={m.meeting_date}
+              style={{
+                border: `1px solid ${colors.cardBorder}`,
+                borderRadius: 8, padding: '10px 12px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <Text strong style={{ color: colors.text, fontSize: 13 }}>
+                  {new Date(m.meeting_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                  {m.is_sep && <Tooltip title="With Summary of Economic Projections"><Tag style={{ marginLeft: 6 }} color="purple">SEP</Tag></Tooltip>}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {m.days_away === 0 ? 'today' : `in ${m.days_away}d`}
+                </Text>
+              </div>
+              {l ? (
+                <>
+                  {/* 分布横条: cut(鸽蓝) / hold(灰) / hike(鹰红) */}
+                  <Tooltip title={`Cut ${fmtPct(l.p_cut)} · Hold ${fmtPct(l.p_hold)} · Hike ${fmtPct(l.p_hike)}`}>
+                    <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', background: colors.neutralTagBg }}>
+                      <div style={{ width: `${(l.p_cut ?? 0) * 100}%`, background: colors.doveColor }} />
+                      <div style={{ width: `${(l.p_hold ?? 0) * 100}%`, background: colors.neutralTagColor }} />
+                      <div style={{ width: `${(l.p_hike ?? 0) * 100}%`, background: colors.hawkColor }} />
+                    </div>
+                  </Tooltip>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 12 }}>
+                    <Text style={{ color: colors.doveColor }}>🕊 {fmtPct(l.p_cut)}</Text>
+                    <Text style={{ color: colors.neutralTagColor }}>Hold {fmtPct(l.p_hold)}</Text>
+                    <Text style={{ color: colors.hawkColor }}>🦅 {fmtPct(l.p_hike)}</Text>
+                  </div>
+                  <Tooltip title={`Implied avg rate ${l.implied_rate}% (contract ${l.futures_contract} @ ${l.futures_price})`}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                      implied {l.implied_rate}% · {l.futures_contract}
+                      {l.method === 'zq_front_v1' && ' (front-month approx.)'}
+                    </Text>
+                  </Tooltip>
+                </>
+              ) : (
+                <Text type="secondary" style={{ fontSize: 12 }}>Pending — no snapshot yet</Text>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 走势图 */}
+      <div style={{ marginTop: 16 }}>
+        <Space style={{ marginBottom: 8 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>Probability trend</Text>
+          <Select
+            size="small"
+            value={selected}
+            style={{ minWidth: 160 }}
+            onChange={setSelectedMeeting}
+            options={meetings.map((m) => ({
+              value: m.meeting_date,
+              label: `${m.meeting_date}${m.is_sep ? ' (SEP)' : ''}`,
+            }))}
+          />
+        </Space>
+        <Spin spinning={trendLoading}>
+          {trend && trend.series.length >= 2 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={trend.series} margin={{ top: 4, right: 12, bottom: 0, left: -12 }}>
+                <CartesianGrid stroke={gridColor} />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: axisColor }}
+                       tickFormatter={(d: string) => d.slice(5)} />
+                <YAxis domain={[0, 1]} tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
+                       tick={{ fontSize: 10, fill: axisColor }} />
+                <RTooltip
+                  formatter={(v: unknown, name: unknown) => {
+                    const num = typeof v === 'number' ? v : Number(v);
+                    return [Number.isFinite(num) ? `${(num * 100).toFixed(0)}%` : '—', String(name)];
+                  }}
+                  contentStyle={{ background: tooltipBg, borderColor: colors.cardBorder, fontSize: 12 }}
+                  labelStyle={{ color: axisColor }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line type="monotone" dataKey="p_hike" name="Hike" stroke={colors.hawkColor} dot={false} strokeWidth={2} />
+                <Line type="monotone" dataKey="p_hold" name="Hold" stroke={colors.neutralTagColor} dot={false} strokeWidth={1.5} />
+                <Line type="monotone" dataKey="p_cut" name="Cut" stroke={colors.doveColor} dot={false} strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Trend will build up as daily snapshots accumulate (1 snapshot so far).
+            </Text>
+          )}
+        </Spin>
+      </div>
+
+      {/* 预期差对照表 */}
+      {probabilities.expectations_vs_actual.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>Expectation vs Actual (past meetings)</Text>
+          <Table
+            size="small"
+            style={{ marginTop: 6 }}
+            pagination={false}
+            dataSource={probabilities.expectations_vs_actual}
+            rowKey="meeting_date"
+            columns={[
+              {
+                title: 'Meeting', dataIndex: 'meeting_date', width: 110,
+                render: (d: string) => <Text style={{ color: colors.text, fontSize: 12 }}>{d}</Text>,
+              },
+              {
+                title: 'Implied (pre-meeting)', dataIndex: 'implied_direction', width: 140,
+                render: (dir: string | null, r) => (
+                  <Text style={{
+                    fontSize: 12,
+                    color: dir === 'hike' ? colors.hawkColor : dir === 'cut' ? colors.doveColor : colors.neutralTagColor,
+                  }}>
+                    {dir ? `${dir} ${(fmtPct(Math.max(r.implied_p?.hike ?? 0, r.implied_p?.cut ?? 0, r.implied_p?.hold ?? 0)))}` : 'n/a'}
+                  </Text>
+                ),
+              },
+              {
+                title: 'Actual', dataIndex: 'actual_direction', width: 90,
+                render: (dir: string | null, r) => (
+                  <Text style={{
+                    fontSize: 12,
+                    color: dir === 'hike' ? colors.hawkColor : dir === 'cut' ? colors.doveColor : colors.text,
+                  }}>
+                    {dir ?? '—'}{r.actual_change_bp ? ` ${r.actual_change_bp > 0 ? '+' : ''}${r.actual_change_bp}bp` : ''}
+                  </Text>
+                ),
+              },
+              {
+                title: '', dataIndex: 'hit', width: 60,
+                render: (hit: boolean | null) =>
+                  hit === null ? <Text type="secondary">n/a</Text>
+                  : hit ? <Tag color="success">✓ hit</Tag> : <Tag color="error">✗ miss</Tag>,
+              },
+              {
+                title: 'Method', dataIndex: 'method', width: 120,
+                render: (mth: string | null) => (
+                  <Tooltip title={mth === 'zq_front_v1' ? 'Backfilled from ZQ=F front-month (±10-15pp resolution)' : 'Live month contract'}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>{mth ?? ''}</Text>
+                  </Tooltip>
+                ),
+              },
+            ]}
+          />
+        </div>
+      )}
+
+      {/* 溯源脚注 */}
+      <Paragraph type="secondary" style={{ fontSize: 11, marginTop: 10, marginBottom: 0 }}>
+        Self-computed from 30-Day Fed Funds futures (Yahoo) + EFFR (FRED). May deviate a few pp
+        from CME FedWatch (25bp step assumption, ignores quarter-end effects).
+      </Paragraph>
+    </Card>
   );
 };
 

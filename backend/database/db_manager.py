@@ -630,7 +630,10 @@ class DatabaseManager:
 
             # 创建央行 Dashboard 相关表（FOMC 声明/纪要/决议/概括/Fed updates）
             self._create_fomc_tables(conn)
-            
+
+            # 创建央行 Dashboard 概率相关表（会议日历 + ZQ 期货概率快照）
+            self._create_fomc_probability_tables(conn)
+
             # 创建文件夹相关表 + 迁移 folder_id 字段
             self._create_file_folders_table(conn.cursor())
             self._migrate_add_folder_id_to_file_processing_details(conn.cursor())
@@ -1883,5 +1886,26 @@ class DatabaseManager:
             # 脚本不存在时静默跳过，不打印警告
         except Exception as e:
             print(f"❌ 创建央行 Dashboard 表时出错: {str(e)}")
+            # 不抛出异常，让系统继续运行
+            pass
+
+    def _create_fomc_probability_tables(self, conn):
+        """创建央行 Dashboard 概率相关表（会议日历 + ZQ 期货概率快照）"""
+        cursor = conn.cursor()
+
+        try:
+            migration_file = os.path.join(
+                os.path.dirname(__file__),
+                'migrations/create_fomc_probabilities.sql'
+            )
+
+            if os.path.exists(migration_file):
+                with open(migration_file, 'r', encoding='utf-8') as f:
+                    sql = f.read()
+                cursor.execute(sql)
+                print("✅ 央行 Dashboard 概率相关表创建/更新完成")
+            # 脚本不存在时静默跳过，不打印警告
+        except Exception as e:
+            print(f"❌ 创建央行 Dashboard 概率表时出错: {str(e)}")
             # 不抛出异常，让系统继续运行
             pass

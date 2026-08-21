@@ -20,9 +20,10 @@ LLM 模板可升级重生成），分表独立失效重算。
 import asyncio
 import hashlib
 import json
+import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import feedparser
@@ -110,6 +111,24 @@ RE_VOTE_FOR = re.compile(
 STATEMENT_START_ANCHOR = "For release at"
 MINUTES_START_ANCHOR = "Minutes of the Federal Open Market Committee"
 END_ANCHORS = ("Last Update:", "Last Update ")
+
+# ── 概率模块（zq_v1）：ZQ 期货自算加息/降息概率 ────────────────────────────
+# 方法论: 合约价 P → 隐含月均利率 implied = 100 - P；
+#         以 EFFR 为基准构造 hold/cut/hike 三情景的月均利率，线性插值得概率。
+# 全部从 EFFR 出发（不用区间中值）——EFFR 常年偏离区间中值几 bp，
+# 直接决定概率方向，是 V1 调研实测踩过的坑。
+
+FOMC_CALENDAR_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+FRED_EFFR_API = "https://api.stlouisfed.org/fred/series/observations"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
+
+# CME 月码: 1-12 月
+MONTH_CODES = "FGHJKMNQUVXZ"
+# 合约选择: 决议后剩余天数 ≥ 此值用当月合约，否则用下月合约
+# （月末会议当月合约只剩 2-3 天权重，对决议几乎不敏感）
+MIN_DAYS_POST_FOR_CURRENT_MONTH = 10
+# 概率步长 bp（Fed 常规动作幅度）
+PROB_STEP_PCT = 0.25
 
 
 def _frac_to_float(s: str) -> float:
@@ -1057,7 +1076,7 @@ class FedDashboardService:
             "recent_meetings": recent,
             "updates": updates["items"],
             "updates_total": updates["total"],
-            "probabilities": None,  # V1 缓做（CME FedWatch/ZQ 期货源调研中）
+            "probabilities": self.get_probabilities(),
         }
 
     def _latest_decision(self) -> Optional[Dict]:
@@ -1237,3 +1256,577 @@ class FedDashboardService:
                 logger.warning(f"[FOMC] 兜底重试失败 doc={doc_id}: {e}")
             time.sleep(2)
         return count
+
+    # ── 概率模块（zq_v1）───────────────────────────────────────────────────
+
+    def _maybe_daily_probabilities(self) -> bool:
+        """按日节流: 今天已有概率快照则跳过（轮询任务每次调用，概率每日一次）"""
+        rows = self.db_manager.fetch_all(
+            """
+            SELECT 1 FROM fomc_probabilities
+            WHERE central_bank = 'FED' AND asof_date = CURRENT_DATE LIMIT 1
+            """
+        )
+        return not rows
+
+    @staticmethod
+    def _zq_symbol(year: int, month: int) -> str:
+        """月份 → Yahoo 合约符号，如 (2026, 9) → 'ZQU26.CBT'"""
+        return f"ZQ{MONTH_CODES[month - 1]}{str(year)[-2:]}.CBT"
+
+    def _sync_fomc_meetings(self) -> int:
+        """同步 FOMC 会议日历到 fomc_meetings（fomccalendars.htm）
+
+        页面结构（2026-08 实测）: 年份锚 <a id="数字">YYYY FOMC Meetings</a>，
+        面板顺序 2026,2025,…,2021,2027（未来年在页尾！）——必须按"全部年份锚
+        排序后取下一段"切段，不能按 year+1 找。月份在 fomc-meeting__month 内
+        <strong>，日期在 fomc-meeting__date；'*' 后缀 = 带 SEP；
+        'notation vote' 无利率决议，is_notation 排除。
+
+        Returns: upsert 行数
+        """
+        html = self.safe_get(FOMC_CALENDAR_URL)
+        if not html:
+            raise Exception(f"日历获取失败: {FOMC_CALENDAR_URL}")
+
+        anchors = sorted(  # (位置, 年份)，升序即页面顺序
+            [(m.start(), int(m.group(1)))
+             for m in re.finditer(r'<a id="\d+">(\d{4}) FOMC Meetings</a>', html)]
+        )
+        meetings: List[Dict] = []
+        for (pos, year), (next_pos, _) in zip(anchors, anchors[1:] + [(len(html), 0)]):
+            seg = html[pos:next_pos]
+            months = re.findall(r'fomc-meeting__month[^>]*>\s*<strong>([^<]+)</strong>', seg)
+            dates = re.findall(r'fomc-meeting__date[^>]*>([^<]*)<', seg)
+            for month_text, date_text in zip(months, dates):
+                date_text = date_text.strip()
+                if not date_text or date_text.upper() in ("TBD", "N/A"):
+                    continue
+                is_notation = "notation" in date_text.lower()
+                is_sep = "*" in date_text
+                # 月名跨月（如 "Apr/May"）取后月；日期 "30-1" 取末日 1
+                month_name = month_text.strip().split("/")[-1]
+                try:
+                    month_num = datetime.strptime(month_name, "%B").month
+                except ValueError:
+                    continue
+                day_part = date_text.split("*")[0].strip()
+                mday = re.findall(r"\d+", day_part)
+                if not mday:
+                    continue
+                day = int(mday[-1])  # "15-16" 取 16；"22 (notation vote)" 取 22
+                # 防跨月溢出（如 "30-1" 末日 1 属下月）: day < 首日且跨月标记时进位
+                first = int(mday[0])
+                if len(mday) > 1 and day < first:  # 如 30-1
+                    month_num = month_num % 12 + 1
+                    year = year + 1 if month_num == 1 else year
+                try:
+                    meeting_date = datetime(year, month_num, day).date()
+                except ValueError:
+                    continue
+                # 首日: "15-16" 取 15；单日会议（notation）= 末日
+                first_day_num = first if len(mday) > 1 and first <= day else day
+                try:
+                    first_day = datetime(year, month_num, first_day_num).date()
+                except ValueError:
+                    first_day = meeting_date
+                meetings.append({
+                    "meeting_date": meeting_date,
+                    "first_day": first_day,
+                    "calendar_year": year,
+                    "is_sep": is_sep,
+                    "is_notation": is_notation,
+                    "raw_date_text": date_text[:64],
+                })
+
+        if not meetings:
+            raise Exception("日历解析结果为空（页面结构可能已改版）")
+
+        conn = self.db_manager.get_connection()
+        try:
+            with conn.cursor() as cur:
+                for mt in meetings:
+                    cur.execute(
+                        """
+                        INSERT INTO fomc_meetings
+                            (central_bank, meeting_date, first_day, calendar_year,
+                             is_sep, is_notation, raw_date_text, synced_at)
+                        VALUES ('FED', %s, %s, %s, %s, %s, %s, NOW())
+                        ON CONFLICT (central_bank, meeting_date) DO UPDATE SET
+                            first_day = EXCLUDED.first_day,
+                            calendar_year = EXCLUDED.calendar_year,
+                            is_sep = EXCLUDED.is_sep,
+                            is_notation = EXCLUDED.is_notation,
+                            raw_date_text = EXCLUDED.raw_date_text,
+                            synced_at = NOW()
+                        """,
+                        (mt["meeting_date"], mt["first_day"], mt["calendar_year"],
+                         mt["is_sep"], mt["is_notation"], mt["raw_date_text"]),
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        logger.info(f"[FOMC] 会议日历同步: {len(meetings)} 行")
+        return len(meetings)
+
+    def _upcoming_meetings(self, limit: int = 4) -> List[Dict]:
+        """未来 limit 次非 notation 会议（含今天，决议日当天仍算）"""
+        rows = self.db_manager.fetch_all(
+            """
+            SELECT meeting_date, is_sep FROM fomc_meetings
+            WHERE central_bank = 'FED' AND is_notation = FALSE
+              AND meeting_date >= CURRENT_DATE
+            ORDER BY meeting_date LIMIT %s
+            """,
+            (limit,),
+        )
+        return [{"meeting_date": r[0], "is_sep": r[1]} for r in rows]
+
+    def _fetch_effr(self, asof=None) -> Optional[float]:
+        """FRED 取 EFFR（asof 前 7 天窗口内最新有效值）
+
+        失败或无 key → None（调用方降级用决议区间中值）。
+        """
+        api_key = os.getenv("FRED_API_KEY")
+        if not api_key:
+            return None
+        ref = asof or datetime.now(timezone.utc).date()
+        try:
+            resp = self.session.get(
+                FRED_EFFR_API,
+                params={
+                    "series_id": "EFFR", "api_key": api_key, "file_type": "json",
+                    "observation_start": (ref - timedelta(days=7)).isoformat(),
+                    "observation_end": ref.isoformat(),
+                },
+                timeout=(10, 30),
+            )
+            resp.raise_for_status()
+            obs = [o for o in resp.json().get("observations", [])
+                   if o.get("value") not in (".", "", None)]
+            return float(obs[-1]["value"]) if obs else None
+        except Exception as e:
+            logger.warning(f"[FOMC] EFFR 获取失败: {e}")
+            return None
+
+    def _fallback_rate(self) -> Optional[float]:
+        """EFFR 不可用时的降级基准: 最新决议区间中值"""
+        d = self._latest_decision()
+        if d and d["rate_low_bp"] is not None and d["rate_high_bp"] is not None:
+            return (d["rate_low_bp"] + d["rate_high_bp"]) / 200.0
+        return None
+
+    def _fetch_zq_closes(self, symbol: str, start=None, end=None) -> Dict[str, float]:
+        """Yahoo v8 chart 取 ZQ 合约日 K 收盘 {date_str: price}
+
+        注意返回字段是 indicators（复数）。默认近 1 年。
+        """
+        end = end or datetime.now(timezone.utc).date()
+        start = start or end - timedelta(days=365)
+        params = {
+            "period1": int(datetime(start.year, start.month, start.day,
+                                    tzinfo=timezone.utc).timestamp()),
+            "period2": int((datetime(end.year, end.month, end.day,
+                                     tzinfo=timezone.utc) + timedelta(days=1)).timestamp()),
+            "interval": "1d",
+        }
+        try:
+            resp = self.session.get(f"{YAHOO_CHART_URL}/{symbol}",
+                                    params=params, timeout=(10, 30))
+            resp.raise_for_status()
+            chart = resp.json().get("chart", {})
+            if chart.get("error") or not chart.get("result"):
+                return {}
+            res = chart["result"][0]
+            ts = res.get("timestamp") or []
+            closes = ((res.get("indicators", {}).get("quote") or [{}])[0]
+                      .get("close")) or []
+            out = {}
+            for t, c in zip(ts, closes):
+                if c:
+                    out[datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat()] = float(c)
+            return out
+        except Exception as e:
+            logger.warning(f"[FOMC] ZQ 行情获取失败 {symbol}: {e}")
+            return {}
+
+    @staticmethod
+    def _prob_from_prices(price: float, base_rate: float, meeting_date,
+                          contract_month: int, year: int) -> Optional[Dict]:
+        """核心公式: 合约价 + 基准利率 + 会议日 → 概率分布（zq_v1 方法）
+
+        implied = 100 - price（合约月每日 EFFR 平均的预期）
+        base_rate = 到该会议为止的市场累计隐含基准（第一个会议用 EFFR，
+        后续会议以前一会议段的隐含利率递推——远月合约定价的是累计路径）
+        hold = base_rate（该会议不动）
+        cut  = (base*d_pre + (base-step)*d_post) / 当月天数
+        hike = (base*d_pre + (base+step)*d_post) / 当月天数
+        概率 = implied 在情景间的线性插值，clip [0,1]；越界 → overflow 标记。
+
+        注意: 会议与合约同月时 d_pre/d_post 直接按决议日切分；用下月合约时
+        （月末会议）决议发生在合约月开始前——d_pre=0，整月都是"会后"利率。
+        """
+        import calendar as _calendar
+        days_in_month = _calendar.monthrange(year, contract_month)[1]
+        if (meeting_date.year, meeting_date.month) == (year, contract_month):
+            d_post = days_in_month - meeting_date.day
+            d_pre = meeting_date.day
+        else:  # 下月合约: 会议在合约月开始前已发生
+            d_pre, d_post = 0, days_in_month
+        hold = base_rate
+        cut = (base_rate * d_pre + (base_rate - PROB_STEP_PCT) * d_post) / days_in_month
+        hike = (base_rate * d_pre + (base_rate + PROB_STEP_PCT) * d_post) / days_in_month
+        implied = 100.0 - price
+
+        overflow = False
+        if implied < cut - 1e-9:      # 定价低于一次降息 → ≥50bp 降息
+            overflow = True
+            p_cut, p_hold, p_hike = 1.0, 0.0, 0.0
+        elif implied <= hold:
+            p_cut = (hold - implied) / (hold - cut)
+            p_hold, p_hike = 1.0 - p_cut, 0.0
+        elif implied <= hike:
+            p_hike = (implied - hold) / (hike - hold)
+            p_hold, p_cut = 1.0 - p_hike, 0.0
+        else:                          # 定价高于一次加息 → ≥50bp 加息
+            overflow = True
+            p_cut, p_hold, p_hike = 0.0, 0.0, 1.0
+
+        return {
+            "p_cut": round(p_cut, 4), "p_hold": round(p_hold, 4),
+            "p_hike": round(p_hike, 4),
+            "distribution": {"-25": round(p_cut, 4), "0": round(p_hold, 4),
+                             "+25": round(p_hike, 4), "overflow": overflow},
+            "implied_rate": round(implied, 3),
+        }
+
+    def _contract_for_meeting(self, meeting_date):
+        """合约选择: d_post ≥ 10 → 当月合约；否则下月合约
+
+        2026-27 日历下会议月的下月均无其他会议（无污染）。若下月合约
+        Yahoo 未挂牌（远月缺失）由调用方跳过该会议。
+        """
+        import calendar as _calendar
+        days_in_month = _calendar.monthrange(meeting_date.year, meeting_date.month)[1]
+        d_post = days_in_month - meeting_date.day
+        if d_post >= MIN_DAYS_POST_FOR_CURRENT_MONTH:
+            y, m = meeting_date.year, meeting_date.month
+        else:
+            y, m = (meeting_date.year + 1, 1) if meeting_date.month == 12 \
+                else (meeting_date.year, meeting_date.month + 1)
+        return self._zq_symbol(y, m), y, m, d_post
+
+    def _upsert_probability(self, meeting_date, asof_date, result: Dict,
+                            contract: str, price: float, effr: float,
+                            method: str):
+        conn = self.db_manager.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO fomc_probabilities
+                        (central_bank, meeting_date, asof_date, p_cut, p_hold,
+                         p_hike, distribution, implied_rate, effr,
+                         futures_contract, futures_price, method)
+                    VALUES ('FED', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (central_bank, meeting_date, asof_date) DO UPDATE SET
+                        p_cut = EXCLUDED.p_cut, p_hold = EXCLUDED.p_hold,
+                        p_hike = EXCLUDED.p_hike,
+                        distribution = EXCLUDED.distribution,
+                        implied_rate = EXCLUDED.implied_rate, effr = EXCLUDED.effr,
+                        futures_contract = EXCLUDED.futures_contract,
+                        futures_price = EXCLUDED.futures_price,
+                        method = EXCLUDED.method,
+                        created_at = NOW()
+                    """,
+                    (meeting_date, asof_date, result["p_cut"], result["p_hold"],
+                     result["p_hike"], json.dumps(result["distribution"]),
+                     result["implied_rate"], effr, contract, price, method),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def compute_probabilities(self, force: bool = False) -> Dict[str, Any]:
+        """每日快照: 同步日历 → 未来 4 次会议 → 逐个算概率入库（zq_v1）
+
+        调度设计: task_scheduling 有 UNIQUE(type)（一 type 一行），概率快照
+        不单设调度行——由 RSS 轮询任务（fed_dashboard mode=poll, */30min）
+        每天首个窗口顺带触发（_maybe_daily_probabilities 按日节流）。
+        force=True 供手动刷新（POST /refresh type=probabilities）。
+        """
+        if not force and not self._maybe_daily_probabilities():
+            return {"snapshots": 0, "meetings": [], "skipped": "already_done_today"}
+        self._sync_fomc_meetings()
+        meetings = self._upcoming_meetings(limit=4)
+        if not meetings:
+            return {"snapshots": 0, "meetings": []}
+
+        effr = self._fetch_effr()
+        rate_note = "effr"
+        if effr is None:
+            effr = self._fallback_rate()
+            rate_note = "midpoint_fallback"
+            if effr is None:
+                raise Exception("无 EFFR 且无决议区间，无法计算概率")
+
+        asof = datetime.now(timezone.utc).date()
+        today_str = asof.isoformat()
+        done, results = 0, []
+        base_rate = effr  # 逐会议递推基准: 首会议=EFFR，后续=前段累计隐含
+        for mt in meetings:
+            md = mt["meeting_date"]
+            contract, cy, cm, d_post = self._contract_for_meeting(md)
+            closes = self._fetch_zq_closes(contract, start=asof - timedelta(days=14))
+            price = closes.get(today_str) or (closes[max(closes)] if closes else None)
+            if price is None:
+                results.append({"meeting_date": str(md), "status": "no_contract"})
+                continue
+            res = self._prob_from_prices(price, base_rate, md, cm, cy)
+            self._upsert_probability(md, asof, res, contract, price, base_rate, "zq_v1")
+            done += 1
+            results.append({
+                "meeting_date": str(md), "status": "ok",
+                "contract": contract, "price": price,
+                "p_hike": res["p_hike"], "p_hold": res["p_hold"],
+                "p_cut": res["p_cut"], "effr": base_rate,
+            })
+            # 递推: 该会议后的基准 = 本合约隐含利率（条件期望近似——
+            # 概率加权理论上更准，但 implied 本身就是市场对全路径的定价）
+            base_rate = res["implied_rate"]
+            time.sleep(1)  # Yahoo 限流友好
+        logger.info(f"[FOMC] 概率快照: {done}/{len(meetings)} 会议, 基准={rate_note}")
+        return {"snapshots": done, "meetings": results, "rate_basis": rate_note}
+
+    # ── 概率回填（zq_front_v1）──────────────────────────────────────────────
+
+    def backfill_probabilities(self, start: str = "2026-01-01") -> Dict[str, Any]:
+        """回填历史概率: ZQ=F 连续合约（当月段≈当月合约）+ FRED EFFR 日序列
+
+        已到期月合约在 Yahoo 已 delisted（实测 2026-08），连续合约当月段
+        是唯一可得近似——method='zq_front_v1' 区分，分辨率弱于在市合约，
+        月末会议（当月仅 1-2 天主力权重）±10-15pp 属预期。
+        范围: start 起所有已过会且有决议记录的会议，会前 45 天窗口逐日快照。
+        """
+        start_date = datetime.strptime(start, "%Y-%m-%d").date()
+        today = datetime.now(timezone.utc).date()
+
+        # 历史会议 = 有决议记录的（fomc_decisions.meeting_date=首日，
+        # fomc_meetings.first_day 对齐），排除今天的快照冲突
+        hist = self.db_manager.fetch_all(
+            """
+            SELECT m.meeting_date FROM fomc_meetings m
+            JOIN fomc_decisions d
+              ON d.central_bank = m.central_bank
+             AND d.meeting_date = COALESCE(m.first_day, m.meeting_date)
+            WHERE m.central_bank = 'FED' AND m.is_notation = FALSE
+              AND m.meeting_date < CURRENT_DATE
+              AND m.meeting_date >= %s
+            ORDER BY m.meeting_date
+            """,
+            (start_date,),
+        )
+        meeting_dates = [r[0] for r in hist]
+        if not meeting_dates:
+            return {"meetings": 0, "snapshots": 0}
+
+        # 1) 连续合约全量日 K + EFFR 日序列（各一次请求）
+        front = self._fetch_zq_closes("ZQ=F", start=start_date - timedelta(days=60),
+                                      end=today)
+        if not front:
+            raise Exception("ZQ=F 连续合约历史获取失败")
+
+        api_key = os.getenv("FRED_API_KEY")
+        effr_by_date: Dict[str, float] = {}
+        if api_key:
+            try:
+                resp = self.session.get(
+                    FRED_EFFR_API,
+                    params={
+                        "series_id": "EFFR", "api_key": api_key, "file_type": "json",
+                        "observation_start": (start_date - timedelta(days=60)).isoformat(),
+                        "observation_end": today.isoformat(),
+                    },
+                    timeout=(10, 30),
+                )
+                resp.raise_for_status()
+                effr_by_date = {
+                    o["date"]: float(o["value"])
+                    for o in resp.json().get("observations", [])
+                    if o.get("value") not in (".", "", None)
+                }
+            except Exception as e:
+                logger.warning(f"[FOMC] 回填 EFFR 序列获取失败: {e}")
+
+        if not effr_by_date:  # 降级: 全程用一个常数 EFFR（最新决议区间中值）
+            fb = self._fallback_rate()
+            if fb is None:
+                raise Exception("回填无 EFFR 序列且无决议区间")
+            effr_by_date = {d: fb for d in front.keys()}
+            logger.warning("[FOMC] 回填使用区间中值常数近似 EFFR")
+
+        # 2) 逐会议 × 会前 45 天窗口
+        total, detail = 0, []
+        for md in meeting_dates:
+            import calendar as _calendar
+            # 当月段: 当月主力=当月合约（月初至月末）
+            month_days = [d for d in front
+                          if d.startswith(f"{md.year:04d}-{md.month:02d}")]
+            if not month_days:
+                detail.append({"meeting_date": str(md), "snapshots": 0,
+                               "note": "no_front_data"})
+                continue
+            # 决议日当日 14:00 ET 前的市场价仍属"会前预期"——保留决议日快照
+            window = [d for d in sorted(front)
+                      if md - timedelta(days=45) <= datetime.strptime(d, "%Y-%m-%d").date() <= md
+                      and d.startswith(f"{md.year:04d}-{md.month:02d}")]
+            days_in_month = _calendar.monthrange(md.year, md.month)[1]
+            n = 0
+            for d in window:
+                price = front[d]
+                effr = effr_by_date.get(d) or effr_by_date.get(
+                    max(k for k in effr_by_date if k <= d), None)
+                if effr is None:
+                    continue
+                res = self._prob_from_prices(price, effr, md, md.month, md.year)
+                self._upsert_probability(
+                    md, datetime.strptime(d, "%Y-%m-%d").date(), res,
+                    "ZQ=F(front)", price, effr, "zq_front_v1",
+                )
+                n += 1
+            total += n
+            detail.append({"meeting_date": str(md), "snapshots": n})
+        logger.info(f"[FOMC] 概率回填: {len(meeting_dates)} 会议 {total} 快照")
+        return {"meetings": len(meeting_dates), "snapshots": total, "detail": detail}
+
+    # ── 概率 API 组装 ────────────────────────────────────────────────────────
+
+    def get_probabilities(self) -> Optional[Dict[str, Any]]:
+        """概率卡片数据: 未来会议最新快照 + 历史预期差对照"""
+        # 未来 4 次会议（即使还没快照也返回，前端显示 pending）
+        upcoming = self._upcoming_meetings(limit=4)
+        asof = datetime.now(timezone.utc).date()
+        next_meetings = []
+        for mt in upcoming:
+            md = mt["meeting_date"]
+            rows = self.db_manager.fetch_all(
+                """
+                SELECT asof_date, p_cut, p_hold, p_hike, implied_rate, effr,
+                       futures_contract, futures_price, method
+                FROM fomc_probabilities
+                WHERE central_bank = 'FED' AND meeting_date = %s
+                ORDER BY asof_date DESC
+                """,
+                (md,),
+            )
+            latest = rows[0] if rows else None
+            trend = [{
+                "date": str(r[0]), "p_cut": float(r[1]) if r[1] is not None else None,
+                "p_hold": float(r[2]) if r[2] is not None else None,
+                "p_hike": float(r[3]) if r[3] is not None else None,
+            } for r in rows[:30]][::-1]  # 升序给折线图
+            next_meetings.append({
+                "meeting_date": str(md),
+                "days_away": (md - asof).days,
+                "is_sep": mt["is_sep"],
+                "latest": ({
+                    "asof_date": str(latest[0]),
+                    "p_cut": float(latest[1]) if latest[1] is not None else None,
+                    "p_hold": float(latest[2]) if latest[2] is not None else None,
+                    "p_hike": float(latest[3]) if latest[3] is not None else None,
+                    "implied_rate": float(latest[4]) if latest[4] is not None else None,
+                    "effr": float(latest[5]) if latest[5] is not None else None,
+                    "futures_contract": latest[6],
+                    "futures_price": float(latest[7]) if latest[7] is not None else None,
+                    "method": latest[8],
+                } if latest else None),
+                "trend": trend,
+            })
+
+        # 预期差对照: 每历史会议的会前最后快照 vs 实际决议
+        # （decisions.meeting_date=首日, probabilities.meeting_date=末日 → 差 1 天）
+        rows = self.db_manager.fetch_all(
+            """
+            SELECT d.meeting_date, d.decision_direction, d.change_bp,
+                   p.asof_date, p.p_cut, p.p_hold, p.p_hike, p.method
+            FROM fomc_decisions d
+            LEFT JOIN LATERAL (
+                SELECT asof_date, p_cut, p_hold, p_hike, method
+                FROM fomc_probabilities p
+                WHERE p.central_bank = d.central_bank
+                  AND p.meeting_date = d.meeting_date + 1
+                  AND p.asof_date <= d.meeting_date + 1
+                ORDER BY asof_date DESC LIMIT 1
+            ) p ON TRUE
+            WHERE d.central_bank = 'FED'
+            ORDER BY d.meeting_date DESC LIMIT 12
+            """
+        )
+        expectations = []
+        for r in rows:
+            md, direction, change_bp, asof_, p_cut, p_hold, p_hike, method = r
+            implied_dir = None
+            hit = None
+            if p_hike is not None:
+                m = max(float(p_cut or 0), float(p_hold or 0), float(p_hike or 0))
+                if m == float(p_hike or 0):
+                    implied_dir = "hike"
+                elif m == float(p_cut or 0):
+                    implied_dir = "cut"
+                else:
+                    implied_dir = "hold"
+                hit = (implied_dir == direction)
+            expectations.append({
+                "meeting_date": str(md),
+                "actual_direction": direction,
+                "actual_change_bp": change_bp,
+                "implied_direction": implied_dir,
+                "implied_p": ({"cut": float(p_cut), "hold": float(p_hold),
+                               "hike": float(p_hike)}
+                              if p_hike is not None else None),
+                "asof_date": str(asof_) if asof_ else None,
+                "hit": hit,
+                "method": method,
+            })
+
+        latest_snap = self.db_manager.fetch_all(
+            "SELECT MAX(asof_date) FROM fomc_probabilities WHERE central_bank='FED'"
+        )
+        return {
+            "asof_date": str(latest_snap[0][0]) if latest_snap and latest_snap[0][0] else None,
+            "next_meetings": next_meetings,
+            "expectations_vs_actual": expectations,
+            "method_note": (
+                "ZQ 30-Day Fed Funds futures implied; self-computed, may deviate "
+                "a few pp from CME FedWatch (25bp step, EFFR basis, ignores "
+                "quarter-end effects)"
+            ),
+        }
+
+    def get_probability_trend(self, meeting_date: str, days: int = 90) -> Dict[str, Any]:
+        """单会议完整概率趋势（折线图数据源）"""
+        md = datetime.strptime(meeting_date, "%Y-%m-%d").date()
+        rows = self.db_manager.fetch_all(
+            """
+            SELECT asof_date, p_cut, p_hold, p_hike, implied_rate, effr,
+                   futures_contract, futures_price, method
+            FROM fomc_probabilities
+            WHERE central_bank = 'FED' AND meeting_date = %s
+              AND asof_date >= %s
+            ORDER BY asof_date
+            """,
+            (md, md - timedelta(days=days)),
+        )
+        series = [{
+            "date": str(r[0]), "p_cut": float(r[1]) if r[1] is not None else None,
+            "p_hold": float(r[2]) if r[2] is not None else None,
+            "p_hike": float(r[3]) if r[3] is not None else None,
+            "implied_rate": float(r[4]) if r[4] is not None else None,
+        } for r in rows]
+        return {"meeting_date": meeting_date, "days": days, "series": series}

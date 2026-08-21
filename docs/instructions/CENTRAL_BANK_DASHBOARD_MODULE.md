@@ -2,22 +2,23 @@
 
 > **创建**：2026-08-20
 > **需求来源**：`docs/DASHBOARD_REQUIREMENTS.md` 3.3 央行模块（2026-08-19 会议）
-> **状态**：V1 已完成开发并实测通过（仅 Fed；概率模块缓做占位）
+> **状态**：V1 + V2（概率模块）已完成开发并实测通过（仅 Fed）
 > **相关文档**：`LLM_ARCHITECTURE_OVERVIEW.md`（模板体系）、`SCHEDULER_DEVELOPMENT_GUIDE.md`（调度器）
 
 ---
 
 ## 1. 模块概述
 
-从 federalreserve.gov 官网抓取 FOMC 利率决议声明与会议纪要原文，regex 结构化抽取利率决议（区间/票型/异议者），并通过 LLM 生成中文五段式概括；轮询 Fed 官方 RSS 维护 updates 流。前端 `/central-bank` 页面四卡片展示。
+从 federalreserve.gov 官网抓取 FOMC 利率决议声明与会议纪要原文，regex 结构化抽取利率决议（区间/票型/异议者），并通过 LLM 生成中文五段式概括；轮询 Fed 官方 RSS 维护 updates 流；基于 ZQ 30-Day Fed Funds 期货自算各会议加息/降息概率并每日快照。前端 `/central-bank` 页面四卡片展示。
 
-**三条数据类型的分工**（模块设计核心）：
+**四条数据类型的分工**（模块设计核心）：
 
 | 类型 | 来源 | 层 |
 |---|---|---|
 | 结构化数值 | Fed 原文 regex 抽取（主）+ EODHD `economic_events` 交叉验证 | `fomc_decisions` |
 | 一手文本 | 声明 ~200 词 / 纪要 ~5,400 词 | `fomc_documents` |
 | 目录/通知 | `press_all.xml` RSS（title/link/pubDate/category） | `fed_updates` |
+| 市场预期 | ZQ 期货价 + EFFR 自算概率（时序快照） | `fomc_probabilities` |
 
 **关键背景**（为什么这样设计）：
 
@@ -179,6 +180,65 @@ RSS (press_all.xml) 每 30 分钟轮询
 
 ---
 
+## 5.5 概率模块（V2，zq_v1 方法）
+
+### 方法论
+
+基于 **30-Day Fed Funds 期货（CME 代码 ZQ）** 自算各 FOMC 会议的加息/降息概率——与 CME FedWatch 同原料同公式，绕开其付费 API。核心恒等式：`合约价 = 100 − 合约月日均 EFFR 预期`。
+
+```
+implied = 100 − price                      # 合约隐含月均利率
+hold = base_rate                           # 该会议不动（整月旧利率）
+cut  = (base*d_pre + (base−0.25)*d_post) / 当月天数
+hike = (base*d_pre + (base+0.25)*d_post) / 当月天数
+概率 = implied 在情景间的线性插值，clip [0,1]；越界 → overflow 标记
+```
+
+三个关键设计（均为实测踩坑结论）：
+
+- **基准利率用 EFFR 不用区间中值**：EFFR 常年偏离区间中值几 bp（实测 3.63 vs 3.625），直接决定概率方向。EFFR 取自 FRED（`EFFR` 序列，`FRED_API_KEY`），失败降级区间中值并标记 `rate_basis`
+- **逐会议递推基准**：远月合约定价的是**累计路径**。首会议基准=EFFR，后续会议基准=前一会议段合约的隐含利率（`base_rate = res["implied_rate"]` 递推）。不做递推会把 10 月会议算成 100% 加息（实测踩坑）
+- **合约选择规则**：`d_post = 当月天数 − 决议日 ≥ 10` 用当月合约，否则用下月合约（月末会议当月合约只剩 1-4 天权重不敏感；此时下月合约 `d_pre=0` 整月都是会后利率）。月码 `FGHJKMNQUVXZ`，symbol 如 `ZQU26.CBT`
+
+### 数据源（全部实测 2026-08-20）
+
+| 源 | 用途 | 状态 |
+|---|---|---|
+| Yahoo v8 chart `/finance/chart/ZQxxYY.CBT` | 在市月合约日 K | ✅ 近月齐全；**已到期合约 delisted 无数据** |
+| Yahoo `ZQ=F` 连续合约 | 历史回填（当月段≈当月合约） | ✅ 2026 全年覆盖 |
+| FRED `EFFR` | 日频基准利率 | ✅ `observation_start/end` 取历史 |
+| EODHD | — | ❌ ZQ 品种 NA，放弃 |
+
+### 两张表（`migrations/create_fomc_probabilities.sql`）
+
+- `fomc_meetings`：会议日历（`fomccalendars.htm` 同步，2021–2027）。⚠️ 语义：`meeting_date`=**会议末日**（决议发布日，概率计算用），`first_day`=会议首日（**对齐 `fomc_decisions.meeting_date` 语义**——V1 存首日，JOIN 预期差对照时必须用 first_day）。`is_sep`（日历 `*` 后缀）、`is_notation`（"notation vote" 无决议，排除）。解析注意：年份锚面板顺序 2026,2025,…,**2027 在页尾**，切段须按全部锚排序取下一段；"30-1" 跨月日期取末日进位下月
+- `fomc_probabilities`：每日快照。`UNIQUE(central_bank, meeting_date, asof_date)`；`p_cut/p_hold/p_hike` 冗余列（折线直查）+ `distribution` JSONB（含 overflow 标记）+ 溯源字段（合约代码/价格/EFFR/method）。`method`: `zq_v1`（在市合约）/ `zq_front_v1`（连续合约回填，分辨率 ±10-15pp）
+
+### 任务与调度
+
+- `fomc_compute_probabilities`（data_fetching）：同步日历 → 未来 4 次会议 → Yahoo+EFFR → upsert。**按日节流**（`_maybe_daily_probabilities`）；`force=True` 供手动刷新
+- `fomc_backfill_probabilities`（data_fetching）：一次性回填。ZQ=F 全量日 K + EFFR 日序列各 1 请求 → 有决议记录的历史会议 × 会前 45 天窗口
+- **调度设计**：`task_scheduling` 有 `UNIQUE(type)` 约束（一 type 一行）——概率**不单设调度行**，由 `fomc_poll_updates`（*/30min）末尾顺带派发，service 内按日节流保证每天只算一次。scheduler 手动触发入口：`fed_dashboard` 任务 `params.mode='probabilities'`
+
+### API
+
+- `GET /dashboard` 的 `probabilities` 字段：`asof_date` + `next_meetings[]`（最新快照+30 点内联 trend）+ `expectations_vs_actual[]`（LATERAL 取会前最后快照 vs 实际决议，hit 布尔）+ `method_note`
+- `GET /probabilities?meeting_date=&days=90`：单会议完整趋势
+- `POST /refresh` 新增 type：`probabilities`（force 快照）/ `probabilities_backfill`
+
+### 前端（ProbabilitiesCard）
+
+未来 4 次会议分布横条（🕊cut 鸽蓝/hold 灰/🦅hike 鹰红，纯 div 宽度）+ 倒计时/SEP 标记 + 会议 Select 切换 recharts 三线走势图（明暗主题适配）+ 预期差对照表（✓hit/✗miss）+ 溯源脚注（合约/EFFR/method/与 FedWatch 偏差声明）。Refresh 按钮并发派发 `poll` + `probabilities`。
+
+### 已知边界
+
+- 与 CME FedWatch 有几 pp 稳定偏差（25bp 步长假设、忽略季末效应）——卡片脚注声明
+- 回填 method=`zq_front_v1` 分辨率弱（连续合约当月段近似），月末会议 ±10-15pp；method 字段区分，前端 hover 提示
+- 2027 远月合约 Yahoo 未挂牌时该会议显示 pending（no_contract 跳过不报错）
+- overflow（市场定价 ≥50bp）clip 到边界 + 标记，不静默
+
+---
+
 ## 6. 运维操作
 
 ```bash
@@ -232,13 +292,21 @@ ORDER BY fd.meeting_date DESC;
 - migration 幂等（重复执行验证过）
 - 前端 `npm run build` 通过
 
+**V2 概率模块已实测验证**（2026-08-20）：
+
+- 会议日历同步：2021–2027 共 55 行（跨月 "30-1" 进位正确、notation vote 排除、SEP 标记无误）
+- 在市快照：9/16 → 34% hike / 66% hold（ZQU26 + EFFR 3.63，与调研期手算一致）；远月递推后 30-39% hike（修复了不递推导致 100% 加息的 bug）
+- 回填：5 会议 × 84 快照（ZQ=F 当月段 + EFFR 日序列）
+- 预期差对照：2026 五次会议 5/5 hit（市场隐含 hold = 实际 hold）
+- 三端点 curl 通过（dashboard / probabilities 趋势 / refresh 派发）
+- 前端 build 通过，dev bundle 含概率卡
+
 **遗留 / 后续**：
 
 | 项 | 说明 |
 |---|---|
-| 概率模块 | V1 占位。数据源候选：CME FedWatch 官方 API（~$25/月）、`pyfedwatch`（ZQ 30-Day Fed Funds 期货自算）、Yahoo `ZQ=F`（现有 market_data_service 可拉）。确定后补第四卡片 |
 | PBoC / BOJ | 表结构已预留 `central_bank` 字段；需调研两国央行官网 RSS/抓取管道后按同模式扩展 |
 | 7 月纪要 | 发布后由 30 分钟调度自动发现（留有 pending/failed 行自愈）——首个全自动增量验证点 |
-| 9 月会议 | 9/15–16；声明发布当日调度自动捕获 |
+| 9 月会议 | 9/15–16；声明发布当日调度自动捕获；概率走势随每日快照积累 |
 | EODHD 事件名依赖 | `'Fed Interest Rate Decision'` 非契约，EODHD 改名仅交叉验证列显示 n/a（主数据来自 Fed 原文，不阻塞） |
-| 生产部署 | 需重启 backend / celery worker / scheduler 使新代码与调度行生效；migrations 两个 SQL 需 psql 应用（本机已应用） |
+| 生产部署 | 需重启 backend / celery worker / scheduler 使新代码生效；migrations（create_fomc_dashboard.sql / insert_fomc_summary_template.sql / add_fed_dashboard_scheduler_task_type.sql / create_fomc_probabilities.sql）需 psql 应用（本机已应用） |

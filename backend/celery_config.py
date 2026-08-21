@@ -136,6 +136,8 @@ task_routes = {
     'fomc_fetch_document': {'queue': 'data_fetching'},
     'fomc_backfill_2026': {'queue': 'data_fetching'},
     'fomc_retry_pending': {'queue': 'data_fetching'},
+    'fomc_compute_probabilities': {'queue': 'data_fetching'},
+    'fomc_backfill_probabilities': {'queue': 'data_fetching'},
     'fomc_summarize': {'queue': 'ai_processing'},
 }
 

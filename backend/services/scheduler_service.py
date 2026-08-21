@@ -1569,21 +1569,28 @@ class SchedulerService:
         默认 mode=poll: 轮询 press_all.xml RSS（updates 流 + 发现新声明/纪要
         + 派发抓取/概括 + 兜底重试 failed 文档）。
         每 30 分钟一次；纪要发布（会议+3周）由该轮询自动发现。
+        mode=probabilities: ZQ 期货概率每日快照（同步会议日历 + 算未来
+        4 次会议加息/降息概率），工作日美东收盘后一次。
 
         Args:
             params:
                 - mode: 'poll'（默认）| 'retry'（仅兜底重试）
+                       | 'probabilities'（概率快照）
         """
         try:
             logger.info("分发央行 Dashboard Celery 任务", params=params)
             from backend.tasks.fomc_tasks import (
                 fomc_poll_updates_task, fomc_retry_pending_task,
+                fomc_compute_probabilities_task,
             )
 
             mode = params.get('mode', 'poll')
             if mode == 'retry':
                 task = fomc_retry_pending_task.delay()
                 message = f"✅ 央行 Dashboard: 已提交兜底重试任务 {task.id}"
+            elif mode == 'probabilities':
+                task = fomc_compute_probabilities_task.delay(force=True)
+                message = f"✅ 央行 Dashboard: 已提交概率快照任务 {task.id}"
             else:
                 task = fomc_poll_updates_task.delay()
                 message = f"✅ 央行 Dashboard: 已提交 RSS 轮询任务 {task.id}"

@@ -63,6 +63,51 @@ export interface RecentMeeting {
   rate_high_bp: number | null;
 }
 
+export interface ProbLatestSnapshot {
+  asof_date: string;
+  p_cut: number | null;
+  p_hold: number | null;
+  p_hike: number | null;
+  implied_rate: number | null;
+  effr: number | null;
+  futures_contract: string | null;
+  futures_price: number | null;
+  method: string | null;
+}
+
+export interface ProbTrendPoint {
+  date: string;
+  p_cut: number | null;
+  p_hold: number | null;
+  p_hike: number | null;
+}
+
+export interface NextMeetingProb {
+  meeting_date: string;
+  days_away: number;
+  is_sep: boolean;
+  latest: ProbLatestSnapshot | null;
+  trend: ProbTrendPoint[];
+}
+
+export interface ExpectationVsActual {
+  meeting_date: string;
+  actual_direction: 'hike' | 'cut' | 'hold' | null;
+  actual_change_bp: number | null;
+  implied_direction: 'hike' | 'cut' | 'hold' | null;
+  implied_p: { cut: number; hold: number; hike: number } | null;
+  asof_date: string | null;
+  hit: boolean | null;
+  method: string | null;
+}
+
+export interface ProbabilitiesPayload {
+  asof_date: string | null;
+  next_meetings: NextMeetingProb[];
+  expectations_vs_actual: ExpectationVsActual[];
+  method_note: string;
+}
+
 export interface DashboardData {
   decision: DecisionCard | null;
   statement_summary: SummaryInfo | null;
@@ -70,7 +115,7 @@ export interface DashboardData {
   recent_meetings: RecentMeeting[];
   updates: UpdateItem[];
   updates_total: number;
-  probabilities: null; // V1 缓做
+  probabilities: ProbabilitiesPayload | null;
 }
 
 export interface UpdatesPage {
@@ -101,7 +146,22 @@ export interface DocumentDetail {
 }
 
 export type RefreshType =
-  | 'poll' | 'fetch' | 'summarize' | 'backfill' | 'retry';
+  | 'poll' | 'fetch' | 'summarize' | 'backfill' | 'retry'
+  | 'probabilities' | 'probabilities_backfill';
+
+export interface ProbabilityTrendPoint {
+  date: string;
+  p_cut: number | null;
+  p_hold: number | null;
+  p_hike: number | null;
+  implied_rate: number | null;
+}
+
+export interface ProbabilityTrend {
+  meeting_date: string;
+  days: number;
+  series: ProbabilityTrendPoint[];
+}
 
 // ===== API =====
 
@@ -109,6 +169,14 @@ export const fomcAPI = {
   /** 央行 Dashboard 聚合数据 */
   getDashboard: async (): Promise<DashboardData> => {
     return api.get<DashboardData>('/fomc/dashboard');
+  },
+
+  /** 单会议概率完整趋势（折线图数据源） */
+  getProbabilityTrend: async (meetingDate: string, days = 90): Promise<ProbabilityTrend> => {
+    return api.get<ProbabilityTrend>('/fomc/probabilities', {
+      meeting_date: meetingDate,
+      days,
+    });
   },
 
   /** 文档原文 + 概括（原文对照用） */
