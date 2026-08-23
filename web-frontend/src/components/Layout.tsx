@@ -76,6 +76,7 @@ function getSelectedNavKey(pathname: string): string {
   if (pathname.startsWith('/feeds')) return '/feeds';
   if (pathname.startsWith('/dashboard')) return '/dashboard';
   if (pathname.startsWith('/investment-themes')) return '/investment-themes';
+  if (pathname.startsWith('/central-bank')) return '/central-bank';
   return pathname;
 }
 

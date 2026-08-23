@@ -22,6 +22,9 @@ export interface DecisionCard {
   previous?: {
     meeting_date: string;
     rate_high_bp: number;
+    vote_for?: number | null;
+    vote_against?: number | null;
+    decision_direction?: string | null;
   } | null;
   eodhd_cross_check?: {
     actual: number | null;
@@ -43,6 +46,7 @@ export interface SummaryInfo {
   summary_content?: string | null;
   prev_meeting_date?: string | null;
   generated_at?: string | null;
+  published_at?: string | null;
 }
 
 export interface UpdateItem {
@@ -60,7 +64,10 @@ export interface RecentMeeting {
   change_bp: number | null;
   vote_for: number | null;
   vote_against: number | null;
+  rate_low_bp?: number | null;
   rate_high_bp: number | null;
+  dissenters?: Dissenter[];
+  source_url?: string | null;
 }
 
 export interface ProbLatestSnapshot {
@@ -166,9 +173,10 @@ export interface ProbabilityTrend {
 // ===== API =====
 
 export const fomcAPI = {
-  /** 央行 Dashboard 聚合数据 */
-  getDashboard: async (): Promise<DashboardData> => {
-    return api.get<DashboardData>('/fomc/dashboard');
+  /** 央行 Dashboard 聚合数据。meetingDate 为会议首日时返回该会决议/概括。 */
+  getDashboard: async (meetingDate?: string): Promise<DashboardData> => {
+    return api.get<DashboardData>('/fomc/dashboard',
+      meetingDate ? { meeting_date: meetingDate } : undefined);
   },
 
   /** 单会议概率完整趋势（折线图数据源） */

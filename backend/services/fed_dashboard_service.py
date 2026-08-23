@@ -683,7 +683,9 @@ class FedDashboardService:
             return None
         rows = self.db_manager.fetch_all(
             """
-            SELECT meeting_date, rate_high_bp FROM fomc_decisions
+            SELECT meeting_date, rate_high_bp, vote_for, vote_against,
+                   decision_direction
+            FROM fomc_decisions
             WHERE central_bank = 'FED' AND meeting_date < %s
             ORDER BY meeting_date DESC LIMIT 1
             """,
@@ -691,7 +693,13 @@ class FedDashboardService:
         )
         if not rows or rows[0][1] is None:
             return None
-        return {"meeting_date": rows[0][0], "rate_high_bp": rows[0][1]}
+        return {
+            "meeting_date": rows[0][0],
+            "rate_high_bp": rows[0][1],
+            "vote_for": rows[0][2],
+            "vote_against": rows[0][3],
+            "decision_direction": rows[0][4],
+        }
 
     def _upsert_decision(self, doc_id: int, source_url: str, r: Dict):
         conn = self.db_manager.get_connection()
@@ -1019,52 +1027,49 @@ class FedDashboardService:
 
     # ── API 数据组装（同步）────────────────────────────────────────────────
 
-    def get_dashboard(self) -> Dict[str, Any]:
-        """Dashboard 聚合端点数据组装"""
-        decision_row = self._latest_decision()
-        decision = None
-        if decision_row:
-            d = decision_row
-            prev = self._get_previous_decision(d["meeting_date"])
-            decision = {
-                "meeting_date": str(d["meeting_date"]) if d["meeting_date"] else None,
-                "decision_date": str(d["decision_date"]) if d["decision_date"] else None,
-                "rate_low_bp": d["rate_low_bp"],
-                "rate_high_bp": d["rate_high_bp"],
-                "decision_direction": d["decision_direction"],
-                "change_bp": d["change_bp"],
-                "vote_for": d["vote_for"],
-                "vote_against": d["vote_against"],
-                "dissenters": d["dissenters"] or [],
-                "source_url": d["source_url"],
-                "previous": ({
-                    "meeting_date": str(prev["meeting_date"]),
-                    "rate_high_bp": prev["rate_high_bp"],
-                } if prev else None),
-                "eodhd_cross_check": self._eodhd_cross_check(d["decision_date"]),
-            }
+    def get_dashboard(self, meeting_date: Optional[str] = None) -> Dict[str, Any]:
+        """Dashboard 聚合端点数据组装。meeting_date 有值时取该会决议/概括。"""
+        decision_row = (
+            self._decision_by_meeting_date(meeting_date)
+            if meeting_date else self._latest_decision()
+        )
+        decision = self._serialize_decision(decision_row) if decision_row else None
 
-        stmt = self._latest_summary("statement")
-        mins = self._latest_summary("minutes")
+        if meeting_date:
+            stmt = self._summary_by_meeting("statement", meeting_date)
+            mins = self._summary_by_meeting("minutes", meeting_date)
+        else:
+            stmt = self._latest_summary("statement")
+            mins = self._latest_summary("minutes")
 
         recent = []
         rows = self.db_manager.fetch_all(
             """
             SELECT d.meeting_date, d.decision_direction, d.change_bp,
-                   d.vote_for, d.vote_against, d.rate_high_bp
+                   d.vote_for, d.vote_against, d.rate_low_bp, d.rate_high_bp,
+                   d.dissenters, d.source_url
             FROM fomc_decisions d
             WHERE d.central_bank = 'FED'
             ORDER BY d.meeting_date DESC LIMIT 8
             """
         )
         for r in rows:
+            dissenters = r[7] or []
+            if isinstance(dissenters, str):
+                try:
+                    dissenters = json.loads(dissenters)
+                except (ValueError, TypeError):
+                    dissenters = []
             recent.append({
-                "meeting_date": str(r[0]),
+                "meeting_date": str(r[0])[:10] if r[0] else None,
                 "decision_direction": r[1],
                 "change_bp": r[2],
                 "vote_for": r[3],
                 "vote_against": r[4],
-                "rate_high_bp": r[5],
+                "rate_low_bp": r[5],
+                "rate_high_bp": r[6],
+                "dissenters": dissenters,
+                "source_url": r[8],
             })
 
         updates = self.get_updates(page=1, page_size=20, monetary_only=False)
@@ -1079,17 +1084,44 @@ class FedDashboardService:
             "probabilities": self.get_probabilities(),
         }
 
-    def _latest_decision(self) -> Optional[Dict]:
+    def _serialize_decision(self, d: Dict) -> Dict[str, Any]:
+        prev = self._get_previous_decision(d["meeting_date"])
+        return {
+            "meeting_date": str(d["meeting_date"])[:10] if d["meeting_date"] else None,
+            "decision_date": str(d["decision_date"])[:10] if d["decision_date"] else None,
+            "rate_low_bp": d["rate_low_bp"],
+            "rate_high_bp": d["rate_high_bp"],
+            "decision_direction": d["decision_direction"],
+            "change_bp": d["change_bp"],
+            "vote_for": d["vote_for"],
+            "vote_against": d["vote_against"],
+            "dissenters": d["dissenters"] or [],
+            "source_url": d["source_url"],
+            "previous": ({
+                "meeting_date": str(prev["meeting_date"])[:10],
+                "rate_high_bp": prev["rate_high_bp"],
+                "vote_for": prev.get("vote_for"),
+                "vote_against": prev.get("vote_against"),
+                "decision_direction": prev.get("decision_direction"),
+            } if prev else None),
+            "eodhd_cross_check": self._eodhd_cross_check(d["decision_date"]),
+        }
+
+    def _decision_by_meeting_date(self, meeting_date: str) -> Optional[Dict]:
         rows = self.db_manager.fetch_all(
             """
             SELECT meeting_date, decision_date, rate_low_bp, rate_high_bp,
                    decision_direction, change_bp, vote_for, vote_against,
                    dissenters, source_url
             FROM fomc_decisions
-            WHERE central_bank = 'FED'
-            ORDER BY meeting_date DESC LIMIT 1
-            """
+            WHERE central_bank = 'FED' AND meeting_date = %s
+            LIMIT 1
+            """,
+            (meeting_date,),
         )
+        return self._row_to_decision(rows)
+
+    def _row_to_decision(self, rows) -> Optional[Dict]:
         if not rows:
             return None
         cols = ["meeting_date", "decision_date", "rate_low_bp", "rate_high_bp",
@@ -1103,28 +1135,12 @@ class FedDashboardService:
                 d["dissenters"] = []
         return d
 
-    def _latest_summary(self, doc_type: str) -> Optional[Dict]:
-        rows = self.db_manager.fetch_all(
-            """
-            SELECT s.document_id, s.doc_type, d.meeting_date, d.title,
-                   d.source_url, s.status, s.template_id, s.model,
-                   s.summary_content, s.prev_meeting_date, s.updated_at
-            FROM fomc_summaries s
-            JOIN fomc_documents d ON d.id = s.document_id
-            WHERE s.doc_type = %s AND s.central_bank = 'FED'
-              AND s.template_id = %s
-            ORDER BY d.meeting_date DESC NULLS LAST
-            LIMIT 1
-            """,
-            (doc_type, FOMC_SUMMARY_TEMPLATE),
-        )
-        if not rows:
-            return None
-        r = rows[0]
+    def _serialize_summary(self, r) -> Dict[str, Any]:
+        published = r[11] if len(r) > 11 else None
         return {
             "document_id": r[0],
             "doc_type": r[1],
-            "meeting_date": str(r[2]) if r[2] else None,
+            "meeting_date": str(r[2])[:10] if r[2] else None,
             "title": r[3],
             "source_url": r[4],
             "status": r[5],
@@ -1133,7 +1149,58 @@ class FedDashboardService:
             "summary_content": r[8],
             "prev_meeting_date": str(r[9]) if r[9] else None,
             "generated_at": r[10].isoformat() if r[10] else None,
+            "published_at": published.isoformat() if published else None,
         }
+
+    def _latest_decision(self) -> Optional[Dict]:
+        rows = self.db_manager.fetch_all(
+            """
+            SELECT meeting_date, decision_date, rate_low_bp, rate_high_bp,
+                   decision_direction, change_bp, vote_for, vote_against,
+                   dissenters, source_url
+            FROM fomc_decisions
+            WHERE central_bank = 'FED'
+            ORDER BY meeting_date DESC LIMIT 1
+            """
+        )
+        return self._row_to_decision(rows)
+
+    def _summary_select_sql(self) -> str:
+        return """
+            SELECT s.document_id, s.doc_type, d.meeting_date, d.title,
+                   d.source_url, s.status, s.template_id, s.model,
+                   s.summary_content, s.prev_meeting_date, s.updated_at,
+                   d.published_at
+            FROM fomc_summaries s
+            JOIN fomc_documents d ON d.id = s.document_id
+            WHERE s.doc_type = %s AND s.central_bank = 'FED'
+              AND s.template_id = %s
+        """
+
+    def _latest_summary(self, doc_type: str) -> Optional[Dict]:
+        rows = self.db_manager.fetch_all(
+            self._summary_select_sql() + """
+            ORDER BY d.meeting_date DESC NULLS LAST
+            LIMIT 1
+            """,
+            (doc_type, FOMC_SUMMARY_TEMPLATE),
+        )
+        if not rows:
+            return None
+        return self._serialize_summary(rows[0])
+
+    def _summary_by_meeting(self, doc_type: str, meeting_date: str) -> Optional[Dict]:
+        rows = self.db_manager.fetch_all(
+            self._summary_select_sql() + """
+            AND d.meeting_date = %s
+            ORDER BY s.updated_at DESC
+            LIMIT 1
+            """,
+            (doc_type, FOMC_SUMMARY_TEMPLATE, meeting_date),
+        )
+        if not rows:
+            return None
+        return self._serialize_summary(rows[0])
 
     def _eodhd_cross_check(self, decision_date) -> Optional[Dict]:
         """从 economic_events 取同日 EODHD 的 Fed 利率决议值（交叉验证用）"""

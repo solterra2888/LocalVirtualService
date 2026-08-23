@@ -67,6 +67,7 @@ class SummaryInfo(BaseModel):
     summary_content: Optional[str] = None
     prev_meeting_date: Optional[str] = None
     generated_at: Optional[str] = None
+    published_at: Optional[str] = None
 
 
 class UpdateItem(BaseModel):
@@ -110,20 +111,33 @@ class RefreshResponse(BaseModel):
 
 @router.get("/dashboard", response_model=DashboardResponse,
             summary="获取央行 Dashboard 聚合数据")
-async def get_dashboard(current_user=Depends(get_current_user)):
+async def get_dashboard(
+    meeting_date: Optional[str] = Query(
+        None, description="会议首日 YYYY-MM-DD；缺省为最近一次决议"),
+    current_user=Depends(get_current_user),
+):
     """
     央行 Dashboard（V1 仅 Fed）聚合端点：
 
-    - **decision**: 最近一次 FOMC 利率决议（区间/票型/异议/上次对照/EODHD 交叉验证）
-    - **statement_summary / minutes_summary**: 最近声明与纪要的 AI 概括
+    - **decision**: 最近一次（或指定 meeting_date）FOMC 利率决议
+    - **statement_summary / minutes_summary**: 对应会议的声明与纪要 AI 概括
     - **recent_meetings**: 近期会议列表（决议+文档状态）
     - **updates**: Fed updates 流（默认前 20 条）
     - **probabilities**: 未来会议概率快照 + 历史预期差对照（ZQ 期货自算）
     """
     try:
-        info(f"获取央行 Dashboard: user={current_user.username}", source="fomc_api")
+        if meeting_date:
+            try:
+                datetime.strptime(meeting_date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="meeting_date 格式须为 YYYY-MM-DD",
+                )
+        info(f"获取央行 Dashboard: user={current_user.username} "
+             f"meeting_date={meeting_date}", source="fomc_api")
         svc = get_fed_dashboard_service()
-        return svc.get_dashboard()
+        return svc.get_dashboard(meeting_date=meeting_date)
     except Exception as e:
         error(f"获取央行 Dashboard 失败: {str(e)}", source="fomc_api")
         raise HTTPException(
