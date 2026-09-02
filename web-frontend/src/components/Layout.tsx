@@ -28,6 +28,7 @@ import {
   GlobalOutlined,
   ThunderboltOutlined,
   BankOutlined,
+  FundViewOutlined,
   AppleOutlined,
   ApiOutlined,
   CloseOutlined,
@@ -77,6 +78,7 @@ function getSelectedNavKey(pathname: string): string {
   if (pathname.startsWith('/dashboard')) return '/dashboard';
   if (pathname.startsWith('/investment-themes')) return '/investment-themes';
   if (pathname.startsWith('/central-bank')) return '/central-bank';
+  if (pathname.startsWith('/form13f')) return '/form13f';
   return pathname;
 }
 
@@ -145,6 +147,11 @@ const Layout: React.FC = () => {
       key: '/central-bank',
       icon: <BankOutlined />,
       label: 'Central Banks',
+    },
+    {
+      key: '/form13f',
+      icon: <FundViewOutlined />,
+      label: '13F Filings',
     },
     {
       key: '/projects',

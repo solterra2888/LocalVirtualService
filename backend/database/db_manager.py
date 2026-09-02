@@ -634,6 +634,9 @@ class DatabaseManager:
             # 创建央行 Dashboard 概率相关表（会议日历 + ZQ 期货概率快照）
             self._create_fomc_probability_tables(conn)
 
+            # 创建 Form 13F 相关表（季度持仓数据集/机构/明细/快照/预设）
+            self._create_form13f_tables(conn)
+
             # 创建文件夹相关表 + 迁移 folder_id 字段
             self._create_file_folders_table(conn.cursor())
             self._migrate_add_folder_id_to_file_processing_details(conn.cursor())
@@ -1011,6 +1014,7 @@ class DatabaseManager:
                 'podcast_subscription',
                 'weibo_subscription',
                 'fed_dashboard',
+                'form13f',
                 # legacy rows in some deployments
                 'cctv_news',
                 'eodhd_news',
@@ -1907,5 +1911,37 @@ class DatabaseManager:
             # 脚本不存在时静默跳过，不打印警告
         except Exception as e:
             print(f"❌ 创建央行 Dashboard 概率表时出错: {str(e)}")
+            # 不抛出异常，让系统继续运行
+            pass
+
+    def _create_form13f_tables(self, conn):
+        """创建 Form 13F 相关表（数据集管理/机构/持仓明细/快照/预设）+ 调度任务类型迁移"""
+        cursor = conn.cursor()
+
+        try:
+            migration_file = os.path.join(
+                os.path.dirname(__file__),
+                'migrations/create_form13f_tables.sql'
+            )
+
+            if os.path.exists(migration_file):
+                with open(migration_file, 'r', encoding='utf-8') as f:
+                    sql = f.read()
+                cursor.execute(sql)
+                print("✅ Form 13F 相关表创建/更新完成")
+
+            # 调度任务类型 CHECK 约束 + 默认调度行 + 预设机构
+            task_type_migration = os.path.join(
+                os.path.dirname(__file__),
+                'migrations/add_form13f_scheduler_task_type.sql'
+            )
+            if os.path.exists(task_type_migration):
+                with open(task_type_migration, 'r', encoding='utf-8') as f:
+                    sql = f.read()
+                cursor.execute(sql)
+                print("✅ Form 13F 调度任务类型迁移完成")
+            # 脚本不存在时静默跳过，不打印警告
+        except Exception as e:
+            print(f"❌ 创建 Form 13F 表时出错: {str(e)}")
             # 不抛出异常，让系统继续运行
             pass

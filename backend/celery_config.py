@@ -139,6 +139,13 @@ task_routes = {
     'fomc_compute_probabilities': {'queue': 'data_fetching'},
     'fomc_backfill_probabilities': {'queue': 'data_fetching'},
     'fomc_summarize': {'queue': 'ai_processing'},
+    # Form 13F — SEC 季度数据集（发现→下载→导入→快照，全部 data_fetching）
+    'form13f_poll': {'queue': 'data_fetching'},
+    'form13f_download': {'queue': 'data_fetching'},
+    'form13f_import': {'queue': 'data_fetching'},
+    'form13f_aggregate': {'queue': 'data_fetching'},
+    'form13f_retry': {'queue': 'data_fetching'},
+    'form13f_backfill': {'queue': 'data_fetching'},
 }
 
 # Worker配置

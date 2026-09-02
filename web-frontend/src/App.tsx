@@ -14,6 +14,7 @@ import MarketsPage from './pages/MarketsPage';
 import EconomicEventsPage from './pages/EconomicEventsPage';
 import MacroIndicatorsPage from './pages/MacroIndicatorsPage';
 import CentralBankDashboardPage from './pages/CentralBankDashboardPage';
+import Form13FPage from './pages/Form13FPage';
 import FilesPage from './pages/FilesPage';
 import MobileSourcesPage from './pages/MobileSourcesPage';
 import DailyPage from './pages/DailyPage';
@@ -140,6 +141,7 @@ const AppContent: React.FC = () => {
           <Route path="markets/macro-indicators" element={<MacroIndicatorsPage />} />
           <Route path="central-bank" element={<CentralBankDashboardPage />} />
           <Route path="central-bank/:bank" element={<CentralBankDashboardPage />} />
+          <Route path="form13f" element={<Form13FPage />} />
           <Route path="files" element={<FilesComponent />} />
           <Route path="fundamentals" element={<FundamentalsPage />} />
           <Route path="eod-fetch" element={<EODFetchPage />} />

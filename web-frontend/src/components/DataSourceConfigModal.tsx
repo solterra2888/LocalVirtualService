@@ -37,6 +37,7 @@ import {
   CustomerServiceOutlined,
   ReadOutlined,
   BankOutlined,
+  FundViewOutlined,
 } from '@ant-design/icons';
 import { schedulerAPI, CreateEODHDNewsTaskParams, TimezoneOption } from '../services/scheduler';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -63,7 +64,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
@@ -305,6 +306,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '*/30 * * * *',
       defaultName: 'Fed Dashboard RSS Poll',
       description: 'Poll Fed press RSS for FOMC statements and minutes, then fetch, extract decisions, and summarize (every 30 minutes UTC)'
+    },
+    form13f: {
+      icon: <FundViewOutlined style={{ color: '#b45309' }} />,
+      params: ['mode'],
+      defaultSchedule: '0 21 * * 1-5',
+      defaultName: 'Form 13F Quarterly Poll',
+      description: 'Poll SEC Form 13F data page for new quarterly datasets, then download, import holdings, and compute snapshots (weekdays 21:00 UTC; SEC publishes quarterly)'
     },
     zhishixingqiu_summary: {
       icon: <StockOutlined style={{ color: '#52c41a' }} />,
@@ -584,6 +592,15 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             timezone: data.timezone!,
             enabled: true,
             task_type: 'fed_dashboard',
+            params: { mode: data.taskParams?.mode || 'poll' },
+          });
+        } else if (dataSourceType === 'form13f') {
+          result = await schedulerAPI.createCronTask({
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            task_type: 'form13f',
             params: { mode: data.taskParams?.mode || 'poll' },
           });
         } else if (dataSourceType === 'zhishixingqiu_summary') {
@@ -2319,6 +2336,21 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             >
               <Select>
                 <Option value="poll">Poll RSS (full chain)</Option>
+                <Option value="retry">Retry pending/failed only</Option>
+              </Select>
+            </Form.Item>
+          );
+
+        case 'form13f':
+          return (
+            <Form.Item
+              label="Mode"
+              name={['taskParams', 'mode']}
+              extra="poll: SEC page discovery + download + import + snapshots + resume stuck datasets. retry: only retry pending/failed datasets."
+              initialValue="poll"
+            >
+              <Select>
+                <Option value="poll">Poll SEC (full chain)</Option>
                 <Option value="retry">Retry pending/failed only</Option>
               </Select>
             </Form.Item>

@@ -74,6 +74,7 @@ class SchedulerService:
             'substack_summary': self._execute_substack_summary_task,
             'podcast_subscription': self._execute_podcast_subscription_task,
             'fed_dashboard': self._execute_fed_dashboard_task,
+            'form13f': self._execute_form13f_task,
         }
         
         # 添加事件监听器
@@ -1599,6 +1600,39 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"央行 Dashboard 任务分发异常: {str(e)}"
+            logger.error(error_msg)
+            return {'success': False, 'message': error_msg}
+
+    async def _execute_form13f_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Form 13F — SEC 季度数据集抓取链（全局）。
+
+        默认 mode=poll: 轮询 SEC 13F 数据页（发现新季度数据集 → 派发下载/导入/
+        快照 + 补推卡住/失败的数据集）。SEC 每季度发布一次，工作日每日一次足够。
+        mode=retry: 仅兜底重试 failed/pending 数据集。
+
+        Args:
+            params:
+                - mode: 'poll'（默认）| 'retry'（仅兜底重试）
+        """
+        try:
+            logger.info("分发 Form 13F Celery 任务", params=params)
+            from backend.tasks.form13f_tasks import (
+                form13f_poll_task, form13f_retry_task,
+            )
+
+            mode = params.get('mode', 'poll')
+            if mode == 'retry':
+                task = form13f_retry_task.delay()
+                message = f"✅ Form 13F: 已提交兜底重试任务 {task.id}"
+            else:
+                task = form13f_poll_task.delay()
+                message = f"✅ Form 13F: 已提交 SEC 轮询任务 {task.id}"
+            logger.info(message)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"Form 13F 任务分发异常: {str(e)}"
             logger.error(error_msg)
             return {'success': False, 'message': error_msg}
 
