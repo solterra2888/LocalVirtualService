@@ -100,6 +100,7 @@ SEC 13F 数据页 每工作日 UTC 21:00 轮询
 | 文件 | 改动 |
 |---|---|
 | `backend/database/db_manager.py` | ensure_schema 加 `_create_form13f_tables`；task_type 列表加 `form13f` |
+| `backend/celery_app.py` | 显式导入 `form13f_tasks`（worker 必须注册，否则 `NotRegistered`） |
 | `backend/celery_config.py` | task_routes 加 6 个任务 → data_fetching |
 | `backend/main.py` | 注册 router（prefix `/api/form13f`） |
 | `backend/services/scheduler_service.py` | task_handlers 加 `form13f`；执行器按 `params.mode` 分发 poll/retry |

@@ -144,6 +144,12 @@ except ImportError as e:
     print(f"❌ 导入央行 Dashboard 任务模块失败: {e}")
 
 try:
+    from backend.tasks import form13f_tasks
+    print(f"✅ 成功导入 Form 13F 任务模块: {form13f_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入 Form 13F 任务模块失败: {e}")
+
+try:
     from backend.tasks import zhishixingqiu_summary_tasks
     print(f"✅ 成功导入知识星球摘要任务模块: {zhishixingqiu_summary_tasks.__name__}")
 except ImportError as e:

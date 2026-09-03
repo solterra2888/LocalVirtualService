@@ -25,6 +25,8 @@ keys = r.keys('celery-task-meta-*') + r.keys('unacked*'); \
 [r.delete(k) for k in keys]; \
 print(f'[pre-start] cleared {len(keys)} stale task meta keys')"
 
+# Worker CLI --time-limit 会覆盖 @task(time_limit=...)。
+# form13f_import 流式导入约 10-20 分钟，须与 celery_config.task_time_limit=7200 对齐。
 ExecStart={{CONDA_ENV}}/bin/celery -A backend.celery_app worker \
     --loglevel=info \
     --concurrency={{CELERY_DATA_CONCURRENCY}} \
@@ -32,8 +34,8 @@ ExecStart={{CONDA_ENV}}/bin/celery -A backend.celery_app worker \
     --hostname=data-worker@%h \
     --max-tasks-per-child=10 \
     --prefetch-multiplier=1 \
-    --soft-time-limit=110 \
-    --time-limit=130 \
+    --soft-time-limit=7200 \
+    --time-limit=7260 \
     --logfile={{LOG_DIR}}/celery_data_worker.log \
     --pidfile={{LOG_DIR}}/celery_data_worker.pid
 

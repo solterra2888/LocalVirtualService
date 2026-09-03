@@ -5,6 +5,7 @@ bin-release/
 [Bb]in/
 uploads/
 sql数据库/
+references/
 node_modules/
 build/
 jikun/

@@ -1940,6 +1940,16 @@ class DatabaseManager:
                     sql = f.read()
                 cursor.execute(sql)
                 print("✅ Form 13F 调度任务类型迁移完成")
+
+            case_migration = os.path.join(
+                os.path.dirname(__file__),
+                'migrations/fix_form13f_dataset_name_case.sql'
+            )
+            if os.path.exists(case_migration):
+                with open(case_migration, 'r', encoding='utf-8') as f:
+                    sql = f.read()
+                cursor.execute(sql)
+                print("✅ Form 13F 数据集名大小写唯一索引迁移完成")
             # 脚本不存在时静默跳过，不打印警告
         except Exception as e:
             print(f"❌ 创建 Form 13F 表时出错: {str(e)}")

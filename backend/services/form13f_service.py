@@ -152,6 +152,15 @@ class Form13fService:
             url = href if href.startswith("http") else SEC_BASE + href
             with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
+                    # SEC 页面文件名大小写不稳定（01JUN2025 vs 01jun2025），
+                    # 按大小写不敏感去重，避免把已导入季度当成新数据集。
+                    cur.execute(
+                        "SELECT id FROM form13f_datasets "
+                        "WHERE LOWER(dataset_name) = LOWER(%s)",
+                        (dataset_name,),
+                    )
+                    if cur.fetchone():
+                        continue
                     cur.execute(
                         """
                         INSERT INTO form13f_datasets (dataset_name, source_url)
@@ -359,6 +368,24 @@ class Form13fService:
         ds = self._get_dataset(dataset_id)
         if not ds:
             raise ValueError(f"数据集 id={dataset_id} 不存在")
+
+        dup = self.db_manager.fetch_all(
+            """
+            SELECT id, dataset_name, quarter FROM form13f_datasets
+            WHERE LOWER(dataset_name) = LOWER(%s)
+              AND id <> %s
+              AND status = 'imported'
+            """,
+            (ds['dataset_name'], dataset_id),
+        )
+        if dup:
+            msg = (
+                f"跳过大小写重复数据集 {ds['dataset_name']}："
+                f"已导入 id={dup[0][0]} ({dup[0][1]}, {dup[0][2]})"
+            )
+            logger.info(f"[13F] {msg}")
+            self._update_dataset(dataset_id, status='failed', error_message=msg)
+            return {"dataset_id": dataset_id, "skipped": True, "reason": msg}
 
         self._update_dataset(dataset_id, status='importing', error_message=None)
         try:

@@ -40,15 +40,34 @@ def form13f_poll_task(self):
         result = svc.poll_sec_datasets()
 
         # pending（新发现）+ failed（下载失败重试）→ 派发下载
+        # 跳过仅大小写不同、但已有进行中/已完成副本的行
         rows = svc.db_manager.fetch_all(
-            "SELECT id, status FROM form13f_datasets "
-            "WHERE status IN ('pending', 'failed') ORDER BY id")
+            """
+            SELECT d.id, d.status FROM form13f_datasets d
+            WHERE d.status IN ('pending', 'failed')
+              AND NOT EXISTS (
+                  SELECT 1 FROM form13f_datasets x
+                  WHERE LOWER(x.dataset_name) = LOWER(d.dataset_name)
+                    AND x.id <> d.id
+                    AND x.status IN ('imported', 'importing',
+                                     'downloaded', 'downloading'))
+            ORDER BY d.id
+            """)
         for ds_id, status in rows:
             _dispatch("form13f_download", dataset_id=ds_id)
 
         # downloaded 但未导入（导入任务派发丢失/worker 崩溃）→ 补派发
         rows = svc.db_manager.fetch_all(
-            "SELECT id FROM form13f_datasets WHERE status = 'downloaded' ORDER BY id")
+            """
+            SELECT d.id FROM form13f_datasets d
+            WHERE d.status = 'downloaded'
+              AND NOT EXISTS (
+                  SELECT 1 FROM form13f_datasets x
+                  WHERE LOWER(x.dataset_name) = LOWER(d.dataset_name)
+                    AND x.id <> d.id
+                    AND x.status IN ('imported', 'importing'))
+            ORDER BY d.id
+            """)
         for (ds_id,) in rows:
             _dispatch("form13f_import", dataset_id=ds_id)
 

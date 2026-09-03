@@ -7,61 +7,17 @@ import {
   ReloadOutlined, SearchOutlined, RiseOutlined, FallOutlined,
 } from '@ant-design/icons';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
-  ResponsiveContainer, Legend,
-} from 'recharts';
-import {
-  form13fAPI, ManifestData, FilerDetail, QuarterSnapshot,
+  form13fAPI, ManifestData, FilerDetail,
   HoldingItem, Top5ChangeItem, FilerSummary,
 } from '../services/form13f';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
+import Form13FSectorChart from '../components/form13f/Form13FSectorChart';
 
 const { Title, Text } = Typography;
 
 // ===== 行业/资产类别（与后端 form13f_sector_map 分类一致）=====
-
-const SECTOR_ORDER = [
-  'Healthcare', 'Basic Materials', 'Consumer Cyclical', 'Industrials', 'Technology',
-  'Real Estate', 'Financial Services', 'Consumer Defensive', 'Utilities',
-  'Communication Services', 'Energy',
-  'Broad Emerging Market', 'Latin American Equity', 'Asia-Pacific (Emerging)',
-  'Broad Developed World', 'Precious Metals', 'High-Yield/Junk Bond',
-  'Investment Grade Corporate Bond', 'Government Bond', 'Large Cap Blend',
-  'Other',
-];
-
-const SECTOR_COLORS: Record<string, string> = {
-  'Healthcare': '#1b3a6b',
-  'Basic Materials': '#25598f',
-  'Consumer Cyclical': '#2f75a8',
-  'Industrials': '#3f8fb5',
-  'Technology': '#56a6b8',
-  'Real Estate': '#74bcae',
-  'Financial Services': '#93c9a2',
-  'Consumer Defensive': '#b4dba2',
-  'Utilities': '#cfe8a1',
-  'Communication Services': '#dce87f',
-  'Energy': '#b6c94f',
-  'Broad Emerging Market': '#a3132c',
-  'Latin American Equity': '#c0392b',
-  'Asia-Pacific (Emerging)': '#d95f4b',
-  'Broad Developed World': '#e8836d',
-  'Precious Metals': '#f2a488',
-  'High-Yield/Junk Bond': '#f7c1a3',
-  'Investment Grade Corporate Bond': '#f9d6c3',
-  'Government Bond': '#f5e3d7',
-  'Large Cap Blend': '#e64961',
-  'Other': '#5d6773',
-};
-
-// 图例用短名（避免长类别名换行），Tooltip 仍显示完整名
-const LEGEND_SHORT: Record<string, string> = {
-  'Broad Emerging Market': 'EM Equity',
-  'Broad Developed World': 'Dev. World',
-  'High-Yield/Junk Bond': 'High-Yield',
-  'Investment Grade Corporate Bond': 'IG Corp Bond',
-};
+// 图表配色与交互见 Form13FSectorChart.tsx
 
 const THEME_COLORS = {
   light: {
@@ -102,24 +58,6 @@ const fmtFull = (v?: number | null): string =>
 
 const fmtQuarter = (q: string): string =>
   q.replace(/^(\d{4})Q(\d)$/, '$1 Q$2');
-
-/** 季度快照列表 → 堆叠柱状图行数据（透视 quarter × sector） */
-const pivotSectors = (quarters: QuarterSnapshot[]) => {
-  const present = new Set<string>();
-  quarters.forEach((qs) => Object.keys(qs.sector_alloc).forEach((k) => present.add(k)));
-  const ordered = SECTOR_ORDER.filter((s) => present.has(s));
-  const rows = quarters.map((qs) => {
-    const row: Record<string, string | number> = { quarter: fmtQuarter(qs.quarter) };
-    ordered.forEach((sec) => {
-      row[sec] = +(qs.sector_alloc[sec] || 0).toFixed(2);
-    });
-    return row;
-  });
-  // Other 放最后绘制 → 堆叠最顶层（与 MacroMicro 布局一致）
-  const drawOrder = ordered.filter((s) => s !== 'Other')
-    .concat(ordered.includes('Other') ? ['Other'] : []);
-  return { rows, sectors: ordered, drawOrder };
-};
 
 // ===== 主组件 =====
 
@@ -203,10 +141,20 @@ const Form13FPage: React.FC = () => {
     }
   }, []);
 
-  const chart = useMemo(() => pivotSectors(detail?.quarters || []), [detail]);
   const currentSnap = useMemo(
     () => detail?.quarters.find((q) => q.quarter === selectedQuarter) || null,
     [detail, selectedQuarter]);
+  const latestQ = detail?.quarters.length
+    ? detail.quarters[detail.quarters.length - 1] : null;
+  const quarterRange = useMemo(() => {
+    const qs = detail?.quarters.map((q) => q.quarter) || [];
+    if (qs.length < 2) return qs[0] ? fmtQuarter(qs[0]) : '';
+    return `${fmtQuarter(qs[0])} – ${fmtQuarter(qs[qs.length - 1])}`;
+  }, [detail]);
+  const maxHoldingPct = useMemo(() => {
+    const pcts = (currentSnap?.top20_holdings || []).map((h) => h.pct);
+    return Math.max(...pcts, 0.01);
+  }, [currentSnap]);
 
   // Top20 表：与上一季度同 (cusip,putcall) 的股数对比
   const prevShares = useMemo(() => {
@@ -253,7 +201,7 @@ const Form13FPage: React.FC = () => {
           <div style={{
             position: 'absolute', inset: 0, borderRadius: 2,
             background: colors.barBg,
-            width: `${Math.min(v * 6, 100)}%`,
+            width: `${(v / maxHoldingPct * 100).toFixed(1)}%`,
           }} />
           <span style={{ position: 'relative', fontVariantNumeric: 'tabular-nums' }}>
             {v.toFixed(2)}%
@@ -281,7 +229,7 @@ const Form13FPage: React.FC = () => {
         );
       },
     },
-  ], [colors, prevShares]);
+  ], [colors, prevShares, maxHoldingPct]);
 
   const changeColumns = useMemo(() => [
     {
@@ -316,9 +264,6 @@ const Form13FPage: React.FC = () => {
         </Text>),
     },
   ], [colors]);
-
-  const latestQ = detail?.quarters.length
-    ? detail.quarters[detail.quarters.length - 1] : null;
 
   if (!isAuthenticated) {
     return <div style={{ padding: 24 }}><Spin /></div>;
@@ -384,48 +329,23 @@ const Form13FPage: React.FC = () => {
             <Tooltip title="组合中各行业/资产类别的市值占比（% of sector），按季度展示。基于该机构当季全部 13F 持仓计算。">
               <Text type="secondary" style={{ cursor: 'help' }}>ⓘ</Text>
             </Tooltip>
-            {currentSnap && (
+            {latestQ && (
               <Text type="secondary" style={{ fontSize: 12 }}>
-                {fmtQuarter(currentSnap.quarter)} 组合市值 ${fmtMoney(currentSnap.total_value)} · {fmtFull(currentSnap.position_count)} 条持仓
+                {fmtQuarter(latestQ.quarter)} 组合市值 ${fmtMoney(latestQ.total_value)} · {fmtFull(latestQ.position_count)} 条持仓
+              </Text>
+            )}
+            {quarterRange && (
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 'auto' }}>
+                {quarterRange}
               </Text>
             )}
           </div>
-          {chart.rows.length ? (
-            <ResponsiveContainer width="100%" height={380}>
-              <BarChart data={chart.rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid vertical={false} stroke={themeMode === 'dark' ? '#2d3a4e' : '#eceff2'} />
-                <XAxis dataKey="quarter" tick={{ fontSize: 11, fill: colors.textSecondary }} />
-                <YAxis
-                  domain={[0, 100]} interval={25}
-                  tickFormatter={(v: number) => String(v)}
-                  tick={{ fontSize: 11, fill: colors.textSecondary }}
-                  width={36}
-                />
-                <RTooltip
-                  formatter={(v: number | string, name: string) => [
-                    `${Number(v).toFixed(2)}%`, LEGEND_SHORT[name] ? name : name,
-                  ]}
-                  contentStyle={{
-                    background: themeMode === 'dark' ? '#1a2234' : '#fff',
-                    border: `1px solid ${colors.cardBorder}`,
-                    color: colors.text,
-                  }}
-                />
-                <Legend
-                  wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-                  formatter={(v: string) => LEGEND_SHORT[v] || v}
-                />
-                {chart.drawOrder.map((sec) => (
-                  <Bar
-                    key={sec}
-                    dataKey={sec}
-                    stackId="sector"
-                    fill={SECTOR_COLORS[sec] || '#999'}
-                    maxBarSize={64}
-                  />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
+          {detail?.quarters.length ? (
+            <Form13FSectorChart
+              quarters={detail.quarters}
+              themeMode={themeMode}
+              onQuarterClick={setSelectedQuarter}
+            />
           ) : (
             <Empty description="暂无快照数据" style={{ padding: 40 }} />
           )}

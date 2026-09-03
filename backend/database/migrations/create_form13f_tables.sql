@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS form13f_datasets (
 CREATE INDEX IF NOT EXISTS idx_f13f_datasets_quarter
 ON form13f_datasets(quarter);
 
+-- SEC 页面 ZIP 文件名大小写不稳定，避免 01JUN2025 / 01jun2025 被当成两季
+CREATE UNIQUE INDEX IF NOT EXISTS idx_f13f_datasets_name_lower
+ON form13f_datasets (LOWER(dataset_name));
+
 -- 2) 机构维表
 CREATE TABLE IF NOT EXISTS form13f_filers (
     id                  SERIAL PRIMARY KEY,
