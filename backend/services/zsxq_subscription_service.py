@@ -754,7 +754,13 @@ class ZsxqSubscriptionService:
             meta = self._get_group_meta(gid)
             if meta.get("group_name"):
                 gname = meta["group_name"]
-            group_avatar = (meta.get("avatar") or "").strip()
+            from backend.services.zsxq_credential_service import (
+                ZsxqCredentialService,
+                resolve_zsxq_avatar_url,
+            )
+            group_avatar = resolve_zsxq_avatar_url(meta.get("avatar"))
+            if not group_avatar:
+                group_avatar = ZsxqCredentialService().get_group_avatar(gid)
 
             try:
                 cred_id, cookie = self._get_credential_for_group(meta)

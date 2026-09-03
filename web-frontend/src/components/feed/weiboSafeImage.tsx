@@ -16,10 +16,14 @@ function needsCdnProxy(url: string): boolean {
  */
 export function weiboSafeImageUrl(url?: string | null): string | undefined {
   if (!url) return undefined;
-  if (needsCdnProxy(url)) {
-    return `/api/subscriptions/proxy-image?url=${encodeURIComponent(url)}`;
+  const trimmed = url.trim();
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    return undefined;
   }
-  return url;
+  if (needsCdnProxy(trimmed)) {
+    return `/api/subscriptions/proxy-image?url=${encodeURIComponent(trimmed)}`;
+  }
+  return trimmed;
 }
 
 /** Avatar `src` — returns a plain string (no embedded img element). */

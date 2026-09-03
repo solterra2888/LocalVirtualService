@@ -164,13 +164,18 @@ async def get_zsxq_groups(
     current_user: TokenData = Depends(get_current_user)
 ):
     """返回可供用户订阅的知识星球列表（管理员已开启 enabled=true 的星球）。"""
-    from backend.services.zsxq_credential_service import ZsxqCredentialService, normalize_avatar_url
-    groups = ZsxqCredentialService().list_groups(enabled_only=True)
+    from backend.services.zsxq_credential_service import (
+        ZsxqCredentialService,
+        resolve_zsxq_avatar_url,
+    )
+    svc = ZsxqCredentialService()
+    svc.ensure_fresh_group_avatars()
+    groups = svc.list_groups(enabled_only=True)
     return [
         {
             "group_id": g["group_id"],
             "group_name": g["group_name"],
-            "avatar": normalize_avatar_url(g.get("avatar")) or None,
+            "avatar": resolve_zsxq_avatar_url(g.get("avatar")) or None,
         }
         for g in groups
     ]
@@ -308,24 +313,21 @@ async def get_user_subscriptions(
                     if avatar:
                         sub.channel_avatar = avatar
 
-        # 知识星球：若 channel_avatar 缺失，从 zsxq_groups 缓存补全（不改库）
+        # 知识星球：补全 / 刷新过期的签名头像 URL（不改库，与 Substack 对齐）
         zsxq_subs = [s for s in subscriptions if s.channel_type == "zhishixingqiu"]
         if zsxq_subs:
-            from backend.services.zsxq_credential_service import ZsxqCredentialService
+            from backend.services.zsxq_credential_service import (
+                ZsxqCredentialService,
+                resolve_zsxq_avatar_url,
+            )
 
-            group_by_id = {
-                g["group_id"]: g
-                for g in ZsxqCredentialService().list_groups(enabled_only=False)
-            }
+            zsxq_svc = ZsxqCredentialService()
+            zsxq_svc.ensure_fresh_group_avatars()
             for sub in zsxq_subs:
-                if (sub.channel_avatar or "").strip():
-                    continue
-                grp = group_by_id.get(sub.channel_identifier)
-                if not grp:
-                    continue
-                avatar = (grp.get("avatar") or "").strip()
-                if avatar:
-                    sub.channel_avatar = avatar
+                fresh = resolve_zsxq_avatar_url(sub.channel_avatar)
+                if not fresh:
+                    fresh = zsxq_svc.get_group_avatar(sub.channel_identifier, ensure_fresh=False)
+                sub.channel_avatar = fresh or None
         
         logger.info(f"Retrieved {len(subscriptions)} subscriptions for user {user_id}")
         return subscriptions
@@ -391,6 +393,21 @@ async def get_subscription(
         
         cursor.close()
         conn.close()
+
+        if subscription.channel_type == "zhishixingqiu":
+            from backend.services.zsxq_credential_service import (
+                ZsxqCredentialService,
+                resolve_zsxq_avatar_url,
+            )
+
+            zsxq_svc = ZsxqCredentialService()
+            zsxq_svc.ensure_fresh_group_avatars()
+            fresh = resolve_zsxq_avatar_url(subscription.channel_avatar)
+            if not fresh:
+                fresh = zsxq_svc.get_group_avatar(
+                    subscription.channel_identifier, ensure_fresh=False
+                )
+            subscription.channel_avatar = fresh or None
         
         return subscription
         
@@ -573,9 +590,10 @@ async def create_subscription(
             # 自动填充星球名 / 头像（对齐 Substack）
             if not request.channel_name:
                 request.channel_name = grp.get("group_name") or group_id
-            avatar = (grp.get("avatar") or "").strip()
+            from backend.services.zsxq_credential_service import resolve_zsxq_avatar_url
+            avatar = resolve_zsxq_avatar_url(grp.get("avatar"))
             if not avatar:
-                avatar = zsxq_svc.ensure_group_avatar(group_id)
+                avatar = resolve_zsxq_avatar_url(zsxq_svc.ensure_group_avatar(group_id))
             channel_avatar = avatar or None
 
             logger.info(
@@ -1647,6 +1665,16 @@ async def get_subscription_contents(
         # 获取订阅的作者标识
         channel_type = result[2]
         channel_identifier = result[3]
+
+        zsxq_group_avatar: Optional[str] = None
+        if channel_type == "zhishixingqiu":
+            from backend.services.zsxq_credential_service import ZsxqCredentialService
+
+            zsxq_svc = ZsxqCredentialService()
+            zsxq_svc.ensure_fresh_group_avatars()
+            zsxq_group_avatar = zsxq_svc.get_group_avatar(
+                channel_identifier, ensure_fresh=False
+            ) or None
         
         # 构建查询条件：按 author_identifier 而不是 subscription_id
         # 这样同一作者的所有内容对所有订阅者可见
@@ -1812,7 +1840,11 @@ async def get_subscription_contents(
                 'content': row[4],
                 'author_name': row[5],
                 'author_identifier': row[6],
-                'author_avatar': row[7],
+                'author_avatar': (
+                    zsxq_group_avatar
+                    if channel_type == "zhishixingqiu" and zsxq_group_avatar
+                    else row[7]
+                ),
                 'url': row[8],
                 'media_urls': row[9],
                 'published_at': ensure_utc(row[10]).isoformat() if row[10] else None,

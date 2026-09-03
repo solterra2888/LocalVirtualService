@@ -939,7 +939,9 @@ const SchedulerPage: React.FC = () => {
         (sourceIdLower === 'the_close_summary' && taskType === 'the_close_summary') ||
         (sourceIdLower === 'cnbc_closing_bell' && taskType === 'cnbc_closing_bell') ||
         (sourceIdLower === 'zhishixingqiu_summary' && taskType === 'zhishixingqiu_summary') ||
-          (sourceIdLower === 'substack_summary' && taskType === 'substack_summary') ||
+        (sourceIdLower === 'substack_summary' && taskType === 'substack_summary') ||
+        (sourceIdLower === 'fed_dashboard' && taskType === 'fed_dashboard') ||
+        (sourceIdLower === 'form13f' && taskType === 'form13f') ||
         (sourceIdLower.includes('events') && taskType.includes('events')) ||
         (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
         (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||

@@ -16,7 +16,7 @@ import uuid
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlparse
 
 import psycopg2
 import psycopg2.extras
@@ -124,6 +124,28 @@ def normalize_avatar_url(value: Optional[str]) -> str:
         return ""
     # 知识星球偶发返回 builtin://N 占位符，非可加载图片
     if not url.startswith(("http://", "https://")):
+        return ""
+    return url
+
+
+def zsxq_signed_url_expired(url: str, *, skew_seconds: int = 300) -> bool:
+    """知识星球 CDN 头像/图片 URL 带 e= 签名，过期后直连与代理均 401。"""
+    normalized = normalize_avatar_url(url)
+    if not normalized:
+        return True
+    try:
+        expiry = int(parse_qs(urlparse(normalized).query).get("e", ["0"])[0])
+    except (ValueError, TypeError, IndexError):
+        return True
+    if expiry <= 0:
+        return True
+    return expiry <= int(time.time()) + skew_seconds
+
+
+def resolve_zsxq_avatar_url(value: Optional[str]) -> str:
+    """规范化并丢弃 builtin 占位符 / 已过期的签名 URL。"""
+    url = normalize_avatar_url(value)
+    if url and zsxq_signed_url_expired(url):
         return ""
     return url
 
@@ -466,7 +488,7 @@ class ZsxqCredentialService:
         }
 
     def ensure_group_avatar(self, group_id: str) -> str:
-        """返回星球头像；DB 无缓存时尝试用有效凭证 refresh_groups 补拉。"""
+        """返回星球头像；DB 无缓存或签名过期时尝试用有效凭证 refresh_groups 补拉。"""
         gid = str(group_id or "").strip()
         if not gid:
             return ""
@@ -481,32 +503,69 @@ class ZsxqCredentialService:
                     (gid,),
                 )
                 row = cur.fetchone()
-        cached = (row[0] or "") if row else ""
+        cached = resolve_zsxq_avatar_url((row[0] or "") if row else "")
         if cached:
             return cached
 
-        # 用所有 valid 凭证各 sync 一次（与 Substack ensure 对齐，best-effort）
+        self.ensure_fresh_group_avatars()
+        return self.get_group_avatar(gid, ensure_fresh=False)
+
+    def ensure_fresh_group_avatars(self) -> bool:
+        """若任一星球缓存头像签名已过期，则用有效凭证 refresh_groups 刷新。"""
+        groups = self.list_groups(enabled_only=False)
+        if not any(zsxq_signed_url_expired((g.get("avatar") or "")) for g in groups):
+            return False
+
+        refreshed = False
         for cred in self.list_credentials():
             if cred.get("status") != "valid":
                 continue
             result = self.refresh_groups(int(cred["id"]))
-            if not result.get("success"):
-                continue
-            with _get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT NULLIF(TRIM(avatar), '')
-                        FROM zsxq_groups
-                        WHERE group_id = %s
-                        """,
-                        (gid,),
-                    )
-                    row = cur.fetchone()
-            avatar = (row[0] or "") if row else ""
-            if avatar:
-                return avatar
-        return ""
+            if result.get("success"):
+                refreshed = True
+                break
+
+        if refreshed:
+            self._sync_subscription_avatars_from_groups()
+        return refreshed
+
+    def get_group_avatar(self, group_id: str, *, ensure_fresh: bool = True) -> str:
+        """返回可用的星球头像 URL（必要时触发 refresh_groups）。"""
+        gid = str(group_id or "").strip()
+        if not gid:
+            return ""
+
+        def _read_cached() -> str:
+            grp = next(
+                (g for g in self.list_groups(enabled_only=False) if g["group_id"] == gid),
+                None,
+            )
+            return resolve_zsxq_avatar_url((grp or {}).get("avatar"))
+
+        avatar = _read_cached()
+        if avatar or not ensure_fresh:
+            return avatar
+
+        self.ensure_fresh_group_avatars()
+        return _read_cached()
+
+    def _sync_subscription_avatars_from_groups(self) -> None:
+        """refresh 后把 subscription_list.channel_avatar 与 zsxq_groups 对齐。"""
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE subscription_list sl
+                    SET channel_avatar = g.avatar,
+                        updated_at = now()
+                    FROM zsxq_groups g
+                    WHERE sl.channel_type = 'zhishixingqiu'
+                      AND sl.channel_identifier = g.group_id
+                      AND NULLIF(TRIM(g.avatar), '') IS NOT NULL
+                      AND (sl.channel_avatar IS DISTINCT FROM g.avatar)
+                    """
+                )
+            conn.commit()
 
     def list_groups(self, enabled_only: bool = True) -> List[Dict[str, Any]]:
         """返回可供用户订阅的星球列表。"""
