@@ -23,6 +23,7 @@ import UsersPage from './pages/UsersPage';
 import SchedulerPage from './pages/SchedulerPage';
 import MonitoringPage from './pages/MonitoringPage';
 import FeedReaderPage from './pages/FeedReaderPage';
+import FeedsDashboardPage from './pages/FeedsDashboardPage';
 import MobileFeedsPage from './pages/MobileFeedsPage';
 import MobileFeedsListView from './pages/MobileFeedsListView';
 import MobileFeedArticlePage from './pages/MobileFeedArticlePage';
@@ -162,6 +163,8 @@ const AppContent: React.FC = () => {
           ) : (
             <Route path="feeds" element={<FeedReaderPage />} />
           )}
+          {/* Feeds Dashboard: 按主题 × 重要性聚合的订阅重要信息视图 (P0 桌面优先, 移动端可用) */}
+          <Route path="feeds-dashboard" element={<FeedsDashboardPage />} />
           {/* Reports 路由 */}
           {isMobile ? (
             <>

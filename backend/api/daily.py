@@ -1585,18 +1585,35 @@ def _fetch_upload_detail(
 
 
 def _fetch_feed_detail(
-    cursor, content_db_id: int, current_user: TokenData
+    cursor, content_db_id: int, current_user: TokenData, enforce_scope: bool = True
 ) -> DailyItemDetail:
     """根据 subscription_content.id 装配 Feed 卡片完整详情.
 
-    鉴权: user_id = ANY(sc.user_ids) (与列表口径 + Feeds 模块一致).
+    鉴权: enforce_scope=True (默认) 时 user_id = ANY(sc.user_ids) (与列表口径 + Feeds 模块一致);
+    enforce_scope=False 供 Feeds Dashboard 全站视图复用 (跳过用户范围检查, 由调用方
+    自行做 FEEDS_DASHBOARD_SERVER_SCOPE_ENABLED 门控)。
     单查询 LEFT JOIN subscription_content_tags 取 AI 打标轻量结构;
     LEFT JOIN subscription_content_user_summaries (PR-D1) 取 per-user 个性化摘要,
     抽屉前端 "AI 深度分析" 段消费.
     跳转目标 subscription_id 用 (channel_type, channel_identifier) 反查 subscription_list.
     """
-    cursor.execute(
+    scope_clause = (
         """
+          AND %s = ANY(sc.user_ids)
+          AND EXISTS (
+              SELECT 1 FROM subscription_list sl
+              WHERE sl.user_id          = %s
+                AND sl.channel_type       = sc.channel_type
+                AND sl.channel_identifier = sc.author_identifier
+                AND sl.enabled = true
+          )
+        """
+        if enforce_scope
+        else ""
+    )
+    scope_params = (current_user.user_id, current_user.user_id) if enforce_scope else ()
+    cursor.execute(
+        f"""
         SELECT
             sc.id, sc.channel_type, sc.content_id,
             sc.title, sc.content,
@@ -1632,21 +1649,16 @@ def _fetch_feed_detail(
         LEFT JOIN substack_followed_authors sfa
             ON sc.channel_type = 'substack'
            AND sfa.publication_url = sc.author_identifier
-        WHERE sc.id = %s
-          AND %s = ANY(sc.user_ids)
-          AND EXISTS (
-              SELECT 1 FROM subscription_list sl
-              WHERE sl.user_id          = %s
-                AND sl.channel_type       = sc.channel_type
-                AND sl.channel_identifier = sc.author_identifier
-                AND sl.enabled = true
-          )
+        WHERE sc.id = %s{scope_clause}
         """,
-        (current_user.user_id, content_db_id, current_user.user_id, current_user.user_id),
+        (current_user.user_id, content_db_id) + scope_params,
     )
     row = cursor.fetchone()
     if not row:
-        raise HTTPException(status_code=404, detail="Feed 内容不存在或无权访问")
+        raise HTTPException(
+            status_code=404,
+            detail="Feed 内容不存在或无权访问" if enforce_scope else "Feed 内容不存在",
+        )
 
     (
         item_id, channel_type, content_id_raw,

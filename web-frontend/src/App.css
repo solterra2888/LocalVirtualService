@@ -93,7 +93,7 @@
 }
 
 /* 非全屏模块页保留卡片边距（Reports 等） */
-.main-layout-with-sider .layout-content:not(:has(.files-page-layout)):not(:has(.feed-page-layout)):not(:has(.watchlist-page-layout)):not(:has(.daily-page-scroll-root)) {
+.main-layout-with-sider .layout-content:not(:has(.files-page-layout)):not(:has(.feed-page-layout)):not(:has(.watchlist-page-layout)):not(:has(.daily-page-scroll-root)):not(:has(.feeds-dashboard-scroll-root)) {
   margin: var(--layout-content-gap, 12px) var(--layout-content-gap, 12px) var(--layout-content-gap, 12px) 0;
   min-height: calc(100vh - 2 * var(--layout-sidebar-inset, 12px));
 }
@@ -104,6 +104,11 @@
 
 /* Daily：页面自建侧栏 + 内容两栏滚动，禁止 layout-content 再滚一层（避免出现 triple-scroll） */
 .layout-content:has(.daily-page-scroll-root) {
+  overflow: hidden;
+}
+
+/* Feeds Dashboard：满高双栏（左词云 + 右内容）各自内部滚动，同上禁止外层再滚 */
+.layout-content:has(.feeds-dashboard-scroll-root) {
   overflow: hidden;
 }
 

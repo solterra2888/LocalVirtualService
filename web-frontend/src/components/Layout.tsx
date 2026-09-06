@@ -22,6 +22,7 @@ import {
   SunOutlined,
   MoonOutlined,
   ReadOutlined,
+  AppstoreOutlined,
   EditOutlined,
   KeyOutlined,
   ProfileOutlined,
@@ -61,6 +62,7 @@ const NAV_DESCRIPTIONS: Record<string, string> = {
   '/daily': 'Overview & monitoring',
   '/files': 'Sources & documents',
   '/feeds': 'Subscriptions & feeds',
+  '/feeds-dashboard': 'Topics & highlights from feeds',
   '/dashboard': 'Markets & watchlist',
   '/reports': 'Daily & Weekly Reports',
   '/agent-integration': 'MCP & integrations',
@@ -74,6 +76,8 @@ function getSelectedNavKey(pathname: string): string {
   if (pathname.startsWith('/agent-integration')) return '/agent-integration';
   if (pathname.startsWith('/daily')) return '/daily';
   if (pathname.startsWith('/files')) return '/files';
+  // ⚠ 必须在 '/feeds' 之前判断, 否则 /feeds-dashboard 会被 startsWith('/feeds') 吞掉
+  if (pathname.startsWith('/feeds-dashboard')) return '/feeds-dashboard';
   if (pathname.startsWith('/feeds')) return '/feeds';
   if (pathname.startsWith('/dashboard')) return '/dashboard';
   if (pathname.startsWith('/investment-themes')) return '/investment-themes';
@@ -137,6 +141,11 @@ const Layout: React.FC = () => {
       key: '/feeds',
       icon: <ReadOutlined />,
       label: 'Feeds',
+    },
+    {
+      key: '/feeds-dashboard',
+      icon: <AppstoreOutlined />,
+      label: 'Feeds Dashboard',
     },
     {
       key: '/dashboard',

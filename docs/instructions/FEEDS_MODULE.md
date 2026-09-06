@@ -918,5 +918,6 @@ personalize_feed_summary_task (per-user)
 - `backend/database/migrations/drop_legacy_news_module.sql` — 删除旧 `news` 表与 `cctv_news` 等调度类型
 - `docs/instructions/SCHEDULER_DEVELOPMENT_GUIDE.md` — Scheduler 任务类型扩展与 `task_scheduling` 表
 - `docs/instructions/PERSONALIZED_TAGS_IMPLEMENTATION.md` — 个性化标签（主要服务于 Upload 链路，可选对接 Feeds）
+- **`docs/instructions/FEEDS_DASHBOARD_MODULE.md`** — Feeds Dashboard：把 auto-tag 产物按「主题 × 重要性」重组的 `/feeds-dashboard` 视图（主题词典归一化、词云折并、快照聚合调度）
 - `docs/instructions/TWITTER_DAILY_REPORT_MANUAL.md` — 基于 Feeds `subscription_content` 的 Twitter 日报
 - `backend/database/migrations/create_subscription_tables.sql` / `migrate_to_subscription_content.sql` / `add_unread_count.sql` / `insert_youtube_subscription_task.sql` — DB schema 演进

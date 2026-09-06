@@ -84,6 +84,12 @@ export interface DailyPreviewDrawerProps {
   onClose: () => void;
   /** 切换上一/下一条; 由父维护 item state, 父也可以拒绝 (例: 已经到首/末) */
   onNavigate?: (next: DailyFeedItem) => void;
+  /**
+   * 自定义详情拉取 (默认 getDailyItemDetail → /api/daily/items/{id})。
+   * Feeds Dashboard 全站视图传此 prop: 订阅外条目走 /api/feeds-dashboard/items/{id}/detail
+   * (Daily 端点有用户范围鉴权, 订阅外内容会 404)。
+   */
+  fetchDetail?: (item: DailyFeedItem) => Promise<DailyItemDetail>;
 }
 
 const DESKTOP_DRAWER_WIDTH = 720;
@@ -95,6 +101,7 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
   placement = 'right',
   onClose,
   onNavigate,
+  fetchDetail,
 }) => {
   const colors = DAILY_THEME_COLORS[themeMode];
   const { userTimezone } = useDashboardSettings();
@@ -143,7 +150,7 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
     setDetail(null);
     (async () => {
       try {
-        const d = await getDailyItemDetail(item.id);
+        const d = await (fetchDetail ? fetchDetail(item) : getDailyItemDetail(item.id));
         if (seq !== requestSeqRef.current) return;
         setDetail(d);
       } catch (e: any) {
@@ -153,7 +160,7 @@ const DailyPreviewDrawer: React.FC<DailyPreviewDrawerProps> = ({
         if (seq === requestSeqRef.current) setLoading(false);
       }
     })();
-  }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- item identity tied to id
+  }, [item?.id, fetchDetail]); // eslint-disable-line react-hooks/exhaustive-deps -- item identity tied to id
 
   // 移动端 bottom-sheet: 切换条目后正文区滚回顶部
   React.useEffect(() => {

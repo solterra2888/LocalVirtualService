@@ -173,6 +173,13 @@ try:
 except ImportError as e:
     print(f"❌ 导入知识星球文件下载任务模块失败: {e}")
 
+# Feeds Dashboard 主题聚合任务 (P0)
+try:
+    from backend.tasks import feed_topic_tasks
+    print(f"✅ 成功导入 Feeds Dashboard 主题聚合任务模块: {feed_topic_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入 Feeds Dashboard 主题聚合任务模块失败: {e}")
+
 # 设置Celery日志
 @worker_init.connect
 def setup_worker_logging(sender=None, **kwargs):

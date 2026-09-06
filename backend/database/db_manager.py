@@ -637,6 +637,9 @@ class DatabaseManager:
             # 创建 Form 13F 相关表（季度持仓数据集/机构/明细/快照/预设）
             self._create_form13f_tables(conn)
 
+            # 创建 Feeds Dashboard 相关表（主题词典 + 每日条目快照）+ 调度任务类型
+            self._create_feed_topic_tables(conn)
+
             # 创建文件夹相关表 + 迁移 folder_id 字段
             self._create_file_folders_table(conn.cursor())
             self._migrate_add_folder_id_to_file_processing_details(conn.cursor())
@@ -738,7 +741,7 @@ class DatabaseManager:
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 
                 CONSTRAINT valid_schedule_type CHECK (schedule_type IN ('cron', 'interval')),
-                CONSTRAINT valid_task_type CHECK (type IN ('twitter_subscription', 'youtube_subscription', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'watchlist_fundamentals', 'finviz_screener', 'eodhd_stock_prices', 'eodhd_eod_stock_prices', 'market_data', 'earnings_calendar', 'ipo_calendar', 'news_feed', 'twitter_author_summary', 'twitter_daily_report', 'youtube_author_summary', 'theme_report', 'market_weekly_report', 'cctv_news', 'eodhd_news', 'watchlist_news', 'zhishixingqiu_subscription')),
+                CONSTRAINT valid_task_type CHECK (type IN ('twitter_subscription', 'youtube_subscription', 'economic_events', 'macro_indicators', 'eodhd_fundamentals', 'watchlist_fundamentals', 'finviz_screener', 'eodhd_stock_prices', 'eodhd_eod_stock_prices', 'market_data', 'earnings_calendar', 'ipo_calendar', 'news_feed', 'feeds_topic_summary', 'twitter_author_summary', 'twitter_daily_report', 'youtube_author_summary', 'theme_report', 'market_weekly_report', 'cctv_news', 'eodhd_news', 'watchlist_news', 'zhishixingqiu_subscription')),
                 CONSTRAINT cron_or_interval CHECK (
                     (schedule_type = 'cron' AND cron_expression IS NOT NULL) OR
                     (schedule_type = 'interval' AND interval_minutes IS NOT NULL)
@@ -1001,6 +1004,7 @@ class DatabaseManager:
                 'earnings_calendar',
                 'ipo_calendar',
                 'news_feed',
+                'feeds_topic_summary',
                 'twitter_author_summary',
                 'twitter_daily_report',
                 'youtube_author_summary',
@@ -1953,5 +1957,36 @@ class DatabaseManager:
             # 脚本不存在时静默跳过，不打印警告
         except Exception as e:
             print(f"❌ 创建 Form 13F 表时出错: {str(e)}")
+            # 不抛出异常，让系统继续运行
+            pass
+
+    def _create_feed_topic_tables(self, conn):
+        """创建 Feeds Dashboard 相关表（主题词典/每日条目快照）+ 调度任务类型迁移"""
+        cursor = conn.cursor()
+
+        try:
+            migration_file = os.path.join(
+                os.path.dirname(__file__),
+                'migrations/create_feed_topic_tables.sql'
+            )
+
+            if os.path.exists(migration_file):
+                with open(migration_file, 'r', encoding='utf-8') as f:
+                    sql = f.read()
+                cursor.execute(sql)
+                print("✅ Feeds Dashboard 主题表创建/更新完成")
+
+            # 调度任务类型 CHECK 约束 + 默认调度行（feeds_topic_summary）
+            task_type_migration = os.path.join(
+                os.path.dirname(__file__),
+                'migrations/add_feeds_topic_summary_task_type.sql'
+            )
+            if os.path.exists(task_type_migration):
+                with open(task_type_migration, 'r', encoding='utf-8') as f:
+                    sql = f.read()
+                cursor.execute(sql)
+                print("✅ Feeds Dashboard 调度任务类型迁移完成")
+        except Exception as e:
+            print(f"❌ 创建 Feeds Dashboard 表时出错: {str(e)}")
             # 不抛出异常，让系统继续运行
             pass
