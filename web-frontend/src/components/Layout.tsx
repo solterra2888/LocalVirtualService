@@ -27,7 +27,6 @@ import {
   KeyOutlined,
   ProfileOutlined,
   GlobalOutlined,
-  ThunderboltOutlined,
   BankOutlined,
   FundViewOutlined,
   AppleOutlined,
@@ -125,12 +124,12 @@ const Layout: React.FC = () => {
 
 
 
-  // 主导航：Daily 首位（登录后默认页，聚合视图），Sources 第二，Feeds 第三
+  // 主导航：Feeds Dashboard 首位（登录后默认页，按主题聚合视图），Sources 第二，Feeds 第三
   const menuItems = [
     {
-      key: '/daily',
-      icon: <ThunderboltOutlined />,
-      label: 'Daily',
+      key: '/feeds-dashboard',
+      icon: <AppstoreOutlined />,
+      label: 'Feeds Dashboard',
     },
     {
       key: '/files',
@@ -141,11 +140,6 @@ const Layout: React.FC = () => {
       key: '/feeds',
       icon: <ReadOutlined />,
       label: 'Feeds',
-    },
-    {
-      key: '/feeds-dashboard',
-      icon: <AppstoreOutlined />,
-      label: 'Feeds Dashboard',
     },
     {
       key: '/dashboard',
@@ -198,6 +192,8 @@ const Layout: React.FC = () => {
     if (item.key === '/projects') return false;
     // 暂时屏蔽 UG Data：功能未成熟；路由与页面代码保留
     if (item.key === 'ug-data') return false;
+    // 暂时屏蔽 Daily：使用人数不多，默认落地页已改为 Feeds Dashboard；路由与页面代码保留
+    if (item.key === '/daily') return false;
     if (item.children) return item.children.length > 0;
     return true;
   });

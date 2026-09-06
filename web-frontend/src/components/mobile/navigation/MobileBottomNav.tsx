@@ -2,17 +2,18 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ApiOutlined,
+  AppstoreOutlined,
   FileTextOutlined,
   ProfileOutlined,
   ReadOutlined,
   StockOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons';
 import './MobileBottomNav.css';
 
 /**
- * 移动端底部导航栏：Daily（登录默认页, 聚合视图）、Sources、Feeds、Reports
+ * 移动端底部导航栏：Feeds Dashboard（登录默认页, 主题聚合视图）、Sources、Feeds、Reports
  * Watchlist 与 PC 顶栏一致，指向 /dashboard
+ * Daily 暂时从导航隐藏 (使用人数不多; 路由保留), 与桌面侧栏口径一致
  */
 const MobileBottomNav: React.FC = () => {
   const navigate = useNavigate();
@@ -20,9 +21,9 @@ const MobileBottomNav: React.FC = () => {
 
   const navItems = [
     {
-      key: '/daily',
-      icon: <ThunderboltOutlined />,
-      label: 'Daily',
+      key: '/feeds-dashboard',
+      icon: <AppstoreOutlined />,
+      label: 'Dashboard',
     },
     {
       key: '/files',

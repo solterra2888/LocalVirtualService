@@ -102,7 +102,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   }
   
   if (!adminUser?.is_admin) {
-    return <Navigate to="/daily" replace />;
+    return <Navigate to="/feeds-dashboard" replace />;
   }
   
   return <>{children}</>;

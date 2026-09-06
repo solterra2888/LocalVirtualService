@@ -232,7 +232,7 @@ def _fetch_user_items(
 
     order_limit = ""
     if limit is not None:
-        order_limit = " ORDER BY i.score DESC, sc.published_at DESC LIMIT %(limit)s OFFSET %(offset)s"
+        order_limit = " ORDER BY sc.published_at DESC, i.score DESC LIMIT %(limit)s OFFSET %(offset)s"
         params["limit"] = limit
         params["offset"] = offset
     elif not count_only:
@@ -378,7 +378,8 @@ def get_feeds_dashboard(
             if meta is None:
                 continue  # 词典刚被禁用, 跳过
             items = [_row_to_dashboard_item(r, sub_id_map) for r in topic_rows]
-            items.sort(key=lambda x: (-x.score, x.published_at))
+            # 列表展示序: 时间降序优先 (阅读预期), score 仅作同刻并列裁决; 重要性由徽标表达
+            items.sort(key=lambda x: (x.published_at, x.score), reverse=True)
             for item in items:
                 unique_content_ids.add(item.id)
 
@@ -746,7 +747,7 @@ def get_feeds_dashboard_items(
         total = int(cursor.fetchone()[0] or 0)
 
         cursor.execute(
-            base_sql + " ORDER BY best.score DESC, sc.published_at DESC LIMIT %(limit)s OFFSET %(offset)s",
+            base_sql + " ORDER BY sc.published_at DESC, best.score DESC LIMIT %(limit)s OFFSET %(offset)s",
             dict(params, limit=limit, offset=offset),
         )
         rows = cursor.fetchall()
