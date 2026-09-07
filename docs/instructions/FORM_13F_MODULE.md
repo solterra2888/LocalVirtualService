@@ -46,10 +46,11 @@ SEC 13F 数据页 每工作日 UTC 21:00 轮询
 1. **主报告期提取**：每个 ZIP 的 COVERPAGE.tsv 里 `REPORTCALENDARORQUARTER` 取**众数**——其余行是往年季度的补报申报，不属于本数据集
 2. **机构多申报取舍**：同一 FILINGMANAGER_NAME 同期多份申报（amendment/重复），取 `ISAMENDMENT=Y` 优先 → `AMENDMENTNO` 最大 → 最后出现
 3. **聚合粒度**：`(filer, quarter, cusip, putcall)`——SEC 原始行有拆腿（OTHERMANAGER），聚合后每季 ~230 万行（原始 ~320 万行）
-4. **quarter 标签**：`31-MAR-2026` → `2026Q2` 格式（`quarter_of()`）
-5. **filer_key**：`sha1(name.strip())[:12]`（`filer_key_of()`），与原型一致
-6. **PUTCALL 原值**：SEC 用全词 `'Call'`/`'Put'`（非单字母），列宽 VARCHAR(6)
-7. **sector 最长类别名 31 字符**（`Investment Grade Corporate Bond`），列宽 VARCHAR(40)
+4. **quarter 标签**：COVERPAGE `REPORTCALENDARORQUARTER` 的**日历季**，`31-MAR-2026` → `2026Q1`（`quarter_of()`）。不要把 SEC 页面申报窗口名（如 "2026 March April May 13F"）当成 Q2——那是 Mar–May 申报窗口，对应截至 3/31 的持仓 = Q1。真正的 2026Q2 应对应 `01jun2026-31aug2026_form13f.zip` / "2026 June July August 13F"
+5. **ZIP 文件名（2024 年换过）**：页面展示名 2024 年起改为月份短语，href 则两套——2024+ 为 `01mar2026-31may2026_form13f.zip`，2013–2023 为 `2023q4_form13f.zip`。日常 poll 只自动入库窗口文件名；`backfill` 才发现 legacy。解析用 `*_form13f.zip` 兜底
+6. **filer_key**：`sha1(name.strip())[:12]`（`filer_key_of()`），与原型一致
+7. **PUTCALL 原值**：SEC 用全词 `'Call'`/`'Put'`（非单字母），列宽 VARCHAR(6)
+8. **sector 最长类别名 31 字符**（`Investment Grade Corporate Bond`），列宽 VARCHAR(40)
 
 ### 快照计算的性能要点
 

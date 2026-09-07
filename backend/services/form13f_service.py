@@ -44,9 +44,16 @@ SEC_DATASETS_URL = (
     "https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets")
 SEC_BASE = "https://www.sec.gov"
 
-# ZIP 链接模式，如 .../01JUN2025-31AUG2025_form13f.zip
+# SEC 页面展示名 2024 年起改为 "2026 March April May 13F"，ZIP href 则有两套：
+#   2024+：01mar2026-31may2026_form13f.zip（申报窗口起止日）
+#   ≤2023：2023q4_form13f.zip
+# 用 *_form13f.zip 兜底，避免再因改名漏季。
 DATASET_ZIP_RE = re.compile(
-    r'href="([^"]*?(\d{2}[A-Z]{3}\d{4}-\d{2}[A-Z]{3}\d{4}_form13f)\.zip)"', re.IGNORECASE)
+    r'href="([^"]*?([^"/]+_form13f)\.zip)"', re.IGNORECASE)
+WINDOW_DATASET_RE = re.compile(
+    r'^\d{2}[A-Z]{3}\d{4}-\d{2}[A-Z]{3}\d{4}_form13f$', re.IGNORECASE)
+LEGACY_DATASET_RE = re.compile(
+    r'^\d{4}q[1-4]_form13f$', re.IGNORECASE)
 
 # 数据集保存目录（照 REPORTS_DIR 模式，位于 backend/data/form13f）
 DATA_DIR = os.path.join(
@@ -61,12 +68,42 @@ _MONTHS = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
 
 
 def quarter_of(date_str: str) -> Optional[str]:
-    """'31-MAR-2026' -> '2026Q1'；解析失败返回 None"""
+    """持仓报告期：'31-MAR-2026' -> '2026Q1'（日历季，不是 SEC 页面申报窗口名）"""
     m = re.match(r'(\d{2})-([A-Z]{3})-(\d{4})', (date_str or '').strip().upper())
     if not m or m.group(2) not in _MONTHS:
         return None
     month = _MONTHS[m.group(2)]
     return f"{m.group(3)}Q{(month - 1) // 3 + 1}"
+
+
+def classify_dataset_name(dataset_name: str) -> str:
+    """window = 2024+ 日期窗口；legacy = 2013–2023 的 YYYYqN；unknown 当 window 处理以免漏新文件。"""
+    name = (dataset_name or '').strip()
+    if WINDOW_DATASET_RE.match(name):
+        return 'window'
+    if LEGACY_DATASET_RE.match(name):
+        return 'legacy'
+    return 'window'
+
+
+def parse_sec_dataset_zips(html: str) -> List[Tuple[str, str, str]]:
+    """从 SEC 13F 数据页 HTML 解析 ZIP 链接。
+
+    Returns: [(href, dataset_name, kind), ...]  kind 为 window | legacy
+    Raises: 解析不到任何 *_form13f.zip 时抛异常（防改版后静默空跑）
+    """
+    matches = DATASET_ZIP_RE.findall(html or '')
+    if not matches:
+        raise RuntimeError("SEC 13F 数据页未解析到任何 form13f ZIP 链接，页面可能已改版")
+    out: List[Tuple[str, str, str]] = []
+    seen = set()
+    for href, dataset_name in matches:
+        key = dataset_name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((href, dataset_name, classify_dataset_name(dataset_name)))
+    return out
 
 
 def filer_key_of(name: str) -> str:
@@ -133,33 +170,54 @@ class Form13fService:
 
     # ── 阶段 1: 发现 ───────────────────────────────────────────────────────
 
-    def poll_sec_datasets(self) -> Dict[str, int]:
+    def poll_sec_datasets(self, include_legacy: bool = False) -> Dict[str, int]:
         """轮询 SEC 13F 数据页，幂等发现季度数据集
 
-        Returns: {"discovered": 新数据集数, "total": 页面数据集总数}
+        日常 poll 只入库 2024+ 窗口文件名（避免一次拉 2013–2023 四十多个 ZIP）。
+        include_legacy=True 时连 YYYYqN 历史文件一并发现（供 backfill）。
+
+        已存在的行：若 source_url 不是 http（如 local://test），用 SEC 真实地址覆盖。
+        已导入却被标成 failed 的行：恢复 imported，避免反复用坏 URL 重下。
+
+        Returns: {discovered, refreshed, healed, total}
         Raises: 解析失败抛异常（防 SEC 改版后静默空跑）
         """
         html = self.safe_get(SEC_DATASETS_URL)
         if not html or len(html) < 500:
             raise RuntimeError(f"SEC 13F 数据页获取失败或内容异常（长度={len(html) if html else 0}）")
 
-        matches = DATASET_ZIP_RE.findall(html)
-        if not matches:
-            raise RuntimeError("SEC 13F 数据页未解析到任何 form13f ZIP 链接，页面可能已改版")
+        parsed = parse_sec_dataset_zips(html)
+        to_upsert = parsed if include_legacy else [
+            p for p in parsed if p[2] != 'legacy']
 
         discovered = 0
-        for href, dataset_name in matches:
+        refreshed = 0
+        for href, dataset_name, _kind in to_upsert:
             url = href if href.startswith("http") else SEC_BASE + href
             with self.db_manager.get_connection_context() as conn:
                 with conn.cursor() as cur:
                     # SEC 页面文件名大小写不稳定（01JUN2025 vs 01jun2025），
                     # 按大小写不敏感去重，避免把已导入季度当成新数据集。
                     cur.execute(
-                        "SELECT id FROM form13f_datasets "
+                        "SELECT id, source_url FROM form13f_datasets "
                         "WHERE LOWER(dataset_name) = LOWER(%s)",
                         (dataset_name,),
                     )
-                    if cur.fetchone():
+                    existing = cur.fetchone()
+                    if existing:
+                        ds_id, source_url = existing
+                        if url.startswith("http") and not (
+                                source_url or '').startswith("http"):
+                            cur.execute(
+                                "UPDATE form13f_datasets "
+                                "SET source_url = %s, updated_at = %s "
+                                "WHERE id = %s",
+                                (url, utcnow(), ds_id),
+                            )
+                            refreshed += 1
+                            logger.info(
+                                f"[13F] 回填 SEC URL {dataset_name} "
+                                f"(id={ds_id})")
                         continue
                     cur.execute(
                         """
@@ -175,8 +233,32 @@ class Form13fService:
                 discovered += 1
                 logger.info(f"[13F] 发现新数据集 {dataset_name} (id={row[0]})")
 
-        logger.info(f"[13F] poll 完成: 发现 {discovered} 个新数据集 / 共 {len(matches)} 个")
-        return {"discovered": discovered, "total": len(matches)}
+        healed = self._heal_imported_failed()
+        logger.info(
+            f"[13F] poll 完成: 发现 {discovered} 个新数据集 / "
+            f"刷新 URL {refreshed} / 修复 {healed} / "
+            f"页面 {len(parsed)} 个")
+        return {
+            "discovered": discovered, "refreshed": refreshed,
+            "healed": healed, "total": len(parsed),
+        }
+
+    def _heal_imported_failed(self) -> int:
+        """已导入成功却被后续坏 URL 下载打成 failed 的行，恢复 imported。"""
+        with self.db_manager.get_connection_context() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE form13f_datasets
+                    SET status = 'imported', error_message = NULL,
+                        updated_at = %s
+                    WHERE status = 'failed'
+                      AND imported_at IS NOT NULL
+                      AND filers_count > 0
+                    """,
+                    (utcnow(),),
+                )
+                return cur.rowcount or 0
 
     # ── 阶段 2: 下载 ───────────────────────────────────────────────────────
 
@@ -217,6 +299,15 @@ class Form13fService:
         ds = self._get_dataset(dataset_id)
         if not ds:
             raise ValueError(f"数据集 id={dataset_id} 不存在")
+
+        if not force and ds['status'] == 'imported':
+            return {"dataset_id": dataset_id, "skipped": True,
+                    "reason": "already imported"}
+
+        source_url = ds.get('source_url') or ''
+        if not source_url.startswith('http'):
+            raise ValueError(
+                f"数据集 id={dataset_id} source_url 不是 http，拒绝下载: {source_url}")
 
         path = self._zip_path(ds['dataset_name'])
         if not force and ds['status'] == 'downloaded' and os.path.exists(path):

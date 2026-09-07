@@ -45,6 +45,8 @@ def form13f_poll_task(self):
             """
             SELECT d.id, d.status FROM form13f_datasets d
             WHERE d.status IN ('pending', 'failed')
+              AND d.imported_at IS NULL
+              AND d.source_url LIKE 'http%'
               AND NOT EXISTS (
                   SELECT 1 FROM form13f_datasets x
                   WHERE LOWER(x.dataset_name) = LOWER(d.dataset_name)
@@ -153,6 +155,7 @@ def form13f_backfill_task(self):
     """回填全部历史数据集（按 id 顺序派发下载，Celery 队列串行执行避免并发下载）"""
     try:
         svc = _get_service()
+        svc.poll_sec_datasets(include_legacy=True)
         result = svc.backfill_history()
         for ds in result['datasets']:
             _dispatch("form13f_download", dataset_id=ds['id'])
