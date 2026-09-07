@@ -7,8 +7,8 @@ import './LandingPage.css';
 /* ===================== 数据 ===================== */
 
 const SOURCES = [
-  'Twitter', 'YouTube', 'Bloomberg', 'CNBC', 'Finviz', 'EODHD',
-  'Reuters', '微博', '知识星球', 'Apple Podcasts',
+  '社交媒体', '视频平台', '财经资讯', '新闻快讯', '市场行情',
+  '宏观数据', '深度研报', '中文社区', '付费专栏', '播客电台',
 ];
 
 const THESIS = [
@@ -51,7 +51,7 @@ const MODULES: ModuleInfo[] = [
       { b: '跨源统一时间线', s: '9+ sources unified into one time-ordered stream' },
       { b: 'AI 摘要与智能标签', s: 'Summary, GICS sector, tickers, people & countries' },
       { b: '就地预览抽屉', s: 'In-place preview, keyboard navigation' },
-      { b: '结构化每日日报', s: 'Bloomberg · CNBC · Finviz market recap' },
+      { b: '结构化每日日报', s: 'News · market data · daily recap across sources' },
     ],
     visual: 'daily',
   },
@@ -61,9 +61,9 @@ const MODULES: ModuleInfo[] = [
     cn: '多渠道智能订阅',
     lead: 'Your follows, continuously synced. Bring scattered sources into one inbox — never miss a signal again.',
     features: [
-      { b: '多源订阅', s: 'Twitter · YouTube · News · 微博 · 知识星球 · Podcasts' },
-      { b: '定时自动抓取', s: 'Auto-fetch with graceful backoff' },
-      { b: '跨用户内容复用', s: 'Cross-user dedup, globally shared tagging' },
+      { b: '多源订阅', s: 'Social · video · news · communities · podcasts' },
+      { b: '定时自动同步', s: 'Auto-sync with graceful backoff' },
+      { b: '智能去重 · 统一标签', s: 'Smart dedup & consistent tagging' },
       { b: 'AI 打标 + 智能日报', s: 'Auto-tagging + two-phase daily digest' },
     ],
     visual: 'feeds',
@@ -125,7 +125,7 @@ const AI_CARDS = [
   {
     title: '智能每日日报',
     en: 'Intelligent Daily Reports',
-    desc: '两阶段生成、跨用户复用、时区对齐，以可控成本输出个性化的市场复盘与主题报告。',
+    desc: '两阶段生成、时区对齐，以可控成本输出个性化的市场复盘与主题报告。',
     icon: 'report',
   },
 ];
@@ -134,7 +134,7 @@ const DAY = [
   {
     time: '06:30',
     label: 'Morning · 早间',
-    text: 'Open Daily, preset to Twitter + News — grasp overnight headlines and KOL views in five minutes.',
+    text: 'Open Daily, preset to social + news — grasp overnight headlines and KOL views in five minutes.',
   },
   {
     time: '09:30',
@@ -201,7 +201,7 @@ const HeroChart: React.FC = () => (
     <g transform="translate(296,46)">
       <rect width="140" height="48" rx="6" fill="rgba(10,19,34,0.9)" stroke="rgba(201,169,97,0.4)" />
       <text x="14" y="20" fill="#8A94A6" fontSize="10" letterSpacing="2">DAILY MARKET REPORT</text>
-      <text x="14" y="38" fill="#F3EFE5" fontSize="14" fontWeight="600">The Close +1.84%</text>
+      <text x="14" y="38" fill="#F3EFE5" fontSize="14" fontWeight="600">US Market +1.84%</text>
     </g>
   </svg>
 );
@@ -228,7 +228,7 @@ const ModuleVisual: React.FC<{ type: ModuleInfo['visual'] }> = ({ type }) => {
     return (
       <svg viewBox="0 0 320 280" fill="none" aria-hidden="true">
         {[
-          { y: 40, label: 'X' }, { y: 110, label: '▶' }, { y: 180, label: '闻' }, { y: 250, label: '博' },
+          { y: 40, label: '社' }, { y: 110, label: '▶' }, { y: 180, label: '闻' }, { y: 250, label: '研' },
         ].map((s, i) => (
           <g key={i}>
             <circle cx="40" cy={s.y} r="16" fill="rgba(255,255,255,0.05)" stroke="rgba(201,169,97,0.45)" />
