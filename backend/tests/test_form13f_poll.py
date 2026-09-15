@@ -1,55 +1,84 @@
 # -*- coding: utf-8 -*-
-"""Form 13F SEC 数据页 ZIP 文件名解析（2024 年前后两套命名）。"""
-import pytest
-
+"""Form 13F：季度标签、CIK 身份、amendment 折叠。"""
 from backend.services.form13f_service import (
-    classify_dataset_name,
-    parse_sec_dataset_zips,
     quarter_of,
+    filer_key_of,
+    normalize_cik,
+    normalize_filer_name,
+    fold_period_filings,
+    HoldingRow,
+    PeriodFiling,
 )
 
-SAMPLE_HTML = """
-<table>
-  <tr><td><a href="/files/structureddata/data/form-13f-data-sets/01mar2026-31may2026_form13f.zip">2026 March April May 13F</a></td></tr>
-  <tr><td><a href="/files/structureddata/data/form-13f-data-sets/01jun2025-31aug2025_form13f.zip">2025 June July August 13F</a></td></tr>
-  <tr><td><a href="/files/structureddata/data/form-13f-data-sets/01jan2024-29feb2024_form13f.zip">2024 January February 13F</a></td></tr>
-  <tr><td><a href="/files/structureddata/data/form-13f-data-sets/2023q4_form13f.zip">2023 Q4 13F</a></td></tr>
-  <tr><td><a href="/files/structureddata/data/form-13f-data-sets/2023q1_form13f.zip">2023 Q1 13F</a></td></tr>
-</table>
-"""
+
+def _row(cusip, shares, value=1, putcall=''):
+    return HoldingRow(
+        cusip=cusip, issuer=cusip, title='COM',
+        putcall=putcall, value=value, shares=shares)
 
 
 class TestQuarterOf:
     def test_march_31_is_calendar_q1_not_filing_window_q2(self):
         assert quarter_of("31-MAR-2026") == "2026Q1"
 
-    def test_june_30_is_q2(self):
-        assert quarter_of("30-JUN-2026") == "2026Q2"
+    def test_iso_date(self):
+        assert quarter_of("2026-03-31") == "2026Q1"
+        assert quarter_of("2026-06-30") == "2026Q2"
+
+    def test_datetime_like(self):
+        class D:
+            year = 2025
+            month = 12
+        assert quarter_of(D()) == "2025Q4"
 
 
-class TestClassifyDatasetName:
-    def test_2024_plus_window_filename(self):
-        assert classify_dataset_name("01mar2026-31may2026_form13f") == "window"
+class TestFilerIdentity:
+    def test_cik_key_is_zero_padded(self):
+        assert normalize_cik(1067983) == "0001067983"
+        assert filer_key_of("0001067983") == filer_key_of(1067983)
+        assert normalize_filer_name("  Foo   Bar ") == "FOO BAR"
 
-    def test_pre_2024_legacy_filename(self):
-        assert classify_dataset_name("2023q4_form13f") == "legacy"
 
+class TestFoldAmendments:
+    def test_new_holdings_unions_with_original(self):
+        original = {
+            ('A', ''): _row('A', 100, 10),
+            ('B', ''): _row('B', 50, 5),
+        }
+        added = {('C', ''): _row('C', 7, 3)}
+        holdings, acc = fold_period_filings([
+            PeriodFiling('acc-orig', '2025-05-15', False, None, 0, original),
+            PeriodFiling('acc-new', '2025-08-14', True, 'NEW HOLDINGS', 1, added),
+        ])
+        assert acc == 'acc-new'
+        assert set(holdings) == {('A', ''), ('B', ''), ('C', '')}
+        assert holdings[('A', '')].shares == 100
+        assert holdings[('C', '')].shares == 7
 
-class TestParseSecDatasetZips:
-    def test_parses_both_filename_conventions(self):
-        parsed = parse_sec_dataset_zips(SAMPLE_HTML)
-        names = [name for _, name, _ in parsed]
-        assert names == [
-            "01mar2026-31may2026_form13f",
-            "01jun2025-31aug2025_form13f",
-            "01jan2024-29feb2024_form13f",
-            "2023q4_form13f",
-            "2023q1_form13f",
-        ]
-        kinds = {name: kind for _, name, kind in parsed}
-        assert kinds["01mar2026-31may2026_form13f"] == "window"
-        assert kinds["2023q4_form13f"] == "legacy"
+    def test_restatement_replaces_original(self):
+        original = {('A', ''): _row('A', 100)}
+        restated = {('B', ''): _row('B', 1)}
+        holdings, acc = fold_period_filings([
+            PeriodFiling('acc-orig', '2025-05-15', False, None, 0, original),
+            PeriodFiling('acc-re', '2025-06-01', True, 'RESTATEMENT', 1, restated),
+        ])
+        assert acc == 'acc-re'
+        assert set(holdings) == {('B', '')}
 
-    def test_raises_when_no_zip_links(self):
-        with pytest.raises(RuntimeError, match="页面可能已改版"):
-            parse_sec_dataset_zips("<html>no datasets here</html>")
+    def test_untyped_amendment_treated_as_restatement(self):
+        original = {('A', ''): _row('A', 100)}
+        amend = {('B', ''): _row('B', 1)}
+        holdings, _acc = fold_period_filings([
+            PeriodFiling('acc-orig', '2025-05-15', False, None, 0, original),
+            PeriodFiling('acc-a', '2025-06-01', True, None, 1, amend),
+        ])
+        assert set(holdings) == {('B', '')}
+
+    def test_empty_notice_ignored(self):
+        original = {('A', ''): _row('A', 100)}
+        holdings, acc = fold_period_filings([
+            PeriodFiling('acc-orig', '2025-05-15', False, None, 0, original),
+            PeriodFiling('acc-nt', '2025-05-16', False, None, 0, {}),
+        ])
+        assert acc == 'acc-orig'
+        assert set(holdings) == {('A', '')}

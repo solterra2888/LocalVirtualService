@@ -80,6 +80,7 @@ feedparser==6.0.11
 # YouTube 音频下载（用于无字幕视频的 Fun-ASR 转录）
 yt-dlp==2026.2.21
 
-# NLP 句子边界检测（用于无标点英文 transcript 清洗，需配合模型 en_core_web_sm）
+# SEC 13F / EDGAR
+edgartools>=5.40.0
 # 安装后需执行: python -m spacy download en_core_web_sm
 spacy>=3.7,<4

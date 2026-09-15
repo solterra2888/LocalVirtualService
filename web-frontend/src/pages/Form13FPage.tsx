@@ -98,6 +98,8 @@ const Form13FPage: React.FC = () => {
   useEffect(() => {
     if (filerId == null) return;
     (async () => {
+      setDetail(null);
+      setSelectedQuarter(null);
       setDetailLoading(true);
       try {
         const d = await form13fAPI.getFilerDetail(filerId);
@@ -133,7 +135,7 @@ const Form13FPage: React.FC = () => {
     setRefreshing(true);
     try {
       await form13fAPI.refresh('poll');
-      message.success('已派发 SEC 轮询任务，稍后刷新查看');
+      message.success('已派发 13F 同步任务，稍后刷新查看');
     } catch (error) {
       message.error('派发刷新失败');
     } finally {
@@ -156,18 +158,10 @@ const Form13FPage: React.FC = () => {
     return Math.max(...pcts, 0.01);
   }, [currentSnap]);
 
-  // Top20 表：与上一季度同 (cusip,putcall) 的股数对比
-  const prevShares = useMemo(() => {
-    if (!detail || !selectedQuarter) return {};
-    const qs = detail.quarters.map((x) => x.quarter);
-    const idx = qs.indexOf(selectedQuarter);
-    if (idx <= 0) return null; // 首季度无对比（null 表示有上下文但无上期）
-    const prev = detail.quarters[idx - 1];
-    const map: Record<string, number> = {};
-    prev.top20_holdings.forEach((h) => {
-      map[`${h.cusip}|${h.putcall || ''}`] = h.shares || 0;
-    });
-    return map;
+  // 当前选中季是否有上一报告期（首季 Δ Shares 显示 —，其余才能标 NEW）
+  const hasPrevQuarter = useMemo(() => {
+    if (!detail || !selectedQuarter) return false;
+    return detail.quarters.map((x) => x.quarter).indexOf(selectedQuarter) > 0;
   }, [detail, selectedQuarter]);
 
   const holdingColumns = useMemo(() => [
@@ -190,8 +184,6 @@ const Form13FPage: React.FC = () => {
         </Space>
       ),
     },
-    { title: 'CUSIP', dataIndex: 'cusip', width: 100, render: (v: string) => (
-      <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text>) },
     { title: 'Value ($)', dataIndex: 'value', align: 'right' as const, width: 120,
       render: (v: number) => <span style={{ color: colors.text, fontVariantNumeric: 'tabular-nums' }}>{fmtFull(v)}</span> },
     {
@@ -215,13 +207,12 @@ const Form13FPage: React.FC = () => {
     {
       title: 'Δ Shares (QoQ)', key: 'delta', align: 'right' as const, width: 140,
       render: (_: unknown, r: HoldingItem) => {
-        if (prevShares === null) return <Text type="secondary">—</Text>;
-        const key = `${r.cusip}|${r.putcall || ''}`;
-        const ps = prevShares[key];
-        if (ps === undefined) return <Tag color="red" style={{ marginInlineEnd: 0 }}>NEW</Tag>;
+        if (!hasPrevQuarter) return <Text type="secondary">—</Text>;
+        const ps = r.prev_shares;
+        if (ps == null || ps === 0) return <Tag color="red" style={{ marginInlineEnd: 0 }}>NEW</Tag>;
         const d = (r.shares || 0) - ps;
         if (d === 0) return <Text type="secondary">0</Text>;
-        const pct = ps > 0 ? (d / ps) * 100 : 100;
+        const pct = (d / ps) * 100;
         return (
           <span style={{ color: d > 0 ? colors.posColor : colors.negColor, fontVariantNumeric: 'tabular-nums' }}>
             {d > 0 ? '+' : ''}{fmtMoney(d)} ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
@@ -229,7 +220,7 @@ const Form13FPage: React.FC = () => {
         );
       },
     },
-  ], [colors, prevShares, maxHoldingPct]);
+  ], [colors, hasPrevQuarter, maxHoldingPct]);
 
   const changeColumns = useMemo(() => [
     {
@@ -276,14 +267,14 @@ const Form13FPage: React.FC = () => {
         <div>
           <Title level={4} style={{ margin: 0, color: colors.text }}>Form 13F Filings</Title>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            数据来源：SEC Form 13F Data Sets · 季度持仓披露{manifest?.quarters.length ? `（${manifest.quarters[0]} – ${manifest.quarters[manifest.quarters.length - 1]}）` : ''}
+            数据来源：SEC EDGAR 13F-HR · 关注机构{manifest?.quarters.length ? `（${manifest.quarters[0]} – ${manifest.quarters[manifest.quarters.length - 1]}）` : ''}
           </Text>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <Select
             showSearch
             value={filerId}
-            placeholder="搜索机构（9,400+ filers）…"
+            placeholder="搜索关注机构…"
             style={{ minWidth: 300 }}
             filterOption={false}
             onSearch={handleSearch}
@@ -295,7 +286,7 @@ const Form13FPage: React.FC = () => {
             }))}
             suffixIcon={<SearchOutlined />}
           />
-          <Tooltip title="轮询 SEC 数据页：发现新季度数据集并自动下载导入">
+          <Tooltip title="同步关注机构的最新 13F-HR">
             <Button icon={<ReloadOutlined />} loading={refreshing} onClick={handleRefresh}>
               刷新
             </Button>
@@ -351,50 +342,34 @@ const Form13FPage: React.FC = () => {
           )}
         </Card>
 
-        {/* ── Top 20 largest holdings ── */}
-        <Card size="small" style={{ marginBottom: 16, background: colors.cardBg, borderColor: colors.cardBorder }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-            <Text strong style={{ fontSize: 15, color: colors.text }}>Top 20 largest holdings</Text>
-            <Tooltip title="该机构报告的全部持仓中市值最大的 20 只证券。% of portfolio = 持仓市值 / 当季组合总市值；Δ Shares 为相对上一报告期的持仓股数变动。">
-              <Text type="secondary" style={{ cursor: 'help' }}>ⓘ</Text>
-            </Tooltip>
-            {detail && detail.quarters.length > 1 && (
-              <Tabs
-                size="small"
-                activeKey={selectedQuarter || undefined}
-                onChange={setSelectedQuarter}
-                style={{ marginLeft: 'auto' }}
-                items={[...detail.quarters].reverse().map((q) => ({
-                  key: q.quarter,
-                  label: fmtQuarter(q.quarter),
-                }))}
-              />
-            )}
+        {detail && detail.quarters.length > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <Tabs
+              size="small"
+              activeKey={selectedQuarter || undefined}
+              onChange={setSelectedQuarter}
+              items={[...detail.quarters].reverse().map((q) => ({
+                key: q.quarter,
+                label: fmtQuarter(q.quarter),
+              }))}
+            />
           </div>
-          <Table<HoldingItem>
-            size="small"
-            rowKey={(r) => `${r.cusip}|${r.putcall || ''}`}
-            columns={holdingColumns}
-            dataSource={currentSnap?.top20_holdings || []}
-            pagination={false}
-            locale={{ emptyText: <Empty description="无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-          />
-        </Card>
+        )}
 
         {/* ── Top 5 buys / sells ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
           {[
             {
               title: 'Top 5 buys',
               icon: <RiseOutlined style={{ color: colors.posColor }} />,
               tip: '当季市值增加幅度最大的 5 只证券（含新建仓）。',
-              items: latestQ?.top5_buys || [],
+              items: currentSnap?.top5_buys || [],
             },
             {
               title: 'Top 5 sells',
               icon: <FallOutlined style={{ color: colors.negColor }} />,
               tip: '当季市值减少幅度最大的 5 只证券（含清仓）。',
-              items: latestQ?.top5_sells || [],
+              items: currentSnap?.top5_sells || [],
             },
           ].map(({ title, icon, tip, items }) => (
             <Card
@@ -406,7 +381,7 @@ const Form13FPage: React.FC = () => {
                   {icon}
                   <span>{title}</span>
                   <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-                    {latestQ ? `· ${fmtQuarter(latestQ.quarter)}` : ''}
+                    {currentSnap ? `· ${fmtQuarter(currentSnap.quarter)}` : ''}
                   </Text>
                   <Tooltip title={tip}>
                     <Text type="secondary" style={{ cursor: 'help', fontSize: 12 }}>ⓘ</Text>
@@ -425,12 +400,30 @@ const Form13FPage: React.FC = () => {
             </Card>
           ))}
         </div>
+
+        {/* ── Top 20 largest holdings ── */}
+        <Card size="small" style={{ marginBottom: 16, background: colors.cardBg, borderColor: colors.cardBorder }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+            <Text strong style={{ fontSize: 15, color: colors.text }}>Top 20 largest holdings</Text>
+            <Tooltip title="该机构报告的全部持仓中市值最大的 20 只证券。% of portfolio = 持仓市值 / 当季组合总市值；Δ Shares 为相对上一报告期全量持仓（不限上季 Top 20）的股数变动。">
+              <Text type="secondary" style={{ cursor: 'help' }}>ⓘ</Text>
+            </Tooltip>
+          </div>
+          <Table<HoldingItem>
+            size="small"
+            rowKey={(r) => `${r.cusip}|${r.putcall || ''}`}
+            columns={holdingColumns}
+            dataSource={currentSnap?.top20_holdings || []}
+            pagination={false}
+            locale={{ emptyText: <Empty description="无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+          />
+        </Card>
       </Spin>
 
       <div style={{ textAlign: 'center', marginTop: 24 }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
           Form 13F 是美国 SEC 要求管理超过 1 亿美元资产的机构投资管理人提交的季度持仓报告。
-          数据来自 <a href="https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets" target="_blank" rel="noreferrer">SEC Form 13F Data Sets</a>，仅供研究参考。
+          数据来自 <a href="https://www.sec.gov/cgi-bin/browse-edgar" target="_blank" rel="noreferrer">SEC EDGAR 13F-HR</a>（关注机构），仅供研究参考。
         </Text>
       </div>
     </div>

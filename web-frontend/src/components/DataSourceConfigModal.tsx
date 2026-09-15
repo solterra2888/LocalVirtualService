@@ -312,7 +312,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       params: ['mode'],
       defaultSchedule: '0 21 * * 1-5',
       defaultName: 'Form 13F Quarterly Poll',
-      description: 'Poll SEC Form 13F data page for new quarterly datasets, then download, import holdings, and compute snapshots (weekdays 21:00 UTC; SEC publishes quarterly)'
+      description: 'Poll 20 preset institution CIKs on EDGAR for 13F-HR filings, fold amendments, import holdings, and compute snapshots (weekdays 21:00 UTC)'
     },
     zhishixingqiu_summary: {
       icon: <StockOutlined style={{ color: '#52c41a' }} />,
@@ -2346,12 +2346,12 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             <Form.Item
               label="Mode"
               name={['taskParams', 'mode']}
-              extra="poll: SEC page discovery + download + import + snapshots + resume stuck datasets. retry: only retry pending/failed datasets."
+              extra="poll: sync 20 preset CIKs from EDGAR (13F-HR + amendments + snapshots). retry: same as poll."
               initialValue="poll"
             >
               <Select>
-                <Option value="poll">Poll SEC (full chain)</Option>
-                <Option value="retry">Retry pending/failed only</Option>
+                <Option value="poll">Sync preset CIKs</Option>
+                <Option value="retry">Retry (same as poll)</Option>
               </Select>
             </Form.Item>
           );

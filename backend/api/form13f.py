@@ -3,7 +3,7 @@
 """
 Form 13F API — SEC 季度持仓接口
 
-提供机构搜索/详情（行业分布、top20 持仓、top5 买卖）与数据集手动刷新
+提供机构搜索/详情（行业分布、top20 持仓、top5 买卖）与预设机构同步
 """
 
 from typing import Any, Dict, List, Optional
@@ -93,8 +93,8 @@ class FilerDetailResponse(BaseModel):
 class RefreshRequest(BaseModel):
     type: str = Field(
         "poll",
-        description="poll=轮询SEC数据页 / import=导入指定数据集 / "
-                    "reaggregate=重算指定季度快照 / backfill=回填全部历史 / retry=重试失败")
+        description="poll=同步20家预设机构13F-HR / reaggregate=重算快照 / "
+                    "backfill|retry|import=同 poll")
     dataset_id: Optional[int] = None
     quarter: Optional[str] = None
     force: bool = False
@@ -178,34 +178,25 @@ async def refresh(
     current_user=Depends(get_current_user),
 ):
     """
-    手动触发后台任务（立即返回 task_id，前端可轮询状态）：
+    手动触发后台任务（立即返回 task_id）：
 
-    - **poll**: 轮询 SEC 数据页 + 补推卡住/失败的数据集（常用）
-    - **import**: 下载并导入指定 dataset_id（local 调试可带 force 重下）
-    - **reaggregate**: 重算指定数据集的快照（quarter 可选）
-    - **backfill**: 按顺序派发全部未完成数据集
-    - **retry**: 重试 failed/pending 数据集
+    - **poll**: 按 20 家预设 CIK 拉 13F-HR（含 amendment 折叠与快照）
+    - **reaggregate**: 重算快照（可带 quarter；不带则全部季度）
+    - **backfill / retry / import**: 与 poll 相同
     """
     try:
         from backend.celery_app import app as celery_app
         task_map = {
             "poll": ("form13f_poll", {}),
-            "import": ("form13f_download",
-                       {"dataset_id": req.dataset_id, "force": req.force}),
-            "reaggregate": ("form13f_aggregate",
-                            {"dataset_id": req.dataset_id, "quarter": req.quarter}),
-            "backfill": ("form13f_backfill", {}),
-            "retry": ("form13f_retry", {}),
+            "import": ("form13f_poll", {}),
+            "reaggregate": ("form13f_aggregate", {"quarter": req.quarter}),
+            "backfill": ("form13f_poll", {}),
+            "retry": ("form13f_poll", {}),
         }
         if req.type not in task_map:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"未知刷新类型: {req.type}，支持: {list(task_map)}",
-            )
-        if req.type in ("import", "reaggregate") and not req.dataset_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"type={req.type} 需要 dataset_id",
             )
         name, kwargs = task_map[req.type]
         result = celery_app.send_task(name, kwargs=kwargs)

@@ -39,6 +39,8 @@ export interface HoldingItem {
   putcall?: string | null;
   value: number;
   shares?: number | null;
+  /** 上一报告期全量持仓中同 (cusip,putcall) 的股数；无上期或不持有则为 null */
+  prev_shares?: number | null;
   pct: number;
 }
 

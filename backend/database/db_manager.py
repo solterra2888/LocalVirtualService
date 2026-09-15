@@ -1954,6 +1954,26 @@ class DatabaseManager:
                     sql = f.read()
                 cursor.execute(sql)
                 print("✅ Form 13F 数据集名大小写唯一索引迁移完成")
+
+            cik_migration = os.path.join(
+                os.path.dirname(__file__),
+                'migrations/add_form13f_preset_cik.sql'
+            )
+            if os.path.exists(cik_migration):
+                with open(cik_migration, 'r', encoding='utf-8') as f:
+                    sql = f.read()
+                cursor.execute(sql)
+                print("✅ Form 13F 预设机构 CIK 迁移完成")
+
+            key_square_migration = os.path.join(
+                os.path.dirname(__file__),
+                'migrations/add_form13f_preset_key_square.sql'
+            )
+            if os.path.exists(key_square_migration):
+                with open(key_square_migration, 'r', encoding='utf-8') as f:
+                    sql = f.read()
+                cursor.execute(sql)
+                print("✅ Form 13F 已移除预设机构 Key Square")
             # 脚本不存在时静默跳过，不打印警告
         except Exception as e:
             print(f"❌ 创建 Form 13F 表时出错: {str(e)}")

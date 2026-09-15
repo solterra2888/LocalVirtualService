@@ -533,14 +533,14 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
       type: 'form13f',
       category: 'data_fetch',
       sortOrder: 170,
-      description: 'Poll SEC Form 13F data page on weekdays: discover new quarterly datasets, download ZIPs, import full holdings (~1.5M rows/quarter) with sector classification, and compute institution snapshots (sector allocation / top 20 holdings / top 5 buys & sells).',
+      description: 'Poll 20 preset institution CIKs on weekdays: fetch 13F-HR filings from EDGAR, fold restatement/new-holdings amendments, import that filer\'s full holdings with sector classification, and compute snapshots (sector allocation / top 20 holdings / top 5 buys & sells).',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
           id: 'configure_form13f_schedule',
           name: 'Configure Form 13F Poll',
-          description: 'Set up periodic SEC 13F page polling (default: weekdays 21:00 UTC)',
+          description: 'Set up periodic 13F CIK polling (default: weekdays 21:00 UTC)',
           endpoint: '/scheduler/tasks/form13f',
           params: {},
           icon: <ScheduleOutlined />

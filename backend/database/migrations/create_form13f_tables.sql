@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS form13f_holdings (
     issuer_name       TEXT,
     title_of_class    TEXT,
     putcall           VARCHAR(6) DEFAULT '',              -- ''(股) | 'Call' | 'Put'（SEC 原值全词）
-    value_usd         BIGINT NOT NULL,                    -- (CUSIP,PUTCALL) 聚合后市值（千美元*1000，SEC 原值）
+    value_usd         BIGINT NOT NULL,                    -- (CUSIP,PUTCALL) 聚合后市值（美元）
     shares            BIGINT,
     leg_count         INTEGER,                            -- 聚合前的原始行数
     sector            VARCHAR(40),                        -- 导入时用 sector_map 分类（GICS 11 类 + ETF 9 类 + Other；最长类别名 31 字符）
@@ -108,15 +108,16 @@ ON form13f_snapshots(quarter);
 CREATE TABLE IF NOT EXISTS form13f_presets (
     id          SERIAL PRIMARY KEY,
     label       TEXT NOT NULL,                            -- 展示名（如 'Bridgewater Associates'）
-    match_name  TEXT NOT NULL,                            -- 匹配 FILINGMANAGER_NAME 原文
+    match_name  TEXT NOT NULL,                            -- 申报名（展示/对照用）
+    cik         VARCHAR(10),                              -- 冻结 EDGAR CIK，拉取主键
     sort_order  INTEGER DEFAULT 0,
     CONSTRAINT uq_f13f_preset UNIQUE (label)
 );
 
 -- 注释
-COMMENT ON TABLE form13f_datasets IS 'SEC Form 13F Data Sets 季度数据集管理层: 发现(poll)->下载(download)->导入(import)->聚合(aggregate) 状态机';
-COMMENT ON COLUMN form13f_datasets.quarter IS 'COVERPAGE REPORTCALENDARORQUARTER 众数对应的主报告期标签，如 2025Q2';
-COMMENT ON TABLE form13f_holdings IS '13F 持仓明细: INFOTABLE 按 (filer,quarter,cusip,putcall) 聚合的全量数据，导入时打好 sector 标签';
+COMMENT ON TABLE form13f_datasets IS '13F 按季度入库批次（edgar_{quarter}），不再对应 SEC ZIP 数据集';
+COMMENT ON COLUMN form13f_datasets.quarter IS '报告期末日历季，如 2025Q2';
+COMMENT ON TABLE form13f_holdings IS '13F 持仓明细: 按 (filer,quarter,cusip,putcall) 聚合，导入时打好 sector 标签';
 COMMENT ON COLUMN form13f_holdings.sector IS '行业/资产分类: GICS 11 板块（CUSIP 映射表）+ ETF 9 类资产（关键词分类）+ Other';
 COMMENT ON TABLE form13f_snapshots IS '机构×季度预计算快照: 仪表盘主数据源。top5 买卖对比依赖相邻季度，导入时一次算好';
 COMMENT ON COLUMN form13f_snapshots.sector_alloc IS '行业分布百分比 {"Technology": 30.29}，基于全组合（非仅 top20），各季度合计约 100';
