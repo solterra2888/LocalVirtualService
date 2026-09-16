@@ -76,10 +76,10 @@ class QuarterSnapshot(BaseModel):
         description="前 20 持仓 [{issuer,title,cusip,putcall,value,shares,pct}]")
     top5_buys: List[Dict[str, Any]] = Field(
         default_factory=list,
-        description="对上一有效季度市值增加最大的 5 笔（含 new）")
+        description="实际加仓/新建中投组占比上升最多的 5 笔；pct/dpct 为占比及占比变化，spct 为股数变化")
     top5_sells: List[Dict[str, Any]] = Field(
         default_factory=list,
-        description="市值减少最大的 5 笔（含 exited）")
+        description="实际减仓/清仓中投组占比下降最多的 5 笔")
 
 
 class FilerDetailResponse(BaseModel):

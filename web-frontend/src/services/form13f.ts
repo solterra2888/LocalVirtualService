@@ -51,7 +51,12 @@ export interface Top5ChangeItem {
   dv: number;
   kind: 'increase' | 'new' | 'decrease' | 'exited';
   value: number;
-  spct: number;
+  /** 本期投组占比（%） */
+  pct?: number;
+  /** 本期占比 − 上期占比（百分点） */
+  dpct?: number;
+  /** 股数变化 %；(current−prev)/prev。新建仓为 null */
+  spct: number | null;
 }
 
 export interface QuarterSnapshot {

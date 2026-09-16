@@ -8,6 +8,10 @@ from backend.services.form13f_service import (
     fold_period_filings,
     HoldingRow,
     PeriodFiling,
+    portfolio_pct,
+    share_change_pct,
+    rank_top5_by_weight_change,
+    notice_other_manager_ciks,
 )
 
 
@@ -82,3 +86,85 @@ class TestFoldAmendments:
         ])
         assert acc == 'acc-orig'
         assert set(holdings) == {('A', '')}
+
+
+class TestNoticeOtherManagerCiks:
+    def test_extracts_successor_cik_from_13f_nt(self):
+        xml = """
+        <coverPage>
+          <reportType>13F NOTICE</reportType>
+          <otherManagersInfo>
+            <otherManager>
+              <cik>0002026053</cik>
+              <form13FFileNumber>028-25746</form13FFileNumber>
+              <name>PERSHING SQUARE INC.</name>
+            </otherManager>
+          </otherManagersInfo>
+        </coverPage>
+        """
+        assert notice_other_manager_ciks(xml) == ['0002026053']
+
+    def test_ignores_filer_credentials_outside_other_manager(self):
+        xml = """
+        <filer><cik>0001336528</cik></filer>
+        <otherManager><cik>2026053</cik></otherManager>
+        """
+        assert notice_other_manager_ciks(xml) == ['0002026053']
+
+    def test_empty_without_other_manager(self):
+        assert notice_other_manager_ciks('<cik>0001336528</cik>') == []
+
+
+class TestTop5ByWeightChange:
+    def test_share_change_pct_new_and_exit(self):
+        assert share_change_pct(100, None) is None
+        assert share_change_pct(100, 0) is None
+        assert share_change_pct(0, 80) == -100.0
+        assert share_change_pct(120, 100) == 20.0
+
+    def test_ranks_by_portfolio_weight_not_dollar_delta(self):
+        # AUM 8000 → 10000。市值少得更多的 MRVL 权重掉得更少。
+        cur_totals = {1: 10_000}
+        prev_totals = {1: 8_000}
+        rows = [
+            # issuer, cusip, putcall, cur_v, prev_v, cur_sh, prev_sh
+            (1, 'MSFT', 'MSFT', '', 700, 800, 70, 100),   # dv=-100, dpct=-3.0
+            (1, 'MRVL', 'MRVL', '', 50, 240, 5, 50),      # dv=-190, dpct=-2.5
+            (1, 'AMZN', 'AMZN', '', 200, 800, 20, 100),    # dv=-600, dpct=-8.0
+            (1, 'SPY', 'SPY', '', 3000, 2000, 30, 25),     # dv=+1000, dpct=+5.0
+            (1, 'PCG', 'PCG', '', 50, 0, 10, 0),           # new, dpct=+0.5
+            (1, 'VOO', 'VOO', '', 400, 100, 40, 10),       # dv=+300, dpct=+2.75
+        ]
+        buys, sells = rank_top5_by_weight_change(rows, cur_totals, prev_totals)
+        assert [x['cusip'] for x in buys[1]] == ['SPY', 'VOO', 'PCG']
+        assert buys[1][0]['dpct'] == 5.0
+        assert buys[1][0]['spct'] == 20.0
+        assert buys[1][2]['kind'] == 'new'
+        assert buys[1][2]['spct'] is None
+        # 权重：AMZN -8.0, MSFT -3.0, MRVL -2.5（不是按 |dv| 的 AMZN/MRVL/MSFT）
+        assert [x['cusip'] for x in sells[1]] == ['AMZN', 'MSFT', 'MRVL']
+        assert sells[1][1]['spct'] == -30.0
+        assert abs(portfolio_pct(700, 10_000) - 7.0) < 1e-9
+
+    def test_excludes_zero_share_change_and_opposite_share_direction(self):
+        # Berkshire 型：AUM 膨胀后，未交易大票权重下跌；减持但股价涨的票权重上升。
+        cur_totals = {1: 10_000}
+        prev_totals = {1: 8_000}
+        rows = [
+            (1, 'GOOGL', 'GOOGL', '', 2000, 800, 150, 100),  # 加仓，dpct=+10
+            (1, 'DAL', 'DAL', '', 400, 200, 40, 20),         # 加仓，dpct=+1.5
+            (1, 'LEN', 'LEN', '', 50, 20, 12, 10),           # 加仓，dpct=+0.25
+            (1, 'DVA', 'DVA', '', 500, 240, 90, 100),        # 减持但权重升，应进 sells
+            (1, 'SIRI', 'SIRI', '', 200, 80, 10, 10),        # 股数未变，不进榜
+            (1, 'OXY', 'OXY', '', 400, 800, 50, 50),         # 股数未变权重大跌，不进榜
+            (1, 'KR', 'KR', '', 100, 400, 8, 10),            # 减持，dpct=-4.0
+            (1, 'BAC', 'BAC', '', 900, 800, 90, 100),        # 减持，dpct=-1.0
+            (1, 'STZ', 'STZ', '', 0, 80, 0, 5),              # 清仓
+        ]
+        buys, sells = rank_top5_by_weight_change(rows, cur_totals, prev_totals)
+        assert [x['cusip'] for x in buys[1]] == ['GOOGL', 'DAL', 'LEN']
+        assert 'SIRI' not in [x['cusip'] for x in buys[1]]
+        assert 'DVA' not in [x['cusip'] for x in buys[1]]
+        assert [x['cusip'] for x in sells[1]] == ['KR', 'BAC', 'STZ', 'DVA']
+        assert sells[1][2]['kind'] == 'exited'
+        assert 'OXY' not in [x['cusip'] for x in sells[1]]

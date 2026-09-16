@@ -1,7 +1,7 @@
 # Form 13F 模块（SEC 季度持仓）开发说明
 
 > **创建**：2026-09-02
-> **更新**：2026-09-15 — 改为按 20 家预设 CIK 从 EDGAR 拉 13F-HR（edgartools），不再下载全市场 ZIP
+> **更新**：2026-09-16 — 13F-NT 跟随 successor CIK；top5 买卖按投组占比变化排序
 > **相关文档**：`SCHEDULER_DEVELOPMENT_GUIDE.md`（调度器）
 
 ---
@@ -45,7 +45,7 @@
 ### 申报取舍（改动前必读）
 
 1. **身份**：`form13f_presets.cik`（10 位）。`filer_key = cik`。禁止再用 `FILINGMANAGER_NAME` 做主键。
-2. **只拉 13F-HR / 13F-HR/A**。`13F-NT` 无 infotable，不会进入同步。Combination Report 的 EDGAR 类型仍是 `13F-HR`。
+2. **默认拉 13F-HR / 13F-HR/A**。`13F-NT` 无 infotable，不入库。若某季只有 NT，则读取 cover page 的 `otherManager.cik`，改拉该主体同季 13F-HR（Pershing 2026Q2：`0001336528` NT → `0002026053` Pershing Square Inc.）。Combination Report 的 EDGAR 类型仍是 `13F-HR`。历史有 infotable 的季度不覆盖，避免 Holdco 早期单票申报盖掉原主体组合。
 3. **同一 CIK + 同一报告期多份申报**，按申报日 / 是否修订 / amendment 号排序后折叠：
    - 原文、`RESTATEMENT`、未标明类型的 `/A`：**整表替换**
    - `NEW HOLDINGS`：按 `(cusip, putcall)` **并入**（保密仓补披露；不能当成整季持仓）
@@ -58,7 +58,7 @@
 
 - 行业分布：SQL `GROUP BY filer_id, sector`
 - top20：窗口函数按 `value_usd DESC`
-- top5 买卖：与上一有效季度 FULL JOIN（`COALESCE(c.filer_id, p.filer_id)` 分区，避免清仓行丢失）
+- top5 买卖：与上一有效季度 FULL JOIN 后，**先按股数方向过滤**（buys = 新建或 Δ股数>0；sells = 清仓或 Δ股数<0），再按 **投组占比变化** `ΔWeight = 本期% − 上期%` 取 Top 5（与 MacroMicro 一致）。股数未变的权重漂移不进榜。`spct` 为股数变化 `(本期股数 − 上期股数) / 上期股数`。
 - 前端 Δ Shares 用全量持仓的 `prev_shares`，不是上季 top20
 
 ---
@@ -125,7 +125,7 @@
 | `GET /api/form13f/filers/{id}` | 全季度快照 |
 | `POST /api/form13f/refresh` | `poll` / `reaggregate`（`quarter` 可选）；`backfill`/`retry`/`import` 等同 poll |
 
-快照 JSONB 结构未变。首个有数据的季度无对比基准，buys/sells 为空。
+快照 JSONB 中 `top5_buys` / `top5_sells` 字段：`pct`（本期占比）、`dpct`（占比变化百分点）、`spct`（股数变化 %，新建仓为 null）、`kind`、`dv` / `value`。首个有数据的季度无对比基准，buys/sells 为空。
 
 ---
 

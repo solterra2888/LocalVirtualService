@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import type { CSSProperties } from 'react';
 import {
-  Card, Typography, Button, Space, message, Tag, Tooltip, Spin, Empty,
+  Card, Typography, Button, Space, message, Tooltip, Spin, Empty,
   Table, Select, Tabs,
 } from 'antd';
 import {
@@ -58,6 +59,48 @@ const fmtFull = (v?: number | null): string =>
 
 const fmtQuarter = (q: string): string =>
   q.replace(/^(\d{4})Q(\d)$/, '$1 Q$2');
+
+/** Feeds「Brief digest」微型标签：大写、字距、10px / 600。 */
+type StatusKind = 'new' | 'exited' | 'put' | 'call';
+
+const STATUS_COPY: Record<StatusKind, string> = {
+  new: 'New',
+  exited: 'Exited',
+  put: 'Put',
+  call: 'Call',
+};
+
+type StatusColors = {
+  posColor: string;
+  negColor: string;
+  textSecondary: string;
+};
+
+const StatusLabel: React.FC<{
+  kind: StatusKind;
+  themeMode: 'light' | 'dark';
+  colors: StatusColors;
+}> = ({ kind, themeMode, colors }) => {
+  const color =
+    kind === 'new' ? colors.posColor
+      : kind === 'exited' ? colors.negColor
+        : (themeMode === 'dark' ? colors.textSecondary : '#3d4a5c');
+  const style: CSSProperties = {
+    fontSize: 10,
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    fontWeight: 600,
+    color,
+    lineHeight: '12px',
+    flexShrink: 0,
+  };
+  return <span style={style}>{STATUS_COPY[kind]}</span>;
+};
+
+const isPut = (putcall?: string | null) =>
+  putcall === 'Put' || putcall === 'P';
+const isCall = (putcall?: string | null) =>
+  putcall === 'Call' || putcall === 'C';
 
 // ===== 主组件 =====
 
@@ -179,8 +222,12 @@ const Form13FPage: React.FC = () => {
           {r.title && r.title !== 'COM' && (
             <Text type="secondary" style={{ fontSize: 11 }}>{r.title}</Text>
           )}
-          {r.putcall === 'Call' && <Tag color="volcano" style={{ marginInlineEnd: 0 }}>Call</Tag>}
-          {r.putcall === 'P' && <Tag color="geekblue" style={{ marginInlineEnd: 0 }}>Put</Tag>}
+          {isCall(r.putcall) && (
+            <StatusLabel kind="call" themeMode={themeMode} colors={colors} />
+          )}
+          {isPut(r.putcall) && (
+            <StatusLabel kind="put" themeMode={themeMode} colors={colors} />
+          )}
         </Space>
       ),
     },
@@ -209,7 +256,11 @@ const Form13FPage: React.FC = () => {
       render: (_: unknown, r: HoldingItem) => {
         if (!hasPrevQuarter) return <Text type="secondary">—</Text>;
         const ps = r.prev_shares;
-        if (ps == null || ps === 0) return <Tag color="red" style={{ marginInlineEnd: 0 }}>NEW</Tag>;
+        if (ps == null || ps === 0) {
+          return (
+            <StatusLabel kind="new" themeMode={themeMode} colors={colors} />
+          );
+        }
         const d = (r.shares || 0) - ps;
         if (d === 0) return <Text type="secondary">0</Text>;
         const pct = (d / ps) * 100;
@@ -220,7 +271,7 @@ const Form13FPage: React.FC = () => {
         );
       },
     },
-  ], [colors, hasPrevQuarter, maxHoldingPct]);
+  ], [colors, hasPrevQuarter, maxHoldingPct, themeMode]);
 
   const changeColumns = useMemo(() => [
     {
@@ -228,33 +279,60 @@ const Form13FPage: React.FC = () => {
       render: (v: string, r: Top5ChangeItem) => (
         <Space size={4}>
           <span style={{ color: colors.text }}>{v}</span>
-          {r.kind === 'new' && <Tag color="red" style={{ marginInlineEnd: 0 }}>NEW</Tag>}
-          {r.kind === 'exited' && <Tag color="green" style={{ marginInlineEnd: 0 }}>EXITED</Tag>}
+          {isCall(r.putcall) && (
+            <StatusLabel kind="call" themeMode={themeMode} colors={colors} />
+          )}
+          {isPut(r.putcall) && (
+            <StatusLabel kind="put" themeMode={themeMode} colors={colors} />
+          )}
+          {r.kind === 'new' && (
+            <StatusLabel kind="new" themeMode={themeMode} colors={colors} />
+          )}
+          {r.kind === 'exited' && (
+            <StatusLabel kind="exited" themeMode={themeMode} colors={colors} />
+          )}
         </Space>
       ),
     },
     {
-      title: 'Δ Value ($)', dataIndex: 'dv', align: 'right' as const, width: 110,
-      render: (v: number) => (
-        <span style={{ color: v > 0 ? colors.posColor : colors.negColor, fontVariantNumeric: 'tabular-nums' }}>
-          {v > 0 ? '+' : '−'}${fmtMoney(Math.abs(v))}
-        </span>),
+      title: '% of portfolio', key: 'pct', align: 'right' as const, width: 150,
+      render: (_: unknown, r: Top5ChangeItem) => {
+        if (r.pct == null) return <Text type="secondary">—</Text>;
+        const dpct = r.dpct ?? 0;
+        return (
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {r.pct.toFixed(2)}%{' '}
+            <span style={{ color: dpct >= 0 ? colors.posColor : colors.negColor }}>
+              ({dpct >= 0 ? '+' : ''}{dpct.toFixed(2)}%)
+            </span>
+          </span>
+        );
+      },
     },
     {
-      title: 'Δ %', dataIndex: 'spct', align: 'right' as const, width: 90,
-      render: (v: number, r: Top5ChangeItem) => (
-        <span style={{ color: r.dv > 0 ? colors.posColor : colors.negColor, fontVariantNumeric: 'tabular-nums' }}>
-          {v > 0 ? '+' : ''}{v.toFixed(1)}%
-        </span>),
+      title: 'Change in shares', key: 'spct', align: 'right' as const, width: 140,
+      render: (_: unknown, r: Top5ChangeItem) => {
+        if (r.kind === 'new' || r.spct == null) {
+          return (
+            <StatusLabel kind="new" themeMode={themeMode} colors={colors} />
+          );
+        }
+        if (r.kind === 'exited') {
+          return (
+            <StatusLabel kind="exited" themeMode={themeMode} colors={colors} />
+          );
+        }
+        return (
+          <span style={{
+            color: r.spct >= 0 ? colors.posColor : colors.negColor,
+            fontVariantNumeric: 'tabular-nums',
+          }}>
+            {r.spct >= 0 ? '+' : ''}{r.spct.toFixed(2)}%
+          </span>
+        );
+      },
     },
-    {
-      title: 'Now ($)', dataIndex: 'value', align: 'right' as const, width: 90,
-      render: (v: number) => (
-        <Text type="secondary" style={{ fontVariantNumeric: 'tabular-nums' }}>
-          {v > 0 ? '$' + fmtMoney(v) : '—'}
-        </Text>),
-    },
-  ], [colors]);
+  ], [colors, themeMode]);
 
   if (!isAuthenticated) {
     return <div style={{ padding: 24 }}><Spin /></div>;
@@ -362,13 +440,13 @@ const Form13FPage: React.FC = () => {
             {
               title: 'Top 5 buys',
               icon: <RiseOutlined style={{ color: colors.posColor }} />,
-              tip: '当季市值增加幅度最大的 5 只证券（含新建仓）。',
+              tip: '实际加仓或新建的证券中，投组占比上升最多的 5 只。股数未变（仅因股价/组合规模漂移）不计入。排序按 Δ(% of portfolio)。',
               items: currentSnap?.top5_buys || [],
             },
             {
               title: 'Top 5 sells',
               icon: <FallOutlined style={{ color: colors.negColor }} />,
-              tip: '当季市值减少幅度最大的 5 只证券（含清仓）。',
+              tip: '实际减仓或清仓的证券中，投组占比下降最多的 5 只。股数未变不计入。排序按 Δ(% of portfolio)。',
               items: currentSnap?.top5_sells || [],
             },
           ].map(({ title, icon, tip, items }) => (

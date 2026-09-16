@@ -79,6 +79,133 @@ def classify_holding(issuer: str, title: str, cusip: str) -> str:
     return CUSIP_SECTOR.get(cusip, 'Other')
 
 
+def portfolio_pct(value: int, total: int) -> float:
+    """持仓市值 / 当季组合总市值，百分数。"""
+    if not total:
+        return 0.0
+    return value / total * 100.0
+
+
+def share_change_pct(cur_shares: Optional[int], prev_shares: Optional[int]) -> Optional[float]:
+    """(本期股数 − 上期股数) / 上期股数。无上期股数返回 None（NEW）。"""
+    prev = int(prev_shares or 0)
+    cur = int(cur_shares or 0)
+    if prev <= 0:
+        return None
+    if cur <= 0:
+        return -100.0
+    return (cur - prev) / prev * 100.0
+
+
+def rank_top5_by_weight_change(
+        rows: List[Tuple],
+        cur_totals: Dict[int, int],
+        prev_totals: Dict[int, int],
+        top_n: int = 5,
+) -> Tuple[Dict[int, List[dict]], Dict[int, List[dict]]]:
+    """Top 5 加码 / 减码，与 MacroMicro 一致。
+
+    先按股数方向过滤（buys = 新建或 Δ股数>0；sells = 清仓或 Δ股数<0），
+    再按 ΔWeight = 本期% − 上期% 排序。股数未变的权重漂移不进榜。
+    """
+    by_filer: Dict[int, List[dict]] = defaultdict(list)
+    for (filer_id, issuer, cusip, putcall,
+         cur_value, prev_value, cur_shares, prev_shares) in rows:
+        filer_id = int(filer_id)
+        cur_value = int(cur_value or 0)
+        prev_value = int(prev_value or 0)
+        cur_shares = int(cur_shares or 0)
+        prev_shares = int(prev_shares or 0)
+        cur_total = int(cur_totals.get(filer_id) or 0)
+        prev_total = int(prev_totals.get(filer_id) or 0)
+        if cur_total <= 0:
+            continue
+        dsh = cur_shares - prev_shares
+        is_new = prev_shares <= 0 < cur_shares
+        is_exit = cur_shares <= 0 < prev_shares
+        if not is_new and not is_exit and dsh == 0:
+            continue
+        cur_pct = portfolio_pct(cur_value, cur_total)
+        prev_pct = portfolio_pct(prev_value, prev_total)
+        dpct = cur_pct - prev_pct
+        if is_new:
+            kind = 'new'
+        elif is_exit:
+            kind = 'exited'
+        elif dsh > 0:
+            kind = 'increase'
+        else:
+            kind = 'decrease'
+        spct = share_change_pct(cur_shares, prev_shares)
+        by_filer[filer_id].append({
+            'issuer': issuer,
+            'cusip': cusip or '',
+            'putcall': putcall or '',
+            'dv': cur_value - prev_value,
+            'value': cur_value,
+            'pct': round(cur_pct, 3),
+            'dpct': round(dpct, 3),
+            'spct': None if spct is None else round(spct, 2),
+            'kind': kind,
+            '_dpct': dpct,
+            '_buy': is_new or dsh > 0,
+            '_sell': is_exit or dsh < 0,
+        })
+
+    buys_map: Dict[int, List[dict]] = {}
+    sells_map: Dict[int, List[dict]] = {}
+    extra_keys = ('_dpct', '_buy', '_sell')
+    for filer_id, items in by_filer.items():
+        buys = sorted(
+            (x for x in items if x['_buy']),
+            key=lambda x: -x['_dpct'])[:top_n]
+        sells = sorted(
+            (x for x in items if x['_sell']),
+            key=lambda x: x['_dpct'])[:top_n]
+        for lst in (buys, sells):
+            for item in lst:
+                for k in extra_keys:
+                    del item[k]
+        buys_map[filer_id] = buys
+        sells_map[filer_id] = sells
+    return buys_map, sells_map
+
+
+_OTHER_MANAGER_BLOCK = re.compile(
+    r'<(?:[\w.]+:)?otherManager\b[^>]*>(.*?)</(?:[\w.]+:)?otherManager>',
+    re.IGNORECASE | re.DOTALL)
+_CIK_TAG = re.compile(
+    r'<(?:[\w.]+:)?cik>\s*(\d+)\s*</(?:[\w.]+:)?cik>', re.IGNORECASE)
+
+
+def notice_other_manager_ciks(xml: str) -> List[str]:
+    """从 13F-NT cover page 提取 otherManager CIK。edgartools 的 other_managers 对 NT 经常是空的。"""
+    if not xml:
+        return []
+    found: List[str] = []
+    seen = set()
+    for block in _OTHER_MANAGER_BLOCK.finditer(xml):
+        m = _CIK_TAG.search(block.group(1))
+        if not m:
+            continue
+        cik = normalize_cik(m.group(1))
+        if cik in seen:
+            continue
+        seen.add(cik)
+        found.append(cik)
+    return found
+
+
+def _filing_xml(filing) -> str:
+    xml = getattr(filing, 'xml', None)
+    if callable(xml):
+        try:
+            xml = xml()
+        except Exception:
+            return ''
+    return xml if isinstance(xml, str) else ''
+
+
 def _na_to_str(value, default: str = '') -> str:
     if value is None:
         return default
@@ -320,10 +447,33 @@ class Form13fService:
     def _group_filings_by_quarter(
             self, cik: str, since_quarter: str,
     ) -> Dict[str, List[PeriodFiling]]:
+        grouped = self._collect_hr_filings(cik, since_quarter)
+        for quarter, successor_cik in self._notice_successors(cik, since_quarter).items():
+            if any(p.rows for p in grouped.get(quarter, [])):
+                continue
+            try:
+                followed = self._collect_hr_filings(
+                    successor_cik, since_quarter, only_quarter=quarter)
+            except Exception as exc:
+                logger.warning(
+                    f"[13F] 跟随 13F-NT 失败 cik={cik} {quarter} → {successor_cik}: {exc}")
+                continue
+            if followed.get(quarter):
+                logger.info(
+                    f"[13F] {cik} {quarter} 13F-NT → {successor_cik}")
+                grouped[quarter] = followed[quarter]
+        return grouped
+
+    def _collect_hr_filings(
+            self, cik: str, since_quarter: str,
+            only_quarter: Optional[str] = None,
+    ) -> Dict[str, List[PeriodFiling]]:
         from edgar import Company
 
-        start_year = int(since_quarter[:4])
-        years = list(range(start_year, date.today().year + 1))
+        cik = normalize_cik(cik)
+        start_year = int((only_quarter or since_quarter)[:4])
+        end_year = int((only_quarter or f"{date.today().year}Q4")[:4])
+        years = list(range(start_year, end_year + 1))
         company = Company(int(cik))
         filings = company.get_filings(
             form="13F-HR", year=years, amendments=True)
@@ -335,6 +485,8 @@ class Form13fService:
             period = getattr(filing, 'period_of_report', None)
             quarter = quarter_of(period)
             if not quarter or quarter < since_quarter:
+                continue
+            if only_quarter and quarter != only_quarter:
                 continue
             try:
                 report = filing.obj()
@@ -361,6 +513,35 @@ class Form13fService:
                 rows=holdings_from_thirteenf(report),
             ))
         return grouped
+
+    def _notice_successors(
+            self, cik: str, since_quarter: str,
+    ) -> Dict[str, str]:
+        """13F-NT 指向的 other manager：quarter → successor CIK（每季取第一个）。"""
+        from edgar import Company
+
+        cik = normalize_cik(cik)
+        start_year = int(since_quarter[:4])
+        years = list(range(start_year, date.today().year + 1))
+        company = Company(int(cik))
+        filings = company.get_filings(
+            form="13F-NT", year=years, amendments=True)
+        out: Dict[str, str] = {}
+        for filing in filings:
+            form = (getattr(filing, 'form', None) or '').upper()
+            if '13F-NT' not in form:
+                continue
+            period = getattr(filing, 'period_of_report', None)
+            quarter = quarter_of(period)
+            if not quarter or quarter < since_quarter:
+                continue
+            others = [
+                ocik for ocik in notice_other_manager_ciks(_filing_xml(filing))
+                if ocik != cik
+            ]
+            if others:
+                out[quarter] = others[0]
+        return out
 
     def _replace_filer_quarter(
             self, filer_id: int, quarter: str, accession: str,
@@ -483,59 +664,38 @@ class Form13fService:
         prev_quarter = self.db_manager.fetch_one(
             "SELECT MAX(quarter) FROM form13f_holdings WHERE quarter < %s", (q,))[0]
 
-        buys_map = defaultdict(list)
-        sells_map = defaultdict(list)
+        buys_map: Dict[int, List[dict]] = {}
+        sells_map: Dict[int, List[dict]] = {}
         if prev_quarter:
+            prev_totals = {
+                fid: int(v) for fid, v in self.db_manager.fetch_all(
+                    """
+                    SELECT filer_id, SUM(value_usd)
+                    FROM form13f_holdings
+                    WHERE quarter = %s
+                    GROUP BY filer_id
+                    """,
+                    (prev_quarter,))
+            }
             change_rows = self.db_manager.fetch_all(
                 """
-                SELECT filer_id, issuer_name, cusip, putcall, dv, cur_value, prev_value
-                FROM (
-                    SELECT COALESCE(c.filer_id, p.filer_id) AS filer_id,
-                           COALESCE(c.issuer_name, p.issuer_name) AS issuer_name,
-                           COALESCE(c.cusip, p.cusip) AS cusip,
-                           COALESCE(c.putcall, p.putcall) AS putcall,
-                           COALESCE(c.value_usd, 0) - COALESCE(p.value_usd, 0) AS dv,
-                           COALESCE(c.value_usd, 0) AS cur_value,
-                           COALESCE(p.value_usd, 0) AS prev_value,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY COALESCE(c.filer_id, p.filer_id)
-                               ORDER BY (COALESCE(c.value_usd, 0) - COALESCE(p.value_usd, 0)) DESC
-                           ) AS rn_buy,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY COALESCE(c.filer_id, p.filer_id)
-                               ORDER BY (COALESCE(c.value_usd, 0) - COALESCE(p.value_usd, 0)) ASC
-                           ) AS rn_sell
-                    FROM (SELECT * FROM form13f_holdings WHERE quarter = %s) c
-                    FULL JOIN (SELECT * FROM form13f_holdings WHERE quarter = %s) p
-                      ON p.filer_id = c.filer_id
-                     AND p.cusip = c.cusip
-                     AND p.putcall = c.putcall
-                    WHERE COALESCE(c.value_usd, 0) - COALESCE(p.value_usd, 0) <> 0
-                ) t
-                WHERE rn_buy <= 5 OR rn_sell <= 5
+                SELECT COALESCE(c.filer_id, p.filer_id) AS filer_id,
+                       COALESCE(c.issuer_name, p.issuer_name) AS issuer_name,
+                       COALESCE(c.cusip, p.cusip) AS cusip,
+                       COALESCE(c.putcall, p.putcall) AS putcall,
+                       COALESCE(c.value_usd, 0) AS cur_value,
+                       COALESCE(p.value_usd, 0) AS prev_value,
+                       c.shares AS cur_shares,
+                       p.shares AS prev_shares
+                FROM (SELECT * FROM form13f_holdings WHERE quarter = %s) c
+                FULL JOIN (SELECT * FROM form13f_holdings WHERE quarter = %s) p
+                  ON p.filer_id = c.filer_id
+                 AND p.cusip = c.cusip
+                 AND p.putcall = c.putcall
                 """,
                 (q, prev_quarter))
-            for filer_id, issuer, cusip, putcall, dv, cur_value, prev_value in change_rows:
-                dv = int(dv)
-                cur_value = int(cur_value)
-                prev_value = int(prev_value)
-                item = {
-                    'issuer': issuer, 'cusip': cusip, 'putcall': putcall,
-                    'dv': dv, 'value': cur_value,
-                }
-                if dv > 0:
-                    item['kind'] = 'new' if prev_value == 0 else 'increase'
-                    item['spct'] = round(dv / prev_value * 100, 2) if prev_value > 0 else 100.0
-                    buys_map[filer_id].append(item)
-                else:
-                    item['kind'] = 'exited' if cur_value == 0 else 'decrease'
-                    item['spct'] = -100.0 if cur_value == 0 else (
-                        round(dv / prev_value * 100, 2) if prev_value > 0 else 0)
-                    sells_map[filer_id].append(item)
-            for m in (buys_map, sells_map):
-                for lst in m.values():
-                    lst.sort(key=lambda x: -abs(x['dv']))
-                    del lst[5:]
+            buys_map, sells_map = rank_top5_by_weight_change(
+                change_rows, totals, prev_totals)
 
         snap_rows = []
         for filer_id, total in totals.items():
