@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, market_weekly, market_weekly_report, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search, theme_report, chat_group_messages, zsxq_admin, weibo_admin, substack_admin, substack_summary, daily_market_report, the_close_summary, cnbc_closing_bell, zhishixingqiu_summary, fomc, form13f, feeds_dashboard
+from backend.api import auth, files, tasks, users, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, market_weekly, market_weekly_report, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search, theme_report, chat_group_messages, zsxq_admin, weibo_admin, substack_admin, substack_summary, daily_market_report, the_close_summary, close_brief_report, cnbc_closing_bell, zhishixingqiu_summary, fomc, form13f, feeds_dashboard
 from backend.database.db_manager import DatabaseManager
 from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import init_logging, info, error, warning, shutdown_logging
@@ -156,6 +156,8 @@ app.include_router(theme_report.router, prefix="/api", tags=["Theme Report"])
 app.include_router(daily_market_report.router, prefix="/api", tags=["Daily Market Report"])
 # The Close Summary API (Bloomberg The Close PM Brief)
 app.include_router(the_close_summary.router, prefix="/api", tags=["The Close Summary"])
+# The Close Report API (独立报告，自 DMR Close Brief 抽取，复用摘要任务触发)
+app.include_router(close_brief_report.router, prefix="/api", tags=["Close Brief Report"])
 # CNBC Closing Bell API (CNBC Closing Bell Stock News)
 app.include_router(cnbc_closing_bell.router, prefix="/api", tags=["CNBC Closing Bell"])
 # 央行 Dashboard API (Fed FOMC)

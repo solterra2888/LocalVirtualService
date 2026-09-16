@@ -7,6 +7,7 @@ import {
   TwitterOutlined,
   VideoCameraOutlined,
   ClockCircleOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -18,6 +19,7 @@ import { youtubeDailyReportsAPI } from '../services/youtubeDailyReports';
 import { marketWeeklyReportAPI } from '../services/marketWeeklyReport';
 import { themeReportAPI } from '../services/themeReport';
 import { dailyMarketReportAPI } from '../services/dailyMarketReport';
+import { closeBriefReportAPI } from '../services/closeBriefReport';
 
 const { Title, Text } = Typography;
 
@@ -169,6 +171,7 @@ interface ReportDatesState {
   marketWeekly: string | null;
   theme: string | null;
   dailyMarket: string | null;
+  closeBrief: string | null;
 }
 
 const MobileReportsOverviewPageInner: React.FC = () => {
@@ -185,6 +188,7 @@ const MobileReportsOverviewPageInner: React.FC = () => {
     marketWeekly: null,
     theme: null,
     dailyMarket: null,
+    closeBrief: null,
   });
 
   const [loading, setLoading] = useState({
@@ -193,6 +197,7 @@ const MobileReportsOverviewPageInner: React.FC = () => {
     marketWeekly: true,
     theme: true,
     dailyMarket: true,
+    closeBrief: true,
   });
 
   useEffect(() => {
@@ -246,6 +251,16 @@ const MobileReportsOverviewPageInner: React.FC = () => {
         }
       } catch { /* ignore */ }
       setLoading(prev => ({ ...prev, theme: false }));
+
+      // The Close Report
+      setLoading(prev => ({ ...prev, closeBrief: true }));
+      try {
+        const cbRes = await closeBriefReportAPI.getLatest();
+        if (cbRes && cbRes.report_date) {
+          setReportDates(prev => ({ ...prev, closeBrief: cbRes.report_date }));
+        }
+      } catch { /* ignore */ }
+      setLoading(prev => ({ ...prev, closeBrief: false }));
     };
 
     loadReportDates();
@@ -299,6 +314,15 @@ const MobileReportsOverviewPageInner: React.FC = () => {
       color: '#FF0000',
       latestDate: reportDates.youtube,
       loading: loading.youtube,
+    },
+    {
+      title: 'The Close Report',
+      description: 'Bloomberg The Close daily PM brief',
+      icon: <PlayCircleOutlined />,
+      path: '/reports/close-brief',
+      color: '#faad14',
+      latestDate: reportDates.closeBrief,
+      loading: loading.closeBrief,
     },
   ];
 

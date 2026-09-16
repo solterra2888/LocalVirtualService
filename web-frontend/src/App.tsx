@@ -46,6 +46,7 @@ import YouTubeDailyReportPage from './pages/YouTubeDailyReportPage';
 import ReportsDetailLayout from './components/ReportsDetailLayout';
 import ReportsOverviewPage from './pages/ReportsOverviewPage';
 import DailyMarketReportPage from './pages/DailyMarketReportPage';
+import CloseBriefReportPage from './pages/CloseBriefReportPage';
 import MobileReportsOverviewPage from './pages/MobileReportsOverviewPage';
 import MobileReportsDetailLayout from './components/MobileReportsDetailLayout';
 import ZsxqAdminPage from './pages/ZsxqAdminPage';
@@ -211,6 +212,14 @@ const AppContent: React.FC = () => {
                   </MobileReportsDetailLayout>
                 }
               />
+              <Route
+                path="reports/close-brief"
+                element={
+                  <MobileReportsDetailLayout>
+                    <CloseBriefReportPage />
+                  </MobileReportsDetailLayout>
+                }
+              />
             </>
           ) : (
             <>
@@ -254,6 +263,14 @@ const AppContent: React.FC = () => {
                 element={
                   <ReportsDetailLayout>
                     <DailyMarketReportPage />
+                  </ReportsDetailLayout>
+                }
+              />
+              <Route
+                path="reports/close-brief"
+                element={
+                  <ReportsDetailLayout>
+                    <CloseBriefReportPage />
                   </ReportsDetailLayout>
                 }
               />

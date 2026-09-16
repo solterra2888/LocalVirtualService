@@ -121,6 +121,10 @@ Market Overview 的数据在 `daily_report_{date}.html` 生成时已**内嵌**�
 | 转录字数 | 14,299 words |
 | YouTube | `https://www.youtube.com/watch?v=KC19qtFQrXU` |
 
+**独立报告（2026-09）：** 除嵌入 DMR Close Brief 标签页外，The Close PM Brief 另有独立报告
+「The Close Report」（`/reports/close-brief`），内容渲染自 `the_close_summaries`，
+由 `generate_the_close_summary_task` 后置钩子生成/更新（见 §10.1）。
+
 本项目 `backend/services/content_adapters/youtube_adapter.py` 将标题后缀 `The Close` 映射为 `Bloomberg The Close`，与 Transcripta 命名一致。详见 [FEEDS_MODULE.md](./FEEDS_MODULE.md) §7.5。
 
 ### 3.2 生成管线
@@ -386,6 +390,7 @@ Layer 3: Daily Report 专用 LLM（PM Brief / Stock News / Macro Review）— �
 | 图表数据 | EODHD OHLCV 查询 |
 | YouTube 转录 + LLM | Feeds / `youtube_author_summary_service`（可复用模式） |
 | 经济事件 | `EconomicEventsService`（EODHD） |
+| The Close Report（独立报告） | `backend/services/close_brief_report_service.py` + `backend/templates/close_brief_report.html.j2` + `backend/api/close_brief_report.py`（`/close-brief-report/*`）；存储 `close_brief_reports` 表 + `reports/close_brief/YYYYMMDD.html`；生成挂在 `generate_the_close_summary_task` 后置钩子（无独立调度器），占位摘要不渲染，`report_date` 新鲜度判断幂等 |
 
 ### 10.2 与参考系统差距
 
