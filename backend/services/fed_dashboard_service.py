@@ -1531,11 +1531,15 @@ class FedDashboardService:
 
         implied = 100 - price（合约月每日 EFFR 平均的预期）
         base_rate = 到该会议为止的市场累计隐含基准（第一个会议用 EFFR，
-        后续会议以前一会议段的隐含利率递推——远月合约定价的是累计路径）
+        后续会议以前一次会议的会后隐含利率 post_rate 递推）
         hold = base_rate（该会议不动）
         cut  = (base*d_pre + (base-step)*d_post) / 当月天数
         hike = (base*d_pre + (base+step)*d_post) / 当月天数
         概率 = implied 在情景间的线性插值，clip [0,1]；越界 → overflow 标记。
+
+        post_rate 从月均恒等式反解: implied = (base*d_pre + post*d_post) / N。
+        远月合约定价的是累计路径，必须递推会后利率而不是月均利率——否则
+        会把「月内部分天数已加息」当成下一次会议的全部起点，远月 hike% 虚高。
 
         注意: 会议与合约同月时 d_pre/d_post 直接按决议日切分；用下月合约时
         （月末会议）决议发生在合约月开始前——d_pre=0，整月都是"会后"利率。
@@ -1551,16 +1555,22 @@ class FedDashboardService:
         cut = (base_rate * d_pre + (base_rate - PROB_STEP_PCT) * d_post) / days_in_month
         hike = (base_rate * d_pre + (base_rate + PROB_STEP_PCT) * d_post) / days_in_month
         implied = 100.0 - price
+        # 会后隐含利率（下一次会议的起点）。d_post=0 时合约月不含会后天数，退回月均。
+        post_rate = implied if d_post <= 0 else (
+            (implied * days_in_month - base_rate * d_pre) / d_post
+        )
 
         overflow = False
         if implied < cut - 1e-9:      # 定价低于一次降息 → ≥50bp 降息
             overflow = True
             p_cut, p_hold, p_hike = 1.0, 0.0, 0.0
         elif implied <= hold:
-            p_cut = (hold - implied) / (hold - cut)
+            denom = hold - cut
+            p_cut = (hold - implied) / denom if abs(denom) > 1e-12 else 0.0
             p_hold, p_hike = 1.0 - p_cut, 0.0
         elif implied <= hike:
-            p_hike = (implied - hold) / (hike - hold)
+            denom = hike - hold
+            p_hike = (implied - hold) / denom if abs(denom) > 1e-12 else 0.0
             p_hold, p_cut = 1.0 - p_hike, 0.0
         else:                          # 定价高于一次加息 → ≥50bp 加息
             overflow = True
@@ -1572,6 +1582,7 @@ class FedDashboardService:
             "distribution": {"-25": round(p_cut, 4), "0": round(p_hold, 4),
                              "+25": round(p_hike, 4), "overflow": overflow},
             "implied_rate": round(implied, 3),
+            "post_rate": round(post_rate, 3),
         }
 
     def _contract_for_meeting(self, meeting_date):
@@ -1667,10 +1678,12 @@ class FedDashboardService:
                 "contract": contract, "price": price,
                 "p_hike": res["p_hike"], "p_hold": res["p_hold"],
                 "p_cut": res["p_cut"], "effr": base_rate,
+                "implied_rate": res["implied_rate"],
+                "post_rate": res["post_rate"],
             })
-            # 递推: 该会议后的基准 = 本合约隐含利率（条件期望近似——
-            # 概率加权理论上更准，但 implied 本身就是市场对全路径的定价）
-            base_rate = res["implied_rate"]
+            # 递推会后隐含利率，不是合约月均。月均把会前旧利率混进去，
+            # 下一次会议会把已定价的加息重复算成「再加一次」。
+            base_rate = res["post_rate"]
             time.sleep(1)  # Yahoo 限流友好
         logger.info(f"[FOMC] 概率快照: {done}/{len(meetings)} 会议, 基准={rate_note}")
         return {"snapshots": done, "meetings": results, "rate_basis": rate_note}
@@ -1820,8 +1833,9 @@ class FedDashboardService:
                 "trend": trend,
             })
 
-        # 预期差对照: 每历史会议的会前最后快照 vs 实际决议
-        # （decisions.meeting_date=首日, probabilities.meeting_date=末日 → 差 1 天）
+        # 预期差对照: 决议日前最后一个交易日快照 vs 实际决议
+        # （decisions.meeting_date=首日, probabilities.meeting_date=末日 → 差 1 天；
+        #  asof < 末日，避免用进公告后的决议日结算价）
         rows = self.db_manager.fetch_all(
             """
             SELECT d.meeting_date, d.decision_direction, d.change_bp,
@@ -1832,7 +1846,7 @@ class FedDashboardService:
                 FROM fomc_probabilities p
                 WHERE p.central_bank = d.central_bank
                   AND p.meeting_date = d.meeting_date + 1
-                  AND p.asof_date <= d.meeting_date + 1
+                  AND p.asof_date < d.meeting_date + 1
                 ORDER BY asof_date DESC LIMIT 1
             ) p ON TRUE
             WHERE d.central_bank = 'FED'

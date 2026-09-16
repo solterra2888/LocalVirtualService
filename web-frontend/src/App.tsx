@@ -141,7 +141,7 @@ const AppContent: React.FC = () => {
           <Route path="markets/economic-events" element={<EconomicEventsPage />} />
           <Route path="markets/macro-indicators" element={<MacroIndicatorsPage />} />
           <Route path="central-bank" element={<CentralBankDashboardPage />} />
-          <Route path="central-bank/:bank" element={<CentralBankDashboardPage />} />
+          <Route path="central-bank/:bank" element={<Navigate to="/central-bank" replace />} />
           <Route path="form13f" element={<Form13FPage />} />
           <Route path="files" element={<FilesComponent />} />
           <Route path="fundamentals" element={<FundamentalsPage />} />

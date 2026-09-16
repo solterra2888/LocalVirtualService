@@ -3,7 +3,7 @@
 > **创建**：2026-08-20
 > **需求来源**：`docs/DASHBOARD_REQUIREMENTS.md` 3.3 央行模块（2026-08-19 会议）
 > **状态**：V1 + V2（概率模块）已完成开发并实测通过（仅 Fed）
-> **相关文档**：`LLM_ARCHITECTURE_OVERVIEW.md`（模板体系）、`SCHEDULER_DEVELOPMENT_GUIDE.md`（调度器）
+> **相关文档**：`FED_MODULE_USER_GUIDE.md`（Fed 模块使用手册；**第 3 节是全部数字的网页溯源**，面向投研同事手算复核）、`CENTRAL_BANK_PRICED_IN_GUIDE.md`（Priced in / 概率趋势短说明）、`LLM_ARCHITECTURE_OVERVIEW.md`（模板体系）、`SCHEDULER_DEVELOPMENT_GUIDE.md`（调度器）
 
 ---
 
@@ -197,7 +197,7 @@ hike = (base*d_pre + (base+0.25)*d_post) / 当月天数
 三个关键设计（均为实测踩坑结论）：
 
 - **基准利率用 EFFR 不用区间中值**：EFFR 常年偏离区间中值几 bp（实测 3.63 vs 3.625），直接决定概率方向。EFFR 取自 FRED（`EFFR` 序列，`FRED_API_KEY`），失败降级区间中值并标记 `rate_basis`
-- **逐会议递推基准**：远月合约定价的是**累计路径**。首会议基准=EFFR，后续会议基准=前一会议段合约的隐含利率（`base_rate = res["implied_rate"]` 递推）。不做递推会把 10 月会议算成 100% 加息（实测踩坑）
+- **逐会议递推基准**：远月合约定价的是**累计路径**。首会议基准=EFFR，后续会议基准=前一次会议的**会后隐含利率** `post_rate = (implied*N − base*d_pre)/d_post`（不是合约月均 `implied_rate`）。用月均递推会把已定价的加息重复算进下一次会议（实测 10 月会从 ~50% 虚高到 ~98%）
 - **合约选择规则**：`d_post = 当月天数 − 决议日 ≥ 10` 用当月合约，否则用下月合约（月末会议当月合约只剩 1-4 天权重不敏感；此时下月合约 `d_pre=0` 整月都是会后利率）。月码 `FGHJKMNQUVXZ`，symbol 如 `ZQU26.CBT`
 
 ### 数据源（全部实测 2026-08-20）
