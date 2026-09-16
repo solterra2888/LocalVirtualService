@@ -44,29 +44,12 @@ export interface HoldingItem {
   pct: number;
 }
 
-export interface Top5ChangeItem {
-  issuer: string;
-  cusip: string;
-  putcall?: string | null;
-  dv: number;
-  kind: 'increase' | 'new' | 'decrease' | 'exited';
-  value: number;
-  /** 本期投组占比（%） */
-  pct?: number;
-  /** 本期占比 − 上期占比（百分点） */
-  dpct?: number;
-  /** 股数变化 %；(current−prev)/prev。新建仓为 null */
-  spct: number | null;
-}
-
 export interface QuarterSnapshot {
   quarter: string;
   total_value?: number | null;
   position_count?: number | null;
   sector_alloc: Record<string, number>;
   top20_holdings: HoldingItem[];
-  top5_buys: Top5ChangeItem[];
-  top5_sells: Top5ChangeItem[];
 }
 
 export interface FilerDetail {
@@ -94,7 +77,7 @@ export const form13fAPI = {
     });
   },
 
-  /** 机构详情：全季度快照（行业分布 / top20 / top5 买卖） */
+  /** 机构详情：全季度快照（行业分布 / top20） */
   getFilerDetail: async (filerId: number): Promise<FilerDetail> => {
     return api.get<FilerDetail>(`/form13f/filers/${filerId}`);
   },

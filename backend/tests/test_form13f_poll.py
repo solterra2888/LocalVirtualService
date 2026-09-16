@@ -12,6 +12,9 @@ from backend.services.form13f_service import (
     share_change_pct,
     rank_top5_by_weight_change,
     notice_other_manager_ciks,
+    is_option_leg,
+    is_fixed_income_holding,
+    is_stock_or_etf_long,
 )
 
 
@@ -168,3 +171,45 @@ class TestTop5ByWeightChange:
         assert [x['cusip'] for x in sells[1]] == ['KR', 'BAC', 'STZ', 'DVA']
         assert sells[1][2]['kind'] == 'exited'
         assert 'OXY' not in [x['cusip'] for x in sells[1]]
+
+    def test_excludes_options_and_notes(self):
+        assert is_option_leg('Put') and is_option_leg('Call')
+        assert is_fixed_income_holding('NOTE 2.000% 6/1')
+        assert not is_fixed_income_holding('COM')
+        assert not is_option_leg('')
+        cur_totals = {1: 10_000}
+        prev_totals = {1: 8_000}
+        rows = [
+            (1, 'SPY PUT', 'SPY', 'Put', 50, 800, 5, 80, 'TR UNIT'),       # 期权，应排除
+            (1, 'JAZZ NOTE', 'JAZZ', '', 0, 400, 0, 10, 'NOTE 2.000% 6/1'),  # 可转债，应排除
+            (1, 'SEE', 'SEE', '', 0, 300, 0, 20, 'COM'),                    # 股票清仓
+            (1, 'AMZN', 'AMZN', '', 200, 400, 20, 40, 'COM'),                # 股票减持
+            (1, 'HON', 'HON', '', 0, 200, 0, 8, 'COM'),                     # 股票清仓
+        ]
+        _buys, sells = rank_top5_by_weight_change(rows, cur_totals, prev_totals)
+        assert [x['cusip'] for x in sells[1]] == ['SEE', 'AMZN', 'HON']
+        assert 'SPY' not in [x['cusip'] for x in sells[1]]
+        assert 'JAZZ' not in [x['cusip'] for x in sells[1]]
+
+    def test_option_overlay_does_not_outrank_equity_exits(self):
+        """Oaktree 型：新增大额 Put 撑高 13F 总市值后，股票减仓的 ΔWeight
+        应按股票/ETF 多头分母计算，不能压过真实清仓。"""
+        assert is_fixed_income_holding('WARRANT')
+        assert is_stock_or_etf_long('', 'COMMON STOCK')
+        assert not is_stock_or_etf_long('Put', 'ETF')
+        # 股票多头 10000 → 7000；另有 8000 新 Put 不进分母。
+        cur_eq = {1: 7_000}
+        prev_eq = {1: 10_000}
+        rows = [
+            (1, 'TORM', 'TRMD', '', 5000, 6000, 80, 100, 'COMMON STOCK'),   # 减仓
+            (1, 'CBL', 'CBL', '', 0, 2000, 0, 50, 'COMMON STOCK'),          # 清仓
+            (1, 'PBR', 'PBR', '', 0, 1500, 0, 40, 'COMMON STOCK'),          # 清仓
+            (1, 'KEEP', 'KEEP', '', 2000, 2500, 50, 50, 'COMMON STOCK'),     # 股数未变
+            (1, 'SPY PUT', 'SPY', 'Put', 8000, 0, 100, 0, 'ETF'),            # 期权
+            (1, 'OCSL', 'OCSL', '', 2000, 500, 40, 10, 'COMMON STOCK'),      # 加仓
+        ]
+        buys, sells = rank_top5_by_weight_change(rows, cur_eq, prev_eq)
+        assert [x['cusip'] for x in buys[1]] == ['OCSL']
+        assert [x['cusip'] for x in sells[1]] == ['CBL', 'PBR', 'TRMD']
+        assert 'SPY' not in [x['cusip'] for x in sells[1]]
+        assert 'KEEP' not in [x['cusip'] for x in sells[1]]

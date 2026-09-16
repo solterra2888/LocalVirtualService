@@ -5,11 +5,11 @@ import {
   Table, Select, Tabs,
 } from 'antd';
 import {
-  ReloadOutlined, SearchOutlined, RiseOutlined, FallOutlined,
+  ReloadOutlined, SearchOutlined,
 } from '@ant-design/icons';
 import {
   form13fAPI, ManifestData, FilerDetail,
-  HoldingItem, Top5ChangeItem, FilerSummary,
+  HoldingItem, FilerSummary,
 } from '../services/form13f';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -61,11 +61,10 @@ const fmtQuarter = (q: string): string =>
   q.replace(/^(\d{4})Q(\d)$/, '$1 Q$2');
 
 /** Feeds「Brief digest」微型标签：大写、字距、10px / 600。 */
-type StatusKind = 'new' | 'exited' | 'put' | 'call';
+type StatusKind = 'new' | 'put' | 'call';
 
 const STATUS_COPY: Record<StatusKind, string> = {
   new: 'New',
-  exited: 'Exited',
   put: 'Put',
   call: 'Call',
 };
@@ -83,8 +82,7 @@ const StatusLabel: React.FC<{
 }> = ({ kind, themeMode, colors }) => {
   const color =
     kind === 'new' ? colors.posColor
-      : kind === 'exited' ? colors.negColor
-        : (themeMode === 'dark' ? colors.textSecondary : '#3d4a5c');
+      : (themeMode === 'dark' ? colors.textSecondary : '#3d4a5c');
   const style: CSSProperties = {
     fontSize: 10,
     letterSpacing: 1.1,
@@ -101,6 +99,23 @@ const isPut = (putcall?: string | null) =>
   putcall === 'Put' || putcall === 'P';
 const isCall = (putcall?: string | null) =>
   putcall === 'Call' || putcall === 'C';
+
+const TIP_BOX: CSSProperties = { maxWidth: 360, fontSize: 12, lineHeight: 1.65 };
+
+const TipLine: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div style={{ marginTop: 4 }}>
+    <span style={{ fontWeight: 600 }}>{label}</span>
+    {children}
+  </div>
+);
+
+const TOP20_TIP = (
+  <div style={TIP_BOX}>
+    该机构当季 13F 申报中市值最大的 20 只证券（含期权等全部 infotable 行）。
+    <TipLine label="% of portfolio：">持仓市值 / 当季 13F 申报总市值。</TipLine>
+    <TipLine label="Δ Shares (QoQ)：">相对上一报告期同一 CUSIP + Put/Call 的股数变动（对照全量持仓，不限上季 Top 20）。上期无持仓标 New。</TipLine>
+  </div>
+);
 
 // ===== 主组件 =====
 
@@ -273,67 +288,6 @@ const Form13FPage: React.FC = () => {
     },
   ], [colors, hasPrevQuarter, maxHoldingPct, themeMode]);
 
-  const changeColumns = useMemo(() => [
-    {
-      title: 'Issuer', dataIndex: 'issuer', key: 'issuer', ellipsis: true,
-      render: (v: string, r: Top5ChangeItem) => (
-        <Space size={4}>
-          <span style={{ color: colors.text }}>{v}</span>
-          {isCall(r.putcall) && (
-            <StatusLabel kind="call" themeMode={themeMode} colors={colors} />
-          )}
-          {isPut(r.putcall) && (
-            <StatusLabel kind="put" themeMode={themeMode} colors={colors} />
-          )}
-          {r.kind === 'new' && (
-            <StatusLabel kind="new" themeMode={themeMode} colors={colors} />
-          )}
-          {r.kind === 'exited' && (
-            <StatusLabel kind="exited" themeMode={themeMode} colors={colors} />
-          )}
-        </Space>
-      ),
-    },
-    {
-      title: '% of portfolio', key: 'pct', align: 'right' as const, width: 150,
-      render: (_: unknown, r: Top5ChangeItem) => {
-        if (r.pct == null) return <Text type="secondary">—</Text>;
-        const dpct = r.dpct ?? 0;
-        return (
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-            {r.pct.toFixed(2)}%{' '}
-            <span style={{ color: dpct >= 0 ? colors.posColor : colors.negColor }}>
-              ({dpct >= 0 ? '+' : ''}{dpct.toFixed(2)}%)
-            </span>
-          </span>
-        );
-      },
-    },
-    {
-      title: 'Change in shares', key: 'spct', align: 'right' as const, width: 140,
-      render: (_: unknown, r: Top5ChangeItem) => {
-        if (r.kind === 'new' || r.spct == null) {
-          return (
-            <StatusLabel kind="new" themeMode={themeMode} colors={colors} />
-          );
-        }
-        if (r.kind === 'exited') {
-          return (
-            <StatusLabel kind="exited" themeMode={themeMode} colors={colors} />
-          );
-        }
-        return (
-          <span style={{
-            color: r.spct >= 0 ? colors.posColor : colors.negColor,
-            fontVariantNumeric: 'tabular-nums',
-          }}>
-            {r.spct >= 0 ? '+' : ''}{r.spct.toFixed(2)}%
-          </span>
-        );
-      },
-    },
-  ], [colors, themeMode]);
-
   if (!isAuthenticated) {
     return <div style={{ padding: 24 }}><Spin /></div>;
   }
@@ -434,56 +388,11 @@ const Form13FPage: React.FC = () => {
           </div>
         )}
 
-        {/* ── Top 5 buys / sells ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-          {[
-            {
-              title: 'Top 5 buys',
-              icon: <RiseOutlined style={{ color: colors.posColor }} />,
-              tip: '实际加仓或新建的证券中，投组占比上升最多的 5 只。股数未变（仅因股价/组合规模漂移）不计入。排序按 Δ(% of portfolio)。',
-              items: currentSnap?.top5_buys || [],
-            },
-            {
-              title: 'Top 5 sells',
-              icon: <FallOutlined style={{ color: colors.negColor }} />,
-              tip: '实际减仓或清仓的证券中，投组占比下降最多的 5 只。股数未变不计入。排序按 Δ(% of portfolio)。',
-              items: currentSnap?.top5_sells || [],
-            },
-          ].map(({ title, icon, tip, items }) => (
-            <Card
-              key={title}
-              size="small"
-              style={{ background: colors.cardBg, borderColor: colors.cardBorder }}
-              title={(
-                <Space size={6}>
-                  {icon}
-                  <span>{title}</span>
-                  <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-                    {currentSnap ? `· ${fmtQuarter(currentSnap.quarter)}` : ''}
-                  </Text>
-                  <Tooltip title={tip}>
-                    <Text type="secondary" style={{ cursor: 'help', fontSize: 12 }}>ⓘ</Text>
-                  </Tooltip>
-                </Space>
-              )}
-            >
-              <Table<Top5ChangeItem>
-                size="small"
-                rowKey={(r) => `${r.cusip}|${r.putcall || ''}`}
-                columns={changeColumns}
-                dataSource={items}
-                pagination={false}
-                locale={{ emptyText: <Empty description="无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-              />
-            </Card>
-          ))}
-        </div>
-
         {/* ── Top 20 largest holdings ── */}
         <Card size="small" style={{ marginBottom: 16, background: colors.cardBg, borderColor: colors.cardBorder }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
             <Text strong style={{ fontSize: 15, color: colors.text }}>Top 20 largest holdings</Text>
-            <Tooltip title="该机构报告的全部持仓中市值最大的 20 只证券。% of portfolio = 持仓市值 / 当季组合总市值；Δ Shares 为相对上一报告期全量持仓（不限上季 Top 20）的股数变动。">
+            <Tooltip title={TOP20_TIP} overlayInnerStyle={{ maxWidth: 400 }}>
               <Text type="secondary" style={{ cursor: 'help' }}>ⓘ</Text>
             </Tooltip>
           </div>
@@ -500,8 +409,10 @@ const Form13FPage: React.FC = () => {
 
       <div style={{ textAlign: 'center', marginTop: 24 }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          Form 13F 是美国 SEC 要求管理超过 1 亿美元资产的机构投资管理人提交的季度持仓报告。
+          Form 13F 是美国 SEC 要求管理超过 1 亿美元资产的机构投资管理人提交的季度持仓报告，
+          披露股权资产（股票、ETF）多头，不含期货与固定收益。
           数据来自 <a href="https://www.sec.gov/cgi-bin/browse-edgar" target="_blank" rel="noreferrer">SEC EDGAR 13F-HR</a>（关注机构），仅供研究参考。
+          Top 20 展示申报表中市值最大的 20 条（含期权等）。
         </Text>
       </div>
     </div>

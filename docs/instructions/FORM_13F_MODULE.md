@@ -1,14 +1,14 @@
 # Form 13F 模块（SEC 季度持仓）开发说明
 
 > **创建**：2026-09-02
-> **更新**：2026-09-16 — 13F-NT 跟随 successor CIK；top5 买卖按投组占比变化排序
+> **更新**：2026-09-16 — 13F-NT 跟随 successor CIK；前端不再展示 top5 买卖
 > **相关文档**：`SCHEDULER_DEVELOPMENT_GUIDE.md`（调度器）
 
 ---
 
 ## 1. 模块概述
 
-用 [edgartools](https://github.com/dgunning/edgartools) 按 **20 家关注机构的冻结 CIK** 从 EDGAR 拉取 `13F-HR` / `13F-HR/A`，折叠 amendment 后写入该机构全部持仓，按内置 GICS 映射 + ETF 关键词打行业标签，预计算机构×季度快照（行业分布 / top20 / top5 买卖），前端 `/form13f` 展示。
+用 [edgartools](https://github.com/dgunning/edgartools) 按 **20 家关注机构的冻结 CIK** 从 EDGAR 拉取 `13F-HR` / `13F-HR/A`，折叠 amendment 后写入该机构全部持仓，按内置 GICS 映射 + ETF 关键词打行业标签，预计算机构×季度快照（行业分布 / top20），前端 `/form13f` 展示。
 
 **数据形态**（纯结构化数值，无 LLM）：
 
@@ -39,7 +39,7 @@
        对 20 个 CIK：Company(cik).get_filings(form="13F-HR", amendments=True)
        按 report_period 分组 → fold_period_filings()
        写入 form13f_holdings（accession 未变则跳过）
-  → compute_snapshots(quarter)   受影响季度 + 下一季（top5 依赖上期）
+  → compute_snapshots(quarter)   受影响季度
 ```
 
 ### 申报取舍（改动前必读）
@@ -58,7 +58,7 @@
 
 - 行业分布：SQL `GROUP BY filer_id, sector`
 - top20：窗口函数按 `value_usd DESC`
-- top5 买卖：与上一有效季度 FULL JOIN 后，**先按股数方向过滤**（buys = 新建或 Δ股数>0；sells = 清仓或 Δ股数<0），再按 **投组占比变化** `ΔWeight = 本期% − 上期%` 取 Top 5（与 MacroMicro 一致）。股数未变的权重漂移不进榜。`spct` 为股数变化 `(本期股数 − 上期股数) / 上期股数`。
+- 前端不再展示 top5 买卖（口径曾多次调整，页面只保留行业分布与 Top 20）
 - 前端 Δ Shares 用全量持仓的 `prev_shares`，不是上季 top20
 
 ---
@@ -125,7 +125,7 @@
 | `GET /api/form13f/filers/{id}` | 全季度快照 |
 | `POST /api/form13f/refresh` | `poll` / `reaggregate`（`quarter` 可选）；`backfill`/`retry`/`import` 等同 poll |
 
-快照 JSONB 中 `top5_buys` / `top5_sells` 字段：`pct`（本期占比）、`dpct`（占比变化百分点）、`spct`（股数变化 %，新建仓为 null）、`kind`、`dv` / `value`。首个有数据的季度无对比基准，buys/sells 为空。
+快照 JSONB 仍含 `top5_buys` / `top5_sells`（后端继续写入），前端 `/form13f` 已不再展示。
 
 ---
 

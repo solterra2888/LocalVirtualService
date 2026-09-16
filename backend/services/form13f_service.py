@@ -86,6 +86,35 @@ def portfolio_pct(value: int, total: int) -> float:
     return value / total * 100.0
 
 
+_OPTION_PUTCALL = frozenset({'put', 'call', 'p', 'c'})
+_NON_EQUITY_TITLE = re.compile(
+    r'\b(?:NOTE|NOTES|BOND|BONDS|DEBENTURE|DEBENTURES|CONVERTIBLE|'
+    r'WARRANT|WARRANTS)\b|\d+\.\d+\s*%',
+    re.IGNORECASE)
+
+
+def is_option_leg(putcall: Optional[str]) -> bool:
+    return (putcall or '').strip().lower() in _OPTION_PUTCALL
+
+
+def is_fixed_income_holding(title: Optional[str]) -> bool:
+    """13F 信息表里的债/可转债/权证（MacroMicro 只展示股票与 ETF 多头）。"""
+    return bool(_NON_EQUITY_TITLE.search(title or ''))
+
+
+def is_stock_or_etf_long(putcall: Optional[str], title: Optional[str] = None) -> bool:
+    return not is_option_leg(putcall) and not is_fixed_income_holding(title)
+
+
+def stock_etf_long_totals(rows) -> Dict[int, int]:
+    """rows: (filer_id, putcall, title, value_usd) → 股票/ETF 多头市值。"""
+    out: Dict[int, int] = defaultdict(int)
+    for filer_id, putcall, title, value in rows:
+        if is_stock_or_etf_long(putcall, title):
+            out[int(filer_id)] += int(value or 0)
+    return dict(out)
+
+
 def share_change_pct(cur_shares: Optional[int], prev_shares: Optional[int]) -> Optional[float]:
     """(本期股数 − 上期股数) / 上期股数。无上期股数返回 None（NEW）。"""
     prev = int(prev_shares or 0)
@@ -105,12 +134,22 @@ def rank_top5_by_weight_change(
 ) -> Tuple[Dict[int, List[dict]], Dict[int, List[dict]]]:
     """Top 5 加码 / 减码，与 MacroMicro 一致。
 
+    只看股票与 ETF 多头（排除 Put/Call、债券/可转债、权证）。
+    占比分母是同一口径的多头合计，避免期权大仓稀释股票权重。
     先按股数方向过滤（buys = 新建或 Δ股数>0；sells = 清仓或 Δ股数<0），
     再按 ΔWeight = 本期% − 上期% 排序。股数未变的权重漂移不进榜。
+
+    rows: (filer_id, issuer, cusip, putcall, cur_value, prev_value,
+           cur_shares, prev_shares[, title])
+    cur_totals / prev_totals: 股票与 ETF 多头市值（不含期权与固定收益）。
     """
     by_filer: Dict[int, List[dict]] = defaultdict(list)
-    for (filer_id, issuer, cusip, putcall,
-         cur_value, prev_value, cur_shares, prev_shares) in rows:
+    for row in rows:
+        (filer_id, issuer, cusip, putcall,
+         cur_value, prev_value, cur_shares, prev_shares) = row[:8]
+        title = row[8] if len(row) > 8 else ''
+        if not is_stock_or_etf_long(putcall, title):
+            continue
         filer_id = int(filer_id)
         cur_value = int(cur_value or 0)
         prev_value = int(prev_value or 0)
@@ -667,16 +706,20 @@ class Form13fService:
         buys_map: Dict[int, List[dict]] = {}
         sells_map: Dict[int, List[dict]] = {}
         if prev_quarter:
-            prev_totals = {
-                fid: int(v) for fid, v in self.db_manager.fetch_all(
-                    """
-                    SELECT filer_id, SUM(value_usd)
-                    FROM form13f_holdings
-                    WHERE quarter = %s
-                    GROUP BY filer_id
-                    """,
-                    (prev_quarter,))
-            }
+            prev_hold_rows = self.db_manager.fetch_all(
+                """
+                SELECT filer_id, putcall, title_of_class, value_usd
+                FROM form13f_holdings WHERE quarter = %s
+                """,
+                (prev_quarter,))
+            prev_eq_totals = stock_etf_long_totals(prev_hold_rows)
+            cur_hold_rows = self.db_manager.fetch_all(
+                """
+                SELECT filer_id, putcall, title_of_class, value_usd
+                FROM form13f_holdings WHERE quarter = %s
+                """,
+                (q,))
+            cur_eq_totals = stock_etf_long_totals(cur_hold_rows)
             change_rows = self.db_manager.fetch_all(
                 """
                 SELECT COALESCE(c.filer_id, p.filer_id) AS filer_id,
@@ -686,7 +729,8 @@ class Form13fService:
                        COALESCE(c.value_usd, 0) AS cur_value,
                        COALESCE(p.value_usd, 0) AS prev_value,
                        c.shares AS cur_shares,
-                       p.shares AS prev_shares
+                       p.shares AS prev_shares,
+                       COALESCE(c.title_of_class, p.title_of_class) AS title
                 FROM (SELECT * FROM form13f_holdings WHERE quarter = %s) c
                 FULL JOIN (SELECT * FROM form13f_holdings WHERE quarter = %s) p
                   ON p.filer_id = c.filer_id
@@ -695,7 +739,7 @@ class Form13fService:
                 """,
                 (q, prev_quarter))
             buys_map, sells_map = rank_top5_by_weight_change(
-                change_rows, totals, prev_totals)
+                change_rows, cur_eq_totals, prev_eq_totals)
 
         snap_rows = []
         for filer_id, total in totals.items():
