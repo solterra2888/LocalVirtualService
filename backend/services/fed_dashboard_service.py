@@ -23,7 +23,7 @@ import json
 import os
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import feedparser
@@ -55,6 +55,14 @@ MINUTES_URL_PATTERN = re.compile(r"fomcminutes(\d{8})\.htm")
 
 # 声明 URL（前缀 monetary 无规律，必须由 RSS 发现）
 STATEMENT_URL_PATTERN = re.compile(r"/monetary(\d{8})a\.htm")
+
+
+def meeting_date_from_source_url(url: str) -> Optional[date]:
+    """Statement / minutes URL 中的 YYYYMMDD = 会议末日（决议/声明发布日）。"""
+    m = STATEMENT_URL_PATTERN.search(url) or MINUTES_URL_PATTERN.search(url)
+    if not m:
+        return None
+    return datetime.strptime(m.group(1), "%Y%m%d").date()
 
 # ── 结构化抽取 regex（regex_v1）───────────────────────────────────────────
 # Unicode 规范化: 老声明用 U+2011 non-breaking hyphen (‑), 新声明用普通 hyphen/en-dash,
@@ -297,7 +305,8 @@ class FedDashboardService:
         """识别 RSS 条目是否为 FOMC 声明/纪要，是则 upsert fomc_documents(pending)
 
         - 声明: URL 模式 /monetary{YYYYMMDD}a.htm（前缀无规律，RSS 是唯一可靠发现渠道）
-        - 纪要: 标题含 'Minutes' + 'FOMC'，URL 模式 fomcminutes{YYYYMMDD}.htm（日期=会议末日）
+        - 纪要: 标题含 'Minutes' + 'FOMC'，URL 模式 fomcminutes{YYYYMMDD}.htm
+        - meeting_date = URL 中的 YYYYMMDD（会议末日 / 声明发布日）
         """
         doc_type = None
         meeting_date = None
@@ -305,18 +314,13 @@ class FedDashboardService:
         m = STATEMENT_URL_PATTERN.search(link)
         if m and ("fomc" in title.lower() or "statement" in title.lower()):
             doc_type = "statement"
-            ds = m.group(1)
-            # 声明发布于会议末日；会议为两日，会议首日=末日-1（meeting_date 取首日）
-            end = datetime.strptime(ds, "%Y%m%d").date()
-            meeting_date = end.fromordinal(end.toordinal() - 1)
+            meeting_date = datetime.strptime(m.group(1), "%Y%m%d").date()
 
         if doc_type is None:
             m = MINUTES_URL_PATTERN.search(link)
             if m and "minutes" in title.lower() and "fomc" in title.lower():
                 doc_type = "minutes"
-                ds = m.group(1)
-                end = datetime.strptime(ds, "%Y%m%d").date()
-                meeting_date = end.fromordinal(end.toordinal() - 1)
+                meeting_date = datetime.strptime(m.group(1), "%Y%m%d").date()
 
         if doc_type is None:
             return False
@@ -349,6 +353,8 @@ class FedDashboardService:
                     VALUES ('FED', %s, %s, %s, %s, %s)
                     ON CONFLICT (central_bank, source_url) DO UPDATE SET
                         title = EXCLUDED.title,
+                        meeting_date = COALESCE(EXCLUDED.meeting_date,
+                                                fomc_documents.meeting_date),
                         published_at = COALESCE(EXCLUDED.published_at,
                                                 fomc_documents.published_at),
                         updated_at = CURRENT_TIMESTAMP
@@ -957,12 +963,11 @@ class FedDashboardService:
 
         for ds in self.BACKFILL_2026_MINUTES_DATES:
             url = f"{FED_BASE}/monetarypolicy/fomcminutes{ds}.htm"
-            end = datetime.strptime(ds, "%Y%m%d").date()
-            meeting_date = end.fromordinal(end.toordinal() - 1)
+            meeting_date = datetime.strptime(ds, "%Y%m%d").date()
             inserted = self._upsert_document(
                 doc_type="minutes",
                 meeting_date=meeting_date,
-                title=f"Minutes of the FOMC, {end.strftime('%B %d–%d, %Y')}",
+                title=f"Minutes of the FOMC, {meeting_date.strftime('%B %d, %Y')}",
                 source_url=url,
                 published_at=None,
             )
@@ -997,20 +1002,15 @@ class FedDashboardService:
         return bool(rows and rows[0][0] == "fetched")
 
     def _patch_meeting_date_from_url(self, doc_id: int, doc_type: str):
-        """从 URL 日期推导 meeting_date（会议首日 = URL 末日 - 1）"""
+        """从 URL 日期推导 meeting_date（YYYYMMDD = 会议末日 / 声明日）"""
         rows = self.db_manager.fetch_all(
             "SELECT source_url FROM fomc_documents WHERE id = %s", (doc_id,)
         )
         if not rows:
             return
-        url = rows[0][0]
-        pattern = (STATEMENT_URL_PATTERN if doc_type == "statement"
-                   else MINUTES_URL_PATTERN)
-        m = pattern.search(url)
-        if not m:
+        meeting_date = meeting_date_from_source_url(rows[0][0])
+        if meeting_date is None:
             return
-        end = datetime.strptime(m.group(1), "%Y%m%d").date()
-        meeting_date = end.fromordinal(end.toordinal() - 1)
         conn = self.db_manager.get_connection()
         try:
             with conn.cursor() as cur:
@@ -1701,14 +1701,13 @@ class FedDashboardService:
         start_date = datetime.strptime(start, "%Y-%m-%d").date()
         today = datetime.now(timezone.utc).date()
 
-        # 历史会议 = 有决议记录的（fomc_decisions.meeting_date=首日，
-        # fomc_meetings.first_day 对齐），排除今天的快照冲突
+        # 历史会议 = 有决议记录的（meeting_date 一律会议末日）
         hist = self.db_manager.fetch_all(
             """
             SELECT m.meeting_date FROM fomc_meetings m
             JOIN fomc_decisions d
               ON d.central_bank = m.central_bank
-             AND d.meeting_date = COALESCE(m.first_day, m.meeting_date)
+             AND d.meeting_date = m.meeting_date
             WHERE m.central_bank = 'FED' AND m.is_notation = FALSE
               AND m.meeting_date < CURRENT_DATE
               AND m.meeting_date >= %s
@@ -1834,8 +1833,7 @@ class FedDashboardService:
             })
 
         # 预期差对照: 决议日前最后一个交易日快照 vs 实际决议
-        # （decisions.meeting_date=首日, probabilities.meeting_date=末日 → 差 1 天；
-        #  asof < 末日，避免用进公告后的决议日结算价）
+        # meeting_date = 会议末日；asof < 末日，避免用进公告后的决议日结算价
         rows = self.db_manager.fetch_all(
             """
             SELECT d.meeting_date, d.decision_direction, d.change_bp,
@@ -1845,8 +1843,8 @@ class FedDashboardService:
                 SELECT asof_date, p_cut, p_hold, p_hike, method
                 FROM fomc_probabilities p
                 WHERE p.central_bank = d.central_bank
-                  AND p.meeting_date = d.meeting_date + 1
-                  AND p.asof_date < d.meeting_date + 1
+                  AND p.meeting_date = d.meeting_date
+                  AND p.asof_date < d.meeting_date
                 ORDER BY asof_date DESC LIMIT 1
             ) p ON TRUE
             WHERE d.central_bank = 'FED'

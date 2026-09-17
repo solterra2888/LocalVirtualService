@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS fomc_documents (
     id                SERIAL PRIMARY KEY,
     central_bank      VARCHAR(16) NOT NULL DEFAULT 'FED',
     doc_type          VARCHAR(20) NOT NULL,                -- 'statement' | 'minutes'
-    meeting_date      DATE,                                -- 会议首日
+    meeting_date      DATE,                                -- 会议末日（声明/纪要 URL 中的 YYYYMMDD）
     title             TEXT NOT NULL,
     source_url        TEXT NOT NULL,
     published_at      TIMESTAMPTZ,                         -- Fed 官方发布时间(RSS pubDate)
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS fomc_decisions (
     id                 SERIAL PRIMARY KEY,
     central_bank       VARCHAR(16) NOT NULL DEFAULT 'FED',
     meeting_date       DATE NOT NULL,
-    decision_date      DATE,                               -- 声明发布日(会议次日)
+    decision_date      DATE,                               -- 声明发布日（= meeting_date / URL 末日）
     rate_low_bp        INTEGER,                            -- 基点: 350 = 3.50%
     rate_high_bp       INTEGER,                            -- 基点: 375
     decision_direction VARCHAR(10),                        -- 'hike' | 'cut' | 'hold'

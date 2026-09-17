@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS fomc_meetings (
     id SERIAL PRIMARY KEY,
     central_bank VARCHAR(16) NOT NULL DEFAULT 'FED',
     meeting_date DATE NOT NULL,            -- 会议末日（决议发布日）
-    first_day DATE,                        -- 会议首日（对齐 fomc_decisions.meeting_date 语义）
+    first_day DATE,                        -- 会议首日（日历 15-16 的 15；决议键用 meeting_date 末日）
     calendar_year INT NOT NULL,            -- 所属 FOMC 日历年
     is_sep BOOLEAN NOT NULL DEFAULT FALSE, -- 带 Summary of Economic Projections（日历 * 后缀）
     is_notation BOOLEAN NOT NULL DEFAULT FALSE, -- "notation vote"，无利率决议，概率排除

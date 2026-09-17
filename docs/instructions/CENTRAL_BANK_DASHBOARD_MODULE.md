@@ -211,7 +211,7 @@ hike = (base*d_pre + (base+0.25)*d_post) / 当月天数
 
 ### 两张表（`migrations/create_fomc_probabilities.sql`）
 
-- `fomc_meetings`：会议日历（`fomccalendars.htm` 同步，2021–2027）。⚠️ 语义：`meeting_date`=**会议末日**（决议发布日，概率计算用），`first_day`=会议首日（**对齐 `fomc_decisions.meeting_date` 语义**——V1 存首日，JOIN 预期差对照时必须用 first_day）。`is_sep`（日历 `*` 后缀）、`is_notation`（"notation vote" 无决议，排除）。解析注意：年份锚面板顺序 2026,2025,…,**2027 在页尾**，切段须按全部锚排序取下一段；"30-1" 跨月日期取末日进位下月
+- `fomc_meetings`：会议日历（`fomccalendars.htm` 同步，2021–2027）。⚠️ 语义：`meeting_date`=**会议末日**（决议/声明发布日），与 `fomc_documents` / `fomc_decisions` / `fomc_probabilities` 的 `meeting_date` 对齐。`first_day`=会议首日（日历 `15-16` 的 15，仅展示/溯源）。`is_sep`（日历 `*` 后缀）、`is_notation`（"notation vote" 无决议，排除）。解析注意：年份锚面板顺序 2026,2025,…,**2027 在页尾**，切段须按全部锚排序取下一段；"30-1" 跨月日期取末日进位下月
 - `fomc_probabilities`：每日快照。`UNIQUE(central_bank, meeting_date, asof_date)`；`p_cut/p_hold/p_hike` 冗余列（折线直查）+ `distribution` JSONB（含 overflow 标记）+ 溯源字段（合约代码/价格/EFFR/method）。`method`: `zq_v1`（在市合约）/ `zq_front_v1`（连续合约回填，分辨率 ±10-15pp）
 
 ### 任务与调度

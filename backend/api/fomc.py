@@ -113,7 +113,7 @@ class RefreshResponse(BaseModel):
             summary="获取央行 Dashboard 聚合数据")
 async def get_dashboard(
     meeting_date: Optional[str] = Query(
-        None, description="会议首日 YYYY-MM-DD；缺省为最近一次决议"),
+        None, description="会议末日 YYYY-MM-DD（声明日）；缺省为最近一次决议"),
     current_user=Depends(get_current_user),
 ):
     """
