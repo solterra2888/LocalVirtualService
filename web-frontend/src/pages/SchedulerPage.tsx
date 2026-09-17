@@ -480,7 +480,7 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
         {
           id: 'configure_bloomberg_surveillance_schedule',
           name: 'Configure Bloomberg Surveillance Schedule',
-          description: 'Set up periodic Surveillance AM Brief generation (default: weekdays 7 AM Beijing / 7 PM ET, after the morning episode uploads)',
+          description: 'Set up Surveillance AM Brief: Mon-Fri 21/22/23 Beijing (same evening as US cash) plus Tue-Sat 9 AM catch-up',
           endpoint: '/scheduler/tasks/bloomberg-surveillance',
           params: {},
           icon: <ScheduleOutlined />

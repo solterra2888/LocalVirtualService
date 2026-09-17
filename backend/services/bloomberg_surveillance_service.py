@@ -14,8 +14,9 @@ Bloomberg Surveillance Summary 服务 — Bloomberg "Surveillance" 每日 AM Bri
 
 import asyncio
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
@@ -36,9 +37,64 @@ MAX_TRANSCRIPT_CHARS = 120000
 # 标题/show_name 匹配模式（Bloomberg TV 频道内，无其他节目名包含该串）
 SURVEILLANCE_TITLE_PATTERN = "%Bloomberg Surveillance%"
 
+# 中国用户晚上交易美股：北京当晚尝试生成 + 次日早晨兜底
+SURVEILLANCE_TZ = ZoneInfo("Asia/Shanghai")
+SURVEILLANCE_EVENING_HOURS = frozenset({21, 22, 23})
+SURVEILLANCE_EVENING_WINDOW_HOURS = 10  # 避免 24h 窗口把前一晚节目并进来
+SURVEILLANCE_MORNING_HOUR = 9
+SURVEILLANCE_MORNING_WINDOW_HOURS = 24
+
 
 # 占位摘要原因（无节目 / 无转录）——不作为幂等终态，允许后续重生成
 PLACEHOLDER_REASONS = {"no_video_found", "no_transcript"}
+
+
+def plan_surveillance_cron_run(now: datetime) -> Optional[Dict[str, Any]]:
+    """按北京时钟决定本次 cron 是否执行、report_date 与窗口长度。
+
+    - 周一至周五 21/22/23：当晚场，report_date=当天，短窗口等当日 VOD
+    - 周二至周六 09:00：兜底前一晚（含 FOMC 特辑），report_date=昨天
+    - 其余触发（如周一 09:00、周六晚上）跳过，避免空占位
+    """
+    aware = now if now.tzinfo else now.replace(tzinfo=ZoneInfo("UTC"))
+    bj = aware.astimezone(SURVEILLANCE_TZ)
+    weekday = bj.weekday()  # Mon=0
+    hour = bj.hour
+    if hour in SURVEILLANCE_EVENING_HOURS and weekday <= 4:
+        return {
+            "report_date": bj.date(),
+            "window_hours": SURVEILLANCE_EVENING_WINDOW_HOURS,
+            "slot": "evening",
+        }
+    if hour == SURVEILLANCE_MORNING_HOUR and 1 <= weekday <= 5:
+        return {
+            "report_date": bj.date() - timedelta(days=1),
+            "window_hours": SURVEILLANCE_MORNING_WINDOW_HOURS,
+            "slot": "morning_catchup",
+        }
+    return None
+
+
+def _should_skip_completed_summary(
+    existing: Optional[Dict[str, Any]], videos: List[Dict[str, Any]]
+) -> bool:
+    """已有非占位 completed 时跳过；窗口内出现尚未纳入的视频则重跑。"""
+    if (
+        not existing
+        or existing.get("status") != "completed"
+        or _is_placeholder_summary(existing)
+    ):
+        return False
+    if not videos:
+        return True
+    meta = existing.get("metadata") or {}
+    existing_ids = set(meta.get("video_ids") or [])
+    if existing.get("video_id"):
+        existing_ids.add(existing["video_id"])
+    new_ids = {v.get("content_id") for v in videos if v.get("content_id")}
+    if not existing_ids:
+        return True
+    return new_ids <= existing_ids
 
 
 def _is_placeholder_summary(existing: Dict[str, Any]) -> bool:
@@ -100,16 +156,14 @@ class BloombergSurveillanceService:
             f"window=[{window_start.isoformat()}, {resolved_end.isoformat()})"
         )
 
-        # 幂等检查：已存在且非强制时跳过。
-        # 占位摘要（no_video_found / no_transcript）不视为终态，
-        # 允许后续调度在内容就绪后重新生成，避免被空占位永久阻断。
+        # 先筛选视频，避免空窗期把 generating 占住后立刻写成空占位。
+        videos = self._fetch_surveillance_videos(window_start, resolved_end)
+        logger.info(f"找到 {len(videos)} 个 Surveillance 视频")
+
+        # 幂等：占位摘要不视为终态；已完成但窗口内出现新片段（如 FOMC 特辑）则重跑。
         if not force:
             existing = self._get_existing_summary(report_date)
-            if (
-                existing
-                and existing["status"] == "completed"
-                and not _is_placeholder_summary(existing)
-            ):
+            if _should_skip_completed_summary(existing, videos):
                 logger.info(f"Surveillance 摘要已存在, 跳过: {report_date}")
                 return {
                     "success": True,
@@ -117,10 +171,6 @@ class BloombergSurveillanceService:
                     "message": "摘要已存在",
                     "skipped": True,
                 }
-
-        # 先筛选视频，避免空窗期把 generating 占住后立刻写成空占位。
-        videos = self._fetch_surveillance_videos(window_start, resolved_end)
-        logger.info(f"找到 {len(videos)} 个 Surveillance 视频")
 
         summary_id = self._upsert_summary_status(report_date, "generating")
 

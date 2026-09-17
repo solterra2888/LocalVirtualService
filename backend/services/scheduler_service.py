@@ -1731,15 +1731,18 @@ class SchedulerService:
         """
         生成 Bloomberg Surveillance 每日 AM Brief 摘要（全局）。
 
-        早间节目（美东 5-9am ET 播出），YouTube 通常在北京时间当晚 ~22:00 前后
-        上传，默认调度为次晨（北京 Tue-Sat 07:00，滚动 24h 窗口可稳定覆盖）。
+        早间节目（美东周一至周五 6-9am ET 直播；北京夏令时 18:00-21:00 /
+        冬令时 19:00-22:00）。YouTube VOD 多在节目结束后 1-3h 入库（北京约
+        22:00-01:00），FOMC 特辑可更晚。
+        默认同一个 cron：北京周一至周五 21/22/23 点当晚尝试（短窗口，给中国
+        用户晚上交易美股用），周二至周六 09:00 兜底前一晚（含晚到特辑）。
         报告（Bloomberg Surveillance Report）为该摘要任务的后置钩子，无独立调度器。
 
         Args:
             params:
                 - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)，北京自然日
                 - window_end: 可选，ISO 时间字符串（UTC），内容窗口结束时间
-                - window_hours: 可选，回溯小时数（默认 24）
+                - window_hours: 可选，回溯小时数（默认由当晚/次晨槽位决定）
                 - force: 可选，是否强制重新生成（默认 False）
         """
         try:
@@ -1748,26 +1751,42 @@ class SchedulerService:
             from backend.tasks.bloomberg_surveillance_tasks import (
                 generate_bloomberg_surveillance_task,
             )
+            from backend.services.bloomberg_surveillance_service import (
+                plan_surveillance_cron_run,
+            )
             from backend.utils.datetime_utils import (
                 utcnow,
                 parse_iso_utc,
                 window_label_date,
             )
 
-            window_hours = int(params.get('window_hours', 24))
             force = params.get('force', False)
+            explicit_date = params.get('report_date')
+            explicit_end = parse_iso_utc(params.get('window_end'))
+            now = utcnow()
 
-            # 滚动 24h 窗口（同 The Close / CNBC）：不传 window_end 会退化为
-            # 自然日历窗口，漏掉前一夜上传的节目，故必须显式传 window_end。
-            window_end = parse_iso_utc(params.get('window_end'))
-            if window_end is None:
-                window_end = utcnow()
+            if explicit_date or explicit_end:
+                window_end = explicit_end or now
+                window_hours = int(params.get('window_hours', 24))
+                report_date = explicit_date or window_label_date(
+                    now, 'Asia/Shanghai'
+                ).isoformat()
+            else:
+                plan = plan_surveillance_cron_run(now)
+                if plan is None:
+                    message = (
+                        "✅ Bloomberg Surveillance: 当前北京时点不在当晚/"
+                        "次晨槽位，跳过"
+                    )
+                    logger.info(message)
+                    return {'success': True, 'message': message, 'skipped': True}
+                window_end = now
+                window_hours = int(
+                    params.get('window_hours', plan['window_hours'])
+                )
+                report_date = plan['report_date'].isoformat()
 
-            # report_date 统一为「北京自然日」，与其他上游摘要及 DMR 口径一致。
-            report_date = params.get('report_date') or window_label_date(
-                utcnow(), 'Asia/Shanghai'
-            ).isoformat()
-
+            # 不传 window_end 会退化为自然日历窗口，漏掉跨日上传，故必须显式传。
             task = generate_bloomberg_surveillance_task.delay(
                 report_date=report_date,
                 window_end=window_end.isoformat(),

@@ -9,7 +9,7 @@ import {
   ClockCircleOutlined,
   PlayCircleOutlined,
   BellOutlined,
-  RadarOutlined,
+  RadarChartOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -366,7 +366,7 @@ const MobileReportsOverviewPageInner: React.FC = () => {
     {
       title: 'Bloomberg Surveillance Report',
       description: 'Bloomberg Surveillance daily AM brief',
-      icon: <RadarOutlined />,
+      icon: <RadarChartOutlined />,
       path: '/reports/surveillance',
       color: '#2f54eb',
       latestDate: reportDates.surveillance,

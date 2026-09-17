@@ -303,9 +303,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     bloomberg_surveillance: {
       icon: <StockOutlined style={{ color: '#2f54eb' }} />,
       params: [],
-      defaultSchedule: '0 7 * * 2-6',
+      defaultSchedule: '0 9,21,22,23 * * 1-6',
       defaultName: 'Bloomberg Surveillance Summary',
-      description: 'Generate daily AM Brief summary from Bloomberg "Surveillance" morning-show transcript; multi-segment episodes are merged (weekdays 7 AM Beijing / 7 PM ET)'
+      description: 'AM Brief for China evening US session: try 21/22/23 Beijing Mon-Fri when VOD lands, plus 9 AM Tue-Sat catch-up (live 6-9 AM ET)'
     },
     fed_dashboard: {
       icon: <BankOutlined style={{ color: '#1d4ed8' }} />,
@@ -360,7 +360,11 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
   const resetModal = () => {
     form.resetFields();
     form.setFieldsValue({
-      timezone: initialTimezone || 'America/New_York',
+      timezone:
+        initialTimezone ||
+        (dataSourceType === 'bloomberg_surveillance'
+          ? 'Asia/Shanghai'
+          : 'America/New_York'),
       cronExpression: initialCronExpression || currentConfig.defaultSchedule,
     });
   };
