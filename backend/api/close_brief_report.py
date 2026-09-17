@@ -9,6 +9,7 @@ The Close Report（Bloomberg "The Close" PM Brief 独立报告）的查询和生
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
+from psycopg2 import errors as pg_errors
 
 from backend.auth.jwt_utils import get_current_user
 from backend.schemas.user import TokenData
@@ -46,7 +47,10 @@ class GenerateReportRequest(BaseModel):
 async def get_latest_report(current_user: TokenData = Depends(get_current_user)):
     """获取最新的 The Close Report。"""
     svc = CloseBriefReportService()
-    report = svc.get_latest_report()
+    try:
+        report = svc.get_latest_report()
+    except pg_errors.UndefinedTable:
+        report = None
     if not report:
         raise HTTPException(status_code=404, detail="No completed report found")
     return report
