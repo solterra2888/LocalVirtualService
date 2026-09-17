@@ -138,6 +138,12 @@ except ImportError as e:
     print(f"❌ 导入 CNBC Closing Bell 任务模块失败: {e}")
 
 try:
+    from backend.tasks import bloomberg_surveillance_tasks
+    print(f"✅ 成功导入 Bloomberg Surveillance 任务模块: {bloomberg_surveillance_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入 Bloomberg Surveillance 任务模块失败: {e}")
+
+try:
     from backend.tasks import fomc_tasks
     print(f"✅ 成功导入央行 Dashboard 任务模块: {fomc_tasks.__name__}")
 except ImportError as e:

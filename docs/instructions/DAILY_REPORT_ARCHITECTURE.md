@@ -131,6 +131,12 @@ Market Overview 的数据在 `daily_report_{date}.html` 生成时已**内嵌**�
 `generate_cnbc_closing_bell_task` 后置钩子生成/更新，DMR 同步移除 Stock Pulse 标签页
 （DMR 现为 Temperature / Feed Digest / Market Movers 三个标签）。
 
+**独立报告（2026-09，第三次）：** Bloomberg Surveillance（早间节目，参考系统中仅作
+Macros 辅助输入）以独立报告「Bloomberg Surveillance Report」呈现（`/reports/surveillance`），
+内容渲染自 `bloomberg_surveillance_summaries`，由
+`generate_bloomberg_surveillance_task` 后置钩子生成/更新；该摘要管线为新建
+（scheduler 任务类型 `bloomberg_surveillance`，不进入 DMR）。
+
 本项目 `backend/services/content_adapters/youtube_adapter.py` 将标题后缀 `The Close` 映射为 `Bloomberg The Close`，与 Transcripta 命名一致。详见 [FEEDS_MODULE.md](./FEEDS_MODULE.md) §7.5。
 
 ### 3.2 生成管线
@@ -398,6 +404,8 @@ Layer 3: Daily Report 专用 LLM（PM Brief / Stock News / Macro Review）— �
 | 经济事件 | `EconomicEventsService`（EODHD） |
 | The Close Report（独立报告） | `backend/services/close_brief_report_service.py` + `backend/templates/close_brief_report.html.j2` + `backend/api/close_brief_report.py`（`/close-brief-report/*`）；存储 `close_brief_reports` 表 + `reports/close_brief/YYYYMMDD.html`；生成挂在 `generate_the_close_summary_task` 后置钩子（无独立调度器），占位摘要不渲染，`report_date` 新鲜度判断幂等；2026-09 起 DMR 不再包含 Close Brief 标签页 |
 | Closing Bell Report（独立报告） | `backend/services/closing_bell_report_service.py` + `backend/templates/closing_bell_report.html.j2` + `backend/api/closing_bell_report.py`（`/closing-bell-report/*`）；存储 `closing_bell_reports` 表 + `reports/closing_bell/YYYYMMDD.html`；生成挂在 `generate_cnbc_closing_bell_task` 后置钩子（无独立调度器），机制同 The Close Report；2026-09 起 DMR 不再包含 Stock Pulse 标签页 |
+| Bloomberg Surveillance Summary（摘要管线） | `backend/services/bloomberg_surveillance_service.py` + `backend/tasks/bloomberg_surveillance_tasks.py`（`generate_bloomberg_surveillance_summary`，`ai_processing` 队列）；存储 `bloomberg_surveillance_summaries` 表；scheduler 任务类型 `bloomberg_surveillance`（`0 7 * * 2-6` 北京，滚动 24h 窗口，report_date=北京自然日）；LLM 模板 `bloomberg_surveillance_am_brief`（八段式开盘前 AM Brief）；Bloomberg TV 频道内按 show_name/标题匹配，同日多段转录合并，截断阈值 120,000 chars（早间节目约 2h） |
+| Surveillance Report（独立报告） | `backend/services/surveillance_report_service.py` + `backend/templates/surveillance_report.html.j2` + `backend/api/surveillance_report.py`（`/surveillance-report/*`）；存储 `surveillance_reports` 表 + `reports/surveillance/YYYYMMDD.html`；生成挂在 `generate_bloomberg_surveillance_task` 后置钩子（无独立调度器），机制同 The Close / Closing Bell Report；不进入 DMR |
 
 ### 10.2 与参考系统差距
 

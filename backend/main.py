@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, market_weekly, market_weekly_report, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search, theme_report, chat_group_messages, zsxq_admin, weibo_admin, substack_admin, substack_summary, daily_market_report, the_close_summary, close_brief_report, cnbc_closing_bell, closing_bell_report, zhishixingqiu_summary, fomc, form13f, feeds_dashboard
+from backend.api import auth, files, tasks, users, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, market_weekly, market_weekly_report, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search, theme_report, chat_group_messages, zsxq_admin, weibo_admin, substack_admin, substack_summary, daily_market_report, the_close_summary, close_brief_report, cnbc_closing_bell, closing_bell_report, bloomberg_surveillance, surveillance_report, zhishixingqiu_summary, fomc, form13f, feeds_dashboard
 from backend.database.db_manager import DatabaseManager
 from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import init_logging, info, error, warning, shutdown_logging
@@ -162,6 +162,10 @@ app.include_router(close_brief_report.router, prefix="/api", tags=["Close Brief 
 app.include_router(cnbc_closing_bell.router, prefix="/api", tags=["CNBC Closing Bell"])
 # Closing Bell Report API (独立报告，自 DMR Stock Pulse 抽取，复用摘要任务触发)
 app.include_router(closing_bell_report.router, prefix="/api", tags=["Closing Bell Report"])
+# Bloomberg Surveillance API (Bloomberg Surveillance AM Brief)
+app.include_router(bloomberg_surveillance.router, prefix="/api", tags=["Bloomberg Surveillance"])
+# Surveillance Report API (独立报告，挂 Surveillance 摘要任务后置钩子)
+app.include_router(surveillance_report.router, prefix="/api", tags=["Surveillance Report"])
 # 央行 Dashboard API (Fed FOMC)
 app.include_router(fomc.router, prefix="/api/fomc", tags=["Central Bank Dashboard"])
 # Form 13F API (SEC 季度持仓)

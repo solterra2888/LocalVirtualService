@@ -71,6 +71,7 @@ class SchedulerService:
             'daily_market_report': self._execute_daily_market_report_task,
             'the_close_summary': self._execute_the_close_summary_task,
             'cnbc_closing_bell': self._execute_cnbc_closing_bell_task,
+            'bloomberg_surveillance': self._execute_bloomberg_surveillance_task,
             'zhishixingqiu_summary': self._execute_zhishixingqiu_summary_task,
             'substack_summary': self._execute_substack_summary_task,
             'podcast_subscription': self._execute_podcast_subscription_task,
@@ -1723,6 +1724,68 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"CNBC Closing Bell 任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_bloomberg_surveillance_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        生成 Bloomberg Surveillance 每日 AM Brief 摘要（全局）。
+
+        早间节目（美东 5-9am ET 播出），YouTube 通常在北京时间当晚 ~22:00 前后
+        上传，默认调度为次晨（北京 Tue-Sat 07:00，滚动 24h 窗口可稳定覆盖）。
+        报告（Bloomberg Surveillance Report）为该摘要任务的后置钩子，无独立调度器。
+
+        Args:
+            params:
+                - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)，北京自然日
+                - window_end: 可选，ISO 时间字符串（UTC），内容窗口结束时间
+                - window_hours: 可选，回溯小时数（默认 24）
+                - force: 可选，是否强制重新生成（默认 False）
+        """
+        try:
+            logger.info("分发 Bloomberg Surveillance Celery 任务", params=params)
+
+            from backend.tasks.bloomberg_surveillance_tasks import (
+                generate_bloomberg_surveillance_task,
+            )
+            from backend.utils.datetime_utils import (
+                utcnow,
+                parse_iso_utc,
+                window_label_date,
+            )
+
+            window_hours = int(params.get('window_hours', 24))
+            force = params.get('force', False)
+
+            # 滚动 24h 窗口（同 The Close / CNBC）：不传 window_end 会退化为
+            # 自然日历窗口，漏掉前一夜上传的节目，故必须显式传 window_end。
+            window_end = parse_iso_utc(params.get('window_end'))
+            if window_end is None:
+                window_end = utcnow()
+
+            # report_date 统一为「北京自然日」，与其他上游摘要及 DMR 口径一致。
+            report_date = params.get('report_date') or window_label_date(
+                utcnow(), 'Asia/Shanghai'
+            ).isoformat()
+
+            task = generate_bloomberg_surveillance_task.delay(
+                report_date=report_date,
+                window_end=window_end.isoformat(),
+                window_hours=window_hours,
+                force=force,
+            )
+
+            date_info = f", date={report_date}"
+            force_info = "（强制重新生成）" if force else ""
+            message = (
+                f"✅ Bloomberg Surveillance: "
+                f"已提交 Celery 异步任务 {task.id}{date_info}{force_info}"
+            )
+            logger.info(message)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"Bloomberg Surveillance 任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

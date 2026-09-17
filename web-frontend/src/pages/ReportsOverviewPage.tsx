@@ -9,6 +9,7 @@ import {
   ClockCircleOutlined,
   PlayCircleOutlined,
   BellOutlined,
+  RadarOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -19,6 +20,7 @@ import { themeReportAPI } from '../services/themeReport';
 import { dailyMarketReportAPI } from '../services/dailyMarketReport';
 import { closeBriefReportAPI } from '../services/closeBriefReport';
 import { closingBellReportAPI } from '../services/closingBellReport';
+import { surveillanceReportAPI } from '../services/surveillanceReport';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -232,6 +234,7 @@ interface ReportDatesState {
   dailyMarket: string | null;
   closeBrief: string | null;
   closingBell: string | null;
+  surveillance: string | null;
 }
 
 const ReportsOverviewPage: React.FC = () => {
@@ -249,6 +252,7 @@ const ReportsOverviewPage: React.FC = () => {
     dailyMarket: null,
     closeBrief: null,
     closingBell: null,
+    surveillance: null,
   });
 
   // 加载状态
@@ -260,6 +264,7 @@ const ReportsOverviewPage: React.FC = () => {
     dailyMarket: true,
     closeBrief: true,
     closingBell: true,
+    surveillance: true,
   });
 
   // 加载各报告的最新日期
@@ -334,6 +339,16 @@ const ReportsOverviewPage: React.FC = () => {
         }
       } catch { /* ignore */ }
       setLoading(prev => ({ ...prev, closingBell: false }));
+
+      // Bloomberg Surveillance Report
+      setLoading(prev => ({ ...prev, surveillance: true }));
+      try {
+        const survRes = await surveillanceReportAPI.getLatest();
+        if (survRes && survRes.report_date) {
+          setReportDates(prev => ({ ...prev, surveillance: survRes.report_date }));
+        }
+      } catch { /* ignore */ }
+      setLoading(prev => ({ ...prev, surveillance: false }));
     };
 
     loadReportDates();
@@ -407,6 +422,15 @@ const ReportsOverviewPage: React.FC = () => {
       color: '#13c2c2',
       latestDate: reportDates.closingBell,
       loading: loading.closingBell,
+    },
+    {
+      title: 'Bloomberg Surveillance Report',
+      description: 'Bloomberg Surveillance daily AM brief',
+      icon: <RadarOutlined />,
+      path: '/reports/surveillance',
+      color: '#2f54eb',
+      latestDate: reportDates.surveillance,
+      loading: loading.surveillance,
     },
   ];
 

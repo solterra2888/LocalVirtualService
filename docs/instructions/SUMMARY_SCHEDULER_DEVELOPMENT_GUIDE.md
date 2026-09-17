@@ -293,6 +293,7 @@ flowchart TD
     ZXQSum[zhishixingqiu_summary]
     Close[the_close_summary]
     CNBC[cnbc_closing_bell]
+    Surveil[bloomberg_surveillance]
   end
 
   subgraph aggregate [聚合]
@@ -304,6 +305,7 @@ flowchart TD
   ZXQSub --> ZXQSum
   YTSub --> Close
   PodSub --> CNBC
+  YTSub --> Surveil
 
   YTSum --> DMR
   TWSum --> DMR

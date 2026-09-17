@@ -48,6 +48,7 @@ import ReportsOverviewPage from './pages/ReportsOverviewPage';
 import DailyMarketReportPage from './pages/DailyMarketReportPage';
 import CloseBriefReportPage from './pages/CloseBriefReportPage';
 import ClosingBellReportPage from './pages/ClosingBellReportPage';
+import SurveillanceReportPage from './pages/SurveillanceReportPage';
 import MobileReportsOverviewPage from './pages/MobileReportsOverviewPage';
 import MobileReportsDetailLayout from './components/MobileReportsDetailLayout';
 import ZsxqAdminPage from './pages/ZsxqAdminPage';
@@ -229,6 +230,14 @@ const AppContent: React.FC = () => {
                   </MobileReportsDetailLayout>
                 }
               />
+              <Route
+                path="reports/surveillance"
+                element={
+                  <MobileReportsDetailLayout>
+                    <SurveillanceReportPage />
+                  </MobileReportsDetailLayout>
+                }
+              />
             </>
           ) : (
             <>
@@ -288,6 +297,14 @@ const AppContent: React.FC = () => {
                 element={
                   <ReportsDetailLayout>
                     <ClosingBellReportPage />
+                  </ReportsDetailLayout>
+                }
+              />
+              <Route
+                path="reports/surveillance"
+                element={
+                  <ReportsDetailLayout>
+                    <SurveillanceReportPage />
                   </ReportsDetailLayout>
                 }
               />

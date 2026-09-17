@@ -64,7 +64,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
@@ -299,6 +299,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 7 * * 2-6',
       defaultName: 'CNBC Closing Bell Summary',
       description: 'Generate daily Stock News summary from CNBC "Closing Bell" transcript (weekdays 7 AM Beijing / 7 PM ET)'
+    },
+    bloomberg_surveillance: {
+      icon: <StockOutlined style={{ color: '#2f54eb' }} />,
+      params: [],
+      defaultSchedule: '0 7 * * 2-6',
+      defaultName: 'Bloomberg Surveillance Summary',
+      description: 'Generate daily AM Brief summary from Bloomberg "Surveillance" morning-show transcript; multi-segment episodes are merged (weekdays 7 AM Beijing / 7 PM ET)'
     },
     fed_dashboard: {
       icon: <BankOutlined style={{ color: '#1d4ed8' }} />,
@@ -584,6 +591,17 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           result = await schedulerAPI.createCronTask({
             task_type: 'cnbc_closing_bell',
             ...cnbcClosingBellParams,
+          });
+        } else if (dataSourceType === 'bloomberg_surveillance') {
+          const bloombergSurveillanceParams = {
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+          };
+          result = await schedulerAPI.createCronTask({
+            task_type: 'bloomberg_surveillance',
+            ...bloombergSurveillanceParams,
           });
         } else if (dataSourceType === 'fed_dashboard') {
           result = await schedulerAPI.createCronTask({
@@ -2324,6 +2342,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           return null;
 
         case 'cnbc_closing_bell':
+          return null;
+
+        case 'bloomberg_surveillance':
           return null;
 
         case 'fed_dashboard':
