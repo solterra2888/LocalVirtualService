@@ -3,11 +3,14 @@
 Daily Market Report Service
 
 从 finviz_screener 表生成每日市场报告（per-user，按 user_id + report_date 维度）：
-- Home 标签页：Bloomberg The Close Summary（全局）
-- Stockview 标签页：CNBC Closing Bell Summary（全局）
-- My Subscription 标签页：知识星球 / Twitter / YouTube 三份用户每日摘要拼接（per-user）
+- Temperature 标签页：全球资产温度卡片（全局）
+- My Subscription 标签页：知识星球 / Twitter / YouTube / Substack 用户每日摘要拼接（per-user）
 - Market Overview 标签页：US Assets / US Sector / Thematic ETFs 三个表现表 + 图表（全局）
-- 渲染为自包含 HTML，保存到本地文件（reports/daily/{user_id}/）和数据库
+
+Bloomberg The Close 与 CNBC Closing Bell 摘要已自本报告移除，分别独立为
+The Close Report（close_brief_report_service）与 Closing Bell Report
+（closing_bell_report_service），各挂对应摘要任务的后置钩子生成。
+渲染为自包含 HTML，保存到本地文件（reports/daily/{user_id}/）和数据库
 """
 
 import json
@@ -907,31 +910,7 @@ class DailyMarketReportService:
             _ip_found = len(index_performers["panels"][0]["cols"][0]["top"]) if index_performers["panels"] else 0
             logger.info(f"Index Performers: S&P 500 day/return top={_ip_found}")
 
-            # 4b. 查询 Bloomberg The Close Summary
-            cursor.execute(
-                """
-                SELECT summary_content
-                FROM the_close_summaries
-                WHERE report_date = %s AND status = 'completed'
-                """,
-                (report_date,),
-            )
-            tc_row = cursor.fetchone()
-            the_close_html = self._render_markdown_to_html(tc_row[0]) if tc_row else ""
-
-            # 4c. 查询 CNBC Closing Bell Summary
-            cursor.execute(
-                """
-                SELECT summary_content
-                FROM cnbc_closing_bell_summaries
-                WHERE report_date = %s AND status = 'completed'
-                """,
-                (report_date,),
-            )
-            cb_row = cursor.fetchone()
-            closing_bell_html = self._render_markdown_to_html(cb_row[0]) if cb_row else ""
-
-            # 4d. 查询 My Subscription 摘要（知识星球 / Twitter / YouTube）
+            # 4b. 查询 My Subscription 摘要（知识星球 / Twitter / YouTube）
             #     这三个表 user_id 是 INTEGER，将 VARCHAR user_id 转 int；
             #     非数字 user_id（如 'system'）跳过订阅查询，显示空状态。
             try:
@@ -1003,8 +982,7 @@ class DailyMarketReportService:
                 my_subscriptions_html = ""
 
             logger.info(
-                f"Summaries: the_close={'✓' if the_close_html else '✗'}, "
-                f"closing_bell={'✓' if closing_bell_html else '✗'}, "
+                f"Summaries: "
                 f"subscriptions(zsxq/tw/yt/ss)="
                 f"{'✓' if zsxq_row and zsxq_row[0] else '✗'}/"
                 f"{'✓' if twitter_row and twitter_row[0] else '✗'}/"
@@ -1026,8 +1004,6 @@ class DailyMarketReportService:
                 thematic=thematic,
                 chart_data=chart_data,
                 index_performers=index_performers,
-                the_close_html=the_close_html,
-                closing_bell_html=closing_bell_html,
                 my_subscriptions_html=my_subscriptions_html,
                 temperature_cards=temperature_cards,
             )
@@ -1046,8 +1022,6 @@ class DailyMarketReportService:
                 "missing_tickers": sorted(set(ALL_TICKERS) - seen_tickers),
                 "chart_tickers_with_data": chart_tickers_found,
                 "generated_at_utc": generated_at_utc.isoformat(),
-                "has_the_close_summary": bool(the_close_html),
-                "has_closing_bell_summary": bool(closing_bell_html),
                 "has_my_subscriptions": bool(my_subscriptions_html),
                 "temperature_cards_found": len(temperature_cards) - len(temperature_missing),
                 "temperature_missing_codes": temperature_missing,
@@ -1120,8 +1094,6 @@ class DailyMarketReportService:
         thematic: List[Dict],
         chart_data: Dict[str, List[Dict[str, Any]]],
         index_performers: Dict[str, Any],
-        the_close_html: str = "",
-        closing_bell_html: str = "",
         my_subscriptions_html: str = "",
         temperature_cards: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
@@ -1181,8 +1153,6 @@ class DailyMarketReportService:
             chart_data_json=json.dumps(chart_data),
             display_names_json=json.dumps(DISPLAY_NAMES),
             index_performers=index_performers,
-            the_close_html=the_close_html,
-            closing_bell_html=closing_bell_html,
             my_subscriptions_html=my_subscriptions_html,
             temperature_groups=MARKET_TEMPERATURE_GROUPS,
             temperature_cards=temperature_cards or [],
@@ -1223,7 +1193,8 @@ class DailyMarketReportService:
     def get_eligible_users(self) -> List[str]:
         """返回需要生成 Daily Market Report 的全部用户 ID（字符串形式）。
 
-        Home/Stockview/Market Overview 是通用市场内容，所有用户都可查看；
+        Home/Stockview（已移除，独立为 The Close / Closing Bell 报告）之外的
+        Temperature/Market Overview 是通用市场内容，所有用户都可查看；
         My Subscription 按用户填充（无订阅则显示空状态）。因此 fan-out 覆盖
         users 表所有用户。
         """

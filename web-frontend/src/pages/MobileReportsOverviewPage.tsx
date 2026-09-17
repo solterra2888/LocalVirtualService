@@ -8,6 +8,7 @@ import {
   VideoCameraOutlined,
   ClockCircleOutlined,
   PlayCircleOutlined,
+  BellOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -20,6 +21,7 @@ import { marketWeeklyReportAPI } from '../services/marketWeeklyReport';
 import { themeReportAPI } from '../services/themeReport';
 import { dailyMarketReportAPI } from '../services/dailyMarketReport';
 import { closeBriefReportAPI } from '../services/closeBriefReport';
+import { closingBellReportAPI } from '../services/closingBellReport';
 
 const { Title, Text } = Typography;
 
@@ -172,6 +174,7 @@ interface ReportDatesState {
   theme: string | null;
   dailyMarket: string | null;
   closeBrief: string | null;
+  closingBell: string | null;
 }
 
 const MobileReportsOverviewPageInner: React.FC = () => {
@@ -189,6 +192,7 @@ const MobileReportsOverviewPageInner: React.FC = () => {
     theme: null,
     dailyMarket: null,
     closeBrief: null,
+    closingBell: null,
   });
 
   const [loading, setLoading] = useState({
@@ -198,6 +202,7 @@ const MobileReportsOverviewPageInner: React.FC = () => {
     theme: true,
     dailyMarket: true,
     closeBrief: true,
+    closingBell: true,
   });
 
   useEffect(() => {
@@ -261,6 +266,16 @@ const MobileReportsOverviewPageInner: React.FC = () => {
         }
       } catch { /* ignore */ }
       setLoading(prev => ({ ...prev, closeBrief: false }));
+
+      // Closing Bell Report
+      setLoading(prev => ({ ...prev, closingBell: true }));
+      try {
+        const cbellRes = await closingBellReportAPI.getLatest();
+        if (cbellRes && cbellRes.report_date) {
+          setReportDates(prev => ({ ...prev, closingBell: cbellRes.report_date }));
+        }
+      } catch { /* ignore */ }
+      setLoading(prev => ({ ...prev, closingBell: false }));
     };
 
     loadReportDates();
@@ -323,6 +338,15 @@ const MobileReportsOverviewPageInner: React.FC = () => {
       color: '#faad14',
       latestDate: reportDates.closeBrief,
       loading: loading.closeBrief,
+    },
+    {
+      title: 'Closing Bell Report',
+      description: 'CNBC Closing Bell daily PM brief',
+      icon: <BellOutlined />,
+      path: '/reports/closing-bell',
+      color: '#13c2c2',
+      latestDate: reportDates.closingBell,
+      loading: loading.closingBell,
     },
   ];
 

@@ -74,6 +74,30 @@ def generate_cnbc_closing_bell_task(
                 f"summary_id={result.get('summary_id')}, "
                 f"skipped={result.get('skipped', False)}"
             )
+
+            # 后置钩子：生成 Closing Bell Report（独立报告，自 DMR Stock Pulse 抽取）。
+            # 摘要已落库，此处渲染失败不影响摘要结果；skip 路径同样执行，
+            # 以覆盖「摘要已存在但报告缺失/落后」的场景（如首次上线、上次渲染失败）。
+            try:
+                from backend.services.closing_bell_report_service import (
+                    ClosingBellReportService,
+                )
+
+                brief = ClosingBellReportService().generate(report_date=as_of)
+                if brief.get("success"):
+                    logger.info(
+                        f"Closing Bell Report: date={as_of}, "
+                        f"skipped={brief.get('skipped', False)}, "
+                        f"reason={brief.get('reason') or 'rendered'}"
+                    )
+                else:
+                    logger.error(
+                        f"Closing Bell Report FAILED: date={as_of}, {brief.get('error')}"
+                    )
+            except Exception as hook_exc:
+                logger.error(
+                    f"Closing Bell Report hook error: {hook_exc}", exc_info=True
+                )
         else:
             logger.error(f"CNBC Closing Bell Summary FAILED: {result.get('message')}")
 

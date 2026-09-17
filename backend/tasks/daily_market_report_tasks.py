@@ -63,9 +63,11 @@ def generate_all_daily_market_reports_task(self, user_id: str = None, report_dat
     为所有（或指定）用户生成 Daily Market Report（fan-out）。
 
     定时调度场景下 report_date 为空时，取【北京自然日】作为报告日期，与上游对齐。
-    各上游（Bloomberg The Close / CNBC Closing Bell / Twitter / YouTube / 知识星球）
-    的 report_date 均为北京自然日（window_label_date + Asia/Shanghai），且都在
-    北京 08:00 前生成当天报告，故 Daily Market Report 查询当天即可凑齐四个标签。
+    各上游（Twitter / YouTube / 知识星球 / Substack）的 report_date 均为北京自然日
+    （window_label_date + Asia/Shanghai），且都在北京 08:00 前生成当天报告，
+    故 Daily Market Report 查询当天即可凑齐各标签。
+    （Bloomberg The Close 与 CNBC Closing Bell 已自 DMR 移除，分别独立为
+    The Close Report 与 Closing Bell Report。）
 
     Args:
         user_id:     可选，仅生成指定用户；为 None 则遍历 users 表所有用户。

@@ -16,6 +16,7 @@ from . import youtube_daily_reports
 from . import chat_group_messages
 from . import daily_market_report
 from . import close_brief_report
+from . import closing_bell_report
 
 __all__ = [
     'auth',
@@ -31,4 +32,5 @@ __all__ = [
     'chat_group_messages',
     'daily_market_report',
     'close_brief_report',
+    'closing_bell_report',
 ] 

@@ -190,7 +190,7 @@ body {
 .summary-content table {
     margin: 12px 0;
     font-size: 13px;
-    /* Markdown content tables (Close Brief / Stock Pulse / Feed Digest) wrap
+    /* Markdown content tables (Feed Digest) wrap
        cell text instead of inheriting the global `white-space: nowrap`
        Market-Movers rule. Without this, the wide YouTube / 知识星球 summary
        tables blow past the page width. */
@@ -773,7 +773,7 @@ a.mt-card-label::after {
     .summary-content { padding: 16px 18px; }
     /* Keep the 13-column Market Overview tables at full width and swipe horizontally */
     .table-scroll > table { min-width: 720px; }
-    /* Markdown tables (Home / Stockview / Subscription) also swipe when too wide */
+    /* Markdown tables (Subscription) also swipe when too wide */
     .summary-content table { display: block; max-width: 100%; overflow-x: auto; }
     /* Market Temperature: single-column cards on mobile */
     .mt-grid { grid-template-columns: 1fr; }
@@ -792,8 +792,6 @@ a.mt-card-label::after {
 
 <div class="tab-nav">
     <button class="tab-btn active" data-tab="temperature" onclick="switchTab('temperature')">Temperature</button>
-    <button class="tab-btn" data-tab="home" onclick="switchTab('home')">Close Brief</button>
-    <button class="tab-btn" data-tab="stockview" onclick="switchTab('stockview')">Stock Pulse</button>
     <button class="tab-btn" data-tab="my-subscription" onclick="switchTab('my-subscription')">Feed Digest</button>
     <button class="tab-btn" data-tab="market-overview" onclick="switchTab('market-overview')">Market Movers</button>
 </div>
@@ -885,36 +883,6 @@ a.mt-card-label::after {
     {% endif %}
 </div>
 {% endfor %}
-</div>
-
-{# ── Home Tab: Bloomberg The Close Summary ── #}
-<div class="tab-panel" id="panel-home">
-{% if the_close_html %}
-    <div class="summary-content">
-        {{ the_close_html | safe }}
-    </div>
-{% else %}
-    <div class="summary-empty">
-        <div class="empty-icon">📊</div>
-        <div class="empty-title">Bloomberg The Close 摘要暂未生成</div>
-        <div class="empty-desc">当日 PM Brief 尚未生成，可能是非交易日或数据管线尚未完成。</div>
-    </div>
-{% endif %}
-</div>
-
-{# ── Stockview Tab: CNBC Closing Bell Summary ── #}
-<div class="tab-panel" id="panel-stockview">
-{% if closing_bell_html %}
-    <div class="summary-content">
-        {{ closing_bell_html | safe }}
-    </div>
-{% else %}
-    <div class="summary-empty">
-        <div class="empty-icon">📰</div>
-        <div class="empty-title">CNBC Closing Bell 摘要暂未生成</div>
-        <div class="empty-desc">当日 Stock News 摘要尚未生成，可能是非交易日或数据管线尚未完成。</div>
-    </div>
-{% endif %}
 </div>
 
 {# ── My Subscription Tab: 知识星球 + Twitter + YouTube 每日摘要 ── #}

@@ -121,9 +121,15 @@ Market Overview 的数据在 `daily_report_{date}.html` 生成时已**内嵌**�
 | 转录字数 | 14,299 words |
 | YouTube | `https://www.youtube.com/watch?v=KC19qtFQrXU` |
 
-**独立报告（2026-09）：** 除嵌入 DMR Close Brief 标签页外，The Close PM Brief 另有独立报告
-「The Close Report」（`/reports/close-brief`），内容渲染自 `the_close_summaries`，
-由 `generate_the_close_summary_task` 后置钩子生成/更新（见 §10.1）。
+**独立报告（2026-09）：** The Close PM Brief 以独立报告「The Close Report」呈现
+（`/reports/close-brief`），内容渲染自 `the_close_summaries`，由
+`generate_the_close_summary_task` 后置钩子生成/更新（见 §10.1）。
+同月起 DMR 移除 Close Brief 标签页。
+
+**独立报告（2026-09，续）：** CNBC Closing Bell 同样以独立报告「Closing Bell Report」
+呈现（`/reports/closing-bell`），内容渲染自 `cnbc_closing_bell_summaries`，由
+`generate_cnbc_closing_bell_task` 后置钩子生成/更新，DMR 同步移除 Stock Pulse 标签页
+（DMR 现为 Temperature / Feed Digest / Market Movers 三个标签）。
 
 本项目 `backend/services/content_adapters/youtube_adapter.py` 将标题后缀 `The Close` 映射为 `Bloomberg The Close`，与 Transcripta 命名一致。详见 [FEEDS_MODULE.md](./FEEDS_MODULE.md) §7.5。
 
@@ -390,7 +396,8 @@ Layer 3: Daily Report 专用 LLM（PM Brief / Stock News / Macro Review）— �
 | 图表数据 | EODHD OHLCV 查询 |
 | YouTube 转录 + LLM | Feeds / `youtube_author_summary_service`（可复用模式） |
 | 经济事件 | `EconomicEventsService`（EODHD） |
-| The Close Report（独立报告） | `backend/services/close_brief_report_service.py` + `backend/templates/close_brief_report.html.j2` + `backend/api/close_brief_report.py`（`/close-brief-report/*`）；存储 `close_brief_reports` 表 + `reports/close_brief/YYYYMMDD.html`；生成挂在 `generate_the_close_summary_task` 后置钩子（无独立调度器），占位摘要不渲染，`report_date` 新鲜度判断幂等 |
+| The Close Report（独立报告） | `backend/services/close_brief_report_service.py` + `backend/templates/close_brief_report.html.j2` + `backend/api/close_brief_report.py`（`/close-brief-report/*`）；存储 `close_brief_reports` 表 + `reports/close_brief/YYYYMMDD.html`；生成挂在 `generate_the_close_summary_task` 后置钩子（无独立调度器），占位摘要不渲染，`report_date` 新鲜度判断幂等；2026-09 起 DMR 不再包含 Close Brief 标签页 |
+| Closing Bell Report（独立报告） | `backend/services/closing_bell_report_service.py` + `backend/templates/closing_bell_report.html.j2` + `backend/api/closing_bell_report.py`（`/closing-bell-report/*`）；存储 `closing_bell_reports` 表 + `reports/closing_bell/YYYYMMDD.html`；生成挂在 `generate_cnbc_closing_bell_task` 后置钩子（无独立调度器），机制同 The Close Report；2026-09 起 DMR 不再包含 Stock Pulse 标签页 |
 
 ### 10.2 与参考系统差距
 
