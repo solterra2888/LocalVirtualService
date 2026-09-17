@@ -32,7 +32,7 @@ logger = get_logger("close_brief_report_service")
 DEFAULT_REPORT_TIMEZONE = "Asia/Shanghai"
 
 # 占位摘要原因（与 the_close_summary_service.PLACEHOLDER_REASONS 对齐）
-PLACEHOLDER_REASONS = {"no_video_found", "no_transcript"}
+PLACEHOLDER_REASONS = {"no_video_found", "no_transcript", "episode_not_yet_published"}
 
 # 报告输出目录
 REPORTS_DIR = os.path.join(
@@ -341,6 +341,25 @@ class CloseBriefReportService:
                 ORDER BY report_date DESC
                 LIMIT 1
                 """
+            )
+            row = cursor.fetchone()
+            return self._row_to_dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_report_by_date(self, report_date: date) -> Optional[Dict[str, Any]]:
+        """按日期返回报告元数据（不含正文）。"""
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT id, report_date, file_path, metadata, status,
+                       error_message, created_at, share_token
+                FROM close_brief_reports
+                WHERE report_date = %s
+                """,
+                (report_date,),
             )
             row = cursor.fetchone()
             return self._row_to_dict(row) if row else None

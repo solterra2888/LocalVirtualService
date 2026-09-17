@@ -289,9 +289,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     the_close_summary: {
       icon: <StockOutlined style={{ color: '#722ed1' }} />,
       params: [],
-      defaultSchedule: '0 7 * * 2-6',
+      defaultSchedule: '40 8,22 * * 2-6',
       defaultName: 'Bloomberg The Close Summary',
-      description: 'Generate daily PM Brief summary from Bloomberg "The Close" transcript (weekdays 7 AM Beijing / 7 PM ET)'
+      description: 'Generate daily PM Brief from Bloomberg The Close (Tue-Sat 08:40 catch-up and 22:40 same-day, Beijing). Identifies episodes by title or opening bumper when YouTube drops the show suffix.'
     },
     cnbc_closing_bell: {
       icon: <StockOutlined style={{ color: '#1890ff' }} />,

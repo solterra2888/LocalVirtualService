@@ -164,7 +164,17 @@ class SubscriptionContentService:
                     user_ids = ARRAY(SELECT DISTINCT UNNEST(subscription_content.user_ids || EXCLUDED.user_ids)),
                     engagement_count = EXCLUDED.engagement_count,
                     view_count = EXCLUDED.view_count,
-                    metadata = EXCLUDED.metadata,
+                    -- 保留已回写的 show_name：RSS 刷新若解析不出节目名，不要把口播识别结果抹掉。
+                    metadata = CASE
+                        WHEN COALESCE(EXCLUDED.metadata->>'show_name', '') = ''
+                         AND COALESCE(subscription_content.metadata->>'show_name', '') <> ''
+                        THEN jsonb_set(
+                            COALESCE(EXCLUDED.metadata, '{}'::jsonb),
+                            '{show_name}',
+                            subscription_content.metadata->'show_name'
+                        )
+                        ELSE EXCLUDED.metadata
+                    END,
                     is_retweet = EXCLUDED.is_retweet,
                     retweeted_author = EXCLUDED.retweeted_author,
                     retweeted_content = EXCLUDED.retweeted_content,

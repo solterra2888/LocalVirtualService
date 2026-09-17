@@ -4,7 +4,7 @@ The Close Summary Celery Tasks
 """
 
 import asyncio
-from datetime import date as _date, datetime as _datetime
+from datetime import date as _date
 
 from backend.celery_app import app
 from backend.utils.logger import get_logger
@@ -52,12 +52,13 @@ def generate_the_close_summary_task(
     try:
         svc = TheCloseSummaryService()
 
+        from backend.utils.datetime_utils import parse_iso_utc, utcnow, window_label_date
+
+        we = parse_iso_utc(window_end) or utcnow()
         if report_date:
             as_of = _date.fromisoformat(report_date)
         else:
-            from backend.utils.datetime_utils import utcnow, window_label_date
-            as_of = window_label_date(utcnow(), 'Asia/Shanghai')
-        we = _datetime.fromisoformat(window_end) if window_end else None
+            as_of = window_label_date(we, "Asia/Shanghai")
 
         result = _run_async(
             svc.generate(
@@ -78,26 +79,35 @@ def generate_the_close_summary_task(
             # 后置钩子：生成 The Close Report（独立报告，自 DMR Close Brief 抽取）。
             # 摘要已落库，此处渲染失败不影响摘要结果；skip 路径同样执行，
             # 以覆盖「摘要已存在但报告缺失/落后」的场景（如首次上线、上次渲染失败）。
-            try:
-                from backend.services.close_brief_report_service import (
-                    CloseBriefReportService,
-                )
+            # 占位摘要不渲染报告；真实摘要（含幂等跳过）才走后置钩子。
+            from backend.services.the_close_summary_service import PLACEHOLDER_REASONS
 
-                brief = CloseBriefReportService().generate(report_date=as_of)
-                if brief.get("success"):
-                    logger.info(
-                        f"Close Brief Report: date={as_of}, "
-                        f"skipped={brief.get('skipped', False)}, "
-                        f"reason={brief.get('reason') or 'rendered'}"
-                    )
-                else:
-                    logger.error(
-                        f"Close Brief Report FAILED: date={as_of}, {brief.get('error')}"
-                    )
-            except Exception as hook_exc:
-                logger.error(
-                    f"Close Brief Report hook error: {hook_exc}", exc_info=True
+            if result.get("reason") in PLACEHOLDER_REASONS:
+                logger.info(
+                    f"Close Brief Report skipped: placeholder "
+                    f"{result.get('reason')} date={as_of}"
                 )
+            else:
+                try:
+                    from backend.services.close_brief_report_service import (
+                        CloseBriefReportService,
+                    )
+
+                    brief = CloseBriefReportService().generate(report_date=as_of)
+                    if brief.get("success"):
+                        logger.info(
+                            f"Close Brief Report: date={as_of}, "
+                            f"skipped={brief.get('skipped', False)}, "
+                            f"reason={brief.get('reason') or 'rendered'}"
+                        )
+                    else:
+                        logger.error(
+                            f"Close Brief Report FAILED: date={as_of}, {brief.get('error')}"
+                        )
+                except Exception as hook_exc:
+                    logger.error(
+                        f"Close Brief Report hook error: {hook_exc}", exc_info=True
+                    )
         else:
             logger.error(f"The Close Summary FAILED: {result.get('message')}")
 

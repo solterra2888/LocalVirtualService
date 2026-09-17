@@ -11,6 +11,21 @@ export interface CloseBriefReportRecord {
   share_token: string | null;
 }
 
+export interface CloseBriefTodaySummary {
+  report_date: string;
+  status: string;
+  video_title: string | null;
+  placeholder_reason: string | null;
+  updated_at: string | null;
+}
+
+export interface CloseBriefStatus {
+  as_of: string;
+  latest_report: CloseBriefReportRecord | null;
+  today_summary: CloseBriefTodaySummary | null;
+  today_report: CloseBriefReportRecord | null;
+}
+
 export interface GenerateResponse {
   success: boolean;
   message: string;
@@ -31,6 +46,14 @@ class CloseBriefReportAPI {
       }
       throw error;
     }
+  }
+
+  /**
+   * 当天摘要/报告状态（含最新已完成报告）
+   */
+  async getStatus(): Promise<CloseBriefStatus> {
+    const response = await apiClient.get(`/close-brief-report/status`);
+    return response.data;
   }
 
   /**

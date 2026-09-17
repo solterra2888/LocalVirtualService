@@ -12,13 +12,15 @@ The Close Summary 服务 — Bloomberg "The Close" 每日 PM Brief 摘要
 """
 
 import asyncio
+import re
 import time
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
-from backend.utils.datetime_utils import ensure_utc, resolve_report_content_window
+from backend.utils.datetime_utils import UTC, ensure_utc, resolve_report_content_window, utcnow
 from backend.utils.logger import get_logger
 from backend.services.summary_common import SINGLE_LLM_TIMEOUT_SEC, SINGLE_LLM_RETRY
 
@@ -32,13 +34,48 @@ THE_CLOSE_SHOW_NAME = "Bloomberg The Close"
 DEFAULT_TEMPLATE = "the_close_pm_brief"
 # 转录文本截断阈值（字符数，约 ~20,000 英文单词的 4 倍估算）
 MAX_TRANSCRIPT_CHARS = 80000
-# 标题匹配：Bloomberg TV 频道内 "| The Close" / "The Close M/D/..." 均为该节目；
-# 已限定 author_identifier，不会误匹配其他频道。
+# 标题匹配：Bloomberg TV 频道内 "| The Close" / 独立 "The Close M/D/..."。
+# 2026-09 起正片常不再带该后缀，需靠转录开场口播兜底（见 _has_the_close_bumper）。
 THE_CLOSE_TITLE_PATTERN = "%The Close%"
+# 只扫转录开场（含冷开场）。正片口播有时在广告之后约 8–10KB。
+BUMPER_SCAN_CHARS = 16000
+# 经验入库点（北京）。此前不把「尚未上传」写成终态空节目。
+TYPICAL_PUBLISH_HOUR_BJ = 22
+DEFAULT_REPORT_TIMEZONE = "Asia/Shanghai"
+
+# 开场口播：THIS IS "THE CLOSE." / Welcome to (a special edition of) The Close
+# 不用裸匹配 "the close"，以免 into/after the close、the closest 误伤。
+_BUMPER_RE = re.compile(
+    r"(?:this\s+is\s+[\"'“”]?the\s+close(?![a-z])"
+    r"|welcome\s+to\s+(?:a\s+special\s+edition\s+of\s+)?"
+    r"(?:bloomberg(?:['’]s)?\s+)?[\"'“”]?the\s+close(?![a-z]))",
+    re.IGNORECASE,
+)
+_TITLE_SHOW_RE = re.compile(
+    r"(?:\|\s*The Close\b|^\s*The Close\b)",
+    re.IGNORECASE,
+)
+# 标题已标明其他 Bloomberg 栏目时，即使转录里提到 The Close 也不选用
+_OTHER_SHOW_MARKERS = (
+    "bloomberg surveillance",
+    "bloomberg businessweek",
+    "bloomberg money",
+    "bloomberg deals",
+    "bloomberg this weekend",
+    "fed special",
+    "| etf iq",
+    "| the pulse",
+    "| the opening trade",
+    "| real yield",
+    "| balance of power",
+    "| daybreak europe",
+    "| the asia trade",
+    "| the china show",
+)
 
 
-# 占位摘要原因（无节目 / 无转录）——不作为幂等终态，允许后续重生成
-PLACEHOLDER_REASONS = {"no_video_found", "no_transcript"}
+# 占位摘要原因（无节目 / 无转录 / 尚未到点）——不作为幂等终态，允许后续重生成
+PLACEHOLDER_REASONS = {"no_video_found", "no_transcript", "episode_not_yet_published"}
 
 
 def _is_placeholder_summary(existing: Dict[str, Any]) -> bool:
@@ -49,16 +86,88 @@ def _is_placeholder_summary(existing: Dict[str, Any]) -> bool:
     return False
 
 
+def _title_looks_like_the_close(title: Optional[str]) -> bool:
+    """标题带节目后缀或独立节目名（不含 'Too Close' 这类词）。"""
+    if not title:
+        return False
+    return bool(_TITLE_SHOW_RE.search(title))
+
+
+def _title_is_other_show(title: Optional[str]) -> bool:
+    """标题已是其他 Bloomberg 栏目。"""
+    if not title or _title_looks_like_the_close(title):
+        return False
+    lowered = title.lower()
+    return any(marker in lowered for marker in _OTHER_SHOW_MARKERS)
+
+
+def _has_the_close_bumper(transcript: Optional[str]) -> bool:
+    """转录开场是否出现 The Close 口播。"""
+    if not transcript:
+        return False
+    head = transcript[:BUMPER_SCAN_CHARS]
+    return bool(_BUMPER_RE.search(head))
+
+
+def _bumper_index(transcript: Optional[str]) -> int:
+    """口播在开场扫描区内的位置；未命中返回 -1。"""
+    if not transcript:
+        return -1
+    match = _BUMPER_RE.search(transcript[:BUMPER_SCAN_CHARS])
+    return match.start() if match else -1
+
+
+def should_defer_no_video_placeholder(
+    report_date: date,
+    now: Optional[datetime] = None,
+    typical_hour_bj: int = TYPICAL_PUBLISH_HOUR_BJ,
+) -> bool:
+    """交易日、且仍早于经验入库点时，用 episode_not_yet_published 而不是 no_video_found。"""
+    current = now or utcnow()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    beijing = current.astimezone(ZoneInfo(DEFAULT_REPORT_TIMEZONE))
+    return beijing.date() == report_date and beijing.hour < typical_hour_bj
+
+
 def is_bloomberg_the_close_video(
     title: Optional[str],
     show_name: Optional[str] = None,
+    transcript: Optional[str] = None,
 ) -> bool:
     """判断是否为 Bloomberg Television The Close 节目视频。"""
     if show_name == THE_CLOSE_SHOW_NAME:
         return True
-    if not title:
+    if _title_looks_like_the_close(title):
+        return True
+    if _title_is_other_show(title):
         return False
-    return "The Close" in title
+    return _has_the_close_bumper(transcript)
+
+
+def _select_primary_the_close_video(
+    videos: List[Dict[str, Any]],
+) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    """从候选中选出正片：排除其他栏目，优先较晚发布、转录更长。"""
+    ranked: List[Tuple[datetime, int, int, Dict[str, Any]]] = []
+    for video in videos:
+        title = video.get("title")
+        metadata = video.get("metadata") or {}
+        if isinstance(metadata, str):
+            metadata = {}
+        show_name = metadata.get("show_name") if isinstance(metadata, dict) else None
+        transcript = (video.get("transcript_cleaned") or video.get("transcript") or "")
+        if not is_bloomberg_the_close_video(title, show_name=show_name, transcript=transcript):
+            continue
+        published_at = video.get("published_at") or datetime.min
+        bumper_pos = _bumper_index(transcript)
+        ranked.append((published_at, len(transcript), -bumper_pos, video))
+
+    if not ranked:
+        return None, []
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    selected = [item[3] for item in ranked]
+    return selected[0], selected
 
 
 class TheCloseSummaryService:
@@ -116,32 +225,46 @@ class TheCloseSummaryService:
                     "skipped": True,
                 }
 
-        # 创建/更新摘要记录
+        # 先筛选视频，避免空窗期把 generating 占住后立刻写成空占位。
+        candidates = self._fetch_the_close_videos(window_start, resolved_end)
+        video, videos = _select_primary_the_close_video(candidates)
+        logger.info(
+            f"找到 {len(videos)} 个 The Close 视频 "
+            f"(candidates={len(candidates)}, "
+            f"primary={video.get('content_id') if video else None})"
+        )
+
         summary_id = self._upsert_summary_status(report_date, "generating")
 
         try:
-            # 查询 The Close 视频
-            videos = self._fetch_the_close_videos(window_start, resolved_end)
-            logger.info(f"找到 {len(videos)} 个 The Close 视频")
-
-            if not videos:
+            if not video:
+                reason = (
+                    "episode_not_yet_published"
+                    if should_defer_no_video_placeholder(report_date)
+                    else "no_video_found"
+                )
+                message = (
+                    "The Close 尚未入库（通常北京时间 22:00 前后上传）"
+                    if reason == "episode_not_yet_published"
+                    else "当日无 The Close 节目"
+                )
                 self._update_summary(
                     summary_id,
                     status="completed",
-                    summary_content="当日无 The Close 节目（可能为非交易日或节目尚未上传）。",
-                    metadata={"reason": "no_video_found"},
+                    summary_content=message + "。",
+                    metadata={"reason": reason},
                 )
-                elapsed = round(time.time() - start_time, 2)
                 return {
                     "success": True,
                     "summary_id": summary_id,
-                    "message": "当日无 The Close 节目",
+                    "message": message,
                     "video_count": 0,
-                    "skipped": False,
+                    "skipped": True,
+                    "reason": reason,
                 }
 
-            # 取最新视频（同日可能有多段，取 published_at 最晚的）
-            video = videos[-1]
+            match_via = self._match_via(video)
+            self._persist_show_name(video)
             transcript, word_count, transcript_truncated = self._prepare_transcript(video)
 
             if not transcript:
@@ -174,6 +297,7 @@ class TheCloseSummaryService:
                 "transcript_truncated": transcript_truncated,
                 "video_id": video.get("content_id"),
                 "video_count": len(videos),
+                "match_via": match_via,
                 "template_code": DEFAULT_TEMPLATE,
                 "window_start": ensure_utc(window_start).isoformat(),
                 "window_end": ensure_utc(resolved_end).isoformat(),
@@ -226,8 +350,11 @@ class TheCloseSummaryService:
         """查询 subscription_content 中 Bloomberg The Close 的视频。
 
         匹配策略（限定 Bloomberg Television 频道）：
-        1. metadata.show_name = 'Bloomberg The Close'（入库时由 YouTubeAdapter 解析）
-        2. title ILIKE '%The Close%'（兼容 show_name 缺失的历史/未回填记录）
+        1. metadata.show_name = 'Bloomberg The Close'
+        2. 标题含 "| The Close" / 独立 "The Close …"
+        3. 转录开场口播 THIS IS "THE CLOSE" / Welcome to The Close
+           （2026-09 起 YouTube 标题不再带节目后缀）
+        SQL 只拉候选，最终以 is_bloomberg_the_close_video 过滤误伤。
         """
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
@@ -243,6 +370,10 @@ class TheCloseSummaryService:
                   AND (
                     metadata->>'show_name' = %s
                     OR title ILIKE %s
+                    OR LEFT(COALESCE(transcript_cleaned, transcript, ''), %s)
+                       ~* 'this is[[:space:]]+.{0,3}the close'
+                    OR LEFT(COALESCE(transcript_cleaned, transcript, ''), %s)
+                       ~* 'welcome to[[:space:]].{0,40}the close'
                   )
                 ORDER BY published_at ASC
                 """,
@@ -252,6 +383,8 @@ class TheCloseSummaryService:
                     window_end,
                     THE_CLOSE_SHOW_NAME,
                     THE_CLOSE_TITLE_PATTERN,
+                    BUMPER_SCAN_CHARS,
+                    BUMPER_SCAN_CHARS,
                 ),
             )
             columns = [
@@ -261,6 +394,56 @@ class TheCloseSummaryService:
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
         finally:
             cursor.close()
+
+    @staticmethod
+    def _match_via(video: Dict[str, Any]) -> str:
+        metadata = video.get("metadata") or {}
+        show_name = metadata.get("show_name") if isinstance(metadata, dict) else None
+        if show_name == THE_CLOSE_SHOW_NAME:
+            return "show_name"
+        if _title_looks_like_the_close(video.get("title")):
+            return "title"
+        return "transcript_bumper"
+
+    def _persist_show_name(self, video: Dict[str, Any]) -> None:
+        """口播命中后回写 show_name，避免下次 RSS 刷新丢掉识别结果。"""
+        content_id = video.get("content_id")
+        if not content_id:
+            return
+        metadata = video.get("metadata") or {}
+        if isinstance(metadata, dict) and metadata.get("show_name") == THE_CLOSE_SHOW_NAME:
+            return
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                UPDATE subscription_content
+                SET metadata = jsonb_set(
+                    COALESCE(metadata, '{}'::jsonb),
+                    '{show_name}',
+                    to_jsonb(%s::text)
+                )
+                WHERE channel_type = 'youtube'
+                  AND content_id = %s
+                  AND COALESCE(metadata->>'show_name', '') = ''
+                """,
+                (THE_CLOSE_SHOW_NAME, content_id),
+            )
+            conn.commit()
+            if cursor.rowcount:
+                logger.info(
+                    f"已回写 show_name={THE_CLOSE_SHOW_NAME} content_id={content_id}"
+                )
+                if isinstance(metadata, dict):
+                    metadata["show_name"] = THE_CLOSE_SHOW_NAME
+                    video["metadata"] = metadata
+        except Exception as exc:
+            conn.rollback()
+            logger.warning(f"回写 show_name 失败: {exc}")
+        finally:
+            cursor.close()
+            conn.close()
 
     # ── Transcript preparation ─────────────────────────────────────────────
 

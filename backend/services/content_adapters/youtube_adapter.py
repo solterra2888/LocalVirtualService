@@ -300,7 +300,6 @@ class YouTubeAdapter(BaseContentAdapter):
         metadata = {
             'video_id': video_id,
             'channel_id': channel_id,
-            'show_name': _extract_show_name(title, channel_id),
             'duration': content_details.get('duration', ''),
             'view_count': view_count,
             'like_count': like_count,
@@ -311,6 +310,9 @@ class YouTubeAdapter(BaseContentAdapter):
             'tags': snippet.get('tags', []),
             'live_broadcast_content': snippet.get('liveBroadcastContent', 'none'),
         }
+        show_name = _extract_show_name(title, channel_id)
+        if show_name:
+            metadata['show_name'] = show_name
         
         # 返回标准化数据
         normalized = {

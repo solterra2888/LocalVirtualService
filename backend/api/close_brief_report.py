@@ -13,6 +13,11 @@ from pydantic import BaseModel, Field
 from backend.auth.jwt_utils import get_current_user
 from backend.schemas.user import TokenData
 from backend.services.close_brief_report_service import CloseBriefReportService
+from backend.services.the_close_summary_service import (
+    PLACEHOLDER_REASONS,
+    TheCloseSummaryService,
+)
+from backend.utils.datetime_utils import utcnow, window_label_date
 from backend.utils.logger import get_logger
 
 logger = get_logger("close_brief_report_api")
@@ -23,6 +28,13 @@ router = APIRouter(prefix="/close-brief-report", tags=["Close Brief Report"])
 class GenerateReportRequest(BaseModel):
     report_date: str | None = Field(
         None, description="ISO date string (e.g. 2026-06-11). Defaults to today."
+    )
+    window_end: str | None = Field(
+        None,
+        description="ISO datetime (UTC) for the rolling content window. Defaults to now.",
+    )
+    window_hours: int = Field(
+        24, description="Look-back hours for content window.", ge=1, le=72
     )
     force: bool = Field(
         False,
@@ -38,6 +50,31 @@ async def get_latest_report(current_user: TokenData = Depends(get_current_user))
     if not report:
         raise HTTPException(status_code=404, detail="No completed report found")
     return report
+
+
+@router.get("/status")
+async def get_report_status(current_user: TokenData = Depends(get_current_user)):
+    """当天摘要/报告状态 + 最新已完成报告（供前端区分旧报告与本次生成结果）。"""
+    today = window_label_date(utcnow(), "Asia/Shanghai")
+    brief_svc = CloseBriefReportService()
+    summary = TheCloseSummaryService().get_summary_by_date(today)
+    today_summary = None
+    if summary:
+        meta = summary.get("metadata") or {}
+        reason = meta.get("reason") if isinstance(meta, dict) else None
+        today_summary = {
+            "report_date": summary["report_date"],
+            "status": summary["status"],
+            "video_title": summary.get("video_title"),
+            "placeholder_reason": reason if reason in PLACEHOLDER_REASONS else None,
+            "updated_at": summary.get("updated_at"),
+        }
+    return {
+        "as_of": str(today),
+        "latest_report": brief_svc.get_latest_report(),
+        "today_summary": today_summary,
+        "today_report": brief_svc.get_report_by_date(today),
+    }
 
 
 @router.get("/list")
@@ -75,6 +112,8 @@ async def generate_report(
 
     task = generate_the_close_summary_task.delay(
         report_date=request.report_date,
+        window_end=request.window_end or utcnow().isoformat(),
+        window_hours=request.window_hours,
         force=request.force,
     )
     return {
