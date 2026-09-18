@@ -160,7 +160,7 @@ def test_format_video_title_empty():
     )
 
 
-# ── 中国晚盘 cron 槽位 ──────────────────────────────────────────────────
+# ── 每日一次 cron 槽位（北京 00:30 周二至周六） ────────────────────────
 
 BJ = ZoneInfo("Asia/Shanghai")
 
@@ -169,24 +169,17 @@ def _bj(y, m, d, h):
     return datetime(y, m, d, h, 0, tzinfo=BJ)
 
 
-def test_plan_evening_weekday_uses_today_and_short_window():
-    plan = plan_surveillance_cron_run(_bj(2026, 9, 17, 22))  # Thursday
+def test_plan_evening_uses_yesterday_and_24h():
+    plan = plan_surveillance_cron_run(_bj(2026, 9, 18, 0))  # Friday 00:30
     assert plan["slot"] == "evening"
-    assert plan["report_date"] == date(2026, 9, 17)
-    assert plan["window_hours"] == 10
-
-
-def test_plan_morning_catchup_uses_yesterday_and_24h():
-    plan = plan_surveillance_cron_run(_bj(2026, 9, 18, 9))  # Friday 09:00
-    assert plan["slot"] == "morning_catchup"
     assert plan["report_date"] == date(2026, 9, 17)
     assert plan["window_hours"] == 24
 
 
-def test_plan_skips_monday_morning_and_saturday_evening():
-    assert plan_surveillance_cron_run(_bj(2026, 9, 14, 9)) is None  # Monday 09:00
-    assert plan_surveillance_cron_run(_bj(2026, 9, 19, 22)) is None  # Saturday 22:00
-    assert plan_surveillance_cron_run(_bj(2026, 9, 17, 15)) is None  # Thursday afternoon
+def test_plan_skips_non_evening_slots():
+    assert plan_surveillance_cron_run(_bj(2026, 9, 14, 0)) is None  # Monday 00:30
+    assert plan_surveillance_cron_run(_bj(2026, 9, 17, 22)) is None  # Thursday 22:00
+    assert plan_surveillance_cron_run(_bj(2026, 9, 18, 9)) is None  # Friday 09:00
 
 
 def test_skip_completed_reruns_when_new_segment_appears():

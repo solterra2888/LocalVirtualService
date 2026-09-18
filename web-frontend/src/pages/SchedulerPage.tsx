@@ -429,17 +429,17 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
     },
     {
       id: 'the_close_summary',
-      name: 'Bloomberg The Close Summary',
+      name: 'Bloomberg The Close Report',
       type: 'the_close_summary',
       category: 'report_generation',
       sortOrder: 60,
-      description: 'Generate daily PM Brief summary from Bloomberg Television "The Close" episode transcript (8-section structured markdown).',
+      description: 'Generate daily The Close Report (PM Brief) from Bloomberg Television "The Close" episode transcript.',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
           id: 'configure_the_close_summary_schedule',
-          name: 'Configure The Close Summary Schedule',
+          name: 'Configure The Close Report Schedule',
           description: 'Set up periodic The Close PM Brief generation (default: weekdays 7 AM Beijing / 7 PM ET)',
           endpoint: '/scheduler/tasks/the-close-summary',
           params: {},
@@ -449,17 +449,17 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
     },
     {
       id: 'cnbc_closing_bell',
-      name: 'CNBC Closing Bell Summary',
+      name: 'CNBC Closing Bell Report',
       type: 'cnbc_closing_bell',
       category: 'report_generation',
       sortOrder: 70,
-      description: 'Generate daily Stock News summary from CNBC "Closing Bell" episode transcript (6-section structured markdown).',
+      description: 'Generate daily Closing Bell Report (Stock News) from CNBC "Closing Bell" episode transcript.',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
           id: 'configure_cnbc_closing_bell_schedule',
-          name: 'Configure CNBC Closing Bell Schedule',
+          name: 'Configure Closing Bell Report Schedule',
           description: 'Set up periodic Closing Bell Stock News generation (default: weekdays 7 AM Beijing / 7 PM ET)',
           endpoint: '/scheduler/tasks/cnbc-closing-bell',
           params: {},
@@ -469,18 +469,18 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
     },
     {
       id: 'bloomberg_surveillance',
-      name: 'Bloomberg Surveillance Summary',
+      name: 'Bloomberg Surveillance Report',
       type: 'bloomberg_surveillance',
       category: 'report_generation',
       sortOrder: 75,
-      description: 'Generate daily AM Brief summary from Bloomberg "Surveillance" morning episode transcript (8-section structured markdown, multi-segment merge).',
+      description: 'Generate daily Surveillance Report (AM Brief) from Bloomberg "Surveillance" morning episode transcript.',
       enabled: true,
       status: 'idle',
       quickActions: [
         {
           id: 'configure_bloomberg_surveillance_schedule',
-          name: 'Configure Bloomberg Surveillance Schedule',
-          description: 'Set up Surveillance AM Brief: Mon-Fri 21/22/23 Beijing (same evening as US cash) plus Tue-Sat 9 AM catch-up',
+          name: 'Configure Surveillance Report Schedule',
+          description: 'Once daily Tue-Sat 00:30 Beijing after YouTube VOD (previous US session, live 6-9 AM ET)',
           endpoint: '/scheduler/tasks/bloomberg-surveillance',
           params: {},
           icon: <ScheduleOutlined />

@@ -290,22 +290,22 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       icon: <StockOutlined style={{ color: '#722ed1' }} />,
       params: [],
       defaultSchedule: '40 8,22 * * 2-6',
-      defaultName: 'Bloomberg The Close Summary',
+      defaultName: 'Bloomberg The Close Report',
       description: 'Generate daily PM Brief from Bloomberg The Close (Tue-Sat 08:40 catch-up and 22:40 same-day, Beijing). Identifies episodes by title or opening bumper when YouTube drops the show suffix.'
     },
     cnbc_closing_bell: {
       icon: <StockOutlined style={{ color: '#1890ff' }} />,
       params: [],
       defaultSchedule: '0 7 * * 2-6',
-      defaultName: 'CNBC Closing Bell Summary',
+      defaultName: 'CNBC Closing Bell Report',
       description: 'Generate daily Stock News summary from CNBC "Closing Bell" transcript (weekdays 7 AM Beijing / 7 PM ET)'
     },
     bloomberg_surveillance: {
       icon: <StockOutlined style={{ color: '#2f54eb' }} />,
       params: [],
-      defaultSchedule: '0 9,21,22,23 * * 1-6',
-      defaultName: 'Bloomberg Surveillance Summary',
-      description: 'AM Brief for China evening US session: try 21/22/23 Beijing Mon-Fri when VOD lands, plus 9 AM Tue-Sat catch-up (live 6-9 AM ET)'
+      defaultSchedule: '30 0 * * 2-6',
+      defaultName: 'Bloomberg Surveillance Report',
+      description: 'AM Brief from Bloomberg Surveillance (live 6-9 AM ET); once daily Tue-Sat 00:30 Beijing after YouTube VOD (previous US session)'
     },
     fed_dashboard: {
       icon: <BankOutlined style={{ color: '#1d4ed8' }} />,

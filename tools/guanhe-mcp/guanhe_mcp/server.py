@@ -64,6 +64,27 @@ _TAGS_HINT = (
     "Use list_subscriptions or a prior search result to discover valid tag values."
 )
 
+_CANONICAL_REPORT_KINDS = [
+    "twitter_daily",
+    "youtube_daily",
+    "market_daily",
+    "market_weekly",
+    "theme",
+    "the_close",
+    "closing_bell",
+    "bloomberg_surveillance",
+]
+
+_KIND_HINT = (
+    "Report type (canonical): twitter_daily / youtube_daily / market_daily / "
+    "market_weekly / theme / the_close / closing_bell / bloomberg_surveillance. "
+    "market_daily = daily market report; market_weekly = weekly market report; "
+    "theme = theme performance report; the_close = Bloomberg The Close PM brief; "
+    "closing_bell = CNBC Closing Bell PM brief; bloomberg_surveillance = "
+    "Bloomberg Surveillance AM brief. "
+    "(Legacy aliases twitter/youtube/market still accepted by the API.)"
+)
+
 _AUTHOR_HINT = (
     "Substring match on author name or handle. "
     "Examples: author=Bloomberg, author=@elonmusk. "
@@ -286,23 +307,20 @@ TOOLS: List[Dict[str, Any]] = [
         "description": (
             "Get the latest completed report for the given kind: twitter_daily / "
             "youtube_daily (feed digest), market_daily (daily market report), "
-            "market_weekly (weekly market report), or theme (theme performance report). "
+            "market_weekly (weekly market report), theme (theme performance report), "
+            "the_close (Bloomberg The Close PM brief), closing_bell (CNBC Closing Bell "
+            "PM brief), or bloomberg_surveillance (Bloomberg Surveillance AM brief). "
             "Use for: 'show me today's Twitter/YouTube/market daily', 'this week's "
-            "market weekly', 'latest theme report'."
+            "market weekly', 'latest theme report', 'The Close / Closing Bell / "
+            "Surveillance report'."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "kind": {
                     "type": "string",
-                    "enum": ["twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"],
-                    "description": (
-                        "Report type (canonical): twitter_daily / youtube_daily / "
-                        "market_daily / market_weekly / theme. market_daily = daily market "
-                        "report; market_weekly = weekly market report; theme = theme "
-                        "performance report. (Legacy aliases twitter/youtube/market still "
-                        "accepted by the API.)"
-                    ),
+                    "enum": _CANONICAL_REPORT_KINDS,
+                    "description": _KIND_HINT,
                 }
             },
             "required": ["kind"],
@@ -317,14 +335,8 @@ TOOLS: List[Dict[str, Any]] = [
             "properties": {
                 "kind": {
                     "type": "string",
-                    "enum": ["twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"],
-                    "description": (
-                        "Report type (canonical): twitter_daily / youtube_daily / "
-                        "market_daily / market_weekly / theme. market_daily = daily market "
-                        "report; market_weekly = weekly market report; theme = theme "
-                        "performance report. (Legacy aliases twitter/youtube/market still "
-                        "accepted by the API.)"
-                    ),
+                    "enum": _CANONICAL_REPORT_KINDS,
+                    "description": _KIND_HINT,
                 },
                 "date": {
                     "type": "string",
@@ -343,14 +355,8 @@ TOOLS: List[Dict[str, Any]] = [
             "properties": {
                 "kind": {
                     "type": "string",
-                    "enum": ["twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"],
-                    "description": (
-                        "Report type (canonical): twitter_daily / youtube_daily / "
-                        "market_daily / market_weekly / theme. market_daily = daily market "
-                        "report; market_weekly = weekly market report; theme = theme "
-                        "performance report. (Legacy aliases twitter/youtube/market still "
-                        "accepted by the API.)"
-                    ),
+                    "enum": _CANONICAL_REPORT_KINDS,
+                    "description": _KIND_HINT,
                 },
                 "limit": {"type": "integer", "default": 30, "minimum": 1, "maximum": 100},
                 "offset": {"type": "integer", "default": 0, "minimum": 0},

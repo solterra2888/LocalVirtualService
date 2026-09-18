@@ -236,14 +236,22 @@ def agent_list_sources(
 
 
 # ---------------------------------------------------------------------------
-# Reports (consolidated — kind=twitter|youtube)
+# Reports (consolidated — kind= twitter_daily | youtube_daily | market_daily |
+# market_weekly | theme | the_close | closing_bell | bloomberg_surveillance)
 # ---------------------------------------------------------------------------
+
+_REPORT_KIND_QUERY = (
+    "Report type (canonical): 'twitter_daily', 'youtube_daily', 'market_daily', "
+    "'market_weekly', 'theme', 'the_close', 'closing_bell', 'bloomberg_surveillance'. "
+    "Legacy aliases twitter/youtube/market still accepted."
+)
+
 
 @router.get("/reports", response_model=AgentTwitterReportListResponse)
 def agent_report_list(
     request: Request,
     response: Response,
-    kind: str = Query(..., description="Report type (canonical): 'twitter_daily', 'youtube_daily', 'market_daily', 'market_weekly', 'theme'. Legacy aliases twitter/youtube/market still accepted."),
+    kind: str = Query(..., description=_REPORT_KIND_QUERY),
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: TokenData = Depends(require_pat_scopes("reports:read")),
@@ -259,7 +267,7 @@ def agent_report_list(
 def agent_report_latest(
     request: Request,
     response: Response,
-    kind: str = Query(..., description="Report type (canonical): 'twitter_daily', 'youtube_daily', 'market_daily', 'market_weekly', 'theme'. Legacy aliases twitter/youtube/market still accepted."),
+    kind: str = Query(..., description=_REPORT_KIND_QUERY),
     user: TokenData = Depends(require_pat_scopes("reports:read")),
 ):
     data = _svc().report_latest(user, kind=kind, request_base=str(request.base_url))
@@ -272,7 +280,7 @@ def agent_report_by_date(
     request: Request,
     response: Response,
     report_date: str,
-    kind: str = Query(..., description="Report type (canonical): 'twitter_daily', 'youtube_daily', 'market_daily', 'market_weekly', 'theme'. Legacy aliases twitter/youtube/market still accepted."),
+    kind: str = Query(..., description=_REPORT_KIND_QUERY),
     user: TokenData = Depends(require_pat_scopes("reports:read")),
 ):
     data = _svc().report_by_date(

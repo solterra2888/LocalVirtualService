@@ -405,7 +405,7 @@ class TestBatchEndpoint:
 
 
 # ---------------------------------------------------------------------------
-# Tests: GET /api/v1/agent/reports* — 5 canonical kinds (v0.5.0)
+# Tests: GET /api/v1/agent/reports* — canonical kinds + global singleton reports
 # ---------------------------------------------------------------------------
 
 class TestReportEndpoints:
@@ -508,6 +508,112 @@ class TestReportEndpoints:
         assert data["kind"] == "theme"
         assert data["share_url"].endswith("/shared/def456")
 
+    @pytest.mark.parametrize(
+        "kind,share_suffix",
+        [
+            ("the_close", "/api/close-brief-report/shared/tok123"),
+            ("closing_bell", "/api/closing-bell-report/shared/tok123"),
+            ("bloomberg_surveillance", "/api/surveillance-report/shared/tok123"),
+        ],
+    )
+    def test_global_report_latest_returns_share_url(self, kind, share_suffix):
+        """Global singleton reports (The Close / Closing Bell / Surveillance)
+        are fetched without a user_id and expose the public share_url.
+        """
+        from unittest.mock import patch, MagicMock
+        from backend.services import agent_service
+
+        fake_report = {
+            "report_date": "2026-09-16",
+            "status": "completed",
+            "share_token": "tok123",
+            "metadata": {},
+        }
+        client = _build_test_client()
+        with patch.object(agent_service, "_resolve_report_service") as mock_resolve:
+            mock_svc = MagicMock()
+            mock_svc.get_latest_report.return_value = fake_report
+            mock_resolve.return_value = mock_svc
+            resp = client.get(
+                "/api/v1/agent/reports/latest",
+                params={"kind": kind},
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        mock_svc.get_latest_report.assert_called_once_with()
+        data = resp.json()
+        assert data["kind"] == kind
+        assert data["content_markdown"] is None
+        assert data["share_url"].endswith(share_suffix)
+
+    @pytest.mark.parametrize(
+        "kind,share_suffix",
+        [
+            ("the_close", "/api/close-brief-report/shared/tok123"),
+            ("closing_bell", "/api/closing-bell-report/shared/tok123"),
+            ("bloomberg_surveillance", "/api/surveillance-report/shared/tok123"),
+        ],
+    )
+    def test_global_report_by_date_returns_share_url(self, kind, share_suffix):
+        from datetime import date
+        from unittest.mock import patch, MagicMock
+        from backend.services import agent_service
+
+        fake_report = {
+            "report_date": "2026-09-16",
+            "status": "completed",
+            "share_token": "tok123",
+            "metadata": {},
+        }
+        client = _build_test_client()
+        with patch.object(agent_service, "_resolve_report_service") as mock_resolve:
+            mock_svc = MagicMock()
+            mock_svc.get_report_by_date.return_value = fake_report
+            mock_resolve.return_value = mock_svc
+            resp = client.get(
+                "/api/v1/agent/reports/2026-09-16",
+                params={"kind": kind},
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        mock_svc.get_report_by_date.assert_called_once_with(date(2026, 9, 16))
+        data = resp.json()
+        assert data["kind"] == kind
+        assert data["share_url"].endswith(share_suffix)
+
+    @pytest.mark.parametrize(
+        "kind,share_suffix",
+        [
+            ("the_close", "/api/close-brief-report/shared/tok123"),
+            ("closing_bell", "/api/closing-bell-report/shared/tok123"),
+            ("bloomberg_surveillance", "/api/surveillance-report/shared/tok123"),
+        ],
+    )
+    def test_global_report_list_returns_share_url(self, kind, share_suffix):
+        from unittest.mock import patch, MagicMock
+        from backend.services import agent_service
+
+        fake_row = {
+            "report_date": "2026-09-16",
+            "status": "completed",
+            "share_token": "tok123",
+        }
+        client = _build_test_client()
+        with patch.object(agent_service, "_resolve_report_service") as mock_resolve:
+            mock_svc = MagicMock()
+            mock_svc.get_user_reports.return_value = ([fake_row], 1)
+            mock_resolve.return_value = mock_svc
+            resp = client.get(
+                "/api/v1/agent/reports",
+                params={"kind": kind},
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        mock_svc.get_user_reports.assert_called_once_with(limit=30, offset=0)
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["reports"][0]["share_url"].endswith(share_suffix)
+
     def test_market_alias_normalizes_to_canonical(self):
         """kind=market (legacy alias) normalizes to market_daily in the service layer.
 
@@ -560,12 +666,104 @@ class TestNormalizeKind:
         assert self._call("market") == "market_daily"
 
     def test_canonical_unchanged(self):
-        for k in ("twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"):
+        for k in (
+            "twitter_daily", "youtube_daily", "market_daily", "market_weekly",
+            "theme", "the_close", "closing_bell", "bloomberg_surveillance",
+        ):
             assert self._call(k) == k
 
     def test_unknown_passes_through(self):
         # Unknown kinds pass through unchanged; _resolve_report_service raises 400.
         assert self._call("nonsense") == "nonsense"
+
+
+class TestGlobalReportServiceDispatch:
+    """Service-layer dispatch for global singleton reports (no TestClient)."""
+
+    def _svc(self):
+        from backend.services.agent_service import AgentService
+        return AgentService(db=MagicMock())
+
+    def test_latest_does_not_pass_user_id(self):
+        from unittest.mock import patch
+        from backend.services import agent_service
+
+        fake = {
+            "report_date": "2026-09-16",
+            "status": "completed",
+            "share_token": "tok123",
+            "metadata": {},
+        }
+        mock_inner = MagicMock()
+        mock_inner.get_latest_report.return_value = fake
+        with patch.object(agent_service, "_resolve_report_service", return_value=mock_inner):
+            body = self._svc().report_latest(
+                FAKE_TOKEN_DATA, kind="the_close", request_base="https://example.com/",
+            )
+        mock_inner.get_latest_report.assert_called_once_with()
+        assert body.kind == "the_close"
+        assert body.content_markdown is None
+        assert body.share_url.endswith("/api/close-brief-report/shared/tok123")
+
+    def test_by_date_does_not_pass_user_id(self):
+        from datetime import date
+        from unittest.mock import patch
+        from backend.services import agent_service
+
+        fake = {
+            "report_date": "2026-09-16",
+            "status": "completed",
+            "share_token": "tok123",
+            "metadata": {},
+        }
+        mock_inner = MagicMock()
+        mock_inner.get_report_by_date.return_value = fake
+        with patch.object(agent_service, "_resolve_report_service", return_value=mock_inner):
+            body = self._svc().report_by_date(
+                FAKE_TOKEN_DATA,
+                kind="closing_bell",
+                report_date="2026-09-16",
+                request_base="https://example.com/",
+            )
+        mock_inner.get_report_by_date.assert_called_once_with(date(2026, 9, 16))
+        assert body.kind == "closing_bell"
+        assert body.share_url.endswith("/api/closing-bell-report/shared/tok123")
+
+    def test_list_uses_limit_offset_kwargs(self):
+        from unittest.mock import patch
+        from backend.services import agent_service
+
+        fake_row = {
+            "report_date": "2026-09-16",
+            "status": "completed",
+            "share_token": "tok123",
+        }
+        mock_inner = MagicMock()
+        mock_inner.get_user_reports.return_value = ([fake_row], 4)
+        with patch.object(agent_service, "_resolve_report_service", return_value=mock_inner):
+            listing = self._svc().report_list(
+                FAKE_TOKEN_DATA,
+                kind="bloomberg_surveillance",
+                limit=10,
+                offset=2,
+                request_base="https://example.com/",
+            )
+        mock_inner.get_user_reports.assert_called_once_with(limit=10, offset=2)
+        assert listing.total == 4
+        assert listing.reports[0].share_url.endswith(
+            "/api/surveillance-report/shared/tok123"
+        )
+
+    def test_unknown_kind_raises_400(self):
+        from fastapi import HTTPException
+        from backend.services.agent_service import _resolve_report_service
+
+        with pytest.raises(HTTPException) as exc:
+            _resolve_report_service("not_a_report")
+        assert exc.value.status_code == 400
+        assert "the_close" in exc.value.detail
+        assert "closing_bell" in exc.value.detail
+        assert "bloomberg_surveillance" in exc.value.detail
 
 
 class TestStripReferences:

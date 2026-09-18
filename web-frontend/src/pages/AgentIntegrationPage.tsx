@@ -411,7 +411,10 @@ const AgentIntegrationPage: React.FC = () => {
     { intent: '本周的市场周报', endpoint: 'report_latest', params: 'kind=market_weekly' },
     { intent: '6 月 13 号（周五）那周的周报', endpoint: 'report_by_date', params: 'kind=market_weekly, date=2026-06-13（week_end 周五）' },
     { intent: '最新的主题表现报告', endpoint: 'report_latest', params: 'kind=theme' },
-    { intent: '有哪些报告可以看？', endpoint: 'report_list', params: 'kind=…（5 种，见下方对照表）' },
+    { intent: '最新的 The Close Report', endpoint: 'report_latest', params: 'kind=the_close' },
+    { intent: '最新的 Closing Bell Report', endpoint: 'report_latest', params: 'kind=closing_bell' },
+    { intent: '最新的 Bloomberg Surveillance Report', endpoint: 'report_latest', params: 'kind=bloomberg_surveillance' },
+    { intent: '有哪些报告可以看？', endpoint: 'report_list', params: 'kind=…（8 种，见下方对照表）' },
     { intent: '这本书 / 这份研报关于 XX 的观点是什么', endpoint: 'hybrid_search', params: 'query=XX（语义 + 关键词融合）' },
     { intent: '帮我语义搜索一下关于价值投资方法论的内容', endpoint: 'semantic_search', params: 'query=价值投资方法论, top_k=5' },
     { intent: '给我读一下第 3 章 / 第 12 段原文', endpoint: 'chunks_by_locator', params: 'file_id=…, chapter="第3章" 或 chunk_idx_range=[12,14]' },
@@ -661,7 +664,7 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'daily_multi_search', endpoint: '多组条件并行搜索 + 跨组服务端去重，最多 5 组' },
                 { intent: 'list_subscriptions', endpoint: '查看当前账号已启用的订阅频道清单（供 LLM 了解"有什么数据"）' },
                 { intent: 'list_sources', endpoint: '查看全局数据来源类型及 30 天内容计数' },
-                { intent: 'report_latest', endpoint: '最新报告；kind ∈ twitter_daily / youtube_daily / market_daily / market_weekly / theme（旧值 twitter/youtube/market 仍可用）' },
+                { intent: 'report_latest', endpoint: '最新报告；kind ∈ twitter_daily / youtube_daily / market_daily / market_weekly / theme / the_close / closing_bell / bloomberg_surveillance（旧值 twitter/youtube/market 仍可用）' },
                 { intent: 'report_by_date', endpoint: '指定日期报告（date=YYYY-MM-DD）；market_weekly 的 date 取 week_end（周五）。kind 同上' },
                 { intent: 'report_list', endpoint: '报告列表（可分页）。kind 同上' },
               ]}
@@ -681,6 +684,9 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'market_daily', endpoint: '每日市场报告', params: 'report_date' },
                 { intent: 'market_weekly', endpoint: '市场周报', params: 'week_end（周五）' },
                 { intent: 'theme', endpoint: '主题表现报告', params: 'report_date' },
+                { intent: 'the_close', endpoint: 'The Close Report（Bloomberg PM Brief）', params: 'report_date' },
+                { intent: 'closing_bell', endpoint: 'Closing Bell Report（CNBC PM Brief）', params: 'report_date' },
+                { intent: 'bloomberg_surveillance', endpoint: 'Bloomberg Surveillance Report（AM Brief）', params: 'report_date' },
               ]}
             />
             <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, borderLeft: `3px solid ${TEAL}`, background: dark ? DARK_SURFACE : '#f0fdfa', fontSize: 13, color: dark ? '#94a3b8' : '#475569', lineHeight: 1.65 }}>
@@ -719,7 +725,7 @@ const AgentIntegrationPage: React.FC = () => {
               { intent: '按时间浏览 / 筛选今日动态', endpoint: 'daily_feed（v1）' },
               { intent: '关键词精确搜索 Feed 内容', endpoint: 'daily_feed q=…（v1）' },
               { intent: '读取单条详情 / 字幕 / 原文', endpoint: 'daily_item / daily_items_batch（v1）' },
-              { intent: '看 Twitter / YouTube / 市场 / 主题报告', endpoint: 'report_latest / report_by_date（v1）' },
+              { intent: '看 Twitter / YouTube / 市场 / 主题 / The Close / Closing Bell / Surveillance 报告', endpoint: 'report_latest / report_by_date（v1）' },
               { intent: '对上传的长文档 / 电子书做语义提问', endpoint: 'hybrid_search（v2）首选' },
               { intent: '只想用纯语义相似度检索', endpoint: 'semantic_search（v2）' },
               { intent: '定位某章节 / 精确读取原始分块', endpoint: 'chunks_by_locator（v2）' },
@@ -984,7 +990,7 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'POST /api/v1/agent/daily/multi', endpoint: '多组并行搜索 + 服务端去重，body: { groups: [...], dedup_by, limit_per_group }' },
                 { intent: 'GET /api/v1/agent/subscriptions', endpoint: '已启用订阅频道清单，含每频道 30 天条目数' },
                 { intent: 'GET /api/v1/agent/sources', endpoint: 'source 类型清单，含 preset 信息与 30 天条目数' },
-                { intent: 'GET /api/v1/agent/reports/latest?kind=…', endpoint: '最新报告；kind ∈ twitter_daily|youtube_daily|market_daily|market_weekly|theme（旧值 twitter/youtube/market 作别名）' },
+                { intent: 'GET /api/v1/agent/reports/latest?kind=…', endpoint: '最新报告；kind ∈ twitter_daily|youtube_daily|market_daily|market_weekly|theme|the_close|closing_bell|bloomberg_surveillance（旧值 twitter/youtube/market 作别名）' },
                 { intent: 'GET /api/v1/agent/reports/{YYYY-MM-DD}?kind=…', endpoint: '指定日期报告；market_weekly 用 week_end（周五）' },
                 { intent: 'GET /api/v1/agent/reports?kind=…', endpoint: '报告列表（分页），limit / offset' },
               ]}

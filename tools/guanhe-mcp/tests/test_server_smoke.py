@@ -203,6 +203,24 @@ class TestReportLatest:
         _, kwargs = client.get.call_args
         assert kwargs["params"] == {"kind": "theme"}
 
+    def test_the_close(self):
+        client = _make_client_mock()
+        srv._call_tool("report_latest", {"kind": "the_close"}, client)
+        _, kwargs = client.get.call_args
+        assert kwargs["params"] == {"kind": "the_close"}
+
+    def test_closing_bell(self):
+        client = _make_client_mock()
+        srv._call_tool("report_latest", {"kind": "closing_bell"}, client)
+        _, kwargs = client.get.call_args
+        assert kwargs["params"] == {"kind": "closing_bell"}
+
+    def test_bloomberg_surveillance(self):
+        client = _make_client_mock()
+        srv._call_tool("report_latest", {"kind": "bloomberg_surveillance"}, client)
+        _, kwargs = client.get.call_args
+        assert kwargs["params"] == {"kind": "bloomberg_surveillance"}
+
 
 class TestReportByDate:
     def test_path_and_params(self):
@@ -292,8 +310,11 @@ class TestToolsList:
         assert "ids" in tool["inputSchema"].get("required", [])
 
     def test_report_kinds_canonical(self):
-        """All three report tools expose the 5 canonical kinds (v0.5.0)."""
-        expected = ["twitter_daily", "youtube_daily", "market_daily", "market_weekly", "theme"]
+        """All three report tools expose the 8 canonical kinds."""
+        expected = [
+            "twitter_daily", "youtube_daily", "market_daily", "market_weekly",
+            "theme", "the_close", "closing_bell", "bloomberg_surveillance",
+        ]
         for name in ("report_latest", "report_by_date", "report_list"):
             tool = next(t for t in srv.TOOLS if t["name"] == name)
             kind_prop = tool["inputSchema"]["properties"]["kind"]

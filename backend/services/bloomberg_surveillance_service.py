@@ -37,12 +37,10 @@ MAX_TRANSCRIPT_CHARS = 120000
 # 标题/show_name 匹配模式（Bloomberg TV 频道内，无其他节目名包含该串）
 SURVEILLANCE_TITLE_PATTERN = "%Bloomberg Surveillance%"
 
-# 中国用户晚上交易美股：北京当晚尝试生成 + 次日早晨兜底
+# 每天一次：北京周二至周六 00:30（周一至周五夜盘），成片多在 23:00–00:10
 SURVEILLANCE_TZ = ZoneInfo("Asia/Shanghai")
-SURVEILLANCE_EVENING_HOURS = frozenset({21, 22, 23})
-SURVEILLANCE_EVENING_WINDOW_HOURS = 10  # 避免 24h 窗口把前一晚节目并进来
-SURVEILLANCE_MORNING_HOUR = 9
-SURVEILLANCE_MORNING_WINDOW_HOURS = 24
+SURVEILLANCE_EVENING_HOUR = 0
+SURVEILLANCE_WINDOW_HOURS = 24
 
 
 # 占位摘要原因（无节目 / 无转录）——不作为幂等终态，允许后续重生成
@@ -52,25 +50,19 @@ PLACEHOLDER_REASONS = {"no_video_found", "no_transcript"}
 def plan_surveillance_cron_run(now: datetime) -> Optional[Dict[str, Any]]:
     """按北京时钟决定本次 cron 是否执行、report_date 与窗口长度。
 
-    - 周一至周五 21/22/23：当晚场，report_date=当天，短窗口等当日 VOD
-    - 周二至周六 09:00：兜底前一晚（含 FOMC 特辑），report_date=昨天
-    - 其余触发（如周一 09:00、周六晚上）跳过，避免空占位
+    仅周二至周六 00:00–00:59（cron 为 00:30）：report_date=昨天
+    （对应刚结束的美东工作日早间场 / 北京前一晚）。
+    其余时点跳过，避免空占位。
     """
     aware = now if now.tzinfo else now.replace(tzinfo=ZoneInfo("UTC"))
     bj = aware.astimezone(SURVEILLANCE_TZ)
     weekday = bj.weekday()  # Mon=0
     hour = bj.hour
-    if hour in SURVEILLANCE_EVENING_HOURS and weekday <= 4:
-        return {
-            "report_date": bj.date(),
-            "window_hours": SURVEILLANCE_EVENING_WINDOW_HOURS,
-            "slot": "evening",
-        }
-    if hour == SURVEILLANCE_MORNING_HOUR and 1 <= weekday <= 5:
+    if hour == SURVEILLANCE_EVENING_HOUR and 1 <= weekday <= 5:
         return {
             "report_date": bj.date() - timedelta(days=1),
-            "window_hours": SURVEILLANCE_MORNING_WINDOW_HOURS,
-            "slot": "morning_catchup",
+            "window_hours": SURVEILLANCE_WINDOW_HOURS,
+            "slot": "evening",
         }
     return None
 

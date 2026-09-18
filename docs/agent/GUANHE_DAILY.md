@@ -56,6 +56,9 @@ MCP 工具只返回当前账号有权限访问的数据：
 | 帮我看今天的市场日报 | `report_latest` | `kind=market_daily` |
 | 帮我看本周市场周报 | `report_latest` | `kind=market_weekly` |
 | 帮我看主题绩效报告 | `report_latest` | `kind=theme` |
+| 帮我看 The Close Report | `report_latest` | `kind=the_close` |
+| 帮我看 Closing Bell Report | `report_latest` | `kind=closing_bell` |
+| 帮我看 Bloomberg Surveillance Report | `report_latest` | `kind=bloomberg_surveillance` |
 | 帮我看 5 月 10 号的 YouTube 日报 | `report_by_date` | `kind=youtube_daily, date=2026-05-10` |
 | 帮我看上周五的市场周报 | `report_by_date` | `kind=market_weekly, date=2026-06-13`（用周五日期） |
 | 有哪些日报可以看？ | `report_list` | `kind=twitter_daily` |
@@ -83,6 +86,7 @@ MCP 工具只返回当前账号有权限访问的数据：
 | 「帮我看 Twitter/YouTube 日报」 | `report_latest kind=twitter_daily / youtube_daily` |
 | 「帮我看今天/本周市场报告」 | `report_latest kind=market_daily / market_weekly` |
 | 「帮我看主题报告」 | `report_latest kind=theme` |
+| 「帮我看 The Close / Closing Bell / Surveillance」 | `report_latest kind=the_close / closing_bell / bloomberg_surveillance` |
 
 0 条时才换入口或放宽参数。**不要**同时调用 `daily_feed` 和 `daily_multi_search` 搜同一话题。
 
@@ -222,7 +226,7 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 
 获取汇总报告。所有报告工具只返回 `share_url`——一个公开免登录的 URL，直接交给用户在浏览器打开；不要尝试总结报告内容，`content_markdown` 始终为 null。
 
-所有报告工具必须传 `kind` 参数（五个规范值）：
+所有报告工具必须传 `kind` 参数（八个规范值）：
 
 | `kind` | 报告内容 | `report_by_date` 的日期字段 |
 |---|---|---|
@@ -231,6 +235,9 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 | `market_daily` | 每日市场报告（指数/ETF 表现） | report_date |
 | `market_weekly` | 每周市场报告（存储于 OSS） | **week_end（周五日期）** |
 | `theme` | 主题绩效报告（各投资主题成分收益） | report_date |
+| `the_close` | The Close Report（Bloomberg The Close PM Brief） | report_date |
+| `closing_bell` | Closing Bell Report（CNBC Closing Bell PM Brief） | report_date |
+| `bloomberg_surveillance` | Bloomberg Surveillance Report（AM Brief） | report_date |
 
 > 旧别名 `twitter` / `youtube` / `market` 仍被接受，分别等同于 `twitter_daily` / `youtube_daily` / `market_daily`。
 

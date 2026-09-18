@@ -46,8 +46,11 @@ from backend.schemas.agent import (
 )
 from backend.schemas.daily import DailyFeedItem, DailyItemDetail
 from backend.schemas.user import TokenData
+from backend.services.close_brief_report_service import CloseBriefReportService
+from backend.services.closing_bell_report_service import ClosingBellReportService
 from backend.services.daily_market_report_service import DailyMarketReportService
 from backend.services.market_weekly_service import MarketWeeklyService
+from backend.services.surveillance_report_service import SurveillanceReportService
 from backend.services.theme_report_service import ThemeReportService
 from backend.services.twitter_daily_report_service import TwitterDailyReportService
 from backend.services.youtube_daily_report_service import YouTubeDailyReportService
@@ -488,7 +491,14 @@ _REPORT_SERVICES = {
     "market_daily": DailyMarketReportService,
     "market_weekly": MarketWeeklyService,
     "theme": ThemeReportService,
+    # Global singleton reports (no per-user row; PAT still required for Agent access)
+    "the_close": CloseBriefReportService,
+    "closing_bell": ClosingBellReportService,
+    "bloomberg_surveillance": SurveillanceReportService,
 }
+
+# These reports are platform-wide (one row per report_date), not scoped to user_id.
+_GLOBAL_KINDS = frozenset({"the_close", "closing_bell", "bloomberg_surveillance"})
 
 
 def _normalize_kind(kind: str) -> str:
@@ -515,11 +525,19 @@ def _resolve_report_service(kind: str):
 #   twitter_daily / youtube_daily : integer user_id
 #   market_daily                  : str(user_id)  (numeric string)
 #   market_weekly / theme         : username  (sourced from theme_tags.user_id)
+#   the_close / closing_bell / bloomberg_surveillance : none (global singleton)
 _USERNAME_KINDS = {"market_weekly", "theme"}
 
 
 def _uid_for(user: TokenData, kind: str):
-    """Resolve the user identifier a report service expects for this canonical kind."""
+    """Resolve the user identifier a report service expects for this canonical kind.
+
+    Returns None for global singleton reports (the_close / closing_bell /
+    bloomberg_surveillance); callers must not pass that to service methods
+    whose signature has no user_id argument.
+    """
+    if kind in _GLOBAL_KINDS:
+        return None
     if kind in _USERNAME_KINDS:
         return user.username
     if kind == "market_daily":
@@ -534,6 +552,9 @@ _REPORT_SHARE_PATH = {
     "market_daily": "/api/daily-market-report/shared/",
     "market_weekly": "/api/market-weekly-report/shared/",
     "theme": "/api/theme-report/shared/",
+    "the_close": "/api/close-brief-report/shared/",
+    "closing_bell": "/api/closing-bell-report/shared/",
+    "bloomberg_surveillance": "/api/surveillance-report/shared/",
 }
 
 
@@ -1169,8 +1190,10 @@ class AgentService:
     ) -> AgentTwitterReportListResponse:
         kind = _normalize_kind(kind)
         svc = _resolve_report_service(kind)
-        uid = _uid_for(user, kind)
-        reports, total = svc.get_user_reports(uid, limit, offset)
+        if kind in _GLOBAL_KINDS:
+            reports, total = svc.get_user_reports(limit=limit, offset=offset)
+        else:
+            reports, total = svc.get_user_reports(_uid_for(user, kind), limit, offset)
         summaries = [
             AgentTwitterReportSummary(
                 report_date=str(r.get("report_date") or r.get("week_end") or r.get("date") or ""),
@@ -1187,8 +1210,11 @@ class AgentService:
     ) -> Optional[AgentReportBodyResponse]:
         kind = _normalize_kind(kind)
         svc = _resolve_report_service(kind)
-        uid = _uid_for(user, kind)
-        r = svc.get_latest_report(uid)
+        r = (
+            svc.get_latest_report()
+            if kind in _GLOBAL_KINDS
+            else svc.get_latest_report(_uid_for(user, kind))
+        )
         if not r:
             return None
         return self._report_dict_to_agent(r, kind=kind, request_base=request_base)
@@ -1203,8 +1229,11 @@ class AgentService:
             raise HTTPException(status_code=400, detail="Use YYYY-MM-DD")
         kind = _normalize_kind(kind)
         svc = _resolve_report_service(kind)
-        uid = _uid_for(user, kind)
-        r = svc.get_report_by_date(uid, d)
+        r = (
+            svc.get_report_by_date(d)
+            if kind in _GLOBAL_KINDS
+            else svc.get_report_by_date(_uid_for(user, kind), d)
+        )
         if not r:
             return None
         return self._report_dict_to_agent(r, kind=kind, request_base=request_base)

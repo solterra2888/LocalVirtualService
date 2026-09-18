@@ -17,7 +17,7 @@ import json
 import os
 import time
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -363,6 +363,29 @@ class CloseBriefReportService:
             )
             row = cursor.fetchone()
             return self._row_to_dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_user_reports(
+        self, limit: int = 30, offset: int = 0
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """分页获取报告列表（供 Agent API 使用）。全局单例，无 user_id。"""
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT COUNT(*) FROM close_brief_reports")
+            total = cursor.fetchone()[0]
+            cursor.execute(
+                """
+                SELECT id, report_date, file_path, metadata, status,
+                       error_message, created_at, share_token
+                FROM close_brief_reports
+                ORDER BY report_date DESC
+                LIMIT %s OFFSET %s
+                """,
+                (limit, offset),
+            )
+            return [self._row_to_dict(row) for row in cursor.fetchall()], total
         finally:
             conn.close()
 

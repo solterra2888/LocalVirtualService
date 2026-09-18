@@ -12,7 +12,7 @@ Three families of read-only tools over your GuanHe data:
 
 ## Reports
 
-The three report tools (`report_latest`, `report_by_date`, `report_list`) share a `kind` parameter. v0.5.0 supports five canonical kinds:
+The three report tools (`report_latest`, `report_by_date`, `report_list`) share a `kind` parameter. Canonical kinds:
 
 | `kind` | Report | `report_by_date` key |
 |---|---|---|
@@ -21,6 +21,9 @@ The three report tools (`report_latest`, `report_by_date`, `report_list`) share 
 | `market_daily` | Daily market report (index performers, ETF performance) | report_date |
 | `market_weekly` | Weekly market report (stored on OSS) | **week_end** (Friday) |
 | `theme` | Theme performance report (constituent returns per investment theme) | report_date |
+| `the_close` | The Close Report (Bloomberg The Close PM brief) | report_date |
+| `closing_bell` | Closing Bell Report (CNBC Closing Bell PM brief) | report_date |
+| `bloomberg_surveillance` | Bloomberg Surveillance Report (AM brief) | report_date |
 
 > **All reports return only a `share_url`** — a public, no-auth URL that opens the fully rendered report in a browser. No report inlines its body (`content_markdown` is always null); hand the `share_url` to the user rather than trying to summarize raw HTML.
 >
@@ -127,6 +130,7 @@ Replace `/path/to/your/python` with the output of `which python` (or `where pyth
 | Today's market report | `report_latest` kind=`market_daily` |
 | This week's market report | `report_latest` kind=`market_weekly` |
 | Theme performance report | `report_latest` kind=`theme` |
+| The Close / Closing Bell / Surveillance | `report_latest` kind=`the_close` / `closing_bell` / `bloomberg_surveillance` |
 | Browse report history | `report_list` |
 | Concept keywords can't capture ("value investing methodology") | `semantic_search` |
 | Proper noun + concept ("1X Technologies funding strategy") | `hybrid_search` |
@@ -157,6 +161,9 @@ python scripts/call_guanhe_mcp.py daily_multi_search '{"groups": [{"q": "NVDA OR
 python scripts/call_guanhe_mcp.py report_latest '{"kind": "market_daily"}'
 python scripts/call_guanhe_mcp.py report_latest '{"kind": "market_weekly"}'
 python scripts/call_guanhe_mcp.py report_latest '{"kind": "theme"}'
+python scripts/call_guanhe_mcp.py report_latest '{"kind": "the_close"}'
+python scripts/call_guanhe_mcp.py report_latest '{"kind": "closing_bell"}'
+python scripts/call_guanhe_mcp.py report_latest '{"kind": "bloomberg_surveillance"}'
 python scripts/call_guanhe_mcp.py report_list '{"kind": "twitter_daily", "limit": 5}'
 python scripts/call_guanhe_mcp.py report_by_date '{"kind": "market_weekly", "date": "2026-06-13"}'
 
@@ -168,7 +175,7 @@ python scripts/call_guanhe_mcp.py chunks_by_locator '{"file_id": 1439, "chapter"
 
 ## Key parameter notes
 
-**`kind`** — report type. Canonical: `twitter_daily`, `youtube_daily`, `market_daily`, `market_weekly`, `theme` (legacy `twitter`/`youtube`/`market` accepted as aliases). See [Reports](#reports).
+**`kind`** — report type. Canonical: `twitter_daily`, `youtube_daily`, `market_daily`, `market_weekly`, `theme`, `the_close`, `closing_bell`, `bloomberg_surveillance` (legacy `twitter`/`youtube`/`market` accepted as aliases). See [Reports](#reports).
 
 **`q` syntax** — space = AND (all terms must match), `OR` (uppercase) = any match, `"phrase"` = exact substring.
 - Good: `q=NVDA OR 英伟达`
@@ -198,6 +205,9 @@ https://www.guanhecapital.hk/agent/skill/GUANHE_DAILY.md
 ```
 
 ## Changelog
+
+### Unreleased
+- **Reports:** added `the_close` (Bloomberg The Close PM brief), `closing_bell` (CNBC Closing Bell PM brief), and `bloomberg_surveillance` (Bloomberg Surveillance AM brief).
 
 ### v0.5.0
 - **Reports:** added `market_weekly` (weekly market report) and `theme` (theme performance report).
