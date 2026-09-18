@@ -1640,7 +1640,7 @@ async def create_default_news_feed_task(
 class CreateTwitterAuthorSummaryTaskRequest(BaseModel):
     """创建 Twitter 每日报告定时任务请求模型"""
     name: str = Field(default="Twitter Daily Report", description="任务名称")
-    cron_expression: str = Field(default="0 5 * * *", description="Cron表达式（默认每天早上5点）")
+    cron_expression: str = Field(default="0 4 * * *", description="Cron表达式（默认每天 04:00 北京时间，早于 Daily Market Report 06:00）")
     timezone: str = Field(default="Asia/Shanghai", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
     force: bool = Field(default=False, description="强制重新生成（忽略已缓存的摘要和报告）")
@@ -1704,7 +1704,7 @@ async def create_twitter_author_summary_task(
 async def create_default_twitter_author_summary_task(
     current_user=Depends(get_current_user)
 ):
-    """创建默认的 Twitter 每日报告定时任务（每天早上5点CST，自动执行完整 Phase A → Phase B 流水线）"""
+    """创建默认的 Twitter 每日报告定时任务（每天 04:00 北京时间，自动执行完整 Phase A → Phase B 流水线）"""
     try:
         logger.info("创建默认 Twitter 每日报告定时任务请求", user=current_user.username)
 
@@ -1713,7 +1713,7 @@ async def create_default_twitter_author_summary_task(
         result = await scheduler_service.create_cron_task(
             task_name="Twitter Daily Report",
             task_type="twitter_author_summary",
-            cron_expression="0 5 * * *",
+            cron_expression="0 4 * * *",
             timezone="Asia/Shanghai",
             enabled=True,
             task_params={'chain_daily_reports': True},
@@ -1747,7 +1747,7 @@ async def create_default_twitter_author_summary_task(
 class CreateYouTubeAuthorSummaryTaskRequest(BaseModel):
     """创建 YouTube 每日报告定时任务请求模型"""
     name: str = Field(default="YouTube Daily Report", description="任务名称")
-    cron_expression: str = Field(default="0 6 * * *", description="Cron表达式（默认每天早上6点）")
+    cron_expression: str = Field(default="30 4 * * *", description="Cron表达式（默认每天 04:30 北京时间，早于 Daily Market Report 06:00）")
     timezone: str = Field(default="Asia/Shanghai", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
     force: bool = Field(default=False, description="强制重新生成（忽略已缓存的摘要和报告）")
@@ -1811,7 +1811,7 @@ async def create_youtube_author_summary_task(
 async def create_default_youtube_author_summary_task(
     current_user=Depends(get_current_user)
 ):
-    """创建默认的 YouTube 每日报告定时任务（每天早上6点CST，自动执行完整 Phase A → Phase B 流水线）"""
+    """创建默认的 YouTube 每日报告定时任务（每天 04:30 北京时间，自动执行完整 Phase A → Phase B 流水线）"""
     try:
         logger.info("创建默认 YouTube 每日报告定时任务请求", user=current_user.username)
 
@@ -1820,7 +1820,7 @@ async def create_default_youtube_author_summary_task(
         result = await scheduler_service.create_cron_task(
             task_name="YouTube Daily Report",
             task_type="youtube_author_summary",
-            cron_expression="0 6 * * *",
+            cron_expression="30 4 * * *",
             timezone="Asia/Shanghai",
             enabled=True,
             task_params={'chain_daily_reports': True},
@@ -2107,8 +2107,8 @@ class CreateDailyMarketReportTaskRequest(BaseModel):
     """创建 Daily Market Report 定时任务请求模型"""
     name: str = Field(default="Daily Market Report", description="任务名称")
     cron_expression: str = Field(
-        default="0 8 * * 2-6",
-        description="Cron表达式（默认周二至周六 08:00 北京时间，即美股交易日收盘次日）",
+        default="0 6 * * 1-6",
+        description="Cron表达式（默认周一至周六 06:00 北京时间，晚于 Twitter/YouTube/Substack/知识星球摘要）",
     )
     timezone: str = Field(default="Asia/Shanghai", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
@@ -2185,7 +2185,7 @@ async def create_daily_market_report_task(
 async def create_default_daily_market_report_task(
     current_user=Depends(get_current_user),
 ):
-    """创建默认 Daily Market Report 定时任务（周二至周六 08:00 北京时间，覆盖所有用户）"""
+    """创建默认 Daily Market Report 定时任务（周一至周六 06:00 北京时间，覆盖所有用户）"""
     try:
         logger.info(
             "创建默认 Daily Market Report 定时任务请求",
@@ -2197,7 +2197,7 @@ async def create_default_daily_market_report_task(
         result = await scheduler_service.create_cron_task(
             task_name="Daily Market Report",
             task_type="daily_market_report",
-            cron_expression="0 8 * * 2-6",
+            cron_expression="0 6 * * 1-6",
             timezone="Asia/Shanghai",
             enabled=True,
             task_params={},

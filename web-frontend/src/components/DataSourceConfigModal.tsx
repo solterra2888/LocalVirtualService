@@ -254,16 +254,16 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     twitter_author_summary: {
       icon: <TwitterOutlined style={{ color: '#1DA1F2' }} />,
       params: ['force'],
-      defaultSchedule: '0 5 * * *',
+      defaultSchedule: '0 4 * * *',
       defaultName: 'Twitter Daily Report',
-      description: 'Full report pipeline: generates per-author summaries (Phase A, shared across users), then synthesizes personalized Twitter Daily Reports (Phase B). Default: daily at 5 AM CST.'
+      description: 'Full report pipeline: generates per-author summaries (Phase A, shared across users), then synthesizes personalized Twitter Daily Reports (Phase B). Default: daily 04:00 Beijing, before Daily Market Report 06:00.'
     },
     youtube_author_summary: {
       icon: <YoutubeOutlined style={{ color: '#FF0000' }} />,
       params: ['force'],
-      defaultSchedule: '0 6 * * *',
+      defaultSchedule: '30 4 * * *',
       defaultName: 'YouTube Daily Report',
-      description: 'Full report pipeline: generates per-channel summaries (Phase A, shared across users), then synthesizes personalized YouTube Daily Reports (Phase B). Default: daily at 6 AM CST.'
+      description: 'Full report pipeline: generates per-channel summaries (Phase A, shared across users), then synthesizes personalized YouTube Daily Reports (Phase B). Default: daily 04:30 Beijing, before Daily Market Report 06:00.'
     },
     theme_report: {
       icon: <BarChartOutlined style={{ color: '#52c41a' }} />,
@@ -282,9 +282,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     daily_market_report: {
       icon: <LineChartOutlined style={{ color: '#13c2c2' }} />,
       params: [],
-      defaultSchedule: '0 8 * * 2-6',
+      defaultSchedule: '0 6 * * 1-6',
       defaultName: 'Daily Market Report',
-      description: 'Pre-generate Daily Market Report (Home/Stockview/My Subscription/Market Overview) for all users (weekdays-next-day 8 AM Beijing, after Bloomberg/CNBC close summaries)'
+      description: 'Pre-generate Daily Market Report (Temperature/My Subscription/Market Overview) for all users. Default: Mon-Sat 06:00 Beijing, after Twitter/YouTube/Substack/Zhishixingqiu summaries.'
     },
     the_close_summary: {
       icon: <StockOutlined style={{ color: '#722ed1' }} />,
@@ -324,16 +324,16 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     zhishixingqiu_summary: {
       icon: <StockOutlined style={{ color: '#52c41a' }} />,
       params: [],
-      defaultSchedule: '0 22 * * *',
+      defaultSchedule: '30 5 * * *',
       defaultName: 'Zhishixingqiu Daily Summary',
-      description: 'Generate daily aggregated summary from all Zhishixingqiu groups (default: 10 PM Beijing)'
+      description: 'Generate daily aggregated summary from all Zhishixingqiu groups (default: 05:30 Beijing, before Daily Market Report 06:00)'
     },
     substack_summary: {
       icon: <ReadOutlined style={{ color: '#FF6719' }} />,
       params: [],
-      defaultSchedule: '0 22 * * *',
+      defaultSchedule: '0 5 * * *',
       defaultName: 'Substack Daily Summary',
-      description: 'Two-phase daily summary: per-publication LLM (articles + notes, cached) then per-user mechanical concat (default: 10 PM Beijing)'
+      description: 'Two-phase daily summary: per-publication LLM (articles + notes, cached) then per-user mechanical concat (default: 05:00 Beijing, before Daily Market Report 06:00)'
     },
   };
 

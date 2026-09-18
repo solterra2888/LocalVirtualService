@@ -284,6 +284,7 @@ flowchart TD
     YTSub[youtube_subscription]
     TWSub[twitter_subscription]
     ZXQSub[zhishixingqiu_subscription]
+    SSSub[substack_subscription]
     PodSub[podcast_subscription]
   end
 
@@ -291,6 +292,7 @@ flowchart TD
     YTSum[youtube_author_summary]
     TWSum[twitter_author_summary]
     ZXQSum[zhishixingqiu_summary]
+    SSSum[substack_summary]
     Close[the_close_summary]
     CNBC[cnbc_closing_bell]
     Surveil[bloomberg_surveillance]
@@ -303,6 +305,7 @@ flowchart TD
   YTSub --> YTSum
   TWSub --> TWSum
   ZXQSub --> ZXQSum
+  SSSub --> SSSum
   YTSub --> Close
   PodSub --> CNBC
   YTSub --> Surveil
@@ -310,9 +313,20 @@ flowchart TD
   YTSum --> DMR
   TWSum --> DMR
   ZXQSum --> DMR
-  Close --> DMR
-  CNBC --> DMR
+  SSSum --> DMR
 ```
+
+北京时间 cron（`Asia/Shanghai`），摘要必须全部早于 Daily Market Report 06:00：
+
+| 北京时间 | cron | task_type | 说明 |
+|----------|------|-----------|------|
+| 04:00 | `0 4 * * *` | `twitter_author_summary` | Phase A → Phase B |
+| 04:30 | `30 4 * * *` | `youtube_author_summary` | 最耗时，给 1.5h 缓冲 |
+| 05:00 | `0 5 * * *` | `substack_summary` | Phase A → Phase B |
+| 05:30 | `30 5 * * *` | `zhishixingqiu_summary` | Phase A → Phase B |
+| 06:00 | `0 6 * * 1-6` | `daily_market_report` | 周一至周六 06:00；聚合 My Subscription |
+
+The Close / CNBC / Surveillance 已从 DMR 拆出独立报告，不参与上表顺序。
 
 **原则**
 
@@ -386,4 +400,5 @@ succeeded=, skipped=, failed=, degraded=, generation_time_seconds=
 
 | 日期 | 说明 |
 |------|------|
+| 2026-09-18 | 明确北京时间 cron：Twitter 04:00 → YouTube 04:30 → Substack 05:00 → 知识星球 05:30 → DMR 06:00（周一至周六） |
 | 2026-06-14 | 初版：统一两阶段/单阶段契约、`summary_common`、状态机、时区与验收标准 |

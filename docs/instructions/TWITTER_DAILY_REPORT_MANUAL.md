@@ -137,7 +137,7 @@
 
 | 任务类型 | Cron | 说明 |
 |----------|------|------|
-| `twitter_author_summary` | `0 5 * * *` | 每天早上5点生成前一天所有作者摘要，自动链式触发 Daily Report |
+| `twitter_author_summary` | `0 4 * * *` | 每天 04:00 北京时间生成前一天所有作者摘要，自动链式触发 Daily Report；须早于 Daily Market Report 06:00 |
 
 > 注：`twitter_author_summary` 默认 `chain_daily_reports: true`，阶段 A 完成后自动触发阶段 B，无需单独配置 Daily Report 调度。
 

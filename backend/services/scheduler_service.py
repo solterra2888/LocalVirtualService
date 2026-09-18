@@ -1510,7 +1510,8 @@ class SchedulerService:
     async def _execute_daily_market_report_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         生成 Daily Market Report（按用户维度，从 finviz_screener 数据）。
-        应在 finviz_screener 刷新完成后调度。
+        应在 Twitter / YouTube / Substack / 知识星球摘要完成后调度
+        （默认周一至周六 06:00 北京时间）。
 
         Args:
             params:
@@ -1809,7 +1810,7 @@ class SchedulerService:
     async def _execute_zhishixingqiu_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         生成知识星球每日摘要（Phase A → chain → Phase B，契约对齐 Twitter/YouTube）。
-        应在知识星球抓取完成后、Daily Market Report 之前调度（默认每日 07:30 北京时间）。
+        应在知识星球抓取完成后、Daily Market Report 之前调度（默认每日 05:30 北京时间）。
 
         Args:
             params:
@@ -1878,7 +1879,7 @@ class SchedulerService:
     async def _execute_substack_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         生成 Substack 每日摘要（Phase A → chain → Phase B）。
-        应在 Substack 抓取完成后调度（默认每日，北京自然日标签）。
+        应在 Substack 抓取完成后、Daily Market Report 之前调度（默认每日 05:00 北京时间）。
 
         Args:
             params:

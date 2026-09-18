@@ -340,7 +340,7 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
         {
           id: 'configure_twitter_author_summary_schedule',
           name: 'Configure Report Schedule',
-          description: 'Set the schedule for Twitter Daily Report generation (default: daily at 5 AM CST). Runs Phase A (author summaries) → Phase B (user reports) automatically.',
+          description: 'Set the schedule for Twitter Daily Report generation (default: daily 04:00 Beijing, before Daily Market Report 06:00). Runs Phase A (author summaries) → Phase B (user reports) automatically.',
           endpoint: '/scheduler/tasks/twitter-author-summary',
           params: {},
           icon: <ScheduleOutlined />
@@ -360,7 +360,7 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
         {
           id: 'configure_youtube_author_summary_schedule',
           name: 'Configure Report Schedule',
-          description: 'Set the schedule for YouTube Daily Report generation (default: daily at 6 AM CST). Runs Phase A (channel summaries) → Phase B (user reports) automatically.',
+          description: 'Set the schedule for YouTube Daily Report generation (default: daily 04:30 Beijing, before Daily Market Report 06:00). Runs Phase A (channel summaries) → Phase B (user reports) automatically.',
           endpoint: '/scheduler/tasks/youtube-author-summary',
           params: {},
           icon: <ScheduleOutlined />
@@ -420,7 +420,7 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
         {
           id: 'configure_daily_market_report_schedule',
           name: 'Configure Daily Market Report Schedule',
-          description: 'Set up periodic Daily Market Report generation (default: weekdays-next-day 8 AM Beijing, after Bloomberg/CNBC close summaries)',
+          description: 'Set up periodic Daily Market Report generation (default: Mon-Sat 06:00 Beijing, after Twitter/YouTube/Substack/Zhishixingqiu summaries)',
           endpoint: '/scheduler/tasks/daily-market-report',
           params: {},
           icon: <ScheduleOutlined />
@@ -500,7 +500,7 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
         {
           id: 'configure_zhishixingqiu_summary_schedule',
           name: 'Configure Zhishixingqiu Summary Schedule',
-          description: 'Set up periodic Zhishixingqiu daily summary generation (default: 10 PM Beijing)',
+          description: 'Set up periodic Zhishixingqiu daily summary generation (default: 05:30 Beijing, before Daily Market Report 06:00)',
           endpoint: '/scheduler/tasks/zhishixingqiu-summary',
           params: {},
           icon: <ScheduleOutlined />
@@ -520,7 +520,7 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
         {
           id: 'configure_substack_summary_schedule',
           name: 'Configure Substack Summary Schedule',
-          description: 'Set up periodic Substack daily summary generation (default: after fetch, Beijing day)',
+          description: 'Set up periodic Substack daily summary generation (default: 05:00 Beijing, before Daily Market Report 06:00)',
           endpoint: '/scheduler/tasks/substack-summary',
           params: {},
           icon: <ScheduleOutlined />
