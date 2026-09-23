@@ -8,9 +8,11 @@
 # 检查逻辑（按顺序）：
 #   1. Redis/Broker 可达性预检（不可达则只告警，跳过 worker 重启）
 #   2. 按 WORKER_NODE_ROLE 检查本节点应运行的 worker（systemctl is-active）
-#   3. 关键队列积压检测（持续超阈值则告警，按配置决定是否重启）
-#   4. 状态去重：同一故障每 HEALTH_ALERT_REPEAT_MINUTES 最多重发一次
-#   5. 故障消失时发送「✓ 已恢复」通知
+#   3. Celery 真活性 ping 检测（inspect ping；systemctl 活着但事件循环僵死
+#      ——如主进程卡死在半开 TCP 连接的 socket read 上——时自动重启）
+#   4. 关键队列积压检测（持续超阈值则告警，按配置决定是否重启）
+#   5. 状态去重：同一故障每 HEALTH_ALERT_REPEAT_MINUTES 最多重发一次
+#   6. 故障消失时发送「✓ 已恢复」通知
 #
 # 状态持久化：logs/.health_state（每行 KEY=value，记录上次告警时间/次数）
 # ============================================================
@@ -38,6 +40,7 @@ fi
 : "${HEALTH_FETCH_BACKLOG_THRESHOLD:=10}"
 : "${HEALTH_ASR_BACKLOG_THRESHOLD:=5}"
 : "${HEALTH_RESTART_ON_BACKLOG:=false}"
+: "${HEALTH_CELERY_PING_TIMEOUT:=5}"
 : "${HEALTH_ALERT_REPEAT_MINUTES:=60}"
 : "${HEALTH_ALERT_PREFIX:=[HK-YT-Worker]}"
 
@@ -45,6 +48,7 @@ fi
 CONDA_BASE=$(conda info --base 2>/dev/null || echo "$HOME/miniconda3")
 CONDA_ENV_NAME="yt_service"
 PYTHON="$CONDA_BASE/envs/$CONDA_ENV_NAME/bin/python"
+CELERY="$CONDA_BASE/envs/$CONDA_ENV_NAME/bin/celery"
 LOGS_DIR="$BASE_DIR/logs"
 STATE_FILE="$LOGS_DIR/.health_state"
 
@@ -123,6 +127,17 @@ declare -A UNIT_NAMES=(
     ["priority-asr"]="yt-worker-priority-asr"
 )
 
+# role → celery 节点名前缀（与 run_worker.sh 的 --hostname 保持一致，
+# 完整节点名 = 前缀@$(hostname)，用于 inspect ping 定向探测）
+declare -A CELERY_NODE_NAMES=(
+    ["main"]="youtube-transcription-worker"
+    ["fetch"]="youtube-fetch-worker"
+    ["asr"]="youtube-asr-worker"
+    ["long"]="youtube-long-worker"
+    ["priority-transcript"]="youtube-priority-worker"
+    ["priority-asr"]="youtube-priority-asr-worker"
+)
+
 # 按节点角色决定检查哪些 worker
 ROLES_TO_CHECK=()
 case "$WORKER_NODE_ROLE" in
@@ -190,7 +205,69 @@ for ROLE in "${ROLES_TO_CHECK[@]}"; do
     fi
 done
 
-# ── 3. 关键队列积压检测 ───────────────────────────────────
+# ── 3. Celery 真活性 ping 检测 ────────────────────────────
+# 背景：SG 节点曾出现 worker 主进程卡死在半开 TCP 连接的 socket read 上 ——
+# systemctl 显示 active，但事件循环已死：不消费消息、不响应 inspect、不上报心跳，
+# 队列积压 28 小时无人处理。systemctl is-active 探测不到这类僵死；
+# inspect ping 同样走 worker 事件循环，无响应即可判定僵死 → 自动重启。
+log "检查 Celery 真活性 (inspect ping, 超时 ${HEALTH_CELERY_PING_TIMEOUT}s)..."
+
+if [[ ! -x "$CELERY" ]]; then
+    log "⚠️  找不到 celery 可执行文件 ($CELERY)，跳过真活性检测"
+else
+    # 本轮要 ping 的节点（步骤 2 刚重启过的跳过 —— 启动注册需要时间，
+    # 下一轮 timer 再检查，避免把正在启动的 worker 再重启一次）
+    NODES_TO_PING=()
+    declare -A PING_ROLE_OF=()
+    for ROLE in "${ROLES_TO_CHECK[@]}"; do
+        if [[ " ${PING_FAILED[*]:-} " == *" ${ROLE} "* ]]; then
+            log "  ⏭️  ${ROLE} 刚被重启，本轮跳过 ping（下轮再检）"
+            continue
+        fi
+        NODE="${CELERY_NODE_NAMES[$ROLE]}@$(hostname)"
+        NODES_TO_PING+=("$NODE")
+        PING_ROLE_OF["$NODE"]="$ROLE"
+    done
+
+    if [[ ${#NODES_TO_PING[@]} -gt 0 ]]; then
+        DEST_LIST="$(IFS=,; echo "${NODES_TO_PING[*]}")"
+        PING_OUT="$("$CELERY" -A worker.celery_app inspect ping \
+            --destination="$DEST_LIST" \
+            --timeout="$HEALTH_CELERY_PING_TIMEOUT" 2>&1 || true)"
+
+        # 安全阀：CLI 自身异常（traceback/导入失败/连不上 Broker 等）时输出的是
+        # 错误信息而非 "No nodes replied"，此时无法判定 worker 状态，跳过本轮，
+        # 绝不因探测工具自身故障而误重启 worker
+        if grep -qE "Traceback|ModuleNotFoundError|ImportError|OperationalError|ResponseError|Error connecting|Authentication" <<<"$PING_OUT"; then
+            log "⚠️  celery CLI 异常，跳过本轮真活性检测:"
+            echo "$PING_OUT" | head -5
+        else
+            for NODE in "${NODES_TO_PING[@]}"; do
+                ROLE="${PING_ROLE_OF[$NODE]}"
+                UNIT="${UNIT_NAMES[$ROLE]}"
+                ALERT_KEY="celery_dead_${ROLE//[-.]/_}"
+
+                if grep -qF -- "${NODE}:" <<<"$PING_OUT"; then
+                    log "  ✅ ${ROLE} 响应 ping (${NODE})"
+                    if [[ -n "$(state_get "LAST_ALERT_${ALERT_KEY}")" ]]; then
+                        lark_notify "✅ Worker [${ROLE}] (${NODE}) 已恢复响应 ping。"
+                        clear_alert "$ALERT_KEY"
+                    fi
+                else
+                    log "  ❌ ${ROLE} 无 ping 响应 (${NODE}) → 判定事件循环僵死，重启 ${UNIT}.service"
+                    PING_FAILED+=("$ROLE")
+                    systemctl restart "${UNIT}.service" 2>&1 || true
+                    if should_alert "$ALERT_KEY"; then
+                        lark_notify "❌ Worker [${ROLE}] (${NODE}) 无 ping 响应（进程存活但事件循环僵死，无法消费任务），已自动重启 ${UNIT}.service。"
+                        mark_alerted "$ALERT_KEY"
+                    fi
+                fi
+            done
+        fi
+    fi
+fi
+
+# ── 4. 关键队列积压检测 ───────────────────────────────────
 log "检查队列积压..."
 
 get_queue_len() {
