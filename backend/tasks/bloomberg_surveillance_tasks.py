@@ -77,30 +77,35 @@ def generate_bloomberg_surveillance_task(
                 f"skipped={result.get('skipped', False)}"
             )
 
-            # 后置钩子：生成 Bloomberg Surveillance Report（独立报告，
-            # 处理方式同 The Close / Closing Bell Report）。
-            # 摘要已落库，此处渲染失败不影响摘要结果；skip 路径同样执行，
-            # 以覆盖「摘要已存在但报告缺失/落后」的场景（如首次上线、上次渲染失败）。
-            try:
-                from backend.services.surveillance_report_service import (
-                    SurveillanceReportService,
-                )
+            # 后置钩子与 The Close / Closing Bell 相同：占位摘要不渲染。
+            from backend.services.bloomberg_surveillance_service import PLACEHOLDER_REASONS
 
-                brief = SurveillanceReportService().generate(report_date=as_of)
-                if brief.get("success"):
-                    logger.info(
-                        f"Surveillance Report: date={as_of}, "
-                        f"skipped={brief.get('skipped', False)}, "
-                        f"reason={brief.get('reason') or 'rendered'}"
-                    )
-                else:
-                    logger.error(
-                        f"Surveillance Report FAILED: date={as_of}, {brief.get('error')}"
-                    )
-            except Exception as hook_exc:
-                logger.error(
-                    f"Surveillance Report hook error: {hook_exc}", exc_info=True
+            if result.get("reason") in PLACEHOLDER_REASONS:
+                logger.info(
+                    f"Surveillance Report skipped: placeholder "
+                    f"{result.get('reason')} date={as_of}"
                 )
+            else:
+                try:
+                    from backend.services.surveillance_report_service import (
+                        SurveillanceReportService,
+                    )
+
+                    brief = SurveillanceReportService().generate(report_date=as_of)
+                    if brief.get("success"):
+                        logger.info(
+                            f"Surveillance Report: date={as_of}, "
+                            f"skipped={brief.get('skipped', False)}, "
+                            f"reason={brief.get('reason') or 'rendered'}"
+                        )
+                    else:
+                        logger.error(
+                            f"Surveillance Report FAILED: date={as_of}, {brief.get('error')}"
+                        )
+                except Exception as hook_exc:
+                    logger.error(
+                        f"Surveillance Report hook error: {hook_exc}", exc_info=True
+                    )
         else:
             logger.error(
                 f"Bloomberg Surveillance Summary FAILED: {result.get('message')}"

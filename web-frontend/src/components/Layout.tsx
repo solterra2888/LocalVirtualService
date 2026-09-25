@@ -106,7 +106,6 @@ const Layout: React.FC = () => {
   const sidebarNavRef = useScrollingClass<HTMLElement>();
   const openProfileModal = () => setProfileModalOpen(true);
 
-  const appName = process.env.REACT_APP_APP_NAME || 'GuanHe Capital';
   const sidebarWidth = sidebarExpanded ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH;
 
   const toggleSidebar = () => setSidebarExpanded((prev) => !prev);
@@ -369,7 +368,7 @@ const Layout: React.FC = () => {
             {sidebarExpanded ? (
               <>
                 <div className="layout-sidebar-brand-meta">
-                  <h2 className="layout-sidebar-brand-title">{appName}</h2>
+                  <h2 className="layout-sidebar-brand-title">Broadview Hub</h2>
                 </div>
                 <button
                   type="button"

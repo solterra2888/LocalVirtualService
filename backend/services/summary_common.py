@@ -7,8 +7,11 @@ Bloomberg The Close、CNBC Closing Bell 单阶段服务使用。
 """
 
 import asyncio
-from datetime import datetime, timedelta
-from typing import Any, Callable, Coroutine, TypeVar
+from datetime import date, datetime, timedelta
+from typing import Any, Callable, Coroutine, Optional, TypeVar
+from zoneinfo import ZoneInfo
+
+from backend.utils.datetime_utils import UTC, utcnow
 
 T = TypeVar("T")
 
@@ -56,6 +59,23 @@ ORPHAN_THRESHOLD_MINUTES = 30
 
 
 # ── 工具函数 ───────────────────────────────────────────────────────────────────
+
+def should_defer_no_video_placeholder(
+    report_date: date,
+    now: Optional[datetime] = None,
+    typical_hour_bj: int = 22,
+    timezone_name: str = "Asia/Shanghai",
+) -> bool:
+    """交易日、且仍早于该节目的经验入库点时，记 episode_not_yet_published。
+
+    The Close、Closing Bell、Surveillance 共用。各节目传入自己的 typical_hour_bj。
+    """
+    current = now or utcnow()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    beijing = current.astimezone(ZoneInfo(timezone_name))
+    return beijing.date() == report_date and beijing.hour < typical_hour_bj
+
 
 def orphan_cutoff_dt() -> datetime:
     """返回孤儿记录的截止时间（UTC naive）。"""

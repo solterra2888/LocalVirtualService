@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Bloomberg Surveillance 视频筛选与转录合并逻辑测试"""
 
-from datetime import date, datetime, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 
 from backend.services.bloomberg_surveillance_service import (
     MAX_TRANSCRIPT_CHARS,
@@ -10,7 +9,6 @@ from backend.services.bloomberg_surveillance_service import (
     BloombergSurveillanceService,
     _should_skip_completed_summary,
     is_bloomberg_surveillance_video,
-    plan_surveillance_cron_run,
 )
 
 
@@ -158,28 +156,6 @@ def test_format_video_title_empty():
         BloombergSurveillanceService._format_video_title_for_llm([])
         == "Bloomberg Surveillance"
     )
-
-
-# ── 每日一次 cron 槽位（北京 00:30 周二至周六） ────────────────────────
-
-BJ = ZoneInfo("Asia/Shanghai")
-
-
-def _bj(y, m, d, h):
-    return datetime(y, m, d, h, 0, tzinfo=BJ)
-
-
-def test_plan_evening_uses_yesterday_and_24h():
-    plan = plan_surveillance_cron_run(_bj(2026, 9, 18, 0))  # Friday 00:30
-    assert plan["slot"] == "evening"
-    assert plan["report_date"] == date(2026, 9, 17)
-    assert plan["window_hours"] == 24
-
-
-def test_plan_skips_non_evening_slots():
-    assert plan_surveillance_cron_run(_bj(2026, 9, 14, 0)) is None  # Monday 00:30
-    assert plan_surveillance_cron_run(_bj(2026, 9, 17, 22)) is None  # Thursday 22:00
-    assert plan_surveillance_cron_run(_bj(2026, 9, 18, 9)) is None  # Friday 09:00
 
 
 def test_skip_completed_reruns_when_new_segment_appears():

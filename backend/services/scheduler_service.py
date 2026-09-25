@@ -1732,10 +1732,10 @@ class SchedulerService:
         """
         生成 Bloomberg Surveillance 每日 AM Brief 摘要（全局）。
 
-        早间节目（美东周一至周五 6-9am ET 直播；北京夏令时 18:00-21:00 /
-        冬令时 19:00-22:00）。YouTube VOD 多在节目结束后入库。
-        默认每天一次：北京周二至周六 00:30 生成前一晚节目（24h 窗口）。
-        报告（Bloomberg Surveillance Report）为该摘要任务的后置钩子，无独立调度器。
+        早间节目（美东周一至周五 6-9am ET）。生成方式与 The Close / Closing Bell 相同：
+        每次调度只提交一个任务，report_date 为北京自然日，窗口为截至当前的 24 小时。
+        调度时刻不同（周二至周六 12:30，赶在正片入库之后）。
+        报告为该摘要任务的后置钩子，占位摘要不渲染。
 
         Args:
             params:
@@ -1750,42 +1750,24 @@ class SchedulerService:
             from backend.tasks.bloomberg_surveillance_tasks import (
                 generate_bloomberg_surveillance_task,
             )
-            from backend.services.bloomberg_surveillance_service import (
-                plan_surveillance_cron_run,
-            )
             from backend.utils.datetime_utils import (
                 utcnow,
                 parse_iso_utc,
                 window_label_date,
             )
 
+            window_hours = int(params.get('window_hours', 24))
             force = params.get('force', False)
-            explicit_date = params.get('report_date')
-            explicit_end = parse_iso_utc(params.get('window_end'))
-            now = utcnow()
 
-            if explicit_date or explicit_end:
-                window_end = explicit_end or now
-                window_hours = int(params.get('window_hours', 24))
-                report_date = explicit_date or window_label_date(
-                    now, 'Asia/Shanghai'
-                ).isoformat()
-            else:
-                plan = plan_surveillance_cron_run(now)
-                if plan is None:
-                    message = (
-                        "✅ Bloomberg Surveillance: 当前北京时点不是 "
-                        "周二至周六 00:30，跳过"
-                    )
-                    logger.info(message)
-                    return {'success': True, 'message': message, 'skipped': True}
-                window_end = now
-                window_hours = int(
-                    params.get('window_hours', plan['window_hours'])
-                )
-                report_date = plan['report_date'].isoformat()
+            # 与 The Close / Closing Bell 相同：显式 window_end，避免退化为自然日窗口。
+            window_end = parse_iso_utc(params.get('window_end'))
+            if window_end is None:
+                window_end = utcnow()
 
-            # 不传 window_end 会退化为自然日历窗口，漏掉跨日上传，故必须显式传。
+            report_date = params.get('report_date') or window_label_date(
+                utcnow(), 'Asia/Shanghai'
+            ).isoformat()
+
             task = generate_bloomberg_surveillance_task.delay(
                 report_date=report_date,
                 window_end=window_end.isoformat(),

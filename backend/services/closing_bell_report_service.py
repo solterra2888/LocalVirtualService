@@ -32,7 +32,9 @@ logger = get_logger("closing_bell_report_service")
 DEFAULT_REPORT_TIMEZONE = "Asia/Shanghai"
 
 # 占位摘要原因（与 cnbc_closing_bell_service.PLACEHOLDER_REASONS 对齐）
-PLACEHOLDER_REASONS = {"no_video_found", "no_transcript"}
+PLACEHOLDER_REASONS = {
+    "no_video_found", "no_transcript", "episode_not_yet_published",
+}
 
 # 报告输出目录
 REPORTS_DIR = os.path.join(

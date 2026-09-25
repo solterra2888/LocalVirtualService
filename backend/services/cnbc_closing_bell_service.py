@@ -31,8 +31,12 @@ MAX_TRANSCRIPT_CHARS = 80000
 CLOSING_BELL_MATCH_PATTERN = "%Closing Bell%"
 
 
-# 占位摘要原因（无节目 / 无转录）——不作为幂等终态，允许后续重生成
-PLACEHOLDER_REASONS = {"no_video_found", "no_transcript"}
+# 经验入库点（北京）。调度在这之后（周二至周六 08:30）。
+TYPICAL_PUBLISH_HOUR_BJ = 8
+DEFAULT_REPORT_TIMEZONE = "Asia/Shanghai"
+
+# 占位摘要原因（无节目 / 无转录 / 尚未到点）——不作为幂等终态，允许后续重生成
+PLACEHOLDER_REASONS = {"no_video_found", "no_transcript", "episode_not_yet_published"}
 
 
 def _is_placeholder_summary(existing: Dict[str, Any]) -> bool:
@@ -116,19 +120,35 @@ class CNBCClosingBellService:
             logger.info(f"找到 {len(videos)} 个 Closing Bell 视频")
 
             if not videos:
+                from backend.services.summary_common import should_defer_no_video_placeholder
+
+                reason = (
+                    "episode_not_yet_published"
+                    if should_defer_no_video_placeholder(
+                        report_date,
+                        typical_hour_bj=TYPICAL_PUBLISH_HOUR_BJ,
+                        timezone_name=DEFAULT_REPORT_TIMEZONE,
+                    )
+                    else "no_video_found"
+                )
+                message = (
+                    "Closing Bell 尚未入库"
+                    if reason == "episode_not_yet_published"
+                    else "当日无 Closing Bell 节目"
+                )
                 self._update_summary(
                     summary_id,
                     status="completed",
-                    summary_content="当日无 Closing Bell 节目（可能为非交易日或节目尚未上传）。",
-                    metadata={"reason": "no_video_found"},
+                    summary_content=message + "。",
+                    metadata={"reason": reason},
                 )
-                elapsed = round(time.time() - start_time, 2)
                 return {
                     "success": True,
                     "summary_id": summary_id,
-                    "message": "当日无 Closing Bell 节目",
+                    "message": message,
                     "video_count": 0,
-                    "skipped": False,
+                    "skipped": True,
+                    "reason": reason,
                 }
 
             # 同日可能有多段（主节目 clip + Overtime 等），按 published_at 合并转录
@@ -154,7 +174,8 @@ class CNBCClosingBellService:
                     "summary_id": summary_id,
                     "message": "无可用转录",
                     "video_count": len(videos),
-                    "skipped": False,
+                    "skipped": True,
+                    "reason": "no_transcript",
                 }
 
             # LLM 生成摘要（带超时与重试）

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { MenuProps } from 'antd';
-import { Layout as AntLayout, Button, Dropdown, Avatar, Typography, Switch } from 'antd';
+import { Layout as AntLayout, Button, Dropdown, Avatar, Switch } from 'antd';
 import {
   LogoutOutlined,
   EditOutlined,
@@ -19,7 +19,6 @@ import MobileTaskProgressBar, { MOBILE_TASK_PROGRESS_BAR_HEIGHT } from './mobile
 import { userAvatarLetter, USER_AVATAR_LETTER_BG } from '../utils/userAvatar';
 
 const { Header, Content } = AntLayout;
-const { Title } = Typography;
 
 const MOBILE_SHELL_THEME = {
   light: {
@@ -139,19 +138,18 @@ const MobileLayout: React.FC = () => {
           lineHeight: '56px',
         }}
       >
-        <Title
-          level={5}
+        <span
           style={{
-            margin: 0,
-            fontSize: '20px',
-            fontWeight: 500,
             fontFamily: "'Aladin', cursive",
+            fontSize: 20,
+            fontWeight: 400,
             letterSpacing: '0.02em',
             color: shell.titleColor,
+            lineHeight: '56px',
           }}
         >
-          {process.env.REACT_APP_APP_NAME || 'GuanHe Capital'}
-        </Title>
+          Broadview Hub
+        </span>
 
         <Dropdown
           menu={{ items: userMenuItems, style: { minWidth: 200 } }}

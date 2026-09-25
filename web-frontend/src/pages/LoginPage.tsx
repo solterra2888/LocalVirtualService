@@ -29,16 +29,17 @@ const LoginPage: React.FC = () => {
     <div className="login-container">
       <Card className="login-form-container">
         <div className="login-logo">
-          <img src="/GuanHeCapital.ico" alt="GuanHe Capital Logo (觀合資本)" style={{ width: 72, height: 72, marginBottom: 16 }} />
+          <img src="/GuanHeCapital.ico" alt="Broadview Hub" style={{ width: 72, height: 72, marginBottom: 16 }} />
           <Title
             level={2}
             className="login-title"
             style={{
               fontFamily: "'Aladin', cursive",
               letterSpacing: '0.02em',
+              marginTop: 0,
             }}
           >
-            {process.env.REACT_APP_APP_NAME || 'GuanHe Capital'}
+            Broadview Hub
           </Title>
           <Text
             className="login-subtitle"

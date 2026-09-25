@@ -1,6 +1,6 @@
 {
-  "short_name": "{{APP_NAME}}",
-  "name": "{{APP_NAME}} - AI-Powered File Processing Platform",
+  "short_name": "Broadview Hub",
+  "name": "{{APP_NAME}}",
   "description": "AI-based file processing and analysis tool",
   "icons": [
     {

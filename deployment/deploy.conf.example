@@ -6,7 +6,7 @@
 
 # ===== 项目标识（与 web-frontend/package.json、config/settings.py 一致）=====
 # 注：APP_NAME 含空格时，deploy.sh / generate_env_from_deploy.sh 写入 .env 会自动加双引号，避免 source 报错
-APP_NAME=GuanHe Capital
+APP_NAME=Broadview Hub
 APP_VERSION=2.0.0
 
 # ===== 服务器路径（与 DEPLOY_GUIDE 第 3 节克隆目录、conda 环境名一致）=====

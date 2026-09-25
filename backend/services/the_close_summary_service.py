@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
-from backend.utils.datetime_utils import UTC, ensure_utc, resolve_report_content_window, utcnow
+from backend.utils.datetime_utils import ensure_utc, resolve_report_content_window
 from backend.utils.logger import get_logger
 from backend.services.summary_common import SINGLE_LLM_TIMEOUT_SEC, SINGLE_LLM_RETRY
 
@@ -123,11 +123,16 @@ def should_defer_no_video_placeholder(
     typical_hour_bj: int = TYPICAL_PUBLISH_HOUR_BJ,
 ) -> bool:
     """交易日、且仍早于经验入库点时，用 episode_not_yet_published 而不是 no_video_found。"""
-    current = now or utcnow()
-    if current.tzinfo is None:
-        current = current.replace(tzinfo=UTC)
-    beijing = current.astimezone(ZoneInfo(DEFAULT_REPORT_TIMEZONE))
-    return beijing.date() == report_date and beijing.hour < typical_hour_bj
+    from backend.services.summary_common import (
+        should_defer_no_video_placeholder as _defer,
+    )
+
+    return _defer(
+        report_date,
+        now=now,
+        typical_hour_bj=typical_hour_bj,
+        timezone_name=DEFAULT_REPORT_TIMEZONE,
+    )
 
 
 def is_bloomberg_the_close_video(
@@ -282,7 +287,8 @@ class TheCloseSummaryService:
                     "summary_id": summary_id,
                     "message": "无可用转录",
                     "video_count": len(videos),
-                    "skipped": False,
+                    "skipped": True,
+                    "reason": "no_transcript",
                 }
 
             # LLM 生成摘要（带超时与重试）

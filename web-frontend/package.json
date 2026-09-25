@@ -1,7 +1,7 @@
 {
   "name": "targettracking-web",
   "version": "2.0.0",
-  "description": "GuanHe Capital - Web前端",
+  "description": "Broadview Hub - Web前端",
   "private": true,
   "dependencies": {
     "@ant-design/icons": "^5.2.6",

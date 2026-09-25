@@ -457,12 +457,12 @@ const AgentIntegrationPage: React.FC = () => {
           }}
         >
           把{' '}
-          <span style={{ color: TEAL }}>GuanHe</span>{' '}
+          <span style={{ color: TEAL }}>Broadview Hub</span>{' '}
           接进你的工作流
         </h1>
 
         <p style={{ fontSize: 16, lineHeight: 1.75, color: dark ? '#94a3b8' : '#475569', margin: 0 }}>
-          让 Cursor、Claude Code、Codex 等任意 Agent 直接读取你在 GuanHe 订阅的 Feed 和上传的文件，
+          让 Cursor、Claude Code、Codex 等任意 Agent 直接读取你在 Broadview Hub 订阅的 Feed 和上传的文件，
           用最自然的一句话拿到当日动态、关键词搜索、Twitter / YouTube 日报、市场日报与周报、主题表现报告，
           或对长篇电子书、研报进行语义检索（Vector RAG）。
           装好后无需记忆 API，直接问就行。
@@ -534,7 +534,7 @@ const AgentIntegrationPage: React.FC = () => {
             <SectionLabel>MCP · Cursor / Claude · stdio</SectionLabel>
             <SectionTitle dark={dark}>三步接入，自然语言提问</SectionTitle>
             <SectionDesc dark={dark}>
-              MCP（Model Context Protocol）让 Cursor / Claude Desktop 以原生工具调用方式读取你的 GuanHe 数据。
+              MCP（Model Context Protocol）让 Cursor / Claude Desktop 以原生工具调用方式读取你的 Broadview Hub 数据。
               完成前三步后再可选安装 Skill，实现自然语言自动路由。
             </SectionDesc>
 
@@ -635,7 +635,7 @@ const AgentIntegrationPage: React.FC = () => {
               用户使用场景
             </h4>
             <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 24px', lineHeight: 1.65 }}>
-              在 GuanHe 网页端完成「订阅 Feed」与「上传文件」后，内容会合并进每日 Daily 时间线。
+              在 Broadview Hub 网页端完成「订阅 Feed」与「上传文件」后，内容会合并进每日 Daily 时间线。
               你可以直接用自然语言向 Agent 提问，无需知道任何 API 或工具名称。
             </p>
 

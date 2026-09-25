@@ -14,9 +14,8 @@ Bloomberg Surveillance Summary 服务 — Bloomberg "Surveillance" 每日 AM Bri
 
 import asyncio
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
-from zoneinfo import ZoneInfo
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
@@ -37,34 +36,13 @@ MAX_TRANSCRIPT_CHARS = 120000
 # 标题/show_name 匹配模式（Bloomberg TV 频道内，无其他节目名包含该串）
 SURVEILLANCE_TITLE_PATTERN = "%Bloomberg Surveillance%"
 
-# 每天一次：北京周二至周六 00:30（周一至周五夜盘），成片多在 23:00–00:10
-SURVEILLANCE_TZ = ZoneInfo("Asia/Shanghai")
-SURVEILLANCE_EVENING_HOUR = 0
-SURVEILLANCE_WINDOW_HOURS = 24
+# 经验入库点（北京）。调度在这之后（周二至周六 12:30），此前不把空窗写成 no_video_found。
+TYPICAL_PUBLISH_HOUR_BJ = 12
+DEFAULT_REPORT_TIMEZONE = "Asia/Shanghai"
 
 
-# 占位摘要原因（无节目 / 无转录）——不作为幂等终态，允许后续重生成
-PLACEHOLDER_REASONS = {"no_video_found", "no_transcript"}
-
-
-def plan_surveillance_cron_run(now: datetime) -> Optional[Dict[str, Any]]:
-    """按北京时钟决定本次 cron 是否执行、report_date 与窗口长度。
-
-    仅周二至周六 00:00–00:59（cron 为 00:30）：report_date=昨天
-    （对应刚结束的美东工作日早间场 / 北京前一晚）。
-    其余时点跳过，避免空占位。
-    """
-    aware = now if now.tzinfo else now.replace(tzinfo=ZoneInfo("UTC"))
-    bj = aware.astimezone(SURVEILLANCE_TZ)
-    weekday = bj.weekday()  # Mon=0
-    hour = bj.hour
-    if hour == SURVEILLANCE_EVENING_HOUR and 1 <= weekday <= 5:
-        return {
-            "report_date": bj.date() - timedelta(days=1),
-            "window_hours": SURVEILLANCE_WINDOW_HOURS,
-            "slot": "evening",
-        }
-    return None
+# 占位摘要原因（无节目 / 无转录 / 尚未到点）——不作为幂等终态，允许后续重生成
+PLACEHOLDER_REASONS = {"no_video_found", "no_transcript", "episode_not_yet_published"}
 
 
 def _should_skip_completed_summary(
@@ -168,18 +146,35 @@ class BloombergSurveillanceService:
 
         try:
             if not videos:
+                from backend.services.summary_common import should_defer_no_video_placeholder
+
+                reason = (
+                    "episode_not_yet_published"
+                    if should_defer_no_video_placeholder(
+                        report_date,
+                        typical_hour_bj=TYPICAL_PUBLISH_HOUR_BJ,
+                        timezone_name=DEFAULT_REPORT_TIMEZONE,
+                    )
+                    else "no_video_found"
+                )
+                message = (
+                    "Surveillance 尚未入库"
+                    if reason == "episode_not_yet_published"
+                    else "当日无 Surveillance 节目"
+                )
                 self._update_summary(
                     summary_id,
                     status="completed",
-                    summary_content="当日无 Surveillance 节目（可能为非交易日或节目尚未上传）。",
-                    metadata={"reason": "no_video_found"},
+                    summary_content=message + "。",
+                    metadata={"reason": reason},
                 )
                 return {
                     "success": True,
                     "summary_id": summary_id,
-                    "message": "当日无 Surveillance 节目",
+                    "message": message,
                     "video_count": 0,
-                    "skipped": False,
+                    "skipped": True,
+                    "reason": reason,
                 }
 
             # 同日可能有多段上传（完整版 + 分段），按 published_at 合并转录
@@ -207,7 +202,8 @@ class BloombergSurveillanceService:
                     "summary_id": summary_id,
                     "message": "无可用转录",
                     "video_count": len(videos),
-                    "skipped": False,
+                    "skipped": True,
+                    "reason": "no_transcript",
                 }
 
             # LLM 生成摘要（带超时与重试）
