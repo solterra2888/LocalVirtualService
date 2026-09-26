@@ -135,10 +135,18 @@ def should_defer_no_video_placeholder(
     )
 
 
+def _description_is_the_close(description: Optional[str]) -> bool:
+    """YouTube 简介固定以节目名开头。2026-09 起有的正片不再口播 This is The Close。"""
+    if not description:
+        return False
+    return description.lstrip().lower().startswith("the close brings you")
+
+
 def is_bloomberg_the_close_video(
     title: Optional[str],
     show_name: Optional[str] = None,
     transcript: Optional[str] = None,
+    description: Optional[str] = None,
 ) -> bool:
     """判断是否为 Bloomberg Television The Close 节目视频。"""
     if show_name == THE_CLOSE_SHOW_NAME:
@@ -147,7 +155,9 @@ def is_bloomberg_the_close_video(
         return True
     if _title_is_other_show(title):
         return False
-    return _has_the_close_bumper(transcript)
+    if _has_the_close_bumper(transcript):
+        return True
+    return _description_is_the_close(description)
 
 
 def _select_primary_the_close_video(
@@ -162,7 +172,12 @@ def _select_primary_the_close_video(
             metadata = {}
         show_name = metadata.get("show_name") if isinstance(metadata, dict) else None
         transcript = (video.get("transcript_cleaned") or video.get("transcript") or "")
-        if not is_bloomberg_the_close_video(title, show_name=show_name, transcript=transcript):
+        if not is_bloomberg_the_close_video(
+            title,
+            show_name=show_name,
+            transcript=transcript,
+            description=video.get("content") or video.get("description"),
+        ):
             continue
         published_at = video.get("published_at") or datetime.min
         bumper_pos = _bumper_index(transcript)
@@ -368,7 +383,7 @@ class TheCloseSummaryService:
             cursor.execute(
                 """
                 SELECT id, content_id, title, url, published_at,
-                       transcript, transcript_cleaned, metadata
+                       transcript, transcript_cleaned, metadata, content
                 FROM subscription_content
                 WHERE channel_type = 'youtube'
                   AND author_identifier = %s
@@ -376,6 +391,7 @@ class TheCloseSummaryService:
                   AND (
                     metadata->>'show_name' = %s
                     OR title ILIKE %s
+                    OR content ILIKE 'The Close brings you%%'
                     OR LEFT(COALESCE(transcript_cleaned, transcript, ''), %s)
                        ~* 'this is[[:space:]]+.{0,3}the close'
                     OR LEFT(COALESCE(transcript_cleaned, transcript, ''), %s)
@@ -395,7 +411,7 @@ class TheCloseSummaryService:
             )
             columns = [
                 "id", "content_id", "title", "url", "published_at",
-                "transcript", "transcript_cleaned", "metadata",
+                "transcript", "transcript_cleaned", "metadata", "content",
             ]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
         finally:
@@ -409,7 +425,11 @@ class TheCloseSummaryService:
             return "show_name"
         if _title_looks_like_the_close(video.get("title")):
             return "title"
-        return "transcript_bumper"
+        if _has_the_close_bumper(
+            video.get("transcript_cleaned") or video.get("transcript")
+        ):
+            return "transcript_bumper"
+        return "description"
 
     def _persist_show_name(self, video: Dict[str, Any]) -> None:
         """口播命中后回写 show_name，避免下次 RSS 刷新丢掉识别结果。"""

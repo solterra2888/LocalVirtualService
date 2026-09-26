@@ -47,6 +47,20 @@ def test_is_bloomberg_the_close_video_by_opening_bumper():
     )
 
 
+def test_is_bloomberg_the_close_video_by_description():
+    assert is_bloomberg_the_close_video(
+        "Markets Rise as AI, Oil & Treasury Yields Drive the Week",
+        description=(
+            "The Close brings you the latest news and analysis leading up "
+            "to the final minutes and seconds before and after the closing bell."
+        ),
+    )
+    assert not is_bloomberg_the_close_video(
+        "Swedish Election Result Too Close to Call",
+        description="The election result was too close to call.",
+    )
+
+
 def test_bumper_rejects_market_jargon_and_other_shows():
     assert not is_bloomberg_the_close_video(
         "Chip tease",
