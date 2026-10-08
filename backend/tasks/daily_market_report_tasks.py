@@ -31,6 +31,7 @@ def generate_daily_market_report_task(self, user_id: str = None, report_date: st
             raise ValueError("user_id is required for daily_market_report generation")
 
         svc = DailyMarketReportService()
+        svc.prepare_market_data()
         as_of = _date.fromisoformat(report_date) if report_date else None
         result = svc.generate(user_id=user_id, report_date=as_of)
 
@@ -82,6 +83,7 @@ def generate_all_daily_market_reports_task(self, user_id: str = None, report_dat
 
     try:
         svc = DailyMarketReportService()
+        svc.prepare_market_data()
 
         # 解析 report_date：调度场景默认「北京自然日」（与上游 report_date 体系一致）
         if report_date:

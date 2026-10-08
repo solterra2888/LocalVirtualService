@@ -678,16 +678,28 @@ tbody tr.chart-active { background: var(--bg-hover); }
 }
 .mt-card-head {
     display: flex;
-    align-items: baseline;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 6px;
 }
 .mt-card-title {
     display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+}
+.mt-card-name {
+    display: flex;
     align-items: baseline;
     gap: 6px;
     min-width: 0;
+}
+.mt-card-asof {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    white-space: nowrap;
 }
 .mt-card-label {
     font-size: 0.86rem;
@@ -828,10 +840,13 @@ a.mt-card-label::after {
         <div class="mt-card" data-mt-id="{{ card_id }}">
             <div class="mt-card-head">
                 <div class="mt-card-title">
-                    <a class="mt-card-label" href="https://www.tradingview.com/chart/?symbol={{ tv_symbol | urlencode }}&interval=D&range=6M" target="_blank" rel="noopener noreferrer" title="Open {{ label }} in TradingView">{{ label }}</a>
-                    {% if sublabel %}<span class="mt-card-sub">{{ sublabel }}</span>{% endif %}
+                    <div class="mt-card-name">
+                        <a class="mt-card-label" href="https://www.tradingview.com/chart/?symbol={{ tv_symbol | urlencode }}&interval=D&range=6M" target="_blank" rel="noopener noreferrer" title="Open {{ label }} in TradingView">{{ label }}</a>
+                        {% if sublabel %}<span class="mt-card-sub">{{ sublabel }}</span>{% endif %}
+                    </div>
+                    <span class="mt-card-asof" id="mt-asof-{{ card_id }}">{% if card and card.as_of %}截至 {{ card.as_of }}{% if card.provisional %} · 未收盘{% endif %}{% endif %}</span>
                 </div>
-                <div class="mt-card-quote">
+                <div class="mt-card-quote" id="mt-quote-{{ card_id }}">
                     {% if card and card.last is not none %}
                     <span class="mt-card-last">{{ '%.2f' | format(card.last) }}</span>
                     {% if card.chg_pct is not none %}
@@ -858,10 +873,13 @@ a.mt-card-label::after {
         <div class="mt-card" data-mt-id="{{ card_id }}">
             <div class="mt-card-head">
                 <div class="mt-card-title">
-                    <a class="mt-card-label" href="https://www.tradingview.com/chart/?symbol={{ tv_symbol | urlencode }}&interval=D&range=6M" target="_blank" rel="noopener noreferrer" title="Open {{ label }} in TradingView">{{ label }}</a>
-                    {% if sublabel %}<span class="mt-card-sub">{{ sublabel }}</span>{% endif %}
+                    <div class="mt-card-name">
+                        <a class="mt-card-label" href="https://www.tradingview.com/chart/?symbol={{ tv_symbol | urlencode }}&interval=D&range=6M" target="_blank" rel="noopener noreferrer" title="Open {{ label }} in TradingView">{{ label }}</a>
+                        {% if sublabel %}<span class="mt-card-sub">{{ sublabel }}</span>{% endif %}
+                    </div>
+                    <span class="mt-card-asof" id="mt-asof-{{ card_id }}">{% if card and card.as_of %}截至 {{ card.as_of }}{% if card.provisional %} · 未收盘{% endif %}{% endif %}</span>
                 </div>
-                <div class="mt-card-quote">
+                <div class="mt-card-quote" id="mt-quote-{{ card_id }}">
                     {% if card and card.last is not none %}
                     <span class="mt-card-last">{{ '%.2f' | format(card.last) }}</span>
                     {% if card.chg_pct is not none %}
@@ -1311,6 +1329,57 @@ const DISPLAY_NAMES = {{ display_names_json | safe }};
 const TEMP_CARDS = {{ temperature_json | safe }};
 const TEMP_DATA = {};
 TEMP_CARDS.forEach(c => { if (c.bars && c.bars.length) TEMP_DATA[c.id] = c.bars; });
+const TEMP_REFRESH_URL = {{ (('/api/daily-market-report/shared/' ~ share_token ~ '/temperature') if share_token else None) | tojson }};
+
+function formatTempQuote(card) {
+    if (!card || card.last == null) return '<span class="val-na">N/A</span>';
+    const last = Number(card.last).toFixed(2);
+    let html = '<span class="mt-card-last">' + last + '</span>';
+    if (card.chg_pct != null) {
+        const cls = card.chg_pct > 0 ? 'val-pos' : (card.chg_pct < 0 ? 'val-neg' : 'val-neutral');
+        const sign = card.chg_pct > 0 ? '+' : '';
+        html += '<span class="' + cls + '">' + sign + Number(card.chg_pct).toFixed(2) + '%</span>';
+    }
+    return html;
+}
+
+function formatTempAsof(card) {
+    if (!card || !card.as_of) return '';
+    return '截至 ' + card.as_of + (card.provisional ? ' · 未收盘' : '');
+}
+
+function applyTemperatureCards(cards) {
+    cards.forEach(card => {
+        TEMP_DATA[card.id] = card.bars || [];
+        const quote = document.getElementById('mt-quote-' + card.id);
+        if (quote) quote.innerHTML = formatTempQuote(card);
+        const asof = document.getElementById('mt-asof-' + card.id);
+        if (asof) asof.textContent = formatTempAsof(card);
+        const host = document.querySelector('.mt-card[data-mt-id="' + card.id + '"]');
+        if (!host) return;
+        let chartEl = document.getElementById('mt-chart-' + card.id);
+        if ((!chartEl || chartEl.classList.contains('mt-chart-empty')) && card.bars && card.bars.length) {
+            const empty = host.querySelector('.mt-chart-empty');
+            if (empty) {
+                empty.outerHTML = '<div class="mt-chart" id="mt-chart-' + card.id + '"></div>';
+            }
+        }
+    });
+    renderTempCharts();
+}
+
+async function refreshTemperatureFromServer() {
+    if (!TEMP_REFRESH_URL) return;
+    try {
+        const res = await fetch(TEMP_REFRESH_URL, { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const payload = await res.json();
+        if (!payload || !Array.isArray(payload.cards)) return;
+        applyTemperatureCards(payload.cards);
+    } catch (err) {
+        // 接口不可用时继续使用生成时嵌入的快照。
+    }
+}
 
 // ── Market Temperature chart state (range + optional MA overlays, off by default) ──
 const tempCharts = {};
@@ -1361,6 +1430,7 @@ window.addEventListener('load', () => {
     // Temperature is the default tab, so its cards render immediately on load.
     // Performance charts render on tab switch to avoid hidden-container sizing issues.
     renderTempCharts();
+    refreshTemperatureFromServer();
 });
 
 // ── Sortable columns ──

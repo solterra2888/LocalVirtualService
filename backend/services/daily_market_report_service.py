@@ -25,6 +25,11 @@ from zoneinfo import ZoneInfo
 
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
+from backend.services.market_session import (
+    US_CASH_INDEX_CODES,
+    build_fx_provisional_bar,
+    expected_session_date,
+)
 from backend.utils.datetime_utils import utcnow, window_label_date
 from backend.utils.logger import get_logger
 
@@ -762,25 +767,79 @@ def _fetch_chart_data(cursor, tickers: List[str]) -> Dict[str, List[Dict[str, An
     return {t: by_code[TICKER_EODHD_MAP[t]] for t in tickers}
 
 
+def _fetch_realtime_quotes(cursor, codes: List[str]) -> Dict[str, Dict[str, Any]]:
+    """读取 market_data_realtime 快照，供外汇未完成 K 线使用。"""
+    if not codes:
+        return {}
+    cursor.execute(
+        """
+        SELECT code, open, high, low, close, previous_close, volume, data_datetime
+        FROM market_data_realtime
+        WHERE code = ANY(%s)
+        """,
+        (codes,),
+    )
+    quotes: Dict[str, Dict[str, Any]] = {}
+    for row in cursor.fetchall():
+        def _num(value):
+            return float(value) if value is not None else None
+
+        quotes[row[0]] = {
+            "open": _num(row[1]),
+            "high": _num(row[2]),
+            "low": _num(row[3]),
+            "close": _num(row[4]),
+            "previous_close": _num(row[5]),
+            "volume": int(row[6]) if row[6] else 0,
+            "data_datetime": row[7],
+        }
+    return quotes
+
+
+def _stale_us_index_codes(cards: List[Dict[str, Any]], now: datetime) -> List[str]:
+    """美股指数最后一根早于应有交易日时，返回可读的差异列表。"""
+    by_code = {card.get("code"): card for card in cards}
+    stale = []
+    for code in sorted(US_CASH_INDEX_CODES):
+        expected = expected_session_date(code, now).isoformat()
+        card = by_code.get(code) or {}
+        as_of = card.get("as_of")
+        if not as_of or as_of < expected:
+            stale.append(f"{code}({as_of or 'none'}<{expected})")
+    return stale
+
+
 def _build_temperature_cards(
-    by_code: Dict[str, List[Dict[str, Any]]]
+    by_code: Dict[str, List[Dict[str, Any]]],
+    realtime_by_code: Optional[Dict[str, Dict[str, Any]]] = None,
+    now: Optional[datetime] = None,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
     构建 Market Temperature 卡片列表。
 
     Args:
         by_code: {EODHD code: bars}（来自 _fetch_chart_data_by_code）
+        realtime_by_code: 实时报价。外汇官方日线落后时用来补一根未完成 K 线。
+        now: 判断应有交易日的时刻，默认当前 UTC。
 
     Returns:
         (cards, missing_codes)
-        cards: [{id, code, label, sublabel, tv_symbol, last, chg_pct, bars}]，
+        cards: [{id, code, label, sublabel, tv_symbol, last, chg_pct, bars, as_of, provisional}]，
                bars 截断为最近 MT_MAX_BARS 条；无数据的 code 仍产出卡片
                （bars 为空，模板渲染 "No data" 占位），并计入 missing_codes。
     """
     cards: List[Dict[str, Any]] = []
     missing: List[str] = []
+    realtime_by_code = realtime_by_code or {}
+    as_of_now = now or utcnow()
     for card_id, label, code, sublabel, tv_symbol in MARKET_TEMPERATURE_CARDS:
-        bars = by_code.get(code, [])[-MT_MAX_BARS:]
+        bars = list(by_code.get(code, [])[-MT_MAX_BARS:])
+        provisional_bar = build_fx_provisional_bar(
+            code, bars, realtime_by_code.get(code), as_of_now
+        )
+        provisional = provisional_bar is not None
+        if provisional_bar:
+            bars.append(provisional_bar)
         if not bars:
             missing.append(code)
         last = bars[-1]["close"] if bars else None
@@ -797,6 +856,8 @@ def _build_temperature_cards(
             "tv_symbol": tv_symbol,
             "last": last,
             "chg_pct": round(chg_pct, 2) if chg_pct is not None else None,
+            "as_of": bars[-1]["time"] if bars else None,
+            "provisional": provisional,
             "bars": bars,
         })
     return cards, missing
@@ -814,6 +875,51 @@ class DailyMarketReportService:
     # ──────────────────────────────────────────
     # 主入口
     # ──────────────────────────────────────────
+
+    def prepare_market_data(self) -> Dict[str, Any]:
+        """日报渲染前拉一次已收盘行情。失败则再试一次，仍不完整就抛错。
+
+        调度器在 06:00 只负责入队。美股收盘大约在 04:00，这一步保证生成时库里
+        已经有上一个美国交易日，而不是停在前一晚 19:00 的快照。
+        """
+        from backend.services.market_data_service import create_market_data_service
+
+        market = create_market_data_service()
+        last: Dict[str, Any] = {"success": False, "message": "market data refresh did not run"}
+        for attempt in (1, 2):
+            last = market.fetch_and_store_market_data()
+            if last.get("success"):
+                logger.info(f"market data ready for daily report (attempt {attempt})")
+                return last
+            logger.warning(
+                f"market data not ready (attempt {attempt}): {last.get('message')}"
+            )
+        raise RuntimeError(last.get("message") or "market data refresh failed")
+
+    def load_temperature_cards(self, cursor) -> List[Dict[str, Any]]:
+        """按当前库内日线和实时价组装温度卡片。未完成外汇 K 线只出现在返回值里。"""
+        mt_data = _fetch_chart_data_by_code(cursor, MARKET_TEMPERATURE_CODES)
+        mt_realtime = _fetch_realtime_quotes(cursor, MARKET_TEMPERATURE_CODES)
+        cards, _missing = _build_temperature_cards(mt_data, mt_realtime, utcnow())
+        return cards
+
+    def get_temperature_cards_by_token(self, token: str) -> Optional[List[Dict[str, Any]]]:
+        """已完成报告的 share token 可以读取最新温度卡片。"""
+        conn = self.db_manager.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT 1 FROM daily_market_reports
+                WHERE share_token = %s AND status = 'completed'
+                """,
+                (token,),
+            )
+            if cursor.fetchone() is None:
+                return None
+            return self.load_temperature_cards(cursor)
+        finally:
+            conn.close()
 
     def generate(self, user_id: str, report_date: Optional[date] = None) -> Dict[str, Any]:
         """
@@ -898,7 +1004,15 @@ class DailyMarketReportService:
 
             # 4a-0. Market Temperature：按 EODHD code 查询全球资产日线并构建卡片
             mt_data = _fetch_chart_data_by_code(cursor, MARKET_TEMPERATURE_CODES)
-            temperature_cards, temperature_missing = _build_temperature_cards(mt_data)
+            mt_realtime = _fetch_realtime_quotes(cursor, MARKET_TEMPERATURE_CODES)
+            temperature_cards, temperature_missing = _build_temperature_cards(
+                mt_data, mt_realtime, generated_at_utc
+            )
+            stale_us = _stale_us_index_codes(temperature_cards, generated_at_utc)
+            if stale_us:
+                raise RuntimeError(
+                    "美国指数日线落后于应有交易日: " + ", ".join(stale_us)
+                )
             logger.info(
                 f"Market Temperature: "
                 f"{len(temperature_cards) - len(temperature_missing)}/"
@@ -990,9 +1104,10 @@ class DailyMarketReportService:
                 f"{'✓' if substack_row and substack_row[0] else '✗'}"
             )
 
-            # 5. 渲染 HTML
+            # 5. 渲染 HTML。share_token 要先于渲染生成，页面打开时用它刷新温度卡片。
             gen_at_ny = generated_at_utc.astimezone(ZoneInfo("America/New_York"))
             gen_at_bj = generated_at_utc.astimezone(ZoneInfo("Asia/Shanghai"))
+            share_token = uuid4().hex
 
             html = self._render_html(
                 report_date=report_date,
@@ -1006,6 +1121,7 @@ class DailyMarketReportService:
                 index_performers=index_performers,
                 my_subscriptions_html=my_subscriptions_html,
                 temperature_cards=temperature_cards,
+                share_token=share_token,
             )
 
             # 6. 保存到本地文件
@@ -1026,8 +1142,6 @@ class DailyMarketReportService:
                 "temperature_cards_found": len(temperature_cards) - len(temperature_missing),
                 "temperature_missing_codes": temperature_missing,
             }
-
-            share_token = uuid4().hex
 
             # 8. 更新数据库记录
             cursor.execute(
@@ -1096,6 +1210,7 @@ class DailyMarketReportService:
         index_performers: Dict[str, Any],
         my_subscriptions_html: str = "",
         temperature_cards: Optional[List[Dict[str, Any]]] = None,
+        share_token: str = "",
     ) -> str:
         """通过 Jinja2 渲染自包含 HTML。"""
         from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -1157,6 +1272,7 @@ class DailyMarketReportService:
             temperature_groups=MARKET_TEMPERATURE_GROUPS,
             temperature_cards=temperature_cards or [],
             temperature_json=json.dumps(temperature_cards or []),
+            share_token=share_token,
         )
         return html
 

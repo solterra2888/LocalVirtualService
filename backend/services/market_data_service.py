@@ -292,65 +292,94 @@ class MarketDataService:
             "gmtoffset": meta.get("gmtoffset", 0),
         }
 
-    def fetch_realtime_data(self, ticker: str) -> Optional[Dict[str, Any]]:
-        """获取实时数据（YAHOO_CHART_CODES 中的 code 路由到 Yahoo）"""
+    def fetch_realtime_status(self, ticker: str) -> Dict[str, Any]:
+        """获取实时数据，并保留 HTTP 状态。data 为 None 表示这次请求没有拿到报价。"""
         if ticker in YAHOO_CHART_CODES:
             chart = self._fetch_yahoo_chart(YAHOO_CHART_CODES[ticker], days=5)
-            if chart:
-                return self._yahoo_realtime_record(ticker, chart)
-            return None
+            if not chart:
+                return {"data": None, "http_status": None, "error": "yahoo chart failed"}
+            data = self._yahoo_realtime_record(ticker, chart)
+            if not data:
+                return {"data": None, "http_status": None, "error": "yahoo realtime empty"}
+            return {"data": data, "http_status": 200, "error": None}
         try:
             url = f"{self.realtime_base_url}/{ticker}"
             params = {
                 'api_token': self.api_token,
                 'fmt': 'json'
             }
-            
+
             logger.debug(f"请求实时数据: {ticker}")
             response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
-            
             data = response.json()
+            if isinstance(data, dict) and data.get("error"):
+                return {
+                    "data": None,
+                    "http_status": response.status_code,
+                    "error": str(data.get("error"))[:200],
+                }
             logger.debug(f"成功获取 {ticker} 的实时数据")
-            return data
-                
+            return {"data": data, "http_status": response.status_code, "error": None}
+        except requests.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            logger.error(f"获取 {ticker} 实时数据失败: HTTP {status} {e}")
+            return {"data": None, "http_status": status, "error": str(e)}
         except Exception as e:
             logger.error(f"获取 {ticker} 实时数据失败: {str(e)}")
-            return None
-    
-    def fetch_eod_data(self, ticker: str, days: int = 1) -> Optional[List[Dict[str, Any]]]:
-        """获取EOD历史数据（YAHOO_CHART_CODES 中的 code 路由到 Yahoo）"""
+            return {"data": None, "http_status": None, "error": str(e)}
+
+    def fetch_realtime_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """获取实时数据（YAHOO_CHART_CODES 中的 code 路由到 Yahoo）"""
+        return self.fetch_realtime_status(ticker).get("data")
+
+    def fetch_eod_status(self, ticker: str, days: int = 1) -> Dict[str, Any]:
+        """获取 EOD。HTTP 200 且无 K 线时 data 为 []；请求失败时 data 为 None。"""
         if ticker in YAHOO_CHART_CODES:
             chart = self._fetch_yahoo_chart(YAHOO_CHART_CODES[ticker], days=max(days, 5))
-            return chart.get("bars") if chart else None
+            if not chart:
+                return {"data": None, "http_status": None, "error": "yahoo chart failed"}
+            return {"data": chart.get("bars") or [], "http_status": 200, "error": None}
         try:
             # 用 utcnow 而非 datetime.now: 服务器在 HK (UTC+8), 跨日时段 datetime.now()
             # 取本地日期会比 UTC 早 1 天, 导致 EODHD 返回不全/空数据.
             from backend.utils.datetime_utils import utcnow
             from_date = (utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
-            
+
             url = f"{self.eod_base_url}/{ticker}"
             params = {
                 'api_token': self.api_token,
                 'fmt': 'json',
                 'from': from_date
             }
-            
+
             logger.debug(f"请求EOD数据: {ticker} (最近{days}天)")
             response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
-            
             data = response.json()
+            if not isinstance(data, list):
+                return {
+                    "data": None,
+                    "http_status": response.status_code,
+                    "error": "unexpected payload",
+                }
             logger.debug(f"成功获取 {ticker} 的{len(data)}条EOD数据")
-            return data
-                
+            return {"data": data, "http_status": response.status_code, "error": None}
+        except requests.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            logger.error(f"获取 {ticker} EOD数据失败: HTTP {status} {e}")
+            return {"data": None, "http_status": status, "error": str(e)}
         except Exception as e:
             logger.error(f"获取 {ticker} EOD数据失败: {str(e)}")
-            return None
+            return {"data": None, "http_status": None, "error": str(e)}
+
+    def fetch_eod_data(self, ticker: str, days: int = 1) -> Optional[List[Dict[str, Any]]]:
+        """获取EOD历史数据（YAHOO_CHART_CODES 中的 code 路由到 Yahoo）"""
+        return self.fetch_eod_status(ticker, days).get("data")
     
     # ==== 🚀 并发获取方法 ====
     
-    def concurrent_fetch_realtime_data(self, assets: List[tuple]) -> Dict[str, Dict[str, Any]]:
+    def concurrent_fetch_realtime_data(self, assets: List[tuple]):
         """
         并发获取多个资产的实时数据
         
@@ -358,37 +387,56 @@ class MarketDataService:
             assets: 资产列表，每个元素为 (name, code, asset_type, category)
             
         Returns:
-            Dict[name, data_dict]: {资产名称: 实时数据字典}
+            (results, outcomes)
+            results: {资产名称: 实时数据字典}
+            outcomes: {code: {ok, http_status, error}}
         """
         results = {}
-        
+        outcomes: Dict[str, Dict[str, Any]] = {}
+
         def fetch_single_realtime(asset_info):
             """获取单个资产的实时数据"""
             name, code, asset_type, category = asset_info
             try:
-                data = self.fetch_realtime_data(code)
+                status = self.fetch_realtime_status(code)
+                data = status.get("data")
                 if data:
-                    return (name, {"code": code, "asset_type": asset_type, "category": category, "data": data})
+                    return (
+                        name,
+                        {"code": code, "asset_type": asset_type, "category": category, "data": data},
+                        {"ok": True, "http_status": status.get("http_status"), "error": None},
+                    )
+                return (
+                    name,
+                    None,
+                    {
+                        "ok": False,
+                        "http_status": status.get("http_status"),
+                        "error": status.get("error"),
+                    },
+                )
             except Exception as e:
                 logger.error(f"并发获取{name}实时数据失败: {str(e)}")
-            return (name, None)
+                return (name, None, {"ok": False, "http_status": None, "error": str(e)})
         
         # 使用线程池并发获取
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {executor.submit(fetch_single_realtime, asset): asset for asset in assets}
             
             for future in as_completed(futures):
+                asset = futures[future]
                 try:
-                    name, data = future.result()
+                    name, data, outcome = future.result()
+                    outcomes[asset[1]] = outcome
                     if data:
                         results[name] = data
                 except Exception as e:
-                    asset = futures[future]
+                    outcomes[asset[1]] = {"ok": False, "http_status": None, "error": str(e)}
                     logger.error(f"并发获取{asset[0]}实时数据异常: {str(e)}")
-        
-        return results
+
+        return results, outcomes
     
-    def concurrent_fetch_eod_data(self, assets: List[tuple], days: int = 1) -> Dict[str, List[Dict[str, Any]]]:
+    def concurrent_fetch_eod_data(self, assets: List[tuple], days: int = 1):
         """
         并发获取多个资产的EOD数据
         
@@ -397,35 +445,54 @@ class MarketDataService:
             days: 获取最近N天的数据
             
         Returns:
-            Dict[name, eod_data_list]: {资产名称: EOD数据列表}
+            (results, outcomes)
+            results: {资产名称: EOD数据}
+            outcomes: {code: {ok, empty, http_status, error}}
         """
         results = {}
-        
+        outcomes: Dict[str, Dict[str, Any]] = {}
+
         def fetch_single_eod(asset_info):
             """获取单个资产的EOD数据"""
             name, code, asset_type, category = asset_info
             try:
-                data = self.fetch_eod_data(code, days)
+                status = self.fetch_eod_status(code, days)
+                data = status.get("data")
+                outcome = {
+                    "ok": bool(data),
+                    "empty": data == [],
+                    "http_status": status.get("http_status"),
+                    "error": status.get("error"),
+                }
                 if data:
-                    return (name, {"code": code, "asset_type": asset_type, "category": category, "data": data})
+                    return (
+                        name,
+                        {"code": code, "asset_type": asset_type, "category": category, "data": data},
+                        outcome,
+                    )
+                return (name, None, outcome)
             except Exception as e:
                 logger.error(f"并发获取{name} EOD数据失败: {str(e)}")
-            return (name, None)
-        
+                return (name, None, {"ok": False, "empty": False, "http_status": None, "error": str(e)})
+
         # 使用线程池并发获取
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {executor.submit(fetch_single_eod, asset): asset for asset in assets}
-            
+
             for future in as_completed(futures):
+                asset = futures[future]
                 try:
-                    name, data = future.result()
+                    name, data, outcome = future.result()
+                    outcomes[asset[1]] = outcome
                     if data:
                         results[name] = data
                 except Exception as e:
-                    asset = futures[future]
+                    outcomes[asset[1]] = {
+                        "ok": False, "empty": False, "http_status": None, "error": str(e),
+                    }
                     logger.error(f"并发获取{asset[0]} EOD数据异常: {str(e)}")
-        
-        return results
+
+        return results, outcomes
     
     def parse_realtime_data(self, code: str, name: str, asset_type: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """解析实时数据"""
@@ -1140,6 +1207,33 @@ class MarketDataService:
             if conn:
                 conn.close()
     
+    def _latest_eod_dates(self, codes: List[str]) -> Dict[str, Any]:
+        """每个代码在 market_data_eod 里的最新交易日。"""
+        if not codes:
+            return {}
+        conn = None
+        try:
+            conn = self.db_manager.get_connection()
+            if not conn:
+                return {}
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT code, MAX(date)
+                FROM market_data_eod
+                WHERE code = ANY(%s)
+                GROUP BY code
+                """,
+                (list(set(codes)),),
+            )
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"查询最新 EOD 日期失败: {e}")
+            return {}
+        finally:
+            if conn:
+                conn.close()
+
     def fetch_and_store_market_data(self, 
                                     asset_types: Optional[List[str]] = None,
                                     fetch_realtime: bool = True,
@@ -1196,13 +1290,16 @@ class MarketDataService:
             realtime_stats = {'success': 0, 'failed': 0}
             eod_stats = {'success': 0, 'failed': 0}
             
+            realtime_outcomes: Dict[str, Dict[str, Any]] = {}
+            eod_outcomes: Dict[str, Dict[str, Any]] = {}
+
             # 🚀 并发获取实时数据
             if fetch_realtime:
                 realtime_fetch_start = datetime.now()
                 logger.info(f"开始并发获取实时数据 (资产数={total_assets}, 并发数={self.max_workers})")
                 
                 # 使用并发方法获取数据
-                concurrent_results = self.concurrent_fetch_realtime_data(assets_list)
+                concurrent_results, realtime_outcomes = self.concurrent_fetch_realtime_data(assets_list)
                 
                 # 解析数据
                 realtime_records = []
@@ -1235,7 +1332,7 @@ class MarketDataService:
                 logger.info(f"开始并发获取EOD数据 (资产数={total_assets}, 天数={eod_days}, 并发数={self.max_workers})")
                 
                 # 使用并发方法获取数据
-                concurrent_results = self.concurrent_fetch_eod_data(assets_list, days=eod_days)
+                concurrent_results, eod_outcomes = self.concurrent_fetch_eod_data(assets_list, days=eod_days)
                 
                 # 解析数据
                 all_eod_records = []
@@ -1259,23 +1356,47 @@ class MarketDataService:
                     fetch_time = (datetime.now() - eod_fetch_start).total_seconds()
                     logger.info(f"✅ EOD数据完成: 获取用时{fetch_time:.2f}s, 存储用时{storage_time:.2f}s, "
                               f"成功{eod_stats['success']}, 失败{eod_stats['failed']}")
+
+            from backend.services.market_session import evaluate_fetch_health
+            from backend.utils.datetime_utils import utcnow
+            latest_dates = self._latest_eod_dates([code for _name, code, _atype, _cat in assets_list]) if fetch_eod else {}
+            health = evaluate_fetch_health(
+                [(name, code) for name, code, _atype, _cat in assets_list],
+                eod_outcomes,
+                realtime_outcomes,
+                latest_dates,
+                utcnow(),
+                store_failed=realtime_stats['failed'] + eod_stats['failed'],
+                check_eod=fetch_eod,
+            )
             
             execution_time = (datetime.now() - start_time).total_seconds()
             speed = total_assets / execution_time if execution_time > 0 else 0
-            
-            logger.info(f"🎉 市场数据获取完成：实时数据成功{realtime_stats['success']}/失败{realtime_stats['failed']}，"
-                       f"EOD数据成功{eod_stats['success']}/失败{eod_stats['failed']}，"
+
+            if health["success"]:
+                message = f"成功获取市场数据：实时{realtime_stats['success']}条，历史{eod_stats['success']}条"
+            else:
+                message = f"市场数据不完整：{health['reason']}"
+
+            logger.info(f"🎉 市场数据获取完成：{message}，"
                        f"总耗时{execution_time:.2f}秒，平均速度{speed:.1f}资产/秒")
             
             return {
-                'success': True,
-                'message': f"成功获取市场数据：实时{realtime_stats['success']}条，历史{eod_stats['success']}条",
+                'success': health["success"],
+                'message': message,
                 'data': {
                     'total_assets': total_assets,
                     'realtime': realtime_stats,
                     'eod': eod_stats,
                     'execution_time': execution_time,
-                    'speed': f"{speed:.2f} assets/sec"
+                    'speed': f"{speed:.2f} assets/sec",
+                    'health': {
+                        'failure_ratio': health['failure_ratio'],
+                        'auth_codes': health['auth_codes'],
+                        'stale_critical': health['stale_critical'],
+                        'failed_codes': health['failed_codes'][:30],
+                        'closed_count': len(health['closed_codes']),
+                    },
                 }
             }
             

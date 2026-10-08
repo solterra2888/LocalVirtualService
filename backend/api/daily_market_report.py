@@ -64,6 +64,16 @@ async def generate_report(
     }
 
 
+@router.get("/shared/{token}/temperature")
+async def get_shared_temperature(token: str):
+    """打开报告时刷新温度卡片。未完成的外汇 K 线来自实时价，不写入日线表。"""
+    svc = DailyMarketReportService()
+    cards = svc.get_temperature_cards_by_token(token)
+    if cards is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"cards": cards}
+
+
 @router.get("/shared/{token}", response_class=HTMLResponse)
 async def get_shared_report(token: str):
     """通过 share_token 公共访问报告 HTML（无需认证）。"""
