@@ -547,6 +547,26 @@
   flex-direction: column;
 }
 
+/* Markdown 编辑模式（Original 文本笔记 / AI Analysis）：面板转为纵向 flex，编辑框占满可视高度。
+   复用桌面端在编辑容器上挂的 .files-markdown-edit-fill 标记类；面板保留 overflow:auto，
+   软键盘弹出的极小视口下内容超出仍可滚动，避免 Save/Cancel 被裁剪 */
+.mobile-source-file-detail-pane:has(.files-markdown-edit-fill) {
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-source-file-detail-pane:has(.files-markdown-edit-fill) > .ai-analysis-view-root {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* AI Analysis 顶部工具栏（Analysis Time 行）不参与压缩 */
+.mobile-source-file-detail-pane:has(.files-markdown-edit-fill) > .ai-analysis-view-root > :first-child {
+  flex-shrink: 0;
+}
+
 /* Original > Audio：内联原生播放控件，保证手机 WebKit 有足够触控区域 */
 .mobile-source-file-detail-pane--original .original-inline-audio-player audio {
   width: 100%;
@@ -556,6 +576,31 @@
 /* Original 内嵌 PDF：给 iframe 父级明确视口高度，避免 iOS/Android WebKit 只显示插件占位图 */
 .mobile-source-file-detail-pane--original .original-pdf-frame-host {
   min-height: calc(100dvh - 140px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important;
+}
+
+/* Original 内嵌媒体（Word/Office 预览、Web 快照）：镜像桌面端 .files-page-layout 下的填满规则。
+   桌面规则限定在 .files-page-layout 作用域，手机端此前缺失，iframe 只有浏览器默认 ~150px 高 */
+.mobile-source-file-detail-pane--original .files-original-media-fill {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-source-file-detail-pane--original .files-original-media-fill .files-original-media-frame {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mobile-source-file-detail-pane--original .files-original-media-fill .files-original-media-frame > iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 
 .mobile-source-file-detail-pane--info .ant-descriptions-item-label {

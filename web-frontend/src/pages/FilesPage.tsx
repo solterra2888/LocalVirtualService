@@ -5165,6 +5165,7 @@ const ContentMarkdownView: React.FC<{
       <>
         {reparseModalContent}
         <div
+          className="files-markdown-edit-fill"
           style={{
             flex: 1,
             minHeight: 0,
@@ -5187,7 +5188,6 @@ const ContentMarkdownView: React.FC<{
             borderColor: themeColors.cardBorder,
             color: themeColors.text,
           }}
-          className={isDark ? 'files-content-textarea-dark' : ''}
         />
         <Space style={{ marginTop: 12 }}>
           <Tooltip title="Save">
@@ -5357,6 +5357,7 @@ const OriginalTextNotePanel: React.FC<{
   if (isEditing) {
     return (
       <div
+        className="files-markdown-edit-fill"
         style={{
           flex: 1,
           minHeight: 0,
@@ -5380,7 +5381,6 @@ const OriginalTextNotePanel: React.FC<{
             borderColor: themeColors.cardBorder,
             color: themeColors.text,
           }}
-          className={isDark ? 'files-content-textarea-dark' : ''}
         />
         <Space style={{ marginTop: 12 }}>
           <Tooltip title="Save">
@@ -7388,7 +7388,7 @@ export const AIAnalysisView: React.FC<{
   const canReAnalyzeAudio = isAudioFile && onAnalyzeAudio && !audioAnalyzing;
 
   return (
-    <div style={{ width: '100%' }}>
+    <div className="ai-analysis-view-root" style={{ width: '100%' }}>
       <div style={{ 
         marginBottom: '16px', 
         padding: '12px',
@@ -7630,6 +7630,7 @@ export const AIAnalysisView: React.FC<{
       
       {isEditing ? (
         <div
+          className="files-markdown-edit-fill"
           style={{
             flex: 1,
             minHeight: 0,
@@ -7651,7 +7652,6 @@ export const AIAnalysisView: React.FC<{
               borderColor: themeColors.cardBorder,
               color: themeColors.text,
             }}
-            className={isDark ? 'files-content-textarea-dark' : ''}
           />
           <Space style={{ marginTop: 12 }}>
             <Tooltip title="Save">

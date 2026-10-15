@@ -1618,6 +1618,29 @@
   flex-direction: column;
 }
 
+/* Markdown 编辑模式（Original 文本笔记 / Content 标签页 / AI Analysis）：
+   滚动容器转为 flex column 并停止滚动，让编辑框占满面板可视高度 */
+.files-page-layout .files-detail-left-content:has(.files-markdown-edit-fill),
+.files-page-layout .files-detail-right-content:has(.files-markdown-edit-fill) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 左侧 Original 链路与 AI Analysis 链路的中间层容器接通 flex 高度 */
+.files-page-layout .files-detail-left-content:has(.files-markdown-edit-fill) > .files-original-view-root,
+.files-page-layout .files-detail-right-content:has(.files-markdown-edit-fill) > .ai-analysis-view-root {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 中间层内的工具栏不参与压缩，编辑框占满剩余高度 */
+.files-page-layout .files-detail-right-content > .ai-analysis-view-root > :first-child {
+  flex-shrink: 0;
+}
+
 .files-page-layout .files-original-media-fill .files-original-media-frame {
   position: relative;
   flex: 1 1 0;

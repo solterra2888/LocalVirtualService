@@ -29,7 +29,7 @@ const LoginPage: React.FC = () => {
     <div className="login-container">
       <Card className="login-form-container">
         <div className="login-logo">
-          <img src="/GuanHeCapital.ico" alt="Broadview Hub" style={{ width: 72, height: 72, marginBottom: 16 }} />
+          <img src="/GuanHeCapital.ico" alt="GuanHe Terminal" style={{ width: 72, height: 72, marginBottom: 16 }} />
           <Title
             level={2}
             className="login-title"
@@ -39,15 +39,20 @@ const LoginPage: React.FC = () => {
               marginTop: 0,
             }}
           >
-            Broadview Hub
+            GuanHe Terminal
           </Title>
           <Text
             className="login-subtitle"
             style={{
               fontFamily: "'Aladin', cursive",
               letterSpacing: '0.02em',
+              display: 'block',
+              marginBottom: 8,
             }}
           >
+            觀合終端
+          </Text>
+          <Text type="secondary" style={{ fontSize: 13, letterSpacing: '0.02em' }}>
             Do the Right things. Do things right.
           </Text>
         </div>

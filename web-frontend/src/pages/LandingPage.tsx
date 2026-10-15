@@ -359,8 +359,8 @@ const LandingPage: React.FC = () => {
           <a href="#top" className="gh-brand">
             <span className="gh-brand-mark">觀</span>
             <span className="gh-brand-text">
-              <span className="gh-brand-cn">博觀匯</span>
-              <span className="gh-brand-en">Broadview Hub</span>
+              <span className="gh-brand-cn">觀合終端</span>
+              <span className="gh-brand-en">GuanHe Terminal</span>
             </span>
           </a>
           <div className="gh-nav-links">
@@ -422,7 +422,7 @@ const LandingPage: React.FC = () => {
       <section className="gh-section gh-thesis">
         <div className="gh-container">
           <div className="reveal">
-            <span className="gh-eyebrow">Why Broadview</span>
+            <span className="gh-eyebrow">Why GuanHe Terminal</span>
             <p className="gh-thesis-lead">
               We bring <span className="gold">every source</span>, every report and every quote into one
               AI-powered workspace — so the signal rises above the noise, and research becomes decisions.
@@ -503,7 +503,7 @@ const LandingPage: React.FC = () => {
       <section className="gh-section" id="workflow">
         <div className="gh-container">
           <div className="reveal" style={{ marginBottom: 8 }}>
-            <span className="gh-eyebrow">A Day with Broadview</span>
+            <span className="gh-eyebrow">A Day with GuanHe Terminal</span>
             <h2 className="gh-section-title">From morning scan to deep research.</h2>
             <div className="gh-section-title-cn">投资者的完整一天</div>
           </div>
@@ -543,8 +543,8 @@ const LandingPage: React.FC = () => {
               <a href="#top" className="gh-brand">
                 <span className="gh-brand-mark">觀</span>
                 <span className="gh-brand-text">
-                  <span className="gh-brand-cn">博觀匯</span>
-                  <span className="gh-brand-en">Broadview Hub</span>
+                  <span className="gh-brand-cn">觀合終端</span>
+                  <span className="gh-brand-en">GuanHe Terminal</span>
                 </span>
               </a>
               <p className="gh-footer-tag">
@@ -574,7 +574,7 @@ const LandingPage: React.FC = () => {
             </div>
           </div>
           <div className="gh-footer-bottom">
-            <span>© 2026 Broadview Hub · 博觀匯</span>
+            <span>© 2026 GuanHe Terminal · 觀合終端</span>
             <span>Hong Kong · 二级市场投资研究平台</span>
           </div>
         </div>
