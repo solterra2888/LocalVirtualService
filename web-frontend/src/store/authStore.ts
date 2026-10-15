@@ -1,6 +1,7 @@
 // 认证状态管理
 import { create } from 'zustand';
 import {
+  detectClientType,
   get401UserMessage,
   isSessionReplaced401Detail,
   showSessionReplacedModal,
@@ -50,7 +51,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(credentials),
+        body: JSON.stringify({
+          ...credentials,
+          client_type: detectClientType(),
+        }),
       });
       
       if (!response.ok) {

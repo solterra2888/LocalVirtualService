@@ -15,7 +15,7 @@ from backend.auth.jwt_utils import (
     get_current_user,
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
-from backend.auth.user_auth import UserAuth
+from backend.auth.user_auth import UserAuth, normalize_client_type
 from backend.database.db_manager import DatabaseManager
 from backend.utils.database_config import get_database_config
 from backend.utils.avatar import resolve_avatar_url
@@ -48,17 +48,19 @@ async def login(login_request: UserLoginRequest):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Extension 登录不递增会话版本，允许 Web 和 Extension 同时在线
+    # 会话版本按客户端类型独立计数：web/mobile/extension 互不挤占，
+    # 同类型内新登录踢掉旧会话；Extension 不递增，允许多个扩展同时在线
+    client_type = normalize_client_type(login_request.client_type)
     user_auth = UserAuth(db_conn_params)
-    if login_request.client_type == "extension":
-        new_tv = user_auth.get_token_version(login_request.username)
+    if client_type == "extension":
+        new_tv = user_auth.get_token_version(login_request.username, client_type="extension")
         if new_tv is None or new_tv == -1:
             new_tv = 1
     else:
-        new_tv = user_auth.increment_token_version(login_request.username)
+        new_tv = user_auth.increment_token_version(login_request.username, client_type=client_type)
         if new_tv is None:
             new_tv = 1
-    
+
     # 创建访问令牌
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -67,6 +69,7 @@ async def login(login_request: UserLoginRequest):
             "user_id": user_info['id'],
             "is_admin": user_info.get('is_admin', False),
             "tv": new_tv,
+            "ct": client_type,
         },
         expires_delta=access_token_expires
     )

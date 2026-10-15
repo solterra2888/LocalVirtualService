@@ -35,7 +35,12 @@ npm install
 # Development server (port 3000)
 npm start
 
-# Production build
+# Production deploy (staging build without sourcemaps, sync to build/, reload nginx)
+npm run deploy
+
+# Local build check only — do NOT use on the production server:
+# builds directly into build/ (breaks the live site mid-build) and
+# enables sourcemaps, which can OOM on low-memory machines
 npm run build
 
 # Run tests

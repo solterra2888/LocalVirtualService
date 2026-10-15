@@ -1,6 +1,6 @@
 # 权限系统说明
 
-> 最后更新：2026-05-10
+> 最后更新：2026-10-15
 
 ---
 
@@ -53,11 +53,14 @@ access_token = create_access_token(data={
     "sub": user_info['username'],
     "user_id": user_info['id'],
     "is_admin": user_info.get('is_admin', False),
-    "tv": new_tv,          # 会话版本号，多设备登录时使旧 token 失效
+    "tv": new_tv,          # 会话版本号，同类型客户端新登录时使旧 token 失效
+    "ct": client_type,     # 客户端类型 web/mobile/extension，各类型会话独立计数
 })
 ```
 
 Token 有效期：**8 小时**（`ACCESS_TOKEN_EXPIRE_MINUTES = 480`）。
+
+> 会话版本按客户端类型独立计数（PC 与手机可同时在线，同类型互踢），详见 [CLIENT_SESSION_MANAGEMENT.md](./CLIENT_SESSION_MANAGEMENT.md)。
 
 > **注意**：`is_admin` 以**登录时 JWT 为准**。若在数据库中变更了用户的管理员状态，需重新登录才生效。
 

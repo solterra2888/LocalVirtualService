@@ -285,10 +285,12 @@ pip install llama-index          # 文件解析（LlamaParse），未包含在 r
 ```bash
 cd web-frontend
 npm install
-npm run build
+CI=false GENERATE_SOURCEMAP=false npm run build
 cd ..
 ```
 
+> **为什么关闭 sourcemap**：本项目前端依赖较重，默认构建会生成 source map，内存峰值很高，低内存服务器上可能 OOM 导致构建失败甚至系统卡死。
+>
 > **本地开发**：执行 `cd web-frontend && npm start` 启动开发服务器（端口 3000，支持热更新），无需 Nginx。
 >
 > **线上部署**：前端由 Docker Nginx 以静态文件方式提供服务，不使用 `npm start`。
@@ -348,7 +350,7 @@ docker run -d --name nginx \
   nginx:alpine
 ```
 
-> **关键挂载**：`-v .../web-frontend/build:/usr/share/nginx/html/guanhe:ro` 将构建产物直接挂载为 Nginx 站点根目录。每次 `npm run build` 后 Nginx 自动读取最新文件，无需额外复制。如果项目目录不在 `/opt/guanhetech`，请将路径替换为实际的 `PROJECT_DIR`。
+> **关键挂载**：`-v .../web-frontend/build:/usr/share/nginx/html/guanhe:ro` 将构建产物直接挂载为 Nginx 站点根目录。注意：Nginx 容器运行后，更新前端一律使用 `npm run deploy`（见下文），不要直接 `npm run build`——后者会原地重建 `build/`，构建期间线上站点会出现缺文件/404。如果项目目录不在 `/opt/guanhetech`，请将路径替换为实际的 `PROJECT_DIR`。
 
 验证容器运行：
 
@@ -368,10 +370,9 @@ npm run deploy
 
 **deploy 脚本说明**：该命令对应 `web-frontend/package.json` 中的 `scripts.deploy`，实际执行：
 
-1. `CI=false react-scripts build` — 构建前端（`CI=false` 避免 ESLint 警告导致构建失败）；
-2. `docker exec nginx nginx -s reload` — 通知 Nginx 重载，使新构建产物生效。
-
-因 Nginx 容器已将 `web-frontend/build/` 挂载为站点目录，构建会直接更新该目录，执行上述命令后用户访问到的即为最新前端。
+1. `CI=false GENERATE_SOURCEMAP=false NODE_OPTIONS=--max-old-space-size=2048 BUILD_PATH=build-staging react-scripts build` — 构建前端（`CI=false` 避免 ESLint 警告导致构建失败；关闭 sourcemap 并将 Node 堆内存限制为 2 GB，避免低内存服务器 OOM；产物先写入临时目录 `build-staging/`，不触碰线上目录）；
+2. `rsync -a --delete build-staging/ build/ && rm -rf build-staging` — 构建成功后一次性同步到 `build/`（Nginx 挂载目录），再删除临时目录；
+3. `docker exec nginx nginx -s reload` — 通知 Nginx 重载，使新构建产物生效。
 
 ---
 

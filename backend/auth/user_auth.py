@@ -10,6 +10,26 @@ import psycopg2
 from datetime import datetime
 from config.settings import config
 
+# 会话版本按客户端类型独立计数：同类设备登录互踢，异类设备可同时在线。
+# web 复用原有 token_version 列，存量数据无需迁移。
+SESSION_VERSION_COLUMNS = {
+    "web": "token_version",
+    "mobile": "token_version_mobile",
+    "extension": "token_version_extension",
+}
+
+
+def normalize_client_type(client_type):
+    """将客户端类型归一化为 web / mobile / extension，空值或未知值按 web 处理"""
+    if client_type in SESSION_VERSION_COLUMNS:
+        return client_type
+    return "web"
+
+
+def session_version_column(client_type):
+    """返回客户端类型对应的 users 表会话版本列名（列名来自白名单，可安全拼接 SQL）"""
+    return SESSION_VERSION_COLUMNS[normalize_client_type(client_type)]
+
 
 class UserAuth:
     """用户认证类"""
@@ -127,21 +147,32 @@ class UserAuth:
         finally:
             conn.close()
 
-    def get_token_version(self, username: str):
-        """读取用户当前会话版本（用于校验 JWT 是否仍为最新登录会话）"""
+    @staticmethod
+    def _ensure_session_version_columns(cursor):
+        """确保三种客户端类型的会话版本列都存在（自迁移，幂等）"""
+        for column in SESSION_VERSION_COLUMNS.values():
+            cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = %s
+            """, (column,))
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    f"ALTER TABLE users ADD COLUMN {column} INTEGER NOT NULL DEFAULT 1"
+                )
+                print(f"已添加{column}列到users表")
+
+    def get_token_version(self, username: str, client_type: str = "web"):
+        """读取指定客户端类型的会话版本（用于校验 JWT 是否仍为该类型最新登录会话）"""
+        column = session_version_column(client_type)
         conn = self.get_connection()
         if not conn:
             return None
         try:
             cursor = conn.cursor()
-            cursor.execute("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'users' AND column_name = 'token_version'
-            """)
-            if cursor.fetchone() is None:
-                return None
+            self._ensure_session_version_columns(cursor)
+            conn.commit()
             cursor.execute(
-                "SELECT token_version FROM users WHERE username = %s",
+                f"SELECT {column} FROM users WHERE username = %s",
                 (username,),
             )
             row = cursor.fetchone()
@@ -154,24 +185,20 @@ class UserAuth:
         finally:
             conn.close()
 
-    def increment_token_version(self, username: str):
-        """新登录时递增会话版本，使其它设备上的旧 JWT 失效"""
+    def increment_token_version(self, username: str, client_type: str = "web"):
+        """指定客户端类型新登录时递增其会话版本，仅使同类型的旧 JWT 失效"""
+        column = session_version_column(client_type)
         conn = self.get_connection()
         if not conn:
             return None
         try:
             cursor = conn.cursor()
-            cursor.execute("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'users' AND column_name = 'token_version'
-            """)
-            if cursor.fetchone() is None:
-                return None
+            self._ensure_session_version_columns(cursor)
             cursor.execute(
-                """
-                UPDATE users SET token_version = token_version + 1
+                f"""
+                UPDATE users SET {column} = {column} + 1
                 WHERE username = %s
-                RETURNING token_version
+                RETURNING {column}
                 """,
                 (username,),
             )
@@ -259,16 +286,8 @@ class UserAuth:
                 cursor.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
                 print("已添加avatar_url列到users表")
 
-            cursor.execute("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'users' AND column_name = 'token_version'
-            """)
-            if cursor.fetchone() is None:
-                cursor.execute(
-                    "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1"
-                )
-                cursor.execute("UPDATE users SET token_version = 1")
-                print("已添加token_version列到users表")
+            # 三种客户端类型的会话版本列（含原有 token_version，兼容存量部署）
+            UserAuth._ensure_session_version_columns(cursor)
             
             # 检查是否有任何用户
             cursor.execute("SELECT COUNT(*) FROM users")

@@ -12,7 +12,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from passlib.context import CryptContext
 
 from backend.schemas.user import TokenData
-from backend.auth.user_auth import UserAuth
+from backend.auth.user_auth import UserAuth, normalize_client_type
 from backend.utils.database_config import get_database_config
 from backend.utils.datetime_utils import utcnow
 from config.settings import config
@@ -64,7 +64,7 @@ SESSION_REPLACED_DETAIL = {
 
 
 def verify_token(token: str) -> TokenData:
-    """验证 JWT 并与数据库中的会话版本比对（新设备登录会使旧 token 失效）"""
+    """验证 JWT 并与数据库中对应客户端类型的会话版本比对（同类型新登录会使旧 token 失效）"""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
@@ -73,7 +73,9 @@ def verify_token(token: str) -> TokenData:
         tv_claim = payload.get("tv")
         if tv_claim is None:
             tv_claim = 0
-        
+        # 旧 token 没有 ct 声明，按 web 处理（与拆分前的校验行为一致）
+        client_type = normalize_client_type(payload.get("ct"))
+
         if username is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -83,7 +85,7 @@ def verify_token(token: str) -> TokenData:
 
         db_conn_params = get_database_config()
         user_auth = UserAuth(db_conn_params)
-        db_tv = user_auth.get_token_version(username)
+        db_tv = user_auth.get_token_version(username, client_type=client_type)
         if db_tv == -1:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -102,6 +104,7 @@ def verify_token(token: str) -> TokenData:
             user_id=user_id,
             is_admin=is_admin,
             token_version=int(tv_claim),
+            client_type=client_type,
         )
     except HTTPException:
         raise
