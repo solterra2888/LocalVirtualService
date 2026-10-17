@@ -285,11 +285,11 @@ pip install llama-index          # 文件解析（LlamaParse），未包含在 r
 ```bash
 cd web-frontend
 npm install
-CI=false GENERATE_SOURCEMAP=false npm run build
+npm run deploy
 cd ..
 ```
 
-> **为什么关闭 sourcemap**：本项目前端依赖较重，默认构建会生成 source map，内存峰值很高，低内存服务器上可能 OOM 导致构建失败甚至系统卡死。
+> **为什么用 `npm run deploy` 而不是 `npm run build`**：本项目前端依赖较重，默认构建会生成 source map，内存峰值很高，低内存服务器上可能 OOM 导致构建失败甚至系统卡死（7GB 服务器曾两次整机死机）。`deploy` 会关闭 sourcemap、限制 Node 堆内存并先做内存预检；裸 `npm run build` 已被 `scripts/guard-build.js` 拦截。首次部署时 Nginx 容器尚未创建，`deploy` 会自动跳过重载步骤。
 >
 > **本地开发**：执行 `cd web-frontend && npm start` 启动开发服务器（端口 3000，支持热更新），无需 Nginx。
 >
@@ -368,11 +368,17 @@ cd web-frontend
 npm run deploy
 ```
 
-**deploy 脚本说明**：该命令对应 `web-frontend/package.json` 中的 `scripts.deploy`，实际执行：
+**deploy 脚本说明**：该命令对应 `web-frontend/package.json` 中的 `scripts.deploy`，实际执行 `web-frontend/scripts/deploy.sh`，流程：
 
-1. `CI=false GENERATE_SOURCEMAP=false NODE_OPTIONS=--max-old-space-size=2048 BUILD_PATH=build-staging react-scripts build` — 构建前端（`CI=false` 避免 ESLint 警告导致构建失败；关闭 sourcemap 并将 Node 堆内存限制为 2 GB，避免低内存服务器 OOM；产物先写入临时目录 `build-staging/`，不触碰线上目录）；
+1. **安全构建**（`scripts/build-safe.sh`）：
+   - **并发锁**：通过 `flock` 保证同一时刻只有一个构建（防止两个构建叠加内存导致 OOM）；
+   - **残留进程检查**：发现卡死的 `react-scripts` 进程时拒绝构建，提示先 `pkill -f react-scripts`；
+   - **内存预检**：`MemAvailable` 低于 3000MB 时拒绝构建（构建峰值约需 2~3.5GB 余量）；
+   - 构建本身：`CI=false GENERATE_SOURCEMAP=false NODE_OPTIONS=--max-old-space-size=2048 BUILD_PATH=build-staging react-scripts build`（`CI=false` 避免 ESLint 警告导致构建失败；关闭 sourcemap 并将 Node 堆内存限制为 2 GB；产物先写入临时目录 `build-staging/`，不触碰线上目录）；
 2. `rsync -a --delete build-staging/ build/ && rm -rf build-staging` — 构建成功后一次性同步到 `build/`（Nginx 挂载目录），再删除临时目录；
-3. `docker exec nginx nginx -s reload` — 通知 Nginx 重载，使新构建产物生效。
+3. `docker exec nginx nginx -s reload` — 通知 Nginx 重载，使新构建产物生效（Nginx 容器未运行时自动跳过，便于首次部署）。
+
+> **裸 `npm run build` 已被拦截**（`scripts/guard-build.js`）：裸构建不限内存、会原地清空线上 `build/` 目录，曾两次导致服务器 OOM 整机死机（2026-10-15 / 2026-10-17）。VS Code 的默认构建任务（Ctrl+Shift+B）执行的正是 `npm run build`，请注意不要在服务器上使用；确需仅验证编译时执行 `GUANHE_ALLOW_BUILD=1 npm run build`（与 deploy 同样安全，产物只到 `build-staging/`，不会上线）。
 
 ---
 

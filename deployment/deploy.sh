@@ -283,12 +283,12 @@ fi
 
 # 前端构建产物通过 Docker volume mount 直接挂载到 Nginx 容器
 # （-v /opt/guanhetech/web-frontend/build:/usr/share/nginx/html/guanhe:ro）
-# npm run build 后自动生效，无需复制或符号链接
+# npm run deploy 后自动生效，无需复制或符号链接
 FRONTEND_BUILD="$PROJECT_DIR/web-frontend/build"
 if [ -d "$FRONTEND_BUILD" ]; then
     echo "   ✅ 前端构建目录存在: $FRONTEND_BUILD (通过 Docker mount 提供给 Nginx)"
 else
-    echo "   ⚠️  前端构建目录不存在: $FRONTEND_BUILD，请先执行 cd web-frontend && npm run build"
+    echo "   ⚠️  前端构建目录不存在: $FRONTEND_BUILD，请先执行 cd web-frontend && npm run deploy"
 fi
 
 # manifest.json（前端 PWA 配置）

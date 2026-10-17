@@ -97,6 +97,8 @@ def _run_generate(summary_row, existing_row, force=False):
             cur.fetchone.return_value = summary_row
         elif "RETURNING id" in sql:
             cur.fetchone.return_value = (99,)
+        elif "RETURNING share_token" in sql:
+            cur.fetchone.return_value = ("token-123",)
         elif "surveillance_reports" in sql and "status" in sql:
             cur.fetchone.return_value = existing_row
 

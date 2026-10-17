@@ -290,7 +290,7 @@ ORDER BY fd.meeting_date DESC;
 - 9 份文档 LLM 概括全部 completed（qwen3-max），五段结构齐全，密度词转译如实
 - EODHD 交叉验证：3.75 三源一致（Fed 原文 / regex 抽取 / economic_events）
 - migration 幂等（重复执行验证过）
-- 前端 `npm run build` 通过
+- 前端 `npm run deploy` 通过
 
 **V2 概率模块已实测验证**（2026-08-20）：
 

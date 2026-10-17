@@ -59,7 +59,7 @@ Scheduler 功能横跨 **独立调度器服务、主 Web 应用、前端、Postg
   - [ ] `handleSubmit` 分支：调用 `createCronTask` 或专用 API
 - [ ] `web-frontend/src/services/scheduler.ts` — `ScheduledTask.type` 联合类型
 - [ ] `web-frontend/src/components/TaskExecutionHistory.tsx` — 展示名称 / 图标（如有）
-- [ ] 执行 `npm run build` 并确认生产环境加载新 build
+- [ ] 执行 `npm run deploy` 并确认生产环境加载新 build
 
 ### 验证命令
 

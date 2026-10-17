@@ -72,6 +72,7 @@ class SchedulerService:
             'the_close_summary': self._execute_the_close_summary_task,
             'cnbc_closing_bell': self._execute_cnbc_closing_bell_task,
             'bloomberg_surveillance': self._execute_bloomberg_surveillance_task,
+            'bloomberg_surveillance_flash': self._execute_bloomberg_surveillance_flash_task,
             'zhishixingqiu_summary': self._execute_zhishixingqiu_summary_task,
             'substack_summary': self._execute_substack_summary_task,
             'podcast_subscription': self._execute_podcast_subscription_task,
@@ -1786,6 +1787,55 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"Bloomberg Surveillance 任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_bloomberg_surveillance_flash_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        生成 Bloomberg Surveillance 速览版摘要（播客精华集官方字幕）。
+
+        节目当晚（北京 21:32–22:06）播客源发布 30–53 分钟精华集并自带官方字幕，
+        无需等待 YouTube 全场 VOD 与 ASR。速览版与完整版共用同一 report_date
+        （北京自然日 + 1），次日早间完整版通过新视频幂等触发自然升级覆盖。
+
+        Cron: 30 22,23 * * 1-5 Asia/Shanghai
+        （美东周一至周五节目 → 北京周一至周五晚间；22:30 首跑，23:30 兜底。
+        冬令时精华集约 22:32–23:06 就绪，由 23:30 档覆盖，无需人工切换。）
+
+        Args:
+            params:
+                - report_date: 可选，ISO 日期字符串 (YYYY-MM-DD)，默认北京自然日 + 1
+                - lookback_hours: 可选，精华集检索回溯窗口（小时，默认 4）
+                - force: 可选，是否强制重新生成（默认 False）
+        """
+        try:
+            logger.info("分发 Bloomberg Surveillance Flash Celery 任务", params=params)
+
+            from backend.tasks.bloomberg_surveillance_flash_tasks import (
+                generate_bloomberg_surveillance_flash_task,
+            )
+
+            report_date = params.get('report_date')
+            lookback_hours = float(params.get('lookback_hours', 4))
+            force = params.get('force', False)
+
+            task = generate_bloomberg_surveillance_flash_task.delay(
+                report_date=report_date,
+                lookback_hours=lookback_hours,
+                force=force,
+            )
+
+            date_info = f", date={report_date or 'auto'}"
+            force_info = "（强制重新生成）" if force else ""
+            message = (
+                f"✅ Bloomberg Surveillance Flash: "
+                f"已提交 Celery 异步任务 {task.id}{date_info}{force_info}"
+            )
+            logger.info(message)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"Bloomberg Surveillance Flash 任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

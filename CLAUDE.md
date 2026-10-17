@@ -35,13 +35,13 @@ npm install
 # Development server (port 3000)
 npm start
 
-# Production deploy (staging build without sourcemaps, sync to build/, reload nginx)
+# Production deploy (safe build: lock + memory check + staging, sync to build/, reload nginx)
 npm run deploy
 
-# Local build check only — do NOT use on the production server:
-# builds directly into build/ (breaks the live site mid-build) and
-# enables sourcemaps, which can OOM on low-memory machines
-npm run build
+# Bare `npm run build` is BLOCKED by scripts/guard-build.js on purpose:
+# it OOM-crashed the 7.4GB server twice (2026-10-15/17) and rebuilds the
+# nginx-mounted build/ in place. Compile-check only when you must:
+#   GUANHE_ALLOW_BUILD=1 npm run build
 
 # Run tests
 npm test

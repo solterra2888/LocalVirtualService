@@ -146,6 +146,14 @@ class SurveillanceReportService:
             gen_at_ny = generated_at_utc.astimezone(ZoneInfo("America/New_York"))
             gen_at_bj = generated_at_utc.astimezone(ZoneInfo("Asia/Shanghai"))
 
+            # 速览版（播客精华集）标记：完整版升级覆盖时自然消失
+            variant_label = (
+                "速览版 · Podcast Highlights"
+                if isinstance(summary["metadata"], dict)
+                and summary["metadata"].get("variant") == "flash"
+                else None
+            )
+
             html = self._render_html(
                 report_date=report_date,
                 generated_at_utc=generated_at_utc.strftime("%Y-%m-%d %H:%M UTC"),
@@ -156,12 +164,14 @@ class SurveillanceReportService:
                 transcript_word_count=summary["transcript_word_count"],
                 video_count=summary["video_count"],
                 summary_html=summary_html,
+                variant_label=variant_label,
             )
 
             # 6. 落盘
             file_path = self._save_to_local_file(html, report_date)
 
-            # 7. 更新记录
+            # 7. 更新记录（share_token 仅首次生成时分配：速览版→完整版升级
+            #    重渲染时保持链接不变，已分享/收藏的地址不失效）
             elapsed = round(time.time() - start_ts, 1)
             metadata = {
                 "generation_time_seconds": elapsed,
@@ -169,10 +179,15 @@ class SurveillanceReportService:
                 "video_title": summary["video_title"],
                 "transcript_word_count": summary["transcript_word_count"],
                 "video_count": summary["video_count"],
+                "variant": (
+                    summary["metadata"].get("variant")
+                    if isinstance(summary["metadata"], dict)
+                    else None
+                ),
                 "summary_updated_at": summary["updated_at"].isoformat(),
                 "generated_at_utc": generated_at_utc.isoformat(),
             }
-            share_token = uuid4().hex
+            new_share_token = uuid4().hex
 
             cursor.execute(
                 """
@@ -181,12 +196,14 @@ class SurveillanceReportService:
                     file_path = %s,
                     html_content = %s,
                     metadata = %s,
-                    share_token = %s,
+                    share_token = COALESCE(share_token, %s),
                     updated_at = NOW()
                 WHERE id = %s
+                RETURNING share_token
                 """,
-                (file_path, html, json.dumps(metadata), share_token, report_id),
+                (file_path, html, json.dumps(metadata), new_share_token, report_id),
             )
+            share_token = cursor.fetchone()[0]
             conn.commit()
 
             logger.info(
@@ -290,6 +307,7 @@ class SurveillanceReportService:
         transcript_word_count: Optional[int],
         video_count: int,
         summary_html: str,
+        variant_label: Optional[str] = None,
     ) -> str:
         """通过 Jinja2 渲染自包含 HTML。"""
         from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -311,6 +329,7 @@ class SurveillanceReportService:
             transcript_word_count=transcript_word_count,
             video_count=video_count,
             summary_html=Markup(summary_html),
+            variant_label=variant_label,
         )
 
     @staticmethod

@@ -124,6 +124,8 @@ task_routes = {
     'generate_cnbc_closing_bell_summary': {'queue': 'ai_processing'},
     # Bloomberg Surveillance — Bloomberg Surveillance 每日 AM Brief
     'generate_bloomberg_surveillance_summary': {'queue': 'ai_processing'},
+    # Bloomberg Surveillance 速览版 — 播客精华集官方字幕（当晚出报）
+    'generate_bloomberg_surveillance_flash_summary': {'queue': 'ai_processing'},
     # 知识星球每日摘要 — Phase 1 全局 + Phase 2 按用户
     'generate_zhishixingqiu_summary': {'queue': 'ai_processing'},
     'generate_all_zhishixingqiu_user_reports': {'queue': 'ai_processing'},

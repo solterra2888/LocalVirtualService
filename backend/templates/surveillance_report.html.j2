@@ -237,7 +237,7 @@ a.meta-title:hover { text-decoration: underline; }
 
 <div class="meta-bar">
     <div class="meta-card">
-        <span class="meta-source">Bloomberg &middot; Surveillance</span>
+        <span class="meta-source">Bloomberg &middot; Surveillance{% if variant_label %} &middot; {{ variant_label }}{% endif %}</span>
         {% if video_url %}
         <a class="meta-title" href="{{ video_url }}" target="_blank" rel="noopener noreferrer" title="Open episode on YouTube">{{ video_title or 'Episode' }}</a>
         {% else %}

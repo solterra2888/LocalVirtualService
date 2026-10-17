@@ -64,7 +64,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
@@ -303,9 +303,16 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     bloomberg_surveillance: {
       icon: <StockOutlined style={{ color: '#2f54eb' }} />,
       params: [],
-      defaultSchedule: '30 0 * * 2-6',
+      defaultSchedule: '30 7,8,12 * * 2-6',
       defaultName: 'Bloomberg Surveillance Report',
-      description: 'AM Brief from Bloomberg Surveillance (live 6-9 AM ET); once daily Tue-Sat 00:30 Beijing after YouTube VOD (previous US session)'
+      description: 'Full-version AM Brief from the Surveillance YouTube full-episode transcript; Tue-Sat 07:30/08:30/12:30 Beijing (upgrades the flash brief)'
+    },
+    bloomberg_surveillance_flash: {
+      icon: <StockOutlined style={{ color: '#4096ff' }} />,
+      params: [],
+      defaultSchedule: '30 22,23 * * 1-5',
+      defaultName: 'Bloomberg Surveillance Flash Report',
+      description: 'Same-evening flash brief from the official podcast highlight transcript (ready 21:36-22:06 Beijing); Mon-Fri 22:30/23:30 Beijing, auto-adapts to DST'
     },
     fed_dashboard: {
       icon: <BankOutlined style={{ color: '#1d4ed8' }} />,
@@ -362,7 +369,8 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
     form.setFieldsValue({
       timezone:
         initialTimezone ||
-        (dataSourceType === 'bloomberg_surveillance'
+        (dataSourceType === 'bloomberg_surveillance' ||
+        dataSourceType === 'bloomberg_surveillance_flash'
           ? 'Asia/Shanghai'
           : 'America/New_York'),
       cronExpression: initialCronExpression || currentConfig.defaultSchedule,
@@ -606,6 +614,14 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           result = await schedulerAPI.createCronTask({
             task_type: 'bloomberg_surveillance',
             ...bloombergSurveillanceParams,
+          });
+        } else if (dataSourceType === 'bloomberg_surveillance_flash') {
+          result = await schedulerAPI.createCronTask({
+            name: currentConfig.defaultName,
+            cron_expression: data.cronExpression!,
+            timezone: data.timezone!,
+            enabled: true,
+            task_type: 'bloomberg_surveillance_flash',
           });
         } else if (dataSourceType === 'fed_dashboard') {
           result = await schedulerAPI.createCronTask({
@@ -2349,6 +2365,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           return null;
 
         case 'bloomberg_surveillance':
+          return null;
+
+        case 'bloomberg_surveillance_flash':
           return null;
 
         case 'fed_dashboard':

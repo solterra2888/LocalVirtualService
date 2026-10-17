@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'zsxq_file_dispatch' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard';
+  type: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'zsxq_file_dispatch' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;

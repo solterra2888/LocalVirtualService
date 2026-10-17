@@ -899,7 +899,7 @@ result = await scheduler_client.post(endpoint, json_data=json_data, headers=auth
 - [ ] TypeScript 编译无错误
   ```bash
   cd web-frontend
-  npm run build
+  npm run deploy   # 裸 npm run build 已被 scripts/guard-build.js 拦截
   ```
 
 - [ ] 配置模态框显示正常

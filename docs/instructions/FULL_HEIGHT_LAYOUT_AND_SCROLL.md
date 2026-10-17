@@ -331,7 +331,7 @@ if (idleTimer !== undefined) {
 2. **检查是否存在 `.ant-app`**：若无 flex 规则，先补 §3.2。
 3. **临时给可疑层加 outline**，确认是哪一层在变高。
 4. **滚动测试**：鼠标在目标区域上滚轮，看 `scrollTop` 是否变化（Console：`$0.scrollTop`）。
-5. **编译**：改 hook 后跑 `npm run build` 或 dev 编译，确认无 `Timeout` 类型错误。
+5. **编译**：改 hook 后跑 `npm run deploy`（或 dev 编译；裸 `npm run build` 已被防护脚本拦截），确认无 `Timeout` 类型错误。
 
 ---
 

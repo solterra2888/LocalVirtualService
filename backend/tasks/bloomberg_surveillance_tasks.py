@@ -4,7 +4,7 @@ Bloomberg Surveillance Summary Celery Tasks
 """
 
 import asyncio
-from datetime import date as _date, datetime as _datetime
+from datetime import date as _date
 
 from backend.celery_app import app
 from backend.utils.logger import get_logger
@@ -54,12 +54,19 @@ def generate_bloomberg_surveillance_task(
     try:
         svc = BloombergSurveillanceService()
 
+        from backend.utils.datetime_utils import (
+            parse_iso_utc,
+            utcnow,
+            window_label_date,
+        )
+
         if report_date:
             as_of = _date.fromisoformat(report_date)
         else:
-            from backend.utils.datetime_utils import utcnow, window_label_date
             as_of = window_label_date(utcnow(), 'Asia/Shanghai')
-        we = _datetime.fromisoformat(window_end) if window_end else None
+        # 缺省用当前时刻的滚动窗口：自然日窗口按 naive 与 UTC 存储 published_at
+        # 比较，会系统性漏掉前一日美东正片（与 The Close 的处理一致）。
+        we = parse_iso_utc(window_end) or utcnow()
 
         result = _run_async(
             svc.generate(

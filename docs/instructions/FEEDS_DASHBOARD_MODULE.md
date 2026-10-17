@@ -151,7 +151,7 @@ python scripts/seed_feed_topics.py               # curated 基线 45 主题
 python scripts/seed_feed_topics.py --scan        # 查看历史 concepts 频次报告
 python scripts/seed_feed_topics.py --scan --write # 高频未覆盖词自动补 (needs_review)
 # 3. 重启: rc-webapp (API) + rc-celery-data (聚合 worker) + rc-scheduler (cron 变更)
-# 4. 前端 npm run build 部署
+# 4. 前端 npm run deploy 部署
 # 5. 首次回填: 页面「生成快照」或 POST /api/feeds-dashboard/generate {"days": 7}
 ```
 
