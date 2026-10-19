@@ -89,9 +89,70 @@ export interface CleanupResponse {
   retention_days: number;
 }
 
+// ===== 财报日历类型 =====
+
+export interface EarningsCalendarItem {
+  code: string;
+  company_name?: string | null;
+  logo_url?: string | null;
+  report_date?: string | null;
+  /** BeforeMarket / AfterMarket / 其他或空 */
+  before_after_market?: string | null;
+  currency?: string | null;
+  eps_actual?: number | null;
+  eps_estimate?: number | null;
+  eps_difference?: number | null;
+  eps_surprise_percent?: number | null;
+  reported: boolean;
+  fetch_date?: string | null;
+}
+
+export interface EarningsCalendarMeta {
+  total: number;
+  limit: number;
+  offset: number;
+  scope: 'watchlist' | 'theme' | 'us' | 'hk';
+  from_date?: string | null;
+  to_date?: string | null;
+  latest_fetch_date?: string | null;
+  latest_update_at?: string | null;
+}
+
+export interface EarningsCalendarData {
+  items: EarningsCalendarItem[];
+  meta: EarningsCalendarMeta;
+}
+
+export interface EarningsCalendarParams {
+  from_date?: string;
+  to_date?: string;
+  scope?: 'watchlist' | 'theme' | 'us' | 'hk';
+  before_after?: 'before' | 'after';
+  search?: string;
+  reported?: 'yes' | 'no';
+  limit?: number;
+  offset?: number;
+}
+
 // ===== API 方法 =====
 
 export const marketsAPI = {
+
+  // === 财报日历相关 ===
+
+  /**
+   * 获取财报日历数据
+   */
+  getEarningsCalendar: async (params?: EarningsCalendarParams): Promise<EarningsCalendarData> => {
+    try {
+      const result = await api.get<EarningsCalendarData>('/markets/earnings-calendar', params);
+      return result;
+    } catch (error) {
+      console.error('获取财报日历数据失败:', error);
+      throw error;
+    }
+  },
+
   // === 经济事件相关 ===
   
   /**

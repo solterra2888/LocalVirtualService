@@ -559,24 +559,28 @@ class EarningsCalendarService:
     def fetch_custom_period_earnings(self, days: int = 7) -> Dict[str, Any]:
         """
         获取指定天数的财报日历数据
-        
+
+        窗口从 today-7 开始（而非今天）：EODHD 只在财报发布后才回填实际 EPS，
+        只向前抓会导致已公布财报的 actual 永远缺失，重抓过去 7 天用于回填。
+
         Args:
-            days: 从今天开始的天数 (默认7天)
-            
+            days: 向未来看的天数 (默认7天)
+
         Returns:
             执行结果
         """
         try:
             today = utcnow().date()
+            start_date = today - timedelta(days=7)
             end_date = today + timedelta(days=days)
-            
-            start_date_str = today.strftime('%Y-%m-%d')
+
+            start_date_str = start_date.strftime('%Y-%m-%d')
             end_date_str = end_date.strftime('%Y-%m-%d')
-            
-            logger.info(f"获取 {days} 天财报日历: {start_date_str} 到 {end_date_str}")
-            
+
+            logger.info(f"获取 {days} 天财报日历(含7天回填): {start_date_str} 到 {end_date_str}")
+
             return self.fetch_earnings_calendar(start_date_str, end_date_str)
-            
+
         except Exception as e:
             error_msg = f"获取财报数据失败: {str(e)}"
             logger.error(error_msg, exc_info=True)
@@ -641,6 +645,191 @@ class EarningsCalendarService:
             logger.error(f"查询财报数据失败: {str(e)}", exc_info=True)
             return []
 
+
+    def get_earnings_calendar_view(
+        self,
+        from_date: str,
+        to_date: str,
+        scope: str = 'watchlist',
+        before_after: Optional[str] = None,
+        search: Optional[str] = None,
+        reported: Optional[str] = None,
+        limit: int = 500,
+        offset: int = 0
+    ) -> Dict[str, Any]:
+        """
+        财报日历展示查询（供前端 Earnings Calendar 模块使用）
+
+        与 get_earnings_by_date_range 的区别：
+        - 同一 (code, report_date) 只返回最新一次抓取的快照（每日抓取会累积多行）
+        - 支持 watchlist / theme / us 三档范围（口径与 market_weekly 一致）
+        - LEFT JOIN companies 补充公司名称和 Logo
+        - 支持盘前/盘后、搜索、已公布/未公布筛选
+
+        Args:
+            from_date: 开始日期 (YYYY-MM-DD)
+            to_date: 结束日期 (YYYY-MM-DD)
+            scope: watchlist=自选(target_tracking_config) / theme=主题关联公司 / us=全部美股
+            before_after: None=全部 / before=盘前 / after=盘后
+            search: 模糊匹配 ticker 或公司名
+            reported: None=全部 / yes=已公布(有实际EPS) / no=未公布
+            limit: 返回条数上限
+            offset: 偏移量
+        """
+        # 范围过滤条件
+        scope_conditions = {
+            'watchlist': """
+                AND (
+                    ec.code IN (SELECT REPLACE(primaryticker, '.US', '') FROM target_tracking_config
+                                WHERE enabled = TRUE AND primaryticker IS NOT NULL AND primaryticker != '')
+                    OR ec.code IN (SELECT primaryticker FROM target_tracking_config
+                                   WHERE enabled = TRUE AND primaryticker IS NOT NULL AND primaryticker != '')
+                )""",
+            'theme': """
+                AND (
+                    ec.code IN (SELECT REPLACE(ticker, '.US', '') FROM theme_company_associations
+                                WHERE is_verified = TRUE AND ticker IS NOT NULL AND ticker != '')
+                    OR ec.code IN (SELECT ticker FROM theme_company_associations
+                                   WHERE is_verified = TRUE AND ticker IS NOT NULL AND ticker != '')
+                )""",
+            # 港股: EODHD 代码带 .HK 后缀; 无优先股系列噪音, 无需 type 过滤;
+            # earnings_calendar 与 companies 表均无港股名称, 前端按代码展示
+            'hk': " AND ec.code LIKE '%%.HK'",
+            # 注意: psycopg2 把 % 当占位符, SQL 字面量中的 % 需写成 %%
+            # 'us' 范围只保留普通股:
+            # 1) 过滤优先股系列(companies.type = Preferred Stock, 如 BAC-PB/PE/PK)
+            # 2) 过滤不在 companies 且以 RP 结尾、但基础代码是普通股的存托凭证变体(如 BACRP → BAC);
+            #    不直接按 RP 后缀删除, 会误伤 NRP/TRP 等正常股票
+            'us': """
+                AND ec.code NOT LIKE '%%.%%'
+                AND (c.type = 'Common Stock' OR c.id IS NULL)
+                AND NOT (
+                    c.id IS NULL
+                    AND ec.code LIKE '%%RP'
+                    AND EXISTS (
+                        SELECT 1 FROM companies c2
+                        WHERE c2.code = left(ec.code, length(ec.code) - 2)
+                          AND c2.type = 'Common Stock'
+                    )
+                )
+            """,
+        }
+        scope_sql = scope_conditions.get(scope, scope_conditions['watchlist'])
+
+        conditions = [scope_sql]
+        params: List[Any] = [from_date, to_date]
+
+        if before_after in ('before', 'after'):
+            conditions.append(" AND ec.before_after_market ILIKE %s")
+            params.append(before_after + '%')
+
+        if search:
+            conditions.append(" AND (ec.code ILIKE %s OR c.name ILIKE %s OR ec.name ILIKE %s)")
+            like = f"%{search}%"
+            params.extend([like, like, like])
+
+        where_sql = " ".join(conditions)
+
+        base_sql = f"""
+            FROM earnings_calendar ec
+            LEFT JOIN companies c ON c.code = ec.code
+            WHERE ec.report_date >= %s AND ec.report_date <= %s
+            {where_sql}
+        """
+
+        # reported 筛选作用在最新快照上（而非原始行），否则已公布公司会命中旧快照被误判为未公布
+        reported_sql = ""
+        if reported == 'yes':
+            reported_sql = " WHERE actual IS NOT NULL"
+        elif reported == 'no':
+            reported_sql = " WHERE actual IS NULL"
+
+        # DISTINCT ON 取每个 (code, report_date) 最新 fetch_date 的快照
+        rows_sql = f"""
+            SELECT * FROM (
+                SELECT DISTINCT ON (ec.code, ec.report_date)
+                    ec.code,
+                    COALESCE(c.name, ec.name, ec.code) AS company_name,
+                    c.logourl,
+                    ec.report_date,
+                    ec.before_after_market,
+                    ec.currency,
+                    ec.actual, ec.estimate, ec.difference, ec.percent,
+                    ec.fetch_date
+                {base_sql}
+                ORDER BY ec.code, ec.report_date, ec.fetch_date DESC
+            ) latest{reported_sql}
+            ORDER BY report_date, before_after_market DESC, code
+            LIMIT %s OFFSET %s
+        """
+
+        count_sql = f"""
+            SELECT count(*) FROM (
+                SELECT DISTINCT ON (ec.code, ec.report_date)
+                    ec.code, ec.report_date, ec.actual
+                {base_sql}
+                ORDER BY ec.code, ec.report_date, ec.fetch_date DESC
+            ) latest{reported_sql}
+        """
+
+        meta_sql = "SELECT max(fetch_date), max(updated_at) FROM earnings_calendar"
+
+        try:
+            with self.db_manager.get_connection_context() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute(count_sql, params)
+                total = cursor.fetchone()[0] or 0
+
+                cursor.execute(meta_sql)
+                meta_row = cursor.fetchone()
+                latest_fetch = meta_row[0].strftime('%Y-%m-%d') if meta_row and meta_row[0] else None
+                latest_update = meta_row[1].isoformat() if meta_row and meta_row[1] else None
+
+                cursor.execute(rows_sql, params + [limit, offset])
+                rows = cursor.fetchall()
+
+                items = []
+                for row in rows:
+                    items.append({
+                        'code': row[0],
+                        'company_name': row[1],
+                        'logo_url': row[2],
+                        'report_date': row[3].strftime('%Y-%m-%d') if row[3] else None,
+                        'before_after_market': row[4],
+                        'currency': row[5] or 'USD',
+                        'eps_actual': float(row[6]) if row[6] is not None else None,
+                        'eps_estimate': float(row[7]) if row[7] is not None else None,
+                        'eps_difference': float(row[8]) if row[8] is not None else None,
+                        'eps_surprise_percent': float(row[9]) if row[9] is not None else None,
+                        'reported': row[6] is not None,
+                        'fetch_date': row[10].strftime('%Y-%m-%d') if row[10] else None,
+                    })
+
+                cursor.close()
+
+                logger.info(
+                    f"财报日历展示查询: scope={scope}, {from_date}~{to_date}, "
+                    f"命中 {total} 条, 返回 {len(items)} 条"
+                )
+
+                return {
+                    'items': items,
+                    'meta': {
+                        'total': total,
+                        'limit': limit,
+                        'offset': offset,
+                        'scope': scope,
+                        'from_date': from_date,
+                        'to_date': to_date,
+                        'latest_fetch_date': latest_fetch,
+                        'latest_update_at': latest_update,
+                    }
+                }
+
+        except Exception as e:
+            logger.error(f"财报日历展示查询失败: {str(e)}", exc_info=True)
+            raise
 
     def __del__(self):
         """清理资源"""

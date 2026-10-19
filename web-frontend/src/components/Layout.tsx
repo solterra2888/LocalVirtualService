@@ -12,6 +12,7 @@ import {
   FundOutlined,
   BuildOutlined,
   CalendarOutlined,
+  ScheduleOutlined,
   ControlOutlined,
   LineChartOutlined,
   FolderOutlined,
@@ -144,6 +145,11 @@ const Layout: React.FC = () => {
       key: '/dashboard',
       icon: <StockOutlined />,
       label: 'Watchlist',
+    },
+    {
+      key: '/markets/earnings-calendar',
+      icon: <ScheduleOutlined />,
+      label: 'Earnings Calendar',
     },
     {
       key: '/central-bank',

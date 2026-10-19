@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import info, error, warning
 from backend.utils.service_registry import get_service_registry
+from backend.services.earnings_calendar_service import EarningsCalendarService
 from backend.services.economic_events_service import (
     EconomicEventsService,
     calculate_event_impact,
@@ -62,6 +63,11 @@ def get_economic_events_service() -> EconomicEventsService:
     """获取经济事件服务实例（单例）"""
     registry = get_service_registry()
     return registry.get_or_create_service("economic_events_service", EconomicEventsService)
+
+def get_earnings_calendar_service() -> EarningsCalendarService:
+    """获取财报日历服务实例（单例）"""
+    registry = get_service_registry()
+    return registry.get_or_create_service("earnings_calendar_service", EarningsCalendarService)
 
 # === Pydantic Models ===
 
@@ -111,6 +117,37 @@ class IndicatorInfo(BaseModel):
     data_points: int = Field(..., description="数据点数量")
     earliest_year: int = Field(..., description="最早年份")
     latest_year: int = Field(..., description="最新年份")
+
+class EarningsCalendarItemResponse(BaseModel):
+    """财报日历条目响应模型"""
+    code: str = Field(..., description="股票代码")
+    company_name: Optional[str] = Field(None, description="公司名称")
+    logo_url: Optional[str] = Field(None, description="公司Logo URL")
+    report_date: Optional[str] = Field(None, description="财报发布日期 (YYYY-MM-DD)")
+    before_after_market: Optional[str] = Field(None, description="发布时间: BeforeMarket/AfterMarket")
+    currency: Optional[str] = Field(None, description="货币")
+    eps_actual: Optional[float] = Field(None, description="EPS 实际值（未公布时为空）")
+    eps_estimate: Optional[float] = Field(None, description="EPS 预期值")
+    eps_difference: Optional[float] = Field(None, description="EPS 差异（实际-预期）")
+    eps_surprise_percent: Optional[float] = Field(None, description="EPS 惊喜率（%）")
+    reported: bool = Field(False, description="是否已公布")
+    fetch_date: Optional[str] = Field(None, description="数据快照日期")
+
+class EarningsCalendarMetaResponse(BaseModel):
+    """财报日历查询元信息"""
+    total: int = Field(..., description="符合条件的总条数")
+    limit: int = Field(..., description="本次返回上限")
+    offset: int = Field(..., description="本次偏移量")
+    scope: str = Field(..., description="查询范围: watchlist/theme/us")
+    from_date: Optional[str] = Field(None, description="查询开始日期")
+    to_date: Optional[str] = Field(None, description="查询结束日期")
+    latest_fetch_date: Optional[str] = Field(None, description="数据最近一次抓取日期")
+    latest_update_at: Optional[str] = Field(None, description="数据最近更新时间")
+
+class EarningsCalendarResponse(BaseModel):
+    """财报日历查询响应"""
+    items: List[EarningsCalendarItemResponse] = Field(..., description="财报条目列表")
+    meta: EarningsCalendarMetaResponse = Field(..., description="查询元信息")
 
 # === API Endpoints ===
 
@@ -330,6 +367,58 @@ async def get_economic_events_countries(
             detail=f"获取经济事件国家列表失败: {str(e)}"
         )
 
+@router.get("/earnings-calendar", response_model=EarningsCalendarResponse, summary="获取财报日历数据")
+async def get_earnings_calendar(
+    from_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)，默认今天-7天"),
+    to_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)，默认今天+14天"),
+    scope: str = Query('watchlist', pattern='^(watchlist|theme|us|hk)$', description="范围: watchlist=自选 / theme=主题关联公司 / us=全部美股 / hk=全部港股"),
+    before_after: Optional[str] = Query(None, pattern='^(before|after)$', description="发布时间筛选: before=盘前 / after=盘后"),
+    search: Optional[str] = Query(None, max_length=50, description="模糊搜索 ticker 或公司名"),
+    reported: Optional[str] = Query(None, pattern='^(yes|no)$', description="是否已公布: yes=已公布 / no=未公布"),
+    limit: int = Query(500, ge=1, le=2000, description="返回数量限制 (1-2000)"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    current_user=Depends(get_current_user)
+):
+    """
+    获取财报日历展示数据（来自 earnings_calendar 表，每日 18:00 自动更新）
+
+    - **scope**: watchlist=自选股(target_tracking_config) / theme=主题关联公司 / us=全部美股 / hk=全部港股
+    - **reported**: 已公布的财报带 EPS 实际值与惊喜率，未公布只带预期值
+    """
+    try:
+        info(f"获取财报日历数据请求: user={current_user.username}, scope={scope}, from={from_date}, to={to_date}", source="markets_api")
+
+        # 默认窗口: 过去7天 ~ 未来14天
+        if not from_date:
+            from_date = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
+        if not to_date:
+            to_date = (datetime.utcnow() + timedelta(days=14)).strftime('%Y-%m-%d')
+
+        service = get_earnings_calendar_service()
+        result = service.get_earnings_calendar_view(
+            from_date=from_date,
+            to_date=to_date,
+            scope=scope,
+            before_after=before_after,
+            search=search,
+            reported=reported,
+            limit=limit,
+            offset=offset
+        )
+
+        # Logo 相对路径补全为 EODHD 完整 URL
+        for item in result.get('items', []):
+            item['logo_url'] = process_logo_url(item.get('logo_url'))
+
+        return result
+
+    except Exception as e:
+        error(f"获取财报日历数据失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取财报日历数据失败: {str(e)}"
+        )
+
 @router.get("/indicators", summary="获取可用指标列表")
 async def get_available_indicators(
     country: Optional[str] = Query(None, description="国家代码，获取该国家的可用指标"),
@@ -337,13 +426,13 @@ async def get_available_indicators(
 ):
     """
     获取可用的宏观指标列表
-    
+
     - **country**: 可选，获取指定国家的可用指标
     """
     try:
         # 初始化API客户端
         macro_service = get_macro_indicators_service()
-        
+
         if country:
             # 获取指定国家的可用指标
             indicators = macro_service.get_available_indicators_for_country(country)

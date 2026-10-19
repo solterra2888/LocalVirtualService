@@ -12,6 +12,7 @@ import DashboardPage from './pages/DashboardPage';
 import MobileDashboardPage from './pages/MobileDashboardPage';
 import MarketsPage from './pages/MarketsPage';
 import EconomicEventsPage from './pages/EconomicEventsPage';
+import EarningsCalendarPage from './pages/EarningsCalendarPage';
 import MacroIndicatorsPage from './pages/MacroIndicatorsPage';
 import CentralBankDashboardPage from './pages/CentralBankDashboardPage';
 import Form13FPage from './pages/Form13FPage';
@@ -141,6 +142,7 @@ const AppContent: React.FC = () => {
           <Route path="daily" element={<DailyComponent />} />
           <Route path="dashboard" element={<DashboardComponent />} />
           <Route path="markets" element={<MarketsPage />} />
+          <Route path="markets/earnings-calendar" element={<EarningsCalendarPage />} />
           <Route path="markets/economic-events" element={<EconomicEventsPage />} />
           <Route path="markets/macro-indicators" element={<MacroIndicatorsPage />} />
           <Route path="central-bank" element={<CentralBankDashboardPage />} />

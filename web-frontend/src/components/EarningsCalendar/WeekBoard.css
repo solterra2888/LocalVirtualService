@@ -1,0 +1,268 @@
+/* Earnings Calendar 周视图面板（独立模块版，视觉语言沿用 MarketWeekly/EarningsCalendarWeek） */
+
+.ec-board {
+  --ec-page-text: #262626;
+  --ec-day-bg: #f5f5f5;
+  --ec-section-border: #e8e8e8;
+  --ec-section-bg: #fafafa;
+  --ec-card-bg: #ffffff;
+  --ec-card-border: #d9d9d9;
+  --ec-card-hover: #1890ff;
+  --ec-logo-bg: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+  --ec-logo-text: #262626;
+  --ec-ticker: #262626;
+  --ec-sub: #8c8c8c;
+  --ec-beat: #16a34a;
+  --ec-miss: #dc2626;
+  --ec-today: #1890ff;
+}
+
+.ec-board.dark {
+  --ec-page-text: #e0e6f1;
+  --ec-day-bg: #1a2234;
+  --ec-section-border: #364152;
+  --ec-section-bg: #1a2234;
+  --ec-card-bg: #232b3d;
+  --ec-card-border: #364152;
+  --ec-card-hover: #4096ff;
+  --ec-logo-bg: linear-gradient(135deg, #232b3d 0%, #1a2234 100%);
+  --ec-logo-text: #e0e6f1;
+  --ec-ticker: #e0e6f1;
+  --ec-sub: #94a3b8;
+  --ec-beat: #4ade80;
+  --ec-miss: #f87171;
+  --ec-today: #4096ff;
+}
+
+.ec-board {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 8px 0 4px;
+}
+
+.ec-day-col {
+  flex: 1;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ec-day-header {
+  text-align: center;
+  padding: 8px 4px;
+  border-radius: 8px;
+  color: var(--ec-page-text);
+  position: relative;
+}
+
+.ec-day-header.is-today {
+  background: color-mix(in srgb, var(--ec-today) 12%, transparent);
+  outline: 1px solid var(--ec-today);
+}
+
+.ec-day-name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.ec-day-number {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.ec-today-tag {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 10px;
+  color: var(--ec-today);
+  border: 1px solid var(--ec-today);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 16px;
+}
+
+.ec-section {
+  background: var(--ec-section-bg);
+  border: 1px solid var(--ec-section-border);
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ec-section.before-open {
+  background: #fff7eb;
+  border-color: #f3c38a;
+}
+
+.ec-section.after-close {
+  background: #edf2f8;
+  border-color: #92a4c2;
+}
+
+.ec-board.dark .ec-section.before-open {
+  background: rgba(231, 180, 134, 0.12);
+  border-color: rgba(231, 180, 134, 0.45);
+}
+
+.ec-board.dark .ec-section.after-close {
+  background: rgba(74, 111, 165, 0.18);
+  border-color: rgba(74, 111, 165, 0.55);
+}
+
+.ec-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: #e7b486;
+}
+
+.ec-section.after-close .ec-section-header {
+  background: #4a6fa5;
+}
+
+.ec-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ec-section-icon {
+  width: 14px;
+  height: 14px;
+  color: #ffffff;
+}
+
+.ec-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow-y: auto;
+  max-height: 420px;
+}
+
+.ec-card {
+  background: var(--ec-card-bg);
+  border: 1px solid var(--ec-card-border);
+  border-radius: 8px;
+  padding: 8px;
+  flex: 0 0 calc(50% - 4px);
+  min-width: 86px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  cursor: default;
+}
+
+.ec-card:hover {
+  border-color: var(--ec-card-hover);
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.15);
+}
+
+.ec-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 30px;
+  padding: 2px;
+  overflow: hidden;
+}
+
+.ec-logo img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.ec-logo-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ec-logo-text);
+  letter-spacing: 0.5px;
+}
+
+.ec-ticker {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ec-ticker);
+  line-height: 1.2;
+}
+
+.ec-eps {
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.ec-eps .est {
+  color: var(--ec-sub);
+}
+
+.ec-eps .actual {
+  font-weight: 700;
+}
+
+.ec-beat {
+  color: var(--ec-beat);
+}
+
+.ec-miss {
+  color: var(--ec-miss);
+}
+
+.ec-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 8px;
+  color: var(--ec-sub);
+  font-size: 12px;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .ec-board {
+    flex-direction: column;
+  }
+
+  .ec-day-col {
+    min-width: 100%;
+  }
+
+  .ec-card {
+    flex: 0 0 calc(33.333% - 6px);
+  }
+
+  .ec-list {
+    max-height: none;
+  }
+}
+
+/* 滚动条 */
+.ec-list::-webkit-scrollbar,
+.ec-board::-webkit-scrollbar {
+  width: 6px;
+  height: 8px;
+}
+
+.ec-list::-webkit-scrollbar-thumb,
+.ec-board::-webkit-scrollbar-thumb {
+  background: #bfbfbf;
+  border-radius: 3px;
+}
