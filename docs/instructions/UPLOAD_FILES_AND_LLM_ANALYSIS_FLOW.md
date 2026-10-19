@@ -851,6 +851,18 @@ POST /api/llm-prompt-templates/templates/test
 | 音频/YouTube 内容分析 | `POST /api/files/audio/analyze` | `analyze_audio_async` | 用户选择，默认 `audio_analysis_v1`，`skip_post_trigger=False` |
 | 测试 Prompt Template | `POST /api/llm-prompt-templates/templates/test` | — | 用户选择（动态） |
 
+### AI 分析报告导出 PDF（Sources 模块 AI Analysis 面板）
+
+| 功能 | 按钮 | 实现方式 | 说明 |
+|------|------|----------|------|
+| 图片版 PDF（原有） | `Export PDF`（下载图标） | 前端 `html2canvas` 截图 `#ai-analysis-content` → `jsPDF` 贴图 | 保真还原页面样式，但文字不可选中、文件较大；见 `web-frontend/src/utils/pdfDownload.ts` |
+| 文字版 PDF（2026-10 新增） | `Export PDF (Text)`（文档图标） | 后端渲染：`GET /api/tasks/executions/{execution_id}/report-pdf` | 服务端把 `final_report`（Markdown）经 PyMuPDF Story 排版为真实文本 PDF：文字可选中/可搜索/可复制，中英文自动回退字体，`subset_fonts()` 后典型仅几十 KB |
+
+- 权限与 `GET /executions/{execution_id}/details` 一致（本人或被共享用户）；`final_report` 为空返回 404。
+- 文件名与前端图片版同规则并追加 ` (Text)`：`{Document Name} {YYYY-MM-DD} (Analyzed by {model}) (Text).pdf`；`Content-Disposition` 同时带 ASCII 回退名与 RFC 5987 编码名。
+- 前端入口：桌面 `FilesPage`（右侧 AI Analysis 面板 + AI Analysis 弹窗 footer 的 `Download PDF (Text)`）与移动端 `MobileSourceFileDetail`，共用 `tasksAPI.downloadExecutionReportPdf`（blob 下载 + `filename*` 解析）。
+- 核心代码：`backend/services/ai_report_pdf_service.py`（Markdown→HTML 轻量转换 + Story 排版 + 字形子集化）。
+
 ### 系统自动触发的并行 LLM 任务（4 路并行）
 
 | 功能 | 触发方式 | Celery 任务 | Prompt Template |
@@ -951,7 +963,8 @@ POST /api/llm-prompt-templates/templates/test
 | 文件 | 说明 |
 |------|------|
 | `backend/api/files.py` | HTTP 入口；含 `create-text-note`、`PATCH .../content`（可选 `trigger_llm`） |
-| `backend/api/tasks.py` | 任务执行列表与单条详情；`folder_id` / `folder_name` 子查询 |
+| `backend/api/tasks.py` | 任务执行列表与单条详情；`folder_id` / `folder_name` 子查询；`GET /executions/{id}/report-pdf` 文字版 PDF 导出 |
+| `backend/services/ai_report_pdf_service.py` | AI 分析报告文字版 PDF 生成（Markdown→HTML→PyMuPDF Story 排版，CJK 回退字体 + 字形子集化） |
 | `backend/api/file_tags.py` | 打标签/命名/归类的 HTTP 管理接口 |
 | `backend/tasks/file_tasks.py` | Celery 任务定义（上传/解析/分析），含 `trigger_auto_tagging` / `trigger_auto_naming` / `trigger_auto_classify` / `trigger_auto_analyze`，以及 `analyze_document_task` / `analyze_audio_task` 的 `skip_post_trigger` 与（仅文档）`content_was_filled_by_llama` 控制 |
 | `backend/tasks/tagging_tasks.py` | `tag_file_content_task` Celery 任务 |

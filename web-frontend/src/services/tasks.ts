@@ -1,3 +1,4 @@
+import apiClient from './api';
 import { api } from './api';
 
 export interface TaskExecution {
@@ -125,6 +126,33 @@ export const tasksAPI = {
       `/tasks/executions/${executionId}/final-report`,
       { final_report: finalReport }
     );
+  },
+
+  /**
+   * 下载 AI 分析报告的**文字版** PDF（服务端渲染：文字可选中/可搜索，支持中文）。
+   * 与前端截图的图片版 Export PDF 互补。
+   */
+  downloadExecutionReportPdf: async (executionId: string): Promise<string> => {
+    const response = await apiClient.get(
+      `/tasks/executions/${executionId}/report-pdf`,
+      { responseType: 'blob' }
+    );
+    const disposition: string = response.headers['content-disposition'] || '';
+    // 优先 RFC 5987（filename*=UTF-8''...），回退 filename="..."
+    const filename =
+      decodeURIComponent(disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1] ?? '') ||
+      disposition.match(/filename="?([^";]+)"?/)?.[1] ||
+      'ai-analysis-report.pdf';
+    const blob: Blob = response.data;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return filename;
   },
 
   // 健康检查

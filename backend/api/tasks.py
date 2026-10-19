@@ -735,6 +735,116 @@ async def get_task_execution_details(
                 for file_detail in files_details
             ]
         }
-        
+
+    finally:
+        conn.close()
+
+
+@router.get("/executions/{execution_id}/report-pdf", summary="下载 AI 分析报告的文字版 PDF")
+async def download_execution_report_pdf(
+    execution_id: str,
+    current_user=Depends(get_current_user)
+):
+    """
+    把任务执行的 AI 分析报告（final_report，Markdown）在服务端渲染为**文字版** PDF 下载：
+    文字可选中/可搜索，中英文自动回退字体，无需前端截图。
+
+    - 权限与 details 端点一致：本人或被共享用户可下载
+    - 文件名与前端图片版规则一致：`{Document Name} {YYYY-MM-DD} (Analyzed by {model}) (Text).pdf`
+    """
+    import urllib.parse
+    from fastapi.responses import Response
+
+    from backend.services.ai_report_pdf_service import generate_ai_report_pdf
+
+    db_conn_params = get_database_config()
+    db_manager = DatabaseManager(db_conn_params)
+
+    conn = db_manager.get_connection()
+    if not conn:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="无法连接到数据库"
+        )
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+        SELECT ps."user", ps.timestamp, ps.llm_model, ps.final_report,
+               COALESCE(
+                   (SELECT display_name FROM file_processing_details
+                    WHERE processing_stats_id = ps.id
+                    ORDER BY id ASC LIMIT 1),
+                   (SELECT filename FROM file_processing_details
+                    WHERE processing_stats_id = ps.id
+                    ORDER BY id ASC LIMIT 1)
+               ) as display_name
+        FROM processing_stats ps
+        WHERE ps.id = %s
+        """, (execution_id,))
+
+        stat = cursor.fetchone()
+        if not stat:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"任务执行不存在: {execution_id}"
+            )
+
+        is_owner = stat[0] == current_user.username
+        if not is_owner:
+            cursor.execute("""
+                SELECT 1 FROM file_processing_details fpd
+                JOIN file_shares fs ON fpd.id = fs.file_id
+                WHERE fpd.processing_stats_id = %s AND fs.shared_to_user_id = %s
+                LIMIT 1
+            """, (execution_id, current_user.user_id))
+            if not cursor.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="权限不足，只能下载自己的任务执行报告"
+                )
+
+        final_report = stat[3]
+        if not final_report or not str(final_report).strip():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="该任务执行暂无 AI 分析报告，无法导出 PDF"
+            )
+
+        try:
+            pdf_bytes, filename = generate_ai_report_pdf(
+                str(final_report),
+                document_name=stat[4],
+                analyzed_at=stat[1],
+                model_name=stat[2],
+                author='Broadview Hub',
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="该任务执行暂无 AI 分析报告，无法导出 PDF"
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"生成文字版 PDF 失败: {exc}"
+            )
+
+        # 同时给出 ASCII 回退名与 RFC 5987 编码名，兼容中文文件名
+        ascii_fallback = filename.encode('ascii', errors='ignore').decode('ascii').strip() or 'ai-analysis-report.pdf'
+        quoted_filename = urllib.parse.quote(filename)
+        content_disposition = (
+            f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quoted_filename}"
+        )
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": content_disposition,
+                "Content-Length": str(len(pdf_bytes)),
+            },
+        )
+
     finally:
         conn.close() 

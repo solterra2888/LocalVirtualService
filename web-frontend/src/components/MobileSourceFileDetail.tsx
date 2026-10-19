@@ -55,6 +55,8 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
   const [aiAnalysisData, setAiAnalysisData] = useState<TaskExecutionDetail | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
+  // 文字版 PDF（服务端渲染，文字可选中）：与图片版截图导出独立的状态
+  const [textPdfDownloading, setTextPdfDownloading] = useState(false);
   const [audioAnalyzingIds, setAudioAnalyzingIds] = useState<Set<string>>(new Set());
   const [docAnalyzingIds, setDocAnalyzingIds] = useState<Set<string>>(new Set());
   const [allTemplates, setAllTemplates] = useState<PromptTemplate[]>([]);
@@ -181,6 +183,24 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
       message.error('PDF download failed, please try again');
     } finally {
       setPdfDownloading(false);
+    }
+  };
+
+  // 导出文字版 PDF：服务端把 final_report (Markdown) 渲染为可选中/可搜索的文本 PDF
+  const handleDownloadTextPdf = async () => {
+    try {
+      setTextPdfDownloading(true);
+      const filename = await tasksAPI.downloadExecutionReportPdf(execution.id);
+      message.success(`Text PDF downloaded: ${filename}`);
+    } catch (error: unknown) {
+      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      message.error(
+        typeof detail === 'string' && detail
+          ? detail
+          : 'Text PDF download failed, please try again'
+      );
+    } finally {
+      setTextPdfDownloading(false);
     }
   };
 
@@ -429,6 +449,8 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
               aiAnalysisLoading={aiAnalysisLoading}
               onDownloadPdf={handleDownloadPdf}
               pdfDownloading={pdfDownloading}
+              onDownloadTextPdf={handleDownloadTextPdf}
+              textPdfDownloading={textPdfDownloading}
               onLoadAnalysis={async () => {
                 try {
                   setAiAnalysisLoading(true);

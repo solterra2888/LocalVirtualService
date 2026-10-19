@@ -388,6 +388,8 @@ const FilesPageInner: React.FC = () => {
   const [aiAnalysisData, setAiAnalysisData] = useState<TaskExecutionDetail | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
+  // 文字版 PDF（服务端渲染，文字可选中）：与图片版截图导出独立的状态
+  const [textPdfDownloading, setTextPdfDownloading] = useState(false);
   
   // AI分析相关状态（音频+文档）
   const [audioAnalyzingIds, setAudioAnalyzingIds] = useState<Set<string>>(new Set());
@@ -1156,11 +1158,36 @@ const FilesPageInner: React.FC = () => {
       });
       
       message.success('PDF report downloaded successfully');
-      
+
     } catch (error) {
       message.error('PDF download failed, please try again');
     } finally {
       setPdfDownloading(false);
+    }
+  };
+
+  // 导出文字版 PDF：服务端把 final_report (Markdown) 渲染为可选中/可搜索的文本 PDF
+  const handleDownloadTextPdf = async () => {
+    const executionMeta = selectedExecutionForView ?? aiAnalysisExecution;
+    const executionId = executionMeta?.id ?? aiAnalysisData?.execution?.id;
+    if (!executionId) {
+      message.error('No report available for download');
+      return;
+    }
+
+    try {
+      setTextPdfDownloading(true);
+      const filename = await tasksAPI.downloadExecutionReportPdf(executionId);
+      message.success(`Text PDF downloaded: ${filename}`);
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+      message.error(
+        typeof detail === 'string' && detail
+          ? detail
+          : 'Text PDF download failed, please try again'
+      );
+    } finally {
+      setTextPdfDownloading(false);
     }
   };
 
@@ -2331,9 +2358,20 @@ const FilesPageInner: React.FC = () => {
           }}>
             Close
           </Button>,
-          <Button 
-            key="download" 
-            type="primary" 
+          <Button
+            key="download-text"
+            type="primary"
+            ghost
+            icon={<FileTextOutlined />}
+            loading={textPdfDownloading}
+            onClick={handleDownloadTextPdf}
+            disabled={!aiAnalysisData?.execution?.final_report || textPdfDownloading}
+          >
+            {textPdfDownloading ? 'Generating...' : 'Download PDF (Text)'}
+          </Button>,
+          <Button
+            key="download"
+            type="primary"
             icon={<DownloadOutlined />}
             loading={pdfDownloading}
             onClick={handleDownloadPdf}
@@ -3571,6 +3609,8 @@ const FilesPageInner: React.FC = () => {
                               aiAnalysisLoading={aiAnalysisLoading}
                               onDownloadPdf={handleDownloadPdf}
                               pdfDownloading={pdfDownloading}
+                              onDownloadTextPdf={handleDownloadTextPdf}
+                              textPdfDownloading={textPdfDownloading}
                               onLoadAnalysis={async () => {
                                 try {
                                   setAiAnalysisLoading(true);
@@ -7081,6 +7121,9 @@ export const AIAnalysisView: React.FC<{
   onLoadAnalysis: () => Promise<void>;
   onDownloadPdf?: () => void;
   pdfDownloading?: boolean;
+  /** 文字版 PDF 导出（服务端渲染，文字可选中/可搜索） */
+  onDownloadTextPdf?: () => void;
+  textPdfDownloading?: boolean;
   onAnalyzeAudio?: (
     record: TaskExecution,
     templateVariables?: Record<string, any>,
@@ -7101,6 +7144,8 @@ export const AIAnalysisView: React.FC<{
   onLoadAnalysis,
   onDownloadPdf,
   pdfDownloading,
+  onDownloadTextPdf,
+  textPdfDownloading,
   onAnalyzeAudio,
   onAnalyzeDocument,
   onAnalysisSaved,
@@ -7443,6 +7488,18 @@ export const AIAnalysisView: React.FC<{
                   />
                 </Tooltip>
               )}
+              {onDownloadTextPdf && !isEditing && (
+                <Tooltip title="Export PDF (Text) — selectable & searchable text">
+                  <Button
+                    icon={<FileTextOutlined />}
+                    onClick={onDownloadTextPdf}
+                    loading={textPdfDownloading}
+                    size="small"
+                    className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
+                    aria-label="Export PDF (Text)"
+                  />
+                </Tooltip>
+              )}
             </div>
           </div>
         ) : (
@@ -7476,6 +7533,18 @@ export const AIAnalysisView: React.FC<{
                     size="small"
                     className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
                     aria-label="Export PDF"
+                  />
+                </Tooltip>
+              )}
+              {onDownloadTextPdf && !isEditing && (
+                <Tooltip title="Export PDF (Text) — selectable & searchable text">
+                  <Button
+                    icon={<FileTextOutlined />}
+                    onClick={onDownloadTextPdf}
+                    loading={textPdfDownloading}
+                    size="small"
+                    className={isDark ? 'files-export-pdf-btn files-export-pdf-btn--dark' : 'files-export-pdf-btn'}
+                    aria-label="Export PDF (Text)"
                   />
                 </Tooltip>
               )}
