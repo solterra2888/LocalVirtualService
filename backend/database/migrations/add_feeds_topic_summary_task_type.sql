@@ -1,45 +1,8 @@
 -- Feeds Dashboard: 添加 feeds_topic_summary 调度任务类型 + 默认调度行
--- Safe to re-run: drops and recreates constraint with merged type list.
-
-ALTER TABLE task_scheduling DROP CONSTRAINT IF EXISTS valid_task_type;
-
-ALTER TABLE task_scheduling ADD CONSTRAINT valid_task_type CHECK (type IN (
-    'twitter_subscription',
-    'youtube_subscription',
-    'zhishixingqiu_subscription',
-    'substack_subscription',
-    'podcast_subscription',
-    'weibo_subscription',
-    'zsxq_file_dispatch',
-    'economic_events',
-    'macro_indicators',
-    'eodhd_fundamentals',
-    'watchlist_fundamentals',
-    'finviz_screener',
-    'eodhd_stock_prices',
-    'eodhd_eod_stock_prices',
-    'market_data',
-    'earnings_calendar',
-    'ipo_calendar',
-    'news_feed',
-    'feeds_topic_summary',
-    'twitter_author_summary',
-    'twitter_daily_report',
-    'youtube_author_summary',
-    'theme_report',
-    'market_weekly_report',
-    'daily_market_report',
-    'the_close_summary',
-    'cnbc_closing_bell',
-    'zhishixingqiu_summary',
-    'substack_summary',
-    'fed_dashboard',
-    'form13f',
-    -- legacy types still referenced by existing rows
-    'cctv_news',
-    'eodhd_news',
-    'watchlist_news'
-));
+-- 约束管理说明: valid_task_type 约束统一由 db_manager._update_task_scheduling_constraints
+-- 在每次启动时按"表内已有类型 + 代码内置清单"合并重建（合并安全）。
+-- 此处不再用静态清单 DROP/ADD 约束——静态清单落后于表内类型时会导致
+-- ADD CONSTRAINT 违反已存在行, 进而毒化整个启动事务（2026-10 修复的存量 bug）。
 
 -- 默认调度行: 每 15 分钟聚合主题快照 (feed_topic_daily_items)。
 -- days=7: 覆盖 Dashboard 的「近3天/近一周」范围查询 + 兜住跨午夜入库的尾段内容。

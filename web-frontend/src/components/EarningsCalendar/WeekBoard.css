@@ -39,6 +39,9 @@
   gap: 12px;
   overflow-x: auto;
   padding: 8px 0 4px;
+  /* 拉伸至内容卡底部, 日框与白色背景底边对齐 */
+  flex: 1;
+  min-height: 0;
 }
 
 .ec-day-col {
@@ -47,6 +50,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
 }
 
 .ec-day-header {
@@ -88,82 +92,44 @@
   line-height: 16px;
 }
 
+/* 每日一个卡片框: 透明灰底, 不分盘前/盘后; 拉伸至列底 */
 .ec-section {
-  background: var(--ec-section-bg);
-  border: 1px solid var(--ec-section-border);
-  border-radius: 10px;
+  background: rgba(128, 128, 128, 0.1);
+  border-radius: 8px;
   padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  flex: 1;
+  min-height: 0;
 }
 
-.ec-section.before-open {
-  background: #fff7eb;
-  border-color: #f3c38a;
-}
-
-.ec-section.after-close {
-  background: #edf2f8;
-  border-color: #92a4c2;
-}
-
-.ec-board.dark .ec-section.before-open {
-  background: rgba(231, 180, 134, 0.12);
-  border-color: rgba(231, 180, 134, 0.45);
-}
-
-.ec-board.dark .ec-section.after-close {
-  background: rgba(74, 111, 165, 0.18);
-  border-color: rgba(74, 111, 165, 0.55);
-}
-
-.ec-section-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  background: #e7b486;
-}
-
-.ec-section.after-close .ec-section-header {
-  background: #4a6fa5;
-}
-
-.ec-section-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: #ffffff;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.ec-section-icon {
-  width: 14px;
-  height: 14px;
-  color: #ffffff;
+.ec-board.dark .ec-section {
+  background: rgba(148, 163, 184, 0.12);
 }
 
 .ec-list {
   display: flex;
   flex-wrap: wrap;
+  align-content: flex-start;
   gap: 8px;
   overflow-y: auto;
-  max-height: 420px;
+  flex: 1;
+  min-height: 0;
 }
 
 .ec-card {
+  position: relative;
   background: var(--ec-card-bg);
   border: 1px solid var(--ec-card-border);
-  border-radius: 8px;
-  padding: 8px;
-  flex: 0 0 calc(50% - 4px);
-  min-width: 86px;
+  border-radius: 6px;
+  padding: 3px 2px;
+  /* EarningsHub 风格紧凑竖卡: 方形 logo + 代码(尺寸适度放大保证可读性) */
+  width: 46px;
+  height: 66px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   cursor: default;
 }
@@ -173,13 +139,37 @@
   box-shadow: 0 2px 8px rgba(24, 144, 255, 0.15);
 }
 
+.ec-card.clickable {
+  cursor: pointer;
+}
+
+/* 已公布财报的 beat/miss 圆点 */
+.ec-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--ec-card-bg);
+}
+
+.ec-dot.beat {
+  background: var(--ec-beat);
+}
+
+.ec-dot.miss {
+  background: var(--ec-miss);
+}
+
 .ec-logo {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 方形 logo 区: 宽 46 - padding 4 = 42px, 等高成正方形 */
   width: 100%;
-  height: 30px;
-  padding: 2px;
+  height: 42px;
+  padding: 4px;
   overflow: hidden;
 }
 
@@ -189,32 +179,32 @@
   object-fit: contain;
 }
 
-.ec-logo-text {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ec-logo-text);
-  letter-spacing: 0.5px;
-}
-
 .ec-ticker {
-  font-size: 13px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  font-size: 10px;
   font-weight: 700;
   color: var(--ec-ticker);
   line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
-.ec-eps {
-  font-size: 11px;
-  line-height: 1.2;
-  text-align: center;
-}
-
-.ec-eps .est {
-  color: var(--ec-sub);
-}
-
-.ec-eps .actual {
+/* 无 Logo 时的首字母方块（颜色由 ticker 哈希生成，随主题适配；与方形 logo 区同尺寸） */
+.ec-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  font-size: 16px;
   font-weight: 700;
+  line-height: 1;
+  user-select: none;
 }
 
 .ec-beat {
@@ -239,18 +229,22 @@
 @media (max-width: 768px) {
   .ec-board {
     flex-direction: column;
+    /* 移动端改为自然高度堆叠, 不做满屏拉伸 */
+    flex: none;
   }
 
   .ec-day-col {
     min-width: 100%;
+    min-height: auto;
   }
 
-  .ec-card {
-    flex: 0 0 calc(33.333% - 6px);
+  .ec-section {
+    flex: none;
   }
 
   .ec-list {
-    max-height: none;
+    overflow-y: visible;
+    flex: none;
   }
 }
 

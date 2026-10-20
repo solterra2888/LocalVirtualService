@@ -52,6 +52,8 @@ class SchedulerService:
             'macro_indicators': self._execute_macro_indicators_task,
             'eodhd_fundamentals': self._execute_fundamentals_task,
             'watchlist_fundamentals': self._execute_watchlist_fundamentals_task,
+            'earnings_active_fundamentals': self._execute_earnings_active_fundamentals_task,
+            'fundamentals_rotation': self._execute_fundamentals_rotation_task,
             'finviz_screener': self._execute_finviz_screener_task,
             'eodhd_stock_prices': self._execute_eodhd_stock_prices_task,
             'eodhd_eod_stock_prices': self._execute_eodhd_eod_stock_prices_task,
@@ -2544,6 +2546,63 @@ class SchedulerService:
                 'data': None
             }
     
+    async def _execute_earnings_active_fundamentals_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        T2 财报活跃名单刷新: earnings_calendar 窗口内将公布/刚公布财报的公司,
+        fundamentals 过期时 fan-out 单票更新（fire-and-forget, 不等待完成）。
+
+        params:
+            - window_back: 回看天数（默认 7）
+            - window_forward: 前瞻天数（默认 21）
+            - stale_days: fundamentals 超过 N 天未刷新才更新（默认 7）
+            - max_companies: 单次上限（默认 800）
+        """
+        try:
+            window_back = params.get('window_back', 7)
+            window_forward = params.get('window_forward', 21)
+            stale_days = params.get('stale_days', 7)
+            max_companies = params.get('max_companies', 800)
+
+            from backend.tasks.data_tasks import update_earnings_active_fundamentals_task
+            task = update_earnings_active_fundamentals_task.apply_async(kwargs={
+                'window_back': window_back,
+                'window_forward': window_forward,
+                'stale_days': stale_days,
+                'max_companies': max_companies,
+            })
+            logger.info(f"财报活跃名单 fundamentals 刷新已提交 Celery: task_id={task.id}")
+            return {
+                'success': True,
+                'message': f'财报活跃名单刷新已提交 Celery（任务ID: {task.id}）',
+                'data': {'task_id': task.id, 'status': 'PENDING'},
+            }
+        except Exception as e:
+            logger.error(f"提交财报活跃名单刷新失败: {str(e)}")
+            return {'success': False, 'message': f'提交财报活跃名单刷新失败: {str(e)}'}
+
+    async def _execute_fundamentals_rotation_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        T4 fundamentals 全量轮换: 美股+港股活跃公司按 updated_at 最旧优先,
+        每天 daily_limit 只 fan-out 单票更新（fire-and-forget）。
+
+        params:
+            - daily_limit: 每日轮换公司数上限（默认 3000, 约占 EODHD 日预算 30%）
+        """
+        try:
+            daily_limit = params.get('daily_limit', 3000)
+
+            from backend.tasks.data_tasks import fundamentals_rotation_task
+            task = fundamentals_rotation_task.apply_async(kwargs={'daily_limit': daily_limit})
+            logger.info(f"fundamentals 全量轮换已提交 Celery: task_id={task.id}")
+            return {
+                'success': True,
+                'message': f'fundamentals 全量轮换已提交 Celery（任务ID: {task.id}）',
+                'data': {'task_id': task.id, 'status': 'PENDING'},
+            }
+        except Exception as e:
+            logger.error(f"提交 fundamentals 轮换失败: {str(e)}")
+            return {'success': False, 'message': f'提交 fundamentals 轮换失败: {str(e)}'}
+
     async def _execute_watchlist_fundamentals_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行 Watchlist Fundamentals 批量更新任务（通过Celery异步执行）

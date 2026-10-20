@@ -1464,6 +1464,98 @@ async def create_default_watchlist_fundamentals_task(
         raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
 
 
+class CreateEarningsActiveFundamentalsTaskRequest(BaseModel):
+    """创建 财报活跃名单 fundamentals 刷新定时任务请求模型"""
+    name: str = Field(default="Earnings Active Fundamentals Refresh", description="任务名称")
+    cron_expression: str = Field(default="20 18 * * *", description="Cron表达式（默认每天 18:20, 跟在 18:00 财报日历抓取之后）")
+    timezone: str = Field(default="Asia/Shanghai", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    window_back: int = Field(default=7, description="回看天数（含刚公布财报的公司）")
+    window_forward: int = Field(default=21, description="前瞻天数（含将公布财报的公司）")
+    stale_days: int = Field(default=7, description="fundamentals 超过 N 天未刷新才更新")
+    max_companies: int = Field(default=800, ge=1, le=2000, description="单日上限（每家 10 次 EODHD 计费调用）")
+
+
+@router.post("/tasks/earnings-active-fundamentals", summary="创建 财报活跃名单 Fundamentals 刷新定时任务")
+async def create_earnings_active_fundamentals_task(
+    request: CreateEarningsActiveFundamentalsTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建 T2 财报活跃名单 fundamentals 刷新任务:
+    earnings_calendar [-window_back, +window_forward] 窗口内、fundamentals 超 stale_days
+    未刷新的公司, 按 report_date 距今排序 fan-out 单票更新（上限 max_companies 家/天）。
+    """
+    try:
+        scheduler_service = await get_scheduler_service()
+        task_params = {
+            'window_back': request.window_back,
+            'window_forward': request.window_forward,
+            'stale_days': request.stale_days,
+            'max_companies': request.max_companies,
+        }
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="earnings_active_fundamentals",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+        if result['success']:
+            return {"success": True, "message": result['message'],
+                    "data": {"task_id": result['task_id'], "task_config": result['task_config']}}
+        raise HTTPException(status_code=400, detail=result['message'])
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建财报活跃名单 Fundamentals 任务失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
+class CreateFundamentalsRotationTaskRequest(BaseModel):
+    """创建 fundamentals 全量轮换定时任务请求模型"""
+    name: str = Field(default="Fundamentals Rotation", description="任务名称")
+    cron_expression: str = Field(default="30 1 * * *", description="Cron表达式（默认每天 01:30）")
+    timezone: str = Field(default="Asia/Shanghai", description="时区")
+    enabled: bool = Field(default=True, description="是否启用")
+    daily_limit: int = Field(default=3000, ge=100, le=10000, description="每日轮换公司数上限（每家 10 次 EODHD 计费调用, 3000≈占日限 30%）")
+
+
+@router.post("/tasks/fundamentals-rotation", summary="创建 Fundamentals 全量轮换定时任务")
+async def create_fundamentals_rotation_task(
+    request: CreateFundamentalsRotationTaskRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    创建 T4 fundamentals 全量轮换任务:
+    美股(NYSE/NASDAQ/US)+港股 活跃公司按 updated_at 最旧优先每日轮换 daily_limit 家,
+    池约 1.5 万家 → 3000 家/天约 5 天一轮。
+    """
+    try:
+        scheduler_service = await get_scheduler_service()
+        task_params = {'daily_limit': request.daily_limit}
+        result = await scheduler_service.create_cron_task(
+            task_name=request.name,
+            task_type="fundamentals_rotation",
+            cron_expression=request.cron_expression,
+            timezone=request.timezone,
+            enabled=request.enabled,
+            task_params=task_params,
+            created_by=current_user.username
+        )
+        if result['success']:
+            return {"success": True, "message": result['message'],
+                    "data": {"task_id": result['task_id'], "task_config": result['task_config']}}
+        raise HTTPException(status_code=400, detail=result['message'])
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("创建 Fundamentals 轮换任务失败", exception=str(e), user=current_user.username)
+        raise HTTPException(status_code=500, detail=f"创建定时任务失败: {str(e)}")
+
+
 @router.post("/tasks/ipo-calendar/default", summary="创建默认 IPO 日历定时任务")
 async def create_default_ipo_calendar_task(
     current_user=Depends(get_current_user)

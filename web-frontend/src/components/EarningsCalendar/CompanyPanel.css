@@ -1,0 +1,74 @@
+/* 公司详情面板内图表区 */
+.ecp-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 18px 0 8px;
+}
+
+.ecp-chart-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ecp-currency-tag {
+  font-size: 10px;
+  opacity: 0.65;
+  margin-left: 6px;
+}
+
+/* 关键指标 / 统计 网格（对齐 EarningsHub Highlights 布局） */
+.ecp-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.ecp-stat {
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 6px;
+  padding: 6px 6px;
+  text-align: center;
+  min-width: 0;
+}
+
+.ecp-dark .ecp-stat {
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.ecp-stat-label {
+  font-size: 10px;
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ecp-stat-value {
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ecp-stat-sub {
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.ecp-stat-sub.up {
+  color: #52c41a;
+}
+
+.ecp-stat-sub.down {
+  color: #f5222d;
+}
+
+/* EPS beat 统计注释 */
+.ecp-beat-note {
+  font-size: 11px;
+  opacity: 0.65;
+  margin: -2px 0 6px;
+}

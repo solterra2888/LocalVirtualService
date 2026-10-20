@@ -1,0 +1,41 @@
+/* Earnings Feed 卡片流（右栏默认态） */
+.ecf-card {
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.ecf-card:hover {
+  background: rgba(24, 144, 255, 0.08) !important;
+}
+
+.ecf-results {
+  margin-top: 8px;
+  border-top: 1px dashed rgba(128, 128, 128, 0.25);
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ecf-row {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  align-items: baseline;
+}
+
+.ecf-label {
+  flex: 0 0 30px;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  opacity: 0.55;
+}
+
+.ecf-est {
+  opacity: 0.6;
+}

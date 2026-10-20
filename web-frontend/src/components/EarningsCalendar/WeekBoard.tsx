@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Tooltip } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
 import type { EarningsCalendarItem } from '../../services/markets';
@@ -10,131 +10,106 @@ interface WeekBoardProps {
   /** 本周周一 */
   weekStart: Dayjs;
   isDark: boolean;
+  /** 点击卡片打开公司详情面板 */
+  onSelect?: (code: string) => void;
 }
 
-const SunIcon: React.FC = () => (
-  <svg className="ec-section-icon" viewBox="0 0 24 24" aria-hidden="true">
-    <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.5" fill="none" />
-    <line x1="12" y1="2" x2="12" y2="5" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="12" y1="19" x2="12" y2="22" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="4.22" y1="4.22" x2="6.34" y2="6.34" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="17.66" y1="17.66" x2="19.78" y2="19.78" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="2" y1="12" x2="5" y2="12" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="19" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="4.22" y1="19.78" x2="6.34" y2="17.66" stroke="currentColor" strokeWidth="1.5" />
-    <line x1="17.66" y1="6.34" x2="19.78" y2="4.22" stroke="currentColor" strokeWidth="1.5" />
-  </svg>
-);
+/** ticker 哈希 → 色相, 保证同一代码的头像颜色稳定 */
+const hueOf = (code: string): number => {
+  let h = 0;
+  for (let i = 0; i < code.length; i++) {
+    h = (h * 31 + code.charCodeAt(i)) % 360;
+  }
+  return h;
+};
 
-const MoonIcon: React.FC = () => (
-  <svg className="ec-section-icon" viewBox="0 0 24 24" aria-hidden="true">
-    <path
-      d="M20 13.5A7.5 7.5 0 0 1 11.5 5 6.5 6.5 0 1 0 20 13.5Z"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      fill="none"
-    />
-  </svg>
-);
-
-const formatEps = (v?: number | null): string =>
-  v === null || v === undefined ? '—' : v.toFixed(2);
-
-/** 单张财报卡片：未公布显示预期值，已公布显示实际值 + 惊喜率着色 */
-const EarningsCard: React.FC<{ item: EarningsCalendarItem }> = ({ item }) => {
-  const beat = item.reported && (item.eps_surprise_percent ?? 0) >= 0;
-
-  const epsLine = item.reported ? (
-    <span>
-      <span className="actual">
-        {formatEps(item.eps_actual)}
-        {item.eps_surprise_percent !== null && item.eps_surprise_percent !== undefined && (
-          <span className={beat ? 'ec-beat' : 'ec-miss'}>
-            {' '}
-            {beat ? '▲' : '▼'}
-            {Math.abs(item.eps_surprise_percent).toFixed(1)}%
-          </span>
-        )}
-      </span>
-    </span>
-  ) : (
-    <span className="est">
-      {item.eps_estimate !== null && item.eps_estimate !== undefined
-        ? `est ${item.eps_estimate.toFixed(2)}`
-        : 'est —'}
+/** 无 Logo 时的首字母方块（颜色由 ticker 哈希生成，随主题适配） */
+const TickerAvatar: React.FC<{ code: string; isDark: boolean }> = ({ code, isDark }) => {
+  const h = hueOf(code);
+  const style: React.CSSProperties = isDark
+    ? { background: `hsl(${h}, 32%, 30%)`, color: `hsl(${h}, 65%, 78%)` }
+    : { background: `hsl(${h}, 60%, 91%)`, color: `hsl(${h}, 55%, 32%)` };
+  return (
+    <span className="ec-avatar" style={style}>
+      {code.charAt(0).toUpperCase()}
     </span>
   );
+};
+
+/** 卡片上的显示代码: 去掉 .HK 后缀避免溢出(完整代码在 Tooltip) */
+const displayCode = (code: string): string => code.replace(/\.(HK|US)$/i, '');
+
+const whenLabel = (v?: string | null): string => {
+  const s = (v || '').toUpperCase();
+  if (s.includes('BEFORE')) return 'BMO';
+  if (s.includes('AFTER')) return 'AMC';
+  return '';
+};
+
+/** 单张财报卡片（EarningsHub 风格: 方形 logo + 代码; 已公布加 beat/miss 圆点） */
+const EarningsCard: React.FC<{
+  item: EarningsCalendarItem;
+  isDark: boolean;
+  onSelect?: (code: string) => void;
+}> = ({ item, isDark, onSelect }) => {
+  const [logoFailed, setLogoFailed] = useState(false);
+  const beat = item.reported && (item.eps_surprise_percent ?? 0) >= 0;
+  const showImg = item.logo_url && !logoFailed;
+
+  const tooltipParts = [item.code, item.company_name || ''];
+  const when = whenLabel(item.before_after_market);
+  if (when) tooltipParts.push(when);
+  if (item.reported) {
+    if (item.eps_actual !== null && item.eps_actual !== undefined) {
+      tooltipParts.push(`EPS ${item.eps_actual.toFixed(2)}`);
+    }
+    if (item.eps_estimate !== null && item.eps_estimate !== undefined) {
+      tooltipParts.push(`est ${item.eps_estimate.toFixed(2)}`);
+    }
+    if (item.eps_surprise_percent !== null && item.eps_surprise_percent !== undefined) {
+      tooltipParts.push(`${item.eps_surprise_percent >= 0 ? '+' : ''}${item.eps_surprise_percent.toFixed(1)}%`);
+    }
+  } else if (item.eps_estimate !== null && item.eps_estimate !== undefined) {
+    tooltipParts.push(`est ${item.eps_estimate.toFixed(2)}`);
+  }
 
   return (
-    <Tooltip
-      title={`${item.code} — ${item.company_name || ''}${
-        item.reported && item.eps_actual !== null && item.eps_actual !== undefined
-          ? ` · EPS ${item.eps_actual.toFixed(2)}`
-          : ''
-      }`}
-    >
-      <div className="ec-card">
+    <Tooltip title={tooltipParts.join(' · ')}>
+      <div
+        className={`ec-card${onSelect ? ' clickable' : ''}`}
+        onClick={onSelect ? () => onSelect(item.code) : undefined}
+      >
+        {item.reported && <span className={`ec-dot${beat ? ' beat' : ' miss'}`} />}
         <div className="ec-logo">
-          {item.logo_url ? (
+          {showImg ? (
             <img
-              src={item.logo_url}
+              src={item.logo_url as string}
               alt={item.code}
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
+              onError={() => setLogoFailed(true)}
             />
           ) : (
-            <span className="ec-logo-text">{item.code}</span>
+            <TickerAvatar code={item.code} isDark={isDark} />
           )}
         </div>
-        <div className="ec-ticker">{item.code}</div>
-        <div className="ec-eps">{epsLine}</div>
+        <div className="ec-ticker">{displayCode(item.code)}</div>
       </div>
     </Tooltip>
   );
 };
 
-const WeekSection: React.FC<{
-  title: string;
-  icon: React.ReactNode;
-  items: EarningsCalendarItem[];
-}> = ({ title, icon, items }) => (
-  <div className={`ec-section ${title === 'Before Open' ? 'before-open' : 'after-close'}`}>
-    <div className="ec-section-header">
-      {icon}
-      <span className="ec-section-title">{title}</span>
-    </div>
-    {items.length > 0 ? (
-      <div className="ec-list">
-        {items.map((item) => (
-          <EarningsCard key={`${item.code}-${item.report_date}`} item={item} />
-        ))}
-      </div>
-    ) : (
-      <div className="ec-empty">
-        <span>📋</span>
-        <span>No Earnings</span>
-      </div>
-    )}
-  </div>
-);
-
-export const WeekBoard: React.FC<WeekBoardProps> = ({ data, weekStart, isDark }) => {
+export const WeekBoard: React.FC<WeekBoardProps> = ({ data, weekStart, isDark, onSelect }) => {
   const todayStr = dayjs().format('YYYY-MM-DD');
 
-  // 周一至周五，每天按盘前/盘后分组（与周报 EarningsCalendarWeek 相同口径）
+  // 周一至周五, 每天一个卡片框(不分盘前/盘后, 发布时点在卡片 Tooltip 的 BMO/AMC)
   const days = Array.from({ length: 5 }, (_, i) => {
     const date = weekStart.add(i, 'day');
     const dateStr = date.format('YYYY-MM-DD');
-    const dayItems = data.filter((it) => it.report_date === dateStr);
-    const when = (it: EarningsCalendarItem) => (it.before_after_market || '').toUpperCase();
     return {
       key: dateStr,
       dayName: date.format('ddd').toUpperCase(),
       dayNumber: date.format('D'),
       isToday: dateStr === todayStr,
-      beforeOpen: dayItems.filter((it) => when(it).includes('BEFORE')),
-      afterClose: dayItems.filter((it) => !when(it).includes('BEFORE')),
+      items: data.filter((it) => it.report_date === dateStr),
     };
   });
 
@@ -147,8 +122,25 @@ export const WeekBoard: React.FC<WeekBoardProps> = ({ data, weekStart, isDark })
             <div className="ec-day-number">{day.dayNumber}</div>
             {day.isToday && <span className="ec-today-tag">TODAY</span>}
           </div>
-          <WeekSection title="Before Open" icon={<SunIcon />} items={day.beforeOpen} />
-          <WeekSection title="After Close" icon={<MoonIcon />} items={day.afterClose} />
+          <div className="ec-section">
+            {day.items.length > 0 ? (
+              <div className="ec-list">
+                {day.items.map((item) => (
+                  <EarningsCard
+                    key={`${item.code}-${item.report_date}`}
+                    item={item}
+                    isDark={isDark}
+                    onSelect={onSelect}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="ec-empty">
+                <span>📋</span>
+                <span>No Earnings</span>
+              </div>
+            )}
+          </div>
         </div>
       ))}
     </div>

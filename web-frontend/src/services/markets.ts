@@ -134,6 +134,206 @@ export interface EarningsCalendarParams {
   offset?: number;
 }
 
+// ===== 财报日历月视图类型 =====
+
+export interface EarningsMonthDayTopItem {
+  code: string;
+  company_name?: string | null;
+  logo_url?: string | null;
+  eps_estimate?: number | null;
+  eps_actual?: number | null;
+  eps_surprise_percent?: number | null;
+  reported: boolean;
+  market_cap?: number | null;
+}
+
+export interface EarningsMonthDaySummary {
+  date?: string | null;
+  count: number;
+  before_count: number;
+  after_count: number;
+  top: EarningsMonthDayTopItem[];
+}
+
+export interface EarningsMonthSummary {
+  month: string;
+  scope: 'watchlist' | 'theme' | 'us' | 'hk';
+  total: number;
+  days: EarningsMonthDaySummary[];
+}
+
+// ===== 财报日历公司面板类型 =====
+
+export interface EarningsPanelCompany {
+  code: string;
+  name?: string | null;
+  exchange?: string | null;
+  sector?: string | null;
+  industry?: string | null;
+  country?: string | null;
+  description?: string | null;
+  web_url?: string | null;
+  logo_url?: string | null;
+  employees?: number | null;
+  currency?: string | null;
+}
+
+export interface EarningsPanelHighlights {
+  market_cap?: number | null;
+  pe_ratio?: number | null;
+  dividend_yield?: number | null;
+  eps_ttm?: number | null;
+  eps_est_current_quarter?: number | null;
+  eps_est_next_quarter?: number | null;
+  eps_est_current_year?: number | null;
+  eps_est_next_year?: number | null;
+  revenue_ttm?: number | null;
+  profit_margin?: number | null;
+  target_price?: number | null;
+  most_recent_quarter?: string | null;
+  forward_pe?: number | null;
+  ps_ratio?: number | null;
+  peg_ratio?: number | null;
+  dividend_share?: number | null;
+  revenue_growth_yoy?: number | null;
+  earnings_growth_yoy?: number | null;
+}
+
+export interface EarningsPanelNext {
+  report_date?: string | null;
+  before_after_market?: string | null;
+  eps_estimate?: number | null;
+  revenue_estimate?: number | null;
+}
+
+export interface EarningsPanelHistoryQuarter {
+  report_date?: string | null;
+  fiscal_period?: string | null;
+  before_after_market?: string | null;
+  eps_actual?: number | null;
+  eps_estimate?: number | null;
+  surprise_percent?: number | null;
+}
+
+export interface EarningsPanelRevenueQuarter {
+  period?: string | null;
+  revenue?: number | null;
+}
+
+export interface EarningsPanelDividendQuarter {
+  period?: string | null;
+  amount?: number | null;
+}
+
+export interface EarningsPanelTrend {
+  period?: string | null;
+  period_date?: string | null;
+  growth?: number | null;
+  eps_avg?: number | null;
+  eps_high?: number | null;
+  eps_low?: number | null;
+  analysts?: number | null;
+  revenue_avg?: number | null;
+  revenue_analysts?: number | null;
+  revisions_up_30d?: number | null;
+  revisions_down_30d?: number | null;
+}
+
+export interface EarningsPanelRatings {
+  rating?: number | null;
+  target_price?: number | null;
+  strong_buy?: number | null;
+  buy?: number | null;
+  hold?: number | null;
+  sell?: number | null;
+  strong_sell?: number | null;
+}
+
+export interface EarningsPanelTechnicals {
+  beta?: number | null;
+  week52_high?: number | null;
+  week52_low?: number | null;
+  ma50?: number | null;
+  ma200?: number | null;
+  short_volume?: number | null;
+  short_percent?: number | null;
+  short_as_of?: string | null;
+}
+
+export interface EarningsPanelPrice {
+  last?: number | null;
+  change_percent?: number | null;
+  as_of?: string | null;
+  volume?: number | null;
+  previous_close?: number | null;
+}
+
+export interface EarningsCompanyPanel {
+  found: boolean;
+  code: string;
+  company?: EarningsPanelCompany;
+  highlights?: EarningsPanelHighlights | null;
+  next_earnings?: EarningsPanelNext | null;
+  earnings_history?: EarningsPanelHistoryQuarter[];
+  revenue_history?: EarningsPanelRevenueQuarter[];
+  revenue_currency?: string | null;
+  dividend_history?: EarningsPanelDividendQuarter[];
+  dividend_currency?: string | null;
+  earnings_trend?: EarningsPanelTrend | null;
+  analyst_ratings?: EarningsPanelRatings | null;
+  technicals?: EarningsPanelTechnicals | null;
+  price?: EarningsPanelPrice | null;
+  eps_beat_count?: number | null;
+  eps_est_quarters?: number | null;
+}
+
+// ===== 财报电话会 AI Recap 类型 =====
+
+export interface EarningsRecapResult {
+  status: 'ok' | 'no_transcript' | 'unsupported' | 'error' | 'quota_exceeded';
+  code: string;
+  period?: string | null;
+  call_date?: string | null;
+  source?: string | null;
+  source_url?: string | null;
+  recap_md?: string | null;
+  model?: string | null;
+  cached?: boolean;
+  generated_at?: string | null;
+  message?: string | null;
+  stale?: boolean;
+  latest_report_date?: string | null;
+}
+
+// ===== Earnings Feed 类型（右栏默认态） =====
+
+export interface EarningsFeedItem {
+  code: string;
+  company_name?: string | null;
+  logo_url?: string | null;
+  report_date?: string | null;
+  before_after_market?: string | null;
+  eps_estimate?: number | null;
+  eps_actual?: number | null;
+  eps_surprise_percent?: number | null;
+  reported: boolean;
+  price?: number | null;
+  change_percent?: number | null;
+  revenue?: number | null;
+  revenue_period?: string | null;
+}
+
+export interface EarningsFeedData {
+  items: EarningsFeedItem[];
+  meta: {
+    total: number;
+    reported: number;
+    scope: string;
+    from_date?: string | null;
+    to_date?: string | null;
+  };
+}
+
 // ===== API 方法 =====
 
 export const marketsAPI = {
@@ -149,6 +349,76 @@ export const marketsAPI = {
       return result;
     } catch (error) {
       console.error('获取财报日历数据失败:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 获取财报日历月度汇总（Month View）
+   */
+  getEarningsCalendarMonthSummary: async (
+    month: string,
+    scope?: 'watchlist' | 'theme' | 'us' | 'hk',
+    search?: string
+  ): Promise<EarningsMonthSummary> => {
+    try {
+      const result = await api.get<EarningsMonthSummary>('/markets/earnings-calendar/month-summary', {
+        month,
+        scope,
+        search: search || undefined,
+      });
+      return result;
+    } catch (error) {
+      console.error('获取财报月度汇总失败:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 获取 Ticker 财务信息面板（财报日历右侧详情）
+   */
+  getEarningsCompanyPanel: async (code: string): Promise<EarningsCompanyPanel> => {
+    try {
+      const result = await api.get<EarningsCompanyPanel>('/markets/earnings-calendar/company-panel', {
+        code,
+      });
+      return result;
+    } catch (error) {
+      console.error('获取公司面板失败:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 生成/获取财报电话会 AI Recap（按需抓取 transcript + LLM 分析, 结果永久缓存）
+   */
+  generateEarningsRecap: async (code: string): Promise<EarningsRecapResult> => {
+    try {
+      const result = await api.post<EarningsRecapResult>(
+        `/markets/earnings-calendar/company-recap?code=${encodeURIComponent(code)}`
+      );
+      return result;
+    } catch (error) {
+      console.error('生成公司 Recap 失败:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 获取 Earnings Feed（右栏默认事件流）
+   */
+  getEarningsCalendarFeed: async (params?: {
+    from_date?: string;
+    to_date?: string;
+    scope?: 'watchlist' | 'theme' | 'us' | 'hk';
+    search?: string;
+    limit?: number;
+  }): Promise<EarningsFeedData> => {
+    try {
+      const result = await api.get<EarningsFeedData>('/markets/earnings-calendar/feed', params);
+      return result;
+    } catch (error) {
+      console.error('获取 Earnings Feed 失败:', error);
       throw error;
     }
   },

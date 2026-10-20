@@ -1,0 +1,37 @@
+/* Earnings Calendar 页面: 左视图 + 右公司详情栏的双栏布局 */
+.ec-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.ec-split-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ec-split-panel {
+  width: 440px;
+  flex: 0 0 440px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 1100px) {
+  .ec-split {
+    flex-direction: column;
+  }
+
+  .ec-split-main {
+    min-height: 320px;
+  }
+
+  .ec-split-panel {
+    width: 100%;
+    flex: 0 0 auto;
+    max-height: 560px;
+  }
+}

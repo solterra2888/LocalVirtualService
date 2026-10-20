@@ -1,0 +1,148 @@
+.ecm-board {
+  --ecm-text: #262626;
+  --ecm-sub: #8c8c8c;
+  --ecm-cell-bg: #fafafa;
+  --ecm-cell-border: #f0f0f0;
+  --ecm-chip-bg: #ffffff;
+  --ecm-chip-border: #e8e8e8;
+  --ecm-chip-text: #262626;
+  --ecm-count: #1890ff;
+  --ecm-today: #1890ff;
+  --ecm-heat: 24, 144, 255;
+  --ecm-out: rgba(0, 0, 0, 0.25);
+}
+
+.ecm-board.dark {
+  --ecm-text: #e0e6f1;
+  --ecm-sub: #94a3b8;
+  --ecm-cell-bg: #1a2234;
+  --ecm-cell-border: #364152;
+  --ecm-chip-bg: #232b3d;
+  --ecm-chip-border: #364152;
+  --ecm-chip-text: #e0e6f1;
+  --ecm-count: #4096ff;
+  --ecm-today: #4096ff;
+  --ecm-heat: 64, 150, 255;
+  --ecm-out: rgba(255, 255, 255, 0.3);
+}
+
+.ecm-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.ecm-weekday {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--ecm-sub);
+  text-transform: uppercase;
+  padding: 4px 0;
+}
+
+.ecm-cell {
+  min-height: 96px;
+  background: var(--ecm-cell-bg);
+  border: 1px solid var(--ecm-cell-border);
+  border-radius: 8px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.15s ease;
+}
+
+.ecm-cell.clickable {
+  cursor: pointer;
+}
+
+.ecm-cell.clickable:hover {
+  border-color: var(--ecm-count);
+}
+
+.ecm-cell.is-today {
+  border-color: var(--ecm-today);
+  box-shadow: 0 0 0 1px var(--ecm-today) inset;
+}
+
+.ecm-cell.out-month .ecm-day-number,
+.ecm-cell.out-month .ecm-chips {
+  opacity: 0.35;
+}
+
+.ecm-cell-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ecm-day-number {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ecm-text);
+}
+
+.ecm-count-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ecm-count);
+}
+
+.ecm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.ecm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--ecm-chip-bg);
+  border: 1px solid var(--ecm-chip-border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ecm-chip-text);
+  line-height: 16px;
+  max-width: 100%;
+}
+
+.ecm-chip img {
+  width: 12px;
+  height: 12px;
+  object-fit: contain;
+}
+
+.ecm-chip.reported {
+  border-color: rgba(82, 196, 26, 0.5);
+}
+
+.ecm-chip-overflow {
+  color: var(--ecm-sub);
+  font-weight: 500;
+}
+
+.ecm-month-total {
+  font-size: 12px;
+  color: var(--ecm-sub);
+  margin: 0 0 8px 2px;
+}
+
+@media (max-width: 768px) {
+  .ecm-grid {
+    gap: 3px;
+  }
+
+  .ecm-cell {
+    min-height: 64px;
+    padding: 3px;
+  }
+
+  .ecm-chips {
+    display: none;
+  }
+}

@@ -64,7 +64,7 @@ class SchedulerServiceClient:
                     
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             logger.warning(f"httpx connection failed, trying requests: {str(e)}")
-            
+
             # 如果httpx失败，使用requests作为备选方案
             try:
                 # 在线程池中运行requests
@@ -79,7 +79,7 @@ class SchedulerServiceClient:
                         **kwargs
                     )
                 )
-                
+
                 # 处理响应
                 if response.status_code >= 400:
                     logger.error(f"failed to request scheduler service: {response.status_code} - {response.text}")
@@ -87,7 +87,7 @@ class SchedulerServiceClient:
                         status_code=response.status_code,
                         detail=f"scheduler service error: {response.text}"
                     )
-                
+
                 # 尝试解析JSON响应
                 try:
                     result = response.json()
@@ -95,21 +95,28 @@ class SchedulerServiceClient:
                 except:
                     # 如果不是JSON响应，返回文本
                     return {"content": response.text, "status_code": response.status_code}
-                    
+
+            except HTTPException:
+                # 上面 >=400 抛出的 HTTPException 直接透传（原实现会被末尾的
+                # 宽泛 except 包装成 500 空消息, 用户只能看到 "failed to request..."）
+                raise
             except requests.exceptions.RequestException as req_e:
                 logger.error(f"requests connection failed: {str(req_e)}")
                 raise HTTPException(
                     status_code=503,
                     detail="scheduler service is not available, please ensure the scheduler service is running"
                 )
-                
+
+        except HTTPException:
+            # >=400 抛出的 HTTPException 直接透传, 保留调度器原始状态码与错误信息
+            raise
         except Exception as e:
             logger.error(f"scheduler service request exception: {str(e)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"failed to request scheduler service: {str(e)}"
             )
-    
+
     async def get(self, endpoint: str, params: Optional[Dict] = None, headers: Optional[Dict] = None) -> Dict[str, Any]:
         """GET请求"""
         return await self._make_request("GET", endpoint, headers=headers, params=params)
@@ -388,6 +395,32 @@ async def create_default_watchlist_fundamentals_task_proxy(request: Request, cur
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to proxy create default watchlist fundamentals task: {str(e)}")
+
+@router.post("/tasks/earnings-active-fundamentals", summary="create earnings active fundamentals task")
+async def create_earnings_active_fundamentals_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建 财报活跃名单 Fundamentals 刷新定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post("/scheduler/tasks/earnings-active-fundamentals", json_data=json_data, headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to proxy create earnings active fundamentals task: {str(e)}")
+
+@router.post("/tasks/fundamentals-rotation", summary="create fundamentals rotation task")
+async def create_fundamentals_rotation_task_proxy(request: Request, current_user=Depends(get_current_user)):
+    """代理创建 Fundamentals 全量轮换定时任务"""
+    try:
+        auth_headers = get_auth_headers(request)
+        json_data = await request.json()
+        result = await scheduler_client.post("/scheduler/tasks/fundamentals-rotation", json_data=json_data, headers=auth_headers)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to proxy create fundamentals rotation task: {str(e)}")
 
 @router.post("/tasks/ipo-calendar", summary="create IPO calendar task")
 async def create_ipo_calendar_task_proxy(request: Request, current_user=Depends(get_current_user)):

@@ -1096,6 +1096,146 @@ def update_watchlist_fundamentals_batch_task(self, data_types: list = None, skip
         }
 
 
+@app.task(bind=True, name='update_earnings_active_fundamentals', queue='data_fetching')
+def update_earnings_active_fundamentals_task(
+    self, window_back: int = 7, window_forward: int = 21,
+    stale_days: int = 7, max_companies: int = 800
+):
+    """
+    T2 财报活跃名单刷新: earnings_calendar 里 [今天-window_back, 今天+window_forward]
+    窗口内将公布/刚公布财报的公司中, fundamentals 超过 stale_days 未刷新的,
+    按 report_date 距今排序(最近的优先), fan-out 单票更新任务(每家 1 次合并请求/10 计费调用)。
+
+    与 watchlist 批量任务不同: 不等待子任务完成(立即返回), 避免 data 队列并发=2 时
+    父任务占住 worker 槽位造成的吞吐减半。
+    """
+    import time
+    from datetime import datetime, timedelta
+
+    try:
+        start_time = time.time()
+        info(f"开始财报活跃名单 fundamentals 刷新: window=[-{window_back}d,+{window_forward}d], "
+             f"stale>{stale_days}d, cap={max_companies}",
+             task_id=self.request.id, source="celery_earnings_active_fundamentals")
+
+        from backend.database.db_manager import DatabaseManager
+        from backend.utils.database_config import get_database_config
+        db_manager = DatabaseManager(get_database_config())
+
+        query = """
+            WITH window_codes AS (
+                SELECT DISTINCT ON (ec.code) ec.code, ec.report_date
+                FROM earnings_calendar ec
+                WHERE ec.report_date >= CURRENT_DATE - %s
+                  AND ec.report_date <= CURRENT_DATE + %s
+                ORDER BY ec.code, ec.report_date, ec.fetch_date DESC
+            )
+            SELECT wc.code, wc.report_date,
+                   CASE WHEN wc.code LIKE '%%.HK' THEN 'HK' ELSE 'US' END AS exchange
+            FROM window_codes wc
+            JOIN companies c ON c.code = replace(wc.code, '.HK', '')
+            WHERE c.updated_at < now() - make_interval(days => %s)
+            ORDER BY abs(wc.report_date - CURRENT_DATE)
+            LIMIT %s
+        """
+        with db_manager.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (window_back, window_forward, stale_days, max_companies))
+            rows = cursor.fetchall()
+            cursor.close()
+
+        if not rows:
+            info("财报活跃名单无需刷新（全部新鲜或窗口为空）",
+                 task_id=self.request.id, source="celery_earnings_active_fundamentals")
+            return {'success': True, 'message': '无需刷新', 'submitted': 0,
+                    'execution_time': time.time() - start_time}
+
+        from backend.tasks.data_tasks import update_single_ticker_fundamentals_task
+        from celery import group
+        job = group(
+            update_single_ticker_fundamentals_task.s(r[0].replace('.HK', ''), r[2])
+            for r in rows
+        )
+        job.apply_async()
+
+        msg = (f"财报活跃名单已提交 {len(rows)} 个单票更新任务"
+               f"（窗口 [-{window_back}d,+{window_forward}d]，stale>{stale_days}d）")
+        info(msg, task_id=self.request.id, submitted=len(rows),
+             source="celery_earnings_active_fundamentals")
+        return {
+            'success': True, 'message': msg, 'submitted': len(rows),
+            'codes': [r[0] for r in rows[:50]],
+            'execution_time': time.time() - start_time,
+        }
+
+    except Exception as e:
+        error_msg = f"财报活跃名单刷新任务异常: {str(e)}"
+        error(error_msg, task_id=self.request.id, exception=str(e),
+              source="celery_earnings_active_fundamentals")
+        return {'success': False, 'message': error_msg, 'submitted': 0}
+
+
+@app.task(bind=True, name='fundamentals_rotation', queue='data_fetching')
+def fundamentals_rotation_task(self, daily_limit: int = 3000):
+    """
+    T4 全量轮换: 美股(NYSE/NASDAQ/US)+港股 活跃公司, 按 companies.updated_at
+    最旧优先取 daily_limit 只, fan-out 单票更新任务。fire-and-forget 不等待子任务。
+
+    3000 家/天 ≈ 3 万计费调用(EODHD 日限 10 万的 30%), 池子约 1.5 万家 → 约 5 天一轮。
+    """
+    import time
+
+    try:
+        start_time = time.time()
+        info(f"开始 fundamentals 全量轮换: daily_limit={daily_limit}",
+             task_id=self.request.id, source="celery_fundamentals_rotation")
+
+        from backend.database.db_manager import DatabaseManager
+        from backend.utils.database_config import get_database_config
+        db_manager = DatabaseManager(get_database_config())
+
+        query = """
+            SELECT c.code, c.exchange
+            FROM companies c
+            WHERE c.isdelisted = FALSE
+              AND c.exchange IN ('NYSE', 'NASDAQ', 'US', 'HK')
+            ORDER BY c.updated_at ASC NULLS FIRST
+            LIMIT %s
+        """
+        with db_manager.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (daily_limit,))
+            rows = cursor.fetchall()
+            cursor.close()
+
+        if not rows:
+            return {'success': True, 'message': '轮换池为空', 'submitted': 0,
+                    'execution_time': time.time() - start_time}
+
+        from backend.tasks.data_tasks import update_single_ticker_fundamentals_task
+        from celery import group
+        job = group(
+            update_single_ticker_fundamentals_task.s(r[0], r[1] or 'US')
+            for r in rows
+        )
+        job.apply_async()
+
+        msg = f"全量轮换已提交 {len(rows)} 个单票更新任务（updated_at 最旧优先）"
+        info(msg, task_id=self.request.id, submitted=len(rows),
+             source="celery_fundamentals_rotation")
+        return {
+            'success': True, 'message': msg, 'submitted': len(rows),
+            'first_codes': [r[0] for r in rows[:20]],
+            'execution_time': time.time() - start_time,
+        }
+
+    except Exception as e:
+        error_msg = f"fundamentals 轮换任务异常: {str(e)}"
+        error(error_msg, task_id=self.request.id, exception=str(e),
+              source="celery_fundamentals_rotation")
+        return {'success': False, 'message': error_msg, 'submitted': 0}
+
+
 @app.task(bind=True, name='fetch_single_ticker_eod_history', queue='data_fetching')
 def fetch_single_ticker_eod_history_task(self, ticker: str, days_back: int = None):
     """

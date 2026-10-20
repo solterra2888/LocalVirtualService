@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card,
   Typography,
@@ -21,16 +21,24 @@ import {
   LeftOutlined,
   RightOutlined,
   ScheduleOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import {
   marketsAPI,
   EarningsCalendarItem,
   EarningsCalendarData,
+  EarningsMonthSummary,
+  EarningsCompanyPanel,
+  EarningsFeedData,
 } from '../services/markets';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import WeekBoard from '../components/EarningsCalendar/WeekBoard';
+import MonthBoard from '../components/EarningsCalendar/MonthBoard';
+import CompanyPanel from '../components/EarningsCalendar/CompanyPanel';
+import FeedList from '../components/EarningsCalendar/FeedList';
+import './EarningsCalendarPage.css';
 
 const { Title, Text } = Typography;
 
@@ -62,7 +70,7 @@ const THEME_COLORS = {
 } as const;
 
 type Scope = 'watchlist' | 'theme' | 'us' | 'hk';
-type ViewMode = 'calendar' | 'table';
+type ViewMode = 'calendar' | 'month' | 'table';
 
 /** 取某日期所在周的周一 */
 const getMonday = (d: Dayjs): Dayjs => {
@@ -82,10 +90,12 @@ const EarningsCalendarPage: React.FC = () => {
   const [scope, setScope] = useState<Scope>('watchlist');
   const [viewMode, setViewMode] = useState<ViewMode>('calendar');
   const [weekStart, setWeekStart] = useState<Dayjs>(getMonday(dayjs()));
+  const [monthStart, setMonthStart] = useState<Dayjs>(dayjs().startOf('month'));
   const [beforeAfter, setBeforeAfter] = useState<'all' | 'before' | 'after'>('all');
   const [reportedFilter, setReportedFilter] = useState<'all' | 'yes' | 'no'>('all');
   const [searchText, setSearchText] = useState('');
   const [data, setData] = useState<EarningsCalendarData | null>(null);
+  const [monthData, setMonthData] = useState<EarningsMonthSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
   // 拉取窗口：上周一 ~ 本周五（表格视图能看到近两周的已公布结果，日历视图只渲染本周）
@@ -110,11 +120,113 @@ const EarningsCalendarPage: React.FC = () => {
     }
   }, [scope, weekStart, beforeAfter, reportedFilter, searchText]);
 
+  // 月视图汇总（只应用 scope/search；月视图是总览，明细筛选不参与）
+  const fetchMonthSummary = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await marketsAPI.getEarningsCalendarMonthSummary(
+        monthStart.format('YYYY-MM'),
+        scope,
+        searchText.trim() || undefined
+      );
+      setMonthData(result);
+    } catch (error) {
+      console.error('Failed to get earnings month summary:', error);
+      message.error('Failed to retrieve earnings month summary');
+    } finally {
+      setLoading(false);
+    }
+  }, [scope, monthStart, searchText]);
+
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && viewMode !== 'month') {
       fetchCalendar();
     }
-  }, [fetchCalendar, isAuthenticated]);
+  }, [fetchCalendar, isAuthenticated, viewMode]);
+
+  useEffect(() => {
+    if (isAuthenticated && viewMode === 'month') {
+      fetchMonthSummary();
+    }
+  }, [fetchMonthSummary, isAuthenticated, viewMode]);
+
+  /** 月视图点击某天 → 跳到该天的周视图 */
+  const handleMonthDayClick = useCallback(
+    (date: string) => {
+      setWeekStart(getMonday(dayjs(date)));
+      setViewMode('calendar');
+    },
+    []
+  );
+
+  // 右侧公司详情面板
+  const [panelCode, setPanelCode] = useState<string | null>(null);
+  const [panelData, setPanelData] = useState<EarningsCompanyPanel | null>(null);
+  const [panelLoading, setPanelLoading] = useState(false);
+
+  // 右栏默认态: Earnings Feed（跟随当前视图窗口与范围; 明细筛选不参与）
+  const [feedData, setFeedData] = useState<EarningsFeedData | null>(null);
+  const [feedLoading, setFeedLoading] = useState(false);
+
+  const feedWindow = useMemo(
+    () =>
+      viewMode === 'month'
+        ? {
+            from: monthStart.format('YYYY-MM-DD'),
+            to: monthStart.endOf('month').format('YYYY-MM-DD'),
+          }
+        : {
+            from: weekStart.subtract(7, 'day').format('YYYY-MM-DD'),
+            to: weekStart.add(4, 'day').format('YYYY-MM-DD'),
+          },
+    [viewMode, monthStart, weekStart]
+  );
+
+  const fetchFeed = useCallback(async () => {
+    setFeedLoading(true);
+    try {
+      const result = await marketsAPI.getEarningsCalendarFeed({
+        from_date: feedWindow.from,
+        to_date: feedWindow.to,
+        scope,
+        search: searchText.trim() || undefined,
+        limit: 150,
+      });
+      setFeedData(result);
+    } catch (error) {
+      console.error('Failed to get earnings feed:', error);
+    } finally {
+      setFeedLoading(false);
+    }
+  }, [feedWindow, scope, searchText]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchFeed();
+    }
+  }, [fetchFeed, isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !panelCode) return;
+    let cancelled = false;
+    setPanelLoading(true);
+    setPanelData(null);
+    marketsAPI
+      .getEarningsCompanyPanel(panelCode)
+      .then((result) => {
+        if (!cancelled) setPanelData(result);
+      })
+      .catch((error) => {
+        console.error('Failed to get company panel:', error);
+        if (!cancelled) message.error('Failed to load company details');
+      })
+      .finally(() => {
+        if (!cancelled) setPanelLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [panelCode, isAuthenticated]);
 
   const items = data?.items ?? [];
   const meta = data?.meta;
@@ -297,7 +409,17 @@ const EarningsCalendarPage: React.FC = () => {
         }),
       }}
     >
-      <div style={{ padding: '24px', backgroundColor: colors.pageBg, minHeight: '100%' }}>
+      <div
+        style={{
+          padding: '24px',
+          // 与 .layout-content 的 min-height calc(100vh - 2*inset) 对齐, 拉满白色卡片高度
+          height: 'calc(100vh - 24px)',
+          backgroundColor: colors.pageBg,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
         <div style={{ marginBottom: '24px' }}>
           <Title level={2} style={{ color: colors.text }}>
             <ScheduleOutlined /> Earnings Calendar
@@ -306,6 +428,8 @@ const EarningsCalendarPage: React.FC = () => {
             Upcoming and recently reported earnings for your watchlist, theme companies and the
             broader US / Hong Kong markets
             {meta?.latest_fetch_date ? ` · Data updated ${meta.latest_fetch_date}` : ''}
+            {meta ? ` · ${meta.total} reports in window` : ''}
+            {' · Source: EODHD (daily 18:00)'}
           </Text>
         </div>
 
@@ -334,30 +458,55 @@ const EarningsCalendarPage: React.FC = () => {
                     />
                   </Space>
                 )}
+                {viewMode === 'month' && (
+                  <Space size={4}>
+                    <Button
+                      icon={<LeftOutlined />}
+                      onClick={() => setMonthStart(monthStart.subtract(1, 'month'))}
+                    />
+                    <Button
+                      size="small"
+                      onClick={() => setMonthStart(dayjs().startOf('month'))}
+                    >
+                      {monthStart.format('MMMM YYYY')}
+                    </Button>
+                    <Button
+                      icon={<RightOutlined />}
+                      onClick={() => setMonthStart(monthStart.add(1, 'month'))}
+                    />
+                  </Space>
+                )}
                 <Segmented
                   options={[
                     { label: 'Calendar', value: 'calendar' },
+                    { label: 'Month', value: 'month' },
                     { label: 'Table', value: 'table' },
                   ]}
                   value={viewMode}
                   onChange={(v) => setViewMode(v as ViewMode)}
                 />
-                <Button icon={<ReloadOutlined />} onClick={fetchCalendar} loading={loading} />
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={viewMode === 'month' ? fetchMonthSummary : fetchCalendar}
+                  loading={loading}
+                />
               </Space>
             </Col>
             <Col xs={24} md={16}>
-              <Space size={12} wrap>
-                <Segmented
-                  options={timeOptions}
-                  value={beforeAfter}
-                  onChange={(v) => setBeforeAfter(v as typeof beforeAfter)}
-                />
-                <Segmented
-                  options={reportedOptions}
-                  value={reportedFilter}
-                  onChange={(v) => setReportedFilter(v as typeof reportedFilter)}
-                />
-              </Space>
+              {viewMode !== 'month' && (
+                <Space size={12} wrap>
+                  <Segmented
+                    options={timeOptions}
+                    value={beforeAfter}
+                    onChange={(v) => setBeforeAfter(v as typeof beforeAfter)}
+                  />
+                  <Segmented
+                    options={reportedOptions}
+                    value={reportedFilter}
+                    onChange={(v) => setReportedFilter(v as typeof reportedFilter)}
+                  />
+                </Space>
+              )}
             </Col>
             <Col xs={24} md={8}>
               <Input.Search
@@ -372,41 +521,88 @@ const EarningsCalendarPage: React.FC = () => {
           </Row>
         </Card>
 
-        {/* 内容区 */}
-        <Card styles={{ body: { padding: '12px' } }}>
-          {viewMode === 'calendar' ? (
-            loading ? (
-              <Empty description="Loading..." style={{ padding: '60px 0' }} />
-            ) : items.length === 0 ? (
-              <Empty
-                description={
-                  scope === 'watchlist'
-                    ? 'No earnings found for your watchlist in this window'
-                    : 'No earnings found for the selected filters'
-                }
-                style={{ padding: '60px 0' }}
+        {/* 内容区: 左侧视图 + 右侧公司详情栏(对齐 EarningsHub 布局), 整体拉伸至白色卡片底部 */}
+        <div className="ec-split">
+          <Card
+            className="ec-split-main"
+            style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+            styles={{ body: { padding: '12px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' } }}
+          >
+            {viewMode === 'month' ? (
+              <MonthBoard
+                data={monthData}
+                monthStart={monthStart}
+                isDark={isDark}
+                onDayClick={handleMonthDayClick}
               />
+            ) : viewMode === 'calendar' ? (
+              loading ? (
+                <Empty description="Loading..." style={{ padding: '60px 0' }} />
+              ) : items.length === 0 ? (
+                <Empty
+                  description={
+                    scope === 'watchlist'
+                      ? 'No earnings found for your watchlist in this window'
+                      : 'No earnings found for the selected filters'
+                  }
+                  style={{ padding: '60px 0' }}
+                />
+              ) : (
+                <WeekBoard data={items} weekStart={weekStart} isDark={isDark} onSelect={setPanelCode} />
+              )
             ) : (
-              <WeekBoard data={items} weekStart={weekStart} isDark={isDark} />
-            )
-          ) : (
-            <Table
-              columns={columns}
-              dataSource={items}
-              rowKey={(r) => `${r.code}-${r.report_date}`}
-              loading={loading}
-              size="middle"
-              pagination={{ pageSize: 50, showSizeChanger: false, showTotal: (t) => `${t} reports` }}
-              scroll={{ x: 800 }}
-            />
-          )}
-        </Card>
+              <Table
+                columns={columns}
+                dataSource={items}
+                rowKey={(r) => `${r.code}-${r.report_date}`}
+                loading={loading}
+                size="middle"
+                onRow={(r) => ({
+                  onClick: () => setPanelCode(r.code),
+                  style: { cursor: 'pointer' },
+                })}
+                pagination={{ pageSize: 50, showSizeChanger: false, showTotal: (t) => `${t} reports` }}
+                scroll={{ x: 800 }}
+              />
+            )}
+          </Card>
 
-        <div style={{ marginTop: 12, textAlign: 'right' }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            Source: EODHD · auto-refreshed daily at 18:00
-            {meta ? ` · ${meta.total} reports in window` : ''}
-          </Text>
+          {/* 右侧: 未选中时为 Earnings Feed 事件流, 选中后为公司详情(对齐 EarningsHub 布局) */}
+          <Card
+            className="ec-split-panel"
+            style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+            styles={{ body: { padding: '12px 16px', flex: 1, minHeight: 0, overflowY: 'auto' } }}
+            title={
+              <span style={{ fontSize: 14 }}>
+                {panelCode
+                  ? panelData?.company?.name || panelCode
+                  : `Earnings Feed${feedData ? ` · ${feedData.meta.reported} reported` : ''}`}
+              </span>
+            }
+            extra={
+              panelCode ? (
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<CloseOutlined />}
+                  onClick={() => setPanelCode(null)}
+                />
+              ) : null
+            }
+          >
+            {panelCode ? (
+              <CompanyPanel
+                code={panelCode}
+                data={panelData}
+                loading={panelLoading}
+                isDark={isDark}
+              />
+            ) : feedLoading && !feedData ? (
+              <Empty description="Loading feed..." style={{ padding: '60px 0' }} />
+            ) : (
+              <FeedList items={feedData?.items ?? []} isDark={isDark} onSelect={setPanelCode} />
+            )}
+          </Card>
         </div>
       </div>
     </ConfigProvider>

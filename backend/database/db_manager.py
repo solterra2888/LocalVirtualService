@@ -997,6 +997,8 @@ class DatabaseManager:
                 'macro_indicators',
                 'eodhd_fundamentals',
                 'watchlist_fundamentals',
+                'earnings_active_fundamentals',
+                'fundamentals_rotation',
                 'finviz_screener',
                 'eodhd_stock_prices',
                 'eodhd_eod_stock_prices',

@@ -136,7 +136,7 @@ type SchedulerCategory = 'data_fetch' | 'report_generation';
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'earnings_active_fundamentals' | 'fundamentals_rotation' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'other';
   category: SchedulerCategory;
   description: string;
   enabled: boolean;
@@ -794,6 +794,46 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
           icon: <DatabaseOutlined />
         }
       ]
+    },
+    {
+      id: 'earnings_active_fundamentals',
+      name: 'Earnings Active Fundamentals',
+      type: 'earnings_active_fundamentals',
+      category: 'data_fetch',
+      sortOrder: 155,
+      description: 'Daily refresh for companies reporting earnings within [-7d, +21d] window (up to 800/day, ~8k EODHD calls). Keeps calendar-viewed tickers fresh around their earnings dates',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_earnings_active_fundamentals',
+          name: 'Configure Earnings Active Fundamentals Refresh',
+          description: 'Runs daily after the 18:00 earnings calendar fetch. Params: window_back / window_forward / stale_days / max_companies',
+          endpoint: '/scheduler/tasks/earnings-active-fundamentals',
+          params: {},
+          icon: <DatabaseOutlined />
+        }
+      ]
+    },
+    {
+      id: 'fundamentals_rotation',
+      name: 'Fundamentals Rotation',
+      type: 'fundamentals_rotation',
+      category: 'data_fetch',
+      sortOrder: 156,
+      description: 'Nightly full rotation of US+HK active companies (~15k pool), oldest-first 3000/day ≈ 30% of EODHD daily quota, full cycle in ~5 days',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_fundamentals_rotation',
+          name: 'Configure Fundamentals Rotation',
+          description: 'Runs nightly at 01:30. Param: daily_limit (companies per day, each costs 10 EODHD calls)',
+          endpoint: '/scheduler/tasks/fundamentals-rotation',
+          params: {},
+          icon: <DatabaseOutlined />
+        }
+      ]
     }
 ];
 
@@ -907,10 +947,12 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'substack_summary' && taskType === 'substack_summary') ||
           (sourceIdLower === 'fed_dashboard' && taskType === 'fed_dashboard') ||
           (sourceIdLower === 'form13f' && taskType === 'form13f') ||
+          (sourceIdLower === 'watchlist_fundamentals' && taskType === 'watchlist_fundamentals') ||
+          (sourceIdLower === 'earnings_active_fundamentals' && taskType === 'earnings_active_fundamentals') ||
+          (sourceIdLower === 'fundamentals_rotation' && taskType === 'fundamentals_rotation') ||
           (sourceIdLower.includes('events') && taskType.includes('events')) ||
           (sourceIdLower.includes('macro') && (taskType.includes('macro') || taskType.includes('indicators'))) ||
           (sourceIdLower.includes('exchange') && taskType.includes('exchange')) ||
-          (sourceIdLower.includes('fundamentals') && taskType.includes('fundamentals')) ||
           (sourceIdLower.includes('finviz_screener') && taskType.includes('finviz_screener'))
         );
       });

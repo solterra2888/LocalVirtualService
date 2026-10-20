@@ -149,6 +149,32 @@ class EarningsCalendarResponse(BaseModel):
     items: List[EarningsCalendarItemResponse] = Field(..., description="财报条目列表")
     meta: EarningsCalendarMetaResponse = Field(..., description="查询元信息")
 
+class EarningsMonthDayTopItem(BaseModel):
+    """月视图单日 Top 公司条目"""
+    code: str = Field(..., description="股票代码")
+    company_name: Optional[str] = Field(None, description="公司名称")
+    logo_url: Optional[str] = Field(None, description="公司Logo URL")
+    eps_estimate: Optional[float] = Field(None, description="EPS 预期值")
+    eps_actual: Optional[float] = Field(None, description="EPS 实际值")
+    eps_surprise_percent: Optional[float] = Field(None, description="EPS 惊喜率（%）")
+    reported: bool = Field(False, description="是否已公布")
+    market_cap: Optional[float] = Field(None, description="市值（美元）")
+
+class EarningsMonthDaySummary(BaseModel):
+    """月视图单日汇总"""
+    date: Optional[str] = Field(None, description="日期 (YYYY-MM-DD)")
+    count: int = Field(0, description="当日财报家数")
+    before_count: int = Field(0, description="盘前家数")
+    after_count: int = Field(0, description="盘后家数")
+    top: List[EarningsMonthDayTopItem] = Field(default_factory=list, description="市值 Top N 公司")
+
+class EarningsCalendarMonthSummaryResponse(BaseModel):
+    """财报日历月度汇总响应"""
+    month: str = Field(..., description="月份 (YYYY-MM)")
+    scope: str = Field(..., description="查询范围: watchlist/theme/us/hk")
+    total: int = Field(..., description="当月财报总家数")
+    days: List[EarningsMonthDaySummary] = Field(default_factory=list, description="逐日汇总")
+
 # === API Endpoints ===
 
 @router.get("/economic-events", response_model=List[EconomicEventResponse], summary="获取经济事件数据")
@@ -417,6 +443,149 @@ async def get_earnings_calendar(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取财报日历数据失败: {str(e)}"
+        )
+
+@router.get("/earnings-calendar/month-summary", response_model=EarningsCalendarMonthSummaryResponse, summary="获取财报日历月度汇总")
+async def get_earnings_calendar_month_summary(
+    month: Optional[str] = Query(None, description="月份 (YYYY-MM)，默认当月"),
+    scope: str = Query('watchlist', pattern='^(watchlist|theme|us|hk)$', description="范围: watchlist=自选 / theme=主题关联公司 / us=全部美股 / hk=全部港股"),
+    search: Optional[str] = Query(None, max_length=50, description="模糊搜索 ticker 或公司名"),
+    top_n: int = Query(5, ge=1, le=10, description="每日返回的市值 Top N 公司数"),
+    current_user=Depends(get_current_user)
+):
+    """
+    获取财报日历月度汇总（Month View 用）：逐日财报家数 + 市值 Top N 公司。
+    市值优先取 EODHD company_highlights，缺失时回退 finviz_screener。
+    """
+    try:
+        info(f"获取财报月度汇总请求: user={current_user.username}, month={month}, scope={scope}", source="markets_api")
+
+        if not month:
+            month = datetime.utcnow().strftime('%Y-%m')
+
+        service = get_earnings_calendar_service()
+        result = service.get_earnings_month_summary(
+            month=month,
+            scope=scope,
+            search=search,
+            top_n=top_n
+        )
+
+        for day in result.get('days', []):
+            for item in day.get('top', []):
+                item['logo_url'] = process_logo_url(item.get('logo_url'))
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        error(f"获取财报月度汇总失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取财报月度汇总失败: {str(e)}"
+        )
+
+@router.get("/earnings-calendar/company-panel", summary="获取财报日历 Ticker 财务信息面板")
+async def get_earnings_calendar_company_panel(
+    code: str = Query(..., min_length=1, max_length=20, description="股票代码(美股裸代码/港股带.HK后缀)"),
+    current_user=Depends(get_current_user)
+):
+    """
+    获取 Ticker 财务信息面板（财报日历右侧详情用）:
+    公司信息 / 关键指标 / 下次财报 / 最近 12 季 EPS 历史 / 一致预期 / 评级 / 技术指标 / 实时价格。
+    """
+    try:
+        info(f"获取公司面板请求: user={current_user.username}, code={code}", source="markets_api")
+
+        service = get_earnings_calendar_service()
+        result = service.get_company_panel(code)
+
+        if result.get('company'):
+            result['company']['logo_url'] = process_logo_url(result['company'].get('logo_url'))
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        error(f"获取公司面板失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取公司面板失败: {str(e)}"
+        )
+
+@router.get("/earnings-calendar/feed", summary="获取 Earnings Feed（右栏默认事件流）")
+async def get_earnings_calendar_feed(
+    from_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)，默认今天-7天"),
+    to_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)，默认今天+14天"),
+    scope: str = Query('watchlist', pattern='^(watchlist|theme|us|hk)$', description="范围: watchlist=自选 / theme=主题关联公司 / us=全部美股 / hk=全部港股"),
+    search: Optional[str] = Query(None, max_length=50, description="模糊搜索 ticker 或公司名"),
+    limit: int = Query(100, ge=1, le=300, description="返回条数上限 (1-300)"),
+    current_user=Depends(get_current_user)
+):
+    """
+    Earnings Feed: 当前窗口财报事件流（已公布在前、未公布在后），
+    每条附实时价格(stock_prices_realtime)与最近季度营收(company_income_statement)。
+    """
+    try:
+        info(f"获取 Earnings Feed 请求: user={current_user.username}, scope={scope}", source="markets_api")
+
+        if not from_date:
+            from_date = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
+        if not to_date:
+            to_date = (datetime.utcnow() + timedelta(days=14)).strftime('%Y-%m-%d')
+
+        service = get_earnings_calendar_service()
+        result = service.get_earnings_feed(
+            from_date=from_date,
+            to_date=to_date,
+            scope=scope,
+            search=search,
+            limit=limit
+        )
+
+        for item in result.get('items', []):
+            item['logo_url'] = process_logo_url(item.get('logo_url'))
+
+        return result
+
+    except Exception as e:
+        error(f"获取 Earnings Feed 失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取 Earnings Feed 失败: {str(e)}"
+        )
+
+@router.post("/earnings-calendar/company-recap", summary="生成/获取财报电话会 AI Recap")
+async def generate_earnings_company_recap(
+    code: str = Query(..., min_length=1, max_length=20, description="股票代码(美股裸代码)"),
+    current_user=Depends(get_current_user)
+):
+    """
+    按需生成某 ticker 最新一期财报电话会的 AI Recap:
+    Motley Fool(免费网页) → AlphaVantage(兜底) → 中央 LLM(qwen 等) 生成 Markdown 回顾,
+    结果永久缓存于 earnings_call_recaps, 同公司同季只抓取一次。
+    全流程约 10-30 秒（主要为 LLM 生成耗时）。
+    """
+    try:
+        info(f"生成公司 Recap 请求: user={current_user.username}, code={code}", source="markets_api")
+
+        from backend.services.earnings_recap_service import EarningsRecapService
+        registry = get_service_registry()
+        service = registry.get_or_create_service("earnings_recap_service", EarningsRecapService)
+
+        result = await service.get_or_generate(code)
+        return result
+
+    except Exception as e:
+        error(f"生成公司 Recap 失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"生成公司 Recap 失败: {str(e)}"
         )
 
 @router.get("/indicators", summary="获取可用指标列表")
