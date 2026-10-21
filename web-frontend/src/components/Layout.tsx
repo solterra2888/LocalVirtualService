@@ -374,7 +374,7 @@ const Layout: React.FC = () => {
             {sidebarExpanded ? (
               <>
                 <div className="layout-sidebar-brand-meta">
-                  <h2 className="layout-sidebar-brand-title">Broadview Hub</h2>
+                  <h2 className="layout-sidebar-brand-title">GuanHe Terminal</h2>
                 </div>
                 <button
                   type="button"

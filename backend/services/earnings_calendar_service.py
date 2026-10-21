@@ -18,6 +18,50 @@ from config.settings import config
 
 logger = get_logger("earnings_calendar_service")
 
+# 日历 actual 回退(EODHD 日历源缺陷兜底): 部分公司(如 GPC 2026Q2)公布后 EODHD 日历接口
+# 一直不回填实际值, 7 天回填窗口一过即永久缺失; 而 fundamentals 管线拉的
+# company_earnings_history 里有同一季的实际值 —— 展示层按 report_date ±4 天就近借用。
+ACTUAL_FALLBACK_LATERAL = """
+LEFT JOIN LATERAL (
+    SELECT eh.epsactual
+    FROM companies cc
+    JOIN company_earnings_history eh ON eh.company_id = cc.id
+    WHERE ec.actual IS NULL
+      AND cc.code = ec.code
+      AND eh.epsactual IS NOT NULL
+      AND eh.reportdate BETWEEN ec.report_date - 4 AND ec.report_date + 4
+    ORDER BY abs(eh.reportdate - ec.report_date)
+    LIMIT 1
+) fb ON TRUE
+"""
+
+# 市值统一换算为 USD(供市值筛选/月度 Top N): 港股代码在 companies 表不带 .HK 后缀;
+# 币种按 currencycode 换算(HKD/7.8, CNY/7.1, 其余视为 USD); 美股缺 highlights 时回退 finviz
+MCAP_USD_LATERAL = """
+    LEFT JOIN LATERAL (
+        SELECT CASE m.cur
+                   WHEN 'HKD' THEN m.mc / 7.8
+                   WHEN 'CNY' THEN m.mc / 7.1
+                   ELSE m.mc
+               END AS mc_usd
+        FROM (
+            SELECT cc.currencycode AS cur,
+                   COALESCE(h.marketcapitalization, f.market_cap * 1000000.0) AS mc
+            FROM companies cc
+            LEFT JOIN LATERAL (
+                SELECT marketcapitalization FROM company_highlights
+                WHERE company_id = cc.id ORDER BY data_date DESC LIMIT 1
+            ) h ON TRUE
+            LEFT JOIN finviz_screener f ON f.ticker = ec.code
+            WHERE cc.code = CASE WHEN ec.code LIKE '%%.HK'
+                                 THEN replace(ec.code, '.HK', '') ELSE ec.code END
+            ORDER BY (cc.code = ec.code) DESC,
+                     (COALESCE(h.marketcapitalization, f.market_cap) IS NOT NULL) DESC
+            LIMIT 1
+        ) m
+    ) mcap ON TRUE
+"""
+
 
 class EarningsCalendarService:
     """财报日历数据服务"""
@@ -658,7 +702,8 @@ class EarningsCalendarService:
         search: Optional[str] = None,
         reported: Optional[str] = None,
         limit: int = 500,
-        offset: int = 0
+        offset: int = 0,
+        min_market_cap: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         财报日历展示查询（供前端 Earnings Calendar 模块使用）
@@ -731,11 +776,18 @@ class EarningsCalendarService:
             like = f"%{search}%"
             params.extend([like, like, like])
 
+        # 市值筛选(USD, 已换算): 无市值数据的公司在启用筛选时被排除
+        if min_market_cap is not None:
+            conditions.append(" AND mcap.mc_usd >= %s")
+            params.append(min_market_cap)
+
         where_sql = " ".join(conditions)
 
         base_sql = f"""
             FROM earnings_calendar ec
             LEFT JOIN companies c ON c.code = ec.code OR c.primaryticker = ec.code
+            {ACTUAL_FALLBACK_LATERAL}
+            {MCAP_USD_LATERAL}
             WHERE ec.report_date >= %s AND ec.report_date <= %s
             {where_sql}
         """
@@ -757,7 +809,16 @@ class EarningsCalendarService:
                     ec.report_date,
                     ec.before_after_market,
                     ec.currency,
-                    ec.actual, ec.estimate, ec.difference, ec.percent,
+                    COALESCE(ec.actual, fb.epsactual) AS actual,
+                    ec.estimate,
+                    COALESCE(ec.difference,
+                        CASE WHEN fb.epsactual IS NOT NULL AND ec.estimate IS NOT NULL
+                             THEN fb.epsactual - ec.estimate END) AS difference,
+                    COALESCE(ec.percent,
+                        CASE WHEN fb.epsactual IS NOT NULL AND ec.estimate IS NOT NULL
+                                  AND ec.estimate <> 0
+                             THEN (fb.epsactual - ec.estimate) * 100.0 / ec.estimate END) AS percent,
+                    (fb.epsactual IS NOT NULL) AS actual_from_history,
                     ec.fetch_date
                 {base_sql}
                 ORDER BY ec.code, ec.report_date, ec.fetch_date DESC
@@ -769,7 +830,8 @@ class EarningsCalendarService:
         count_sql = f"""
             SELECT count(*) FROM (
                 SELECT DISTINCT ON (ec.code, ec.report_date)
-                    ec.code, ec.report_date, ec.actual
+                    ec.code, ec.report_date,
+                    COALESCE(ec.actual, fb.epsactual) AS actual
                 {base_sql}
                 ORDER BY ec.code, ec.report_date, ec.fetch_date DESC
             ) latest{reported_sql}
@@ -806,7 +868,8 @@ class EarningsCalendarService:
                         'eps_difference': float(row[8]) if row[8] is not None else None,
                         'eps_surprise_percent': float(row[9]) if row[9] is not None else None,
                         'reported': row[6] is not None,
-                        'fetch_date': row[10].strftime('%Y-%m-%d') if row[10] else None,
+                        'actual_from_history': bool(row[10]),
+                        'fetch_date': row[11].strftime('%Y-%m-%d') if row[11] else None,
                     })
 
                 cursor.close()
@@ -839,7 +902,8 @@ class EarningsCalendarService:
         month: str,
         scope: str = 'watchlist',
         search: Optional[str] = None,
-        top_n: int = 5
+        top_n: int = 5,
+        min_market_cap: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         月度汇总（Month View 用）：每个日期的财报家数 + 市值 Top N 公司
@@ -887,6 +951,9 @@ class EarningsCalendarService:
             conditions.append(" AND (ec.code ILIKE %s OR c.name ILIKE %s OR ec.name ILIKE %s)")
             like = f"%{search}%"
             params.extend([like, like, like])
+        if min_market_cap is not None:
+            conditions.append(" AND mcap.mc_usd >= %s")
+            params.append(min_market_cap)
         where_sql = " ".join(conditions)
 
         sql = f"""
@@ -898,11 +965,12 @@ class EarningsCalendarService:
                     ec.report_date,
                     ec.before_after_market,
                     ec.actual, ec.estimate, ec.percent,
-                    COALESCE(h.marketcapitalization, f.market_cap * 1000000.0) AS market_cap
+                    mcap.mc_usd AS market_cap
                 FROM earnings_calendar ec
                 LEFT JOIN companies c ON c.code = ec.code OR c.primaryticker = ec.code
                 LEFT JOIN company_highlights h ON h.company_id = c.id
                 LEFT JOIN finviz_screener f ON f.ticker = ec.code
+                {MCAP_USD_LATERAL}
                 WHERE ec.report_date >= %s AND ec.report_date <= %s
                 {where_sql}
                 ORDER BY ec.code, ec.report_date, ec.fetch_date DESC
@@ -1126,6 +1194,38 @@ class EarningsCalendarService:
                     'surprise_percent': _f(r[5]),
                 })
 
+            # 4.5) 用财报日历的已公布实际值补"刚公布"季度:
+            # earnings_calendar 每日 06:00/18:00 更新, 快于 fundamentals 管线回填
+            # company_earnings_history(受 7 天新鲜度节流)。就近合并 report_date ±4 天、
+            # actual 为空的行, 使 Overview 卡片/柱状图/History 表在公布当天即有数据。
+            merged_ests = 0
+            merged_beats = 0
+            try:
+                cursor.execute("""
+                    SELECT DISTINCT ON (report_date) report_date, actual, estimate, percent
+                    FROM earnings_calendar
+                    WHERE code = %s AND actual IS NOT NULL
+                      AND report_date >= CURRENT_DATE - 60 AND report_date <= CURRENT_DATE
+                    ORDER BY report_date, fetch_date DESC
+                """, (bare_code,))
+                for cr in cursor.fetchall():
+                    for h in earnings_history:
+                        if h['eps_actual'] is not None or not h['report_date']:
+                            continue
+                        rd = datetime.strptime(h['report_date'], '%Y-%m-%d').date()
+                        if abs((rd - cr[0]).days) <= 4:
+                            h['eps_actual'] = _f(cr[1])
+                            if h['eps_estimate'] is None and cr[2] is not None:
+                                h['eps_estimate'] = _f(cr[2])
+                            h['surprise_percent'] = _f(cr[3])
+                            if h['eps_estimate'] is not None and h['eps_actual'] is not None:
+                                merged_ests += 1
+                                if h['eps_actual'] > h['eps_estimate']:
+                                    merged_beats += 1
+                            break
+            except Exception as merge_err:
+                logger.warning(f"日历实际值合并失败({bare_code}): {merge_err}")
+
             # 5) 分析师一致预期（优先当季 '0q'，其次最新一期；'0q' 的营收预估同时用于下次财报卡片）
             cursor.execute("""
                 SELECT date, period, growth, earningsestimateavg, earningsestimatehigh,
@@ -1227,8 +1327,8 @@ class EarningsCalendarService:
                 ORDER BY reportdate DESC LIMIT 17
             """, (company_id,))
             beat_rows = cursor.fetchall()
-            eps_est_quarters = len(beat_rows)
-            eps_beat_count = sum(1 for br in beat_rows if br[0] > br[1])
+            eps_est_quarters = len(beat_rows) + merged_ests
+            eps_beat_count = sum(1 for br in beat_rows if br[0] > br[1]) + merged_beats
 
             # 8) 实时价格（code 格式为 xxx.US）
             cursor.execute("""
@@ -1294,7 +1394,8 @@ class EarningsCalendarService:
         to_date: str,
         scope: str = 'watchlist',
         search: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        min_market_cap: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Earnings Feed（右栏默认态）: 当前窗口的财报事件流, 每条附实时价格与最近季度营收。
@@ -1328,6 +1429,9 @@ class EarningsCalendarService:
             conditions.append(" AND (ec.code ILIKE %s OR c.name ILIKE %s OR ec.name ILIKE %s)")
             like = f"%{search}%"
             params.extend([like, like, like])
+        if min_market_cap is not None:
+            conditions.append(" AND mcap.mc_usd >= %s")
+            params.append(min_market_cap)
         where_sql = " ".join(conditions)
 
         sql = f"""
@@ -1339,10 +1443,15 @@ class EarningsCalendarService:
                     ec.report_date,
                     ec.before_after_market,
                     ec.estimate,
-                    ec.actual,
-                    ec.percent
+                    COALESCE(ec.actual, fb.epsactual) AS actual,
+                    COALESCE(ec.percent,
+                        CASE WHEN fb.epsactual IS NOT NULL AND ec.estimate IS NOT NULL
+                                  AND ec.estimate <> 0
+                             THEN (fb.epsactual - ec.estimate) * 100.0 / ec.estimate END) AS percent
                 FROM earnings_calendar ec
                 LEFT JOIN companies c ON c.code = ec.code OR c.primaryticker = ec.code
+                {ACTUAL_FALLBACK_LATERAL}
+                {MCAP_USD_LATERAL}
                 WHERE ec.report_date >= %s AND ec.report_date <= %s
                 {where_sql}
                 ORDER BY ec.code, ec.report_date, ec.fetch_date DESC

@@ -1,12 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Card,
   Typography,
   Table,
   Space,
   Input,
-  Row,
-  Col,
   message,
   Tag,
   Tooltip,
@@ -17,10 +15,8 @@ import {
   Empty,
 } from 'antd';
 import {
-  ReloadOutlined,
   LeftOutlined,
   RightOutlined,
-  ScheduleOutlined,
   CloseOutlined,
 } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
@@ -91,24 +87,26 @@ const EarningsCalendarPage: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('calendar');
   const [weekStart, setWeekStart] = useState<Dayjs>(getMonday(dayjs()));
   const [monthStart, setMonthStart] = useState<Dayjs>(dayjs().startOf('month'));
-  const [beforeAfter, setBeforeAfter] = useState<'all' | 'before' | 'after'>('all');
-  const [reportedFilter, setReportedFilter] = useState<'all' | 'yes' | 'no'>('all');
+
+  // 市值筛选(USD, 港股已按汇率换算), 默认 $10B+(对齐 EarningsHub)
+  const [mcapFilter, setMcapFilter] = useState<string>('30');
+  const mcapUsd = mcapFilter !== '0' ? Number(mcapFilter) * 1e9 : undefined;
+
   const [searchText, setSearchText] = useState('');
   const [data, setData] = useState<EarningsCalendarData | null>(null);
   const [monthData, setMonthData] = useState<EarningsMonthSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // 拉取窗口：上周一 ~ 本周五（表格视图能看到近两周的已公布结果，日历视图只渲染本周）
+  // 拉取窗口：所选周周一 ~ 周五（Calendar/Table/Feed 三个视图同一窗口, 数量保持一致）
   const fetchCalendar = useCallback(async () => {
     setLoading(true);
     try {
       const result = await marketsAPI.getEarningsCalendar({
-        from_date: weekStart.subtract(7, 'day').format('YYYY-MM-DD'),
+        from_date: weekStart.format('YYYY-MM-DD'),
         to_date: weekStart.add(4, 'day').format('YYYY-MM-DD'),
         scope,
-        before_after: beforeAfter === 'all' ? undefined : beforeAfter,
-        reported: reportedFilter === 'all' ? undefined : reportedFilter,
         search: searchText.trim() || undefined,
+        min_market_cap: mcapUsd,
         limit: 2000,
       });
       setData(result);
@@ -118,7 +116,7 @@ const EarningsCalendarPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [scope, weekStart, beforeAfter, reportedFilter, searchText]);
+  }, [scope, weekStart, searchText, mcapUsd]);
 
   // 月视图汇总（只应用 scope/search；月视图是总览，明细筛选不参与）
   const fetchMonthSummary = useCallback(async () => {
@@ -127,7 +125,8 @@ const EarningsCalendarPage: React.FC = () => {
       const result = await marketsAPI.getEarningsCalendarMonthSummary(
         monthStart.format('YYYY-MM'),
         scope,
-        searchText.trim() || undefined
+        searchText.trim() || undefined,
+        mcapUsd
       );
       setMonthData(result);
     } catch (error) {
@@ -136,7 +135,7 @@ const EarningsCalendarPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [scope, monthStart, searchText]);
+  }, [scope, monthStart, searchText, mcapUsd]);
 
   useEffect(() => {
     if (isAuthenticated && viewMode !== 'month') {
@@ -150,9 +149,10 @@ const EarningsCalendarPage: React.FC = () => {
     }
   }, [fetchMonthSummary, isAuthenticated, viewMode]);
 
-  /** 月视图点击某天 → 跳到该天的周视图 */
+  /** 月视图点击某天 → 跳到该天的周视图(并直接选中点击的那天) */
   const handleMonthDayClick = useCallback(
     (date: string) => {
+      monthJumpDateRef.current = date;
       setWeekStart(getMonday(dayjs(date)));
       setViewMode('calendar');
     },
@@ -161,8 +161,39 @@ const EarningsCalendarPage: React.FC = () => {
 
   // 右侧公司详情面板
   const [panelCode, setPanelCode] = useState<string | null>(null);
+  // 所点事件的 report_date: 未来事件(未公布)不展示 Recap 按钮
+  const [panelReportDate, setPanelReportDate] = useState<string | null>(null);
   const [panelData, setPanelData] = useState<EarningsCompanyPanel | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
+
+  const openPanel = useCallback((code: string, reportDate?: string | null) => {
+    setPanelCode(code);
+    setPanelReportDate(reportDate ?? null);
+  }, []);
+
+  // Calendar 视图选中的日期(YYYY-MM-DD): 选中后右栏 Feed 只显示该日财报(对齐 EarningsHub 按日查看)
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  // 月视图跳转要选中的具体日期(effect 里优先消费, 否则会被默认规则覆盖)
+  const monthJumpDateRef = useRef<string | null>(null);
+
+  // 默认选中规则: 进入/翻动 Calendar 视图时, 当周包含今天则默认选中今天, 否则不选;
+  // 非 Calendar 视图不选中(Feed 回到整周窗口)
+  useEffect(() => {
+    if (monthJumpDateRef.current) {
+      setSelectedDate(monthJumpDateRef.current);
+      monthJumpDateRef.current = null;
+      return;
+    }
+    if (viewMode === 'calendar') {
+      const today = dayjs();
+      const inWeek = !today.isBefore(weekStart, 'day') && today.isBefore(weekStart.add(5, 'day'), 'day');
+      setSelectedDate(inWeek ? today.format('YYYY-MM-DD') : null);
+    } else {
+      setSelectedDate(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStart, viewMode]);
 
   // 右栏默认态: Earnings Feed（跟随当前视图窗口与范围; 明细筛选不参与）
   const [feedData, setFeedData] = useState<EarningsFeedData | null>(null);
@@ -175,11 +206,14 @@ const EarningsCalendarPage: React.FC = () => {
             from: monthStart.format('YYYY-MM-DD'),
             to: monthStart.endOf('month').format('YYYY-MM-DD'),
           }
+        : selectedDate
+        ? { from: selectedDate, to: selectedDate }
         : {
-            from: weekStart.subtract(7, 'day').format('YYYY-MM-DD'),
+            // 与 Calendar/Table 同一窗口(所选周), 三视图数量一致
+            from: weekStart.format('YYYY-MM-DD'),
             to: weekStart.add(4, 'day').format('YYYY-MM-DD'),
           },
-    [viewMode, monthStart, weekStart]
+    [viewMode, monthStart, weekStart, selectedDate]
   );
 
   const fetchFeed = useCallback(async () => {
@@ -190,6 +224,7 @@ const EarningsCalendarPage: React.FC = () => {
         to_date: feedWindow.to,
         scope,
         search: searchText.trim() || undefined,
+        min_market_cap: mcapUsd,
         limit: 150,
       });
       setFeedData(result);
@@ -198,7 +233,7 @@ const EarningsCalendarPage: React.FC = () => {
     } finally {
       setFeedLoading(false);
     }
-  }, [feedWindow, scope, searchText]);
+  }, [feedWindow, scope, searchText, mcapUsd]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -229,8 +264,8 @@ const EarningsCalendarPage: React.FC = () => {
   }, [panelCode, isAuthenticated]);
 
   const items = data?.items ?? [];
-  const meta = data?.meta;
   const todayStr = dayjs().format('YYYY-MM-DD');
+  const today = dayjs();
 
   const columns = [
     {
@@ -356,22 +391,9 @@ const EarningsCalendarPage: React.FC = () => {
   ];
 
   const scopeOptions = [
-    { label: 'My Watchlist', value: 'watchlist' },
-    { label: 'Theme Companies', value: 'theme' },
-    { label: 'All US', value: 'us' },
-    { label: 'Hong Kong', value: 'hk' },
-  ];
-
-  const timeOptions = [
-    { label: 'All Times', value: 'all' },
-    { label: 'Before Open', value: 'before' },
-    { label: 'After Close', value: 'after' },
-  ];
-
-  const reportedOptions = [
-    { label: 'All', value: 'all' },
-    { label: 'Reported', value: 'yes' },
-    { label: 'Upcoming', value: 'no' },
+    { label: 'Watchlist', value: 'watchlist' },
+    { label: 'US', value: 'us' },
+    { label: 'HK', value: 'hk' },
   ];
 
   if (!isAuthenticated) {
@@ -411,7 +433,8 @@ const EarningsCalendarPage: React.FC = () => {
     >
       <div
         style={{
-          padding: '24px',
+          // 顶部 padding 为 0: 查询卡片顶边与左侧导航栏顶边(viewport y=12px)对齐
+          padding: '0 24px 24px',
           // 与 .layout-content 的 min-height calc(100vh - 2*inset) 对齐, 拉满白色卡片高度
           height: 'calc(100vh - 24px)',
           backgroundColor: colors.pageBg,
@@ -420,111 +443,82 @@ const EarningsCalendarPage: React.FC = () => {
           overflow: 'hidden',
         }}
       >
-        <div style={{ marginBottom: '24px' }}>
-          <Title level={2} style={{ color: colors.text }}>
-            <ScheduleOutlined /> Earnings Calendar
-          </Title>
-          <Text style={{ color: colors.textSecondary }}>
-            Upcoming and recently reported earnings for your watchlist, theme companies and the
-            broader US / Hong Kong markets
-            {meta?.latest_fetch_date ? ` · Data updated ${meta.latest_fetch_date}` : ''}
-            {meta ? ` · ${meta.total} reports in window` : ''}
-            {' · Source: EODHD (daily 18:00)'}
-          </Text>
-        </div>
-
-        {/* 控制面板 */}
-        <Card style={{ marginBottom: 16 }}>
-          <Row gutter={[16, 16]} align="middle">
-            <Col xs={24} md={10}>
-              <Space size={12} wrap>
-                <Segmented options={scopeOptions} value={scope} onChange={(v) => setScope(v as Scope)} />
-              </Space>
-            </Col>
-            <Col xs={24} md={14}>
-              <Space size={12} wrap style={{ justifyContent: 'flex-end', width: '100%' }}>
-                {viewMode === 'calendar' && (
-                  <Space size={4}>
-                    <Button
-                      icon={<LeftOutlined />}
-                      onClick={() => setWeekStart(weekStart.subtract(1, 'week'))}
-                    />
-                    <Button size="small" onClick={() => setWeekStart(getMonday(dayjs()))}>
-                      {weekStart.format('MMM D')} – {weekStart.add(4, 'day').format('MMM D, YYYY')}
-                    </Button>
-                    <Button
-                      icon={<RightOutlined />}
-                      onClick={() => setWeekStart(weekStart.add(1, 'week'))}
-                    />
-                  </Space>
-                )}
-                {viewMode === 'month' && (
-                  <Space size={4}>
-                    <Button
-                      icon={<LeftOutlined />}
-                      onClick={() => setMonthStart(monthStart.subtract(1, 'month'))}
-                    />
-                    <Button
-                      size="small"
-                      onClick={() => setMonthStart(dayjs().startOf('month'))}
-                    >
-                      {monthStart.format('MMMM YYYY')}
-                    </Button>
-                    <Button
-                      icon={<RightOutlined />}
-                      onClick={() => setMonthStart(monthStart.add(1, 'month'))}
-                    />
-                  </Space>
-                )}
-                <Segmented
-                  options={[
-                    { label: 'Calendar', value: 'calendar' },
-                    { label: 'Month', value: 'month' },
-                    { label: 'Table', value: 'table' },
-                  ]}
-                  value={viewMode}
-                  onChange={(v) => setViewMode(v as ViewMode)}
-                />
-                <Button
-                  icon={<ReloadOutlined />}
-                  onClick={viewMode === 'month' ? fetchMonthSummary : fetchCalendar}
-                  loading={loading}
-                />
-              </Space>
-            </Col>
-            <Col xs={24} md={16}>
-              {viewMode !== 'month' && (
-                <Space size={12} wrap>
-                  <Segmented
-                    options={timeOptions}
-                    value={beforeAfter}
-                    onChange={(v) => setBeforeAfter(v as typeof beforeAfter)}
-                  />
-                  <Segmented
-                    options={reportedOptions}
-                    value={reportedFilter}
-                    onChange={(v) => setReportedFilter(v as typeof reportedFilter)}
-                  />
-                </Space>
-              )}
-            </Col>
-            <Col xs={24} md={8}>
-              <Input.Search
-                placeholder="Search ticker or company"
-                allowClear
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                onSearch={fetchCalendar}
-                style={{ maxWidth: 280 }}
-              />
-            </Col>
-          </Row>
-        </Card>
-
-        {/* 内容区: 左侧视图 + 右侧公司详情栏(对齐 EarningsHub 布局), 整体拉伸至白色卡片底部 */}
+        {/* 内容区: 左列 = 查询筛选栏 + 视图卡片; 右列 = 股票信息栏(顶边与左侧导航栏齐平) */}
         <div className="ec-split">
-          <Card
-            className="ec-split-main"
+          <div className="ec-split-left">
+            {/* 控制面板: 查询控件按全站规范(styles/control-style.css), 仅占左列(右侧与下方视图卡片对齐) */}
+            <Card className="app-controls" style={{ marginBottom: 16 }}>
+          {/* 全部筛选项左对齐单行流式布局(窄屏自动换行), 顺序: 视图 → 范围 → 市值 → 周/月导航 → 搜索 */}
+          <Space size={12} wrap>
+            <Segmented
+              options={[
+                { label: 'Calendar', value: 'calendar' },
+                { label: 'Month', value: 'month' },
+                { label: 'Table', value: 'table' },
+              ]}
+              value={viewMode}
+              onChange={(v) => setViewMode(v as ViewMode)}
+            />
+            <Segmented options={scopeOptions} value={scope} onChange={(v) => setScope(v as Scope)} />
+            {/* 市值筛选: 三视图通用, 港股已按汇率换算为 USD(默认 $30B+) */}
+            <Segmented
+              options={[
+                { label: 'No Filter', value: '0' },
+                { label: '$100B+', value: '100' },
+                { label: '$30B+', value: '30' },
+                { label: '$10B+', value: '10' },
+                { label: '$1B+', value: '1' },
+              ]}
+              value={mcapFilter}
+              onChange={(v) => setMcapFilter(v as string)}
+            />
+            {viewMode === 'calendar' && (
+              <Space size={4}>
+                <Button
+                  icon={<LeftOutlined />}
+                  onClick={() => setWeekStart(weekStart.subtract(1, 'week'))}
+                />
+                <Button size="small" onClick={() => setWeekStart(getMonday(dayjs()))}>
+                  W{' '}
+                  {today.isBefore(weekStart.add(5, 'day'), 'day') && !today.isBefore(weekStart, 'day')
+                    ? today.date()
+                    : weekStart.date()}
+                </Button>
+                <Button
+                  icon={<RightOutlined />}
+                  onClick={() => setWeekStart(weekStart.add(1, 'week'))}
+                />
+              </Space>
+            )}
+            {viewMode === 'month' && (
+              <Space size={4}>
+                <Button
+                  icon={<LeftOutlined />}
+                  onClick={() => setMonthStart(monthStart.subtract(1, 'month'))}
+                />
+                <Button size="small" onClick={() => setMonthStart(dayjs().startOf('month'))}>
+                  {monthStart.format('MMM YYYY')}
+                </Button>
+                <Button
+                  icon={<RightOutlined />}
+                  onClick={() => setMonthStart(monthStart.add(1, 'month'))}
+                />
+              </Space>
+            )}
+            <Input.Search
+              placeholder="Search ticker or company"
+              allowClear
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              onSearch={fetchCalendar}
+              style={{ width: 220 }}
+            />
+          </Space>
+            </Card>
+
+            {/* 视图卡片(Calendar / Month / Table) */}
+            <Card
+              className="ec-split-main"
             style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
             styles={{ body: { padding: '12px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' } }}
           >
@@ -548,7 +542,18 @@ const EarningsCalendarPage: React.FC = () => {
                   style={{ padding: '60px 0' }}
                 />
               ) : (
-                <WeekBoard data={items} weekStart={weekStart} isDark={isDark} onSelect={setPanelCode} />
+                <WeekBoard
+                  data={items}
+                  weekStart={weekStart}
+                  isDark={isDark}
+                  onSelect={openPanel}
+                  selectedDate={selectedDate}
+                  onDateSelect={(d) => {
+                    // 点日期 = 想看该日财报列表, 右栏从公司详情切回 Feed
+                    setSelectedDate(d);
+                    setPanelCode(null);
+                  }}
+                />
               )
             ) : (
               <Table
@@ -558,7 +563,7 @@ const EarningsCalendarPage: React.FC = () => {
                 loading={loading}
                 size="middle"
                 onRow={(r) => ({
-                  onClick: () => setPanelCode(r.code),
+                  onClick: () => openPanel(r.code, r.report_date),
                   style: { cursor: 'pointer' },
                 })}
                 pagination={{ pageSize: 50, showSizeChanger: false, showTotal: (t) => `${t} reports` }}
@@ -566,16 +571,30 @@ const EarningsCalendarPage: React.FC = () => {
               />
             )}
           </Card>
+          </div>
 
-          {/* 右侧: 未选中时为 Earnings Feed 事件流, 选中后为公司详情(对齐 EarningsHub 布局) */}
+          {/* 右侧: 未选中时为 Earnings Feed 事件流, 选中后为公司详情; 独立整列, 顶边与导航栏齐平 */}
           <Card
             className="ec-split-panel"
             style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-            styles={{ body: { padding: '12px 16px', flex: 1, minHeight: 0, overflowY: 'auto' } }}
+            styles={{
+              body: {
+                padding: '12px 16px',
+                flex: 1,
+                minHeight: 0,
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+              },
+            }}
             title={
               <span style={{ fontSize: 14 }}>
                 {panelCode
                   ? panelData?.company?.name || panelCode
+                  : selectedDate && viewMode === 'calendar'
+                  ? `Earnings · ${dayjs(selectedDate).format('ddd, MMM D')}${
+                      feedData ? ` · ${feedData.meta.reported} reported` : ''
+                    }`
                   : `Earnings Feed${feedData ? ` · ${feedData.meta.reported} reported` : ''}`}
               </span>
             }
@@ -596,11 +615,15 @@ const EarningsCalendarPage: React.FC = () => {
                 data={panelData}
                 loading={panelLoading}
                 isDark={isDark}
+                reportDate={panelReportDate}
               />
             ) : feedLoading && !feedData ? (
               <Empty description="Loading feed..." style={{ padding: '60px 0' }} />
             ) : (
-              <FeedList items={feedData?.items ?? []} isDark={isDark} onSelect={setPanelCode} />
+              /* Feed 态: 列表在面板内滚动(标题栏固定), 滚动条静止时隐藏 */
+              <div className="ec-scroll-hidden" style={{ flex: 1, minHeight: 0 }}>
+                <FeedList items={feedData?.items ?? []} isDark={isDark} onSelect={openPanel} />
+              </div>
             )}
           </Card>
         </div>

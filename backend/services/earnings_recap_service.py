@@ -13,11 +13,12 @@
 """
 
 import asyncio
+import calendar
 import html as ihtml
 import os
 import re
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -36,6 +37,17 @@ MF_HEADERS = {
 }
 MF_QUOTE_URL = 'https://www.fool.com/quote/{exchange}/{ticker}/'
 AV_TRANSCRIPT_URL = 'https://www.alphavantage.co/query'
+
+# Yahoo Finance earnings call transcript（免费层=最新几季全文, 历史存档付费——Recap 只取最新场, 免费层够用）
+YAHOO_EARNINGS_URL = 'https://finance.yahoo.com/quote/{ticker}/earnings'
+YAHOO_LINK_RE = re.compile(r'([A-Z0-9.\-]{1,10})-Q(\d{1,2})-(20\d{2})-earnings_call-(\d+)\.html')
+YAHOO_CHROME_PATH = '/root/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome'
+
+
+def _quarter_rank(period_key: str):
+    """'q2-2026' → (2026, 2); 无季度标记的 key 排最低（用于 MF/Yahoo 目标择优）"""
+    m = re.match(r'q(\d{1,2})-(20\d{2})$', period_key or '')
+    return (int(m.group(2)), int(m.group(1))) if m else (0, 0)
 
 # EODHD 交易所代码 → Motley Fool quote 页路径段
 EXCHANGE_MAP = {
@@ -106,20 +118,33 @@ class EarningsRecapService:
             }
         bare = code
 
-        # 1) Motley Fool 发现最新 transcript
+        # 1) 数据源择优: Motley Fool(快, 纯 HTTP) → 缺失或落后时 Yahoo Finance 补位(覆盖全, 需渲染)
         try:
-            ref = await asyncio.to_thread(self._find_mf_transcript, code)
-            if ref:
-                cached = self._load_cached(code, ref['period_key'])
+            target = await asyncio.to_thread(self._find_mf_transcript, code)
+            if target:
+                target['source'] = 'motley_fool'
+
+            # MF 没有、或 MF 的最新一季已落后最近财报 → 问 Yahoo 要更新的
+            if (not target) or target.get('stale'):
+                yh_ref = await asyncio.to_thread(self._find_yahoo_transcript, code)
+                if yh_ref and ((not target) or
+                               _quarter_rank(yh_ref['period_key']) > _quarter_rank(target['period_key'])):
+                    target = yh_ref
+
+            if target:
+                cached = self._load_cached(code, target['period_key'])
                 if cached:
                     return cached
-                try:
-                    text = await asyncio.to_thread(self._fetch_mf_article_text, ref['url'])
-                except Exception as e:
-                    logger.error(f"MF 文章抓取失败: {code} {ref['url']}: {e}")
-                    text = ''
+                if target['source'] == 'yahoo_finance':
+                    text = await asyncio.to_thread(self._fetch_yahoo_article_text, target['url'])
+                else:
+                    try:
+                        text = await asyncio.to_thread(self._fetch_mf_article_text, target['url'])
+                    except Exception as e:
+                        logger.error(f"MF 文章抓取失败: {code} {target['url']}: {e}")
+                        text = ''
                 if text:
-                    return await self._generate_and_save(code, 'motley_fool', ref, text)
+                    return await self._generate_and_save(code, target['source'], target, text)
 
             # 2) AlphaVantage 兜底（免费 key 实测无数据, 付费后自动生效）
             av = await asyncio.to_thread(self._try_alphavantage, code)
@@ -247,6 +272,77 @@ class EarningsRecapService:
         text = ihtml.unescape(text)
         lines = [ln.strip() for ln in text.split('\n') if ln.strip()]
         text = '\n'.join(lines)
+        return text[:TRANSCRIPT_MAX_CHARS]
+
+    # ── Yahoo Finance: 发现 + 渲染抓取 ───────────────────────────
+
+    def _find_yahoo_transcript(self, code: str) -> Optional[Dict[str, Any]]:
+        """从 Yahoo 个股 earnings 页解析 transcript 链接列表, 取最新一季。
+        链接形如 GPC-Q2-2026-earnings_call-652164.html（无发布日期, 按季度排序）;
+        staleness: 最近财报日超过该季末 +45 天 → 该季落后（如只有 Q2 而财报已到 Q3 周期）。"""
+        html = self._http_get(YAHOO_EARNINGS_URL.format(ticker=code.upper()))
+        if not html:
+            return None
+        seen = {}
+        for ticker, q, year, sid in YAHOO_LINK_RE.findall(html):
+            if ticker.upper() != code.upper():
+                continue
+            seen[(int(year), int(q))] = \
+                f'https://finance.yahoo.com/quote/{code.upper()}/earnings/' \
+                f'{ticker}-Q{q}-{year}-earnings_call-{sid}.html'
+        if not seen:
+            return None
+        year, q = max(seen)
+        ref = {
+            'url': seen[(year, q)],
+            'period_key': f'q{q}-{year}',
+            'fiscal_label': f'Q{q} {year}',
+            'source': 'yahoo_finance',
+            'quarter_end': date(year, q * 3, calendar.monthrange(year, q * 3)[1]),
+            # 链接无发布日期, 用"季末+30天"近似通话日(仅用于展示与缓存新鲜度)
+            'date': date(year, q * 3, calendar.monthrange(year, q * 3)[1]) + timedelta(days=30),
+        }
+        report_date = self._latest_report_date(code)
+        if report_date and (report_date - ref['quarter_end']).days > 45:
+            # 财报日比该季末晚 45 天以上 → 该 transcript 落后一个财报周期
+            ref['stale'] = True
+            ref['latest_report_date'] = report_date
+        return ref
+
+    def _fetch_yahoo_article_text(self, url: str) -> str:
+        """无头浏览器渲染 Yahoo transcript 页并抽取正文
+        （curl 直取 404, 页面需 JS 渲染; 最新季免费全文, 页脚 Premium 提示为历史存档推销）"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            logger.warning('playwright 未安装, 无法抓取 Yahoo transcript')
+            return ''
+        chrome_kwargs = {}
+        if os.path.exists(YAHOO_CHROME_PATH):
+            chrome_kwargs['executable_path'] = YAHOO_CHROME_PATH
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    args=['--no-sandbox', '--disable-dev-shm-usage'], **chrome_kwargs)
+                page = browser.new_page(viewport={'width': 1400, 'height': 2000})
+                page.goto(url, wait_until='domcontentloaded', timeout=60000)
+                page.wait_for_timeout(8000)
+                txt = page.inner_text('body')
+                browser.close()
+        except Exception as e:
+            logger.warning(f"Yahoo transcript 渲染失败: {url}: {e}")
+            return ''
+
+        # 正文切片: 从 Operator 开场白起, 到页脚推销/版权止
+        start = txt.find('Operator')
+        if start < 0:
+            start = 0
+        end = len(txt)
+        for marker in ('Premium Upgrade', 'Trending Topics', 'Copyright ©'):
+            idx = txt.find(marker, start)
+            if 0 < idx < end:
+                end = idx
+        text = txt[start:end].strip()
         return text[:TRANSCRIPT_MAX_CHARS]
 
     # ── AlphaVantage 兜底 ─────────────────────────────────────────

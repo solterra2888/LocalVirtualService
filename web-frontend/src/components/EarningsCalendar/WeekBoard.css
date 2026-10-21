@@ -14,7 +14,6 @@
   --ec-sub: #8c8c8c;
   --ec-beat: #16a34a;
   --ec-miss: #dc2626;
-  --ec-today: #1890ff;
 }
 
 .ec-board.dark {
@@ -31,7 +30,6 @@
   --ec-sub: #94a3b8;
   --ec-beat: #4ade80;
   --ec-miss: #f87171;
-  --ec-today: #4096ff;
 }
 
 .ec-board {
@@ -51,6 +49,34 @@
   flex-direction: column;
   gap: 10px;
   min-height: 0;
+  border-radius: 10px;
+  transition: background 0.2s ease, outline-color 0.2s ease;
+  /* outline 不占布局, 选中描边不引起跳动 */
+  outline: 1.5px solid transparent;
+}
+
+/* 整个日期栏可点击选中: cursor 与 hover 提示作用于整列(股票卡片自身 stopPropagation) */
+.ec-day-col.clickable {
+  cursor: pointer;
+}
+
+.ec-day-col.clickable:hover:not(.is-selected) {
+  background: rgba(29, 89, 152, 0.05);
+}
+
+.ec-board.dark .ec-day-col.clickable:hover:not(.is-selected) {
+  background: rgba(125, 175, 225, 0.08);
+}
+
+/* 选中日: 整列(日期表头+股票区)高亮, 颜色走全站导航蓝系 */
+.ec-day-col.is-selected {
+  background: rgba(29, 89, 152, 0.07);
+  outline-color: rgba(29, 89, 152, 0.55);
+}
+
+.ec-board.dark .ec-day-col.is-selected {
+  background: rgba(125, 175, 225, 0.1);
+  outline-color: rgba(125, 175, 225, 0.5);
 }
 
 .ec-day-header {
@@ -61,9 +87,14 @@
   position: relative;
 }
 
-.ec-day-header.is-today {
-  background: color-mix(in srgb, var(--ec-today) 12%, transparent);
-  outline: 1px solid var(--ec-today);
+.ec-day-header.is-selected .ec-day-name,
+.ec-day-header.is-selected .ec-day-number {
+  color: #1d5998;
+}
+
+.ec-board.dark .ec-day-header.is-selected .ec-day-name,
+.ec-board.dark .ec-day-header.is-selected .ec-day-number {
+  color: #9cc3e8;
 }
 
 .ec-day-name {
@@ -78,18 +109,6 @@
   font-size: 26px;
   font-weight: 700;
   line-height: 1.1;
-}
-
-.ec-today-tag {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  font-size: 10px;
-  color: var(--ec-today);
-  border: 1px solid var(--ec-today);
-  border-radius: 4px;
-  padding: 0 4px;
-  line-height: 16px;
 }
 
 /* 每日一个卡片框: 透明灰底, 不分盘前/盘后; 拉伸至列底 */
@@ -248,15 +267,65 @@
   }
 }
 
-/* 滚动条 */
+/* 滚动条: 静止时隐藏, 悬停滚动区才显示 */
+.ec-list,
+.ec-board {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.25s ease;
+}
+
+.ec-list:hover,
+.ec-board:hover {
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+
+.ec-board.dark .ec-list:hover,
+.ec-board.dark:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+
 .ec-list::-webkit-scrollbar,
 .ec-board::-webkit-scrollbar {
   width: 6px;
   height: 8px;
 }
 
+.ec-list::-webkit-scrollbar-track,
+.ec-board::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .ec-list::-webkit-scrollbar-thumb,
 .ec-board::-webkit-scrollbar-thumb {
-  background: #bfbfbf;
+  background: transparent;
   border-radius: 3px;
+}
+
+.ec-list:hover::-webkit-scrollbar-thumb,
+.ec-board:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.ec-board.dark .ec-list:hover::-webkit-scrollbar-thumb,
+.ec-board.dark:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* 发布时点标识(左上角): BMO=小太阳 / AMC=月亮(替代原盘前盘后筛选) */
+.ec-when {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  font-size: 10px;
+  line-height: 1;
+  user-select: none;
+}
+
+.ec-when.bmo {
+  color: #f59e0b;
+}
+
+.ec-when.amc {
+  color: #6366f1;
 }

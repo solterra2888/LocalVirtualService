@@ -72,3 +72,142 @@
   opacity: 0.65;
   margin: -2px 0 6px;
 }
+
+/* 面板滚动边界: 公司头部/描述/Tab 导航固定, 只有 Tabs 下方内容区滚动 */
+.ecp-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.ecp-panel .ant-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ecp-panel .ant-tabs .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* 滚动条内嵌, 右侧留出间隙避免贴住面板边缘 */
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+}
+
+/* 滚动条静止时隐藏, 悬停内容区才显示 */
+.ecp-panel .ant-tabs .ant-tabs-content-holder {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.25s ease;
+}
+
+.ecp-panel .ant-tabs .ant-tabs-content-holder:hover {
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+
+.ecp-panel .ant-tabs .ant-tabs-content-holder::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ecp-panel .ant-tabs .ant-tabs-content-holder::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ecp-panel .ant-tabs .ant-tabs-content-holder::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.ecp-panel .ant-tabs .ant-tabs-content-holder:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.ecp-panel.ecp-dark .ant-tabs .ant-tabs-content-holder:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+
+.ecp-panel.ecp-dark .ant-tabs .ant-tabs-content-holder:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* 最新一期 Earnings 结果卡片(Overview 分区, 对齐 EarningsHub Results 卡):
+   beat=绿 / miss=红 左边框 + 浅色底 */
+.ecp-latest-card {
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  border-left: 3px solid;
+}
+
+.ecp-latest-card.beat {
+  background: rgba(22, 163, 74, 0.07);
+  border-left-color: #16a34a;
+}
+
+.ecp-latest-card.miss {
+  background: rgba(220, 38, 38, 0.06);
+  border-left-color: #dc2626;
+}
+
+.ecp-panel.ecp-dark .ecp-latest-card.beat {
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.ecp-panel.ecp-dark .ecp-latest-card.miss {
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.ecp-latest-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ecp-latest-q {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.ecp-latest-date {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.ecp-latest-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.ecp-latest-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  opacity: 0.55;
+  letter-spacing: 0.5px;
+}
+
+.ecp-latest-big {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ecp-latest-mid {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ecp-latest-sub {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.ecp-latest-pct {
+  font-size: 13px;
+  font-weight: 700;
+}

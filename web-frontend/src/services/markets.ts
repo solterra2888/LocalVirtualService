@@ -130,6 +130,8 @@ export interface EarningsCalendarParams {
   before_after?: 'before' | 'after';
   search?: string;
   reported?: 'yes' | 'no';
+  /** 最小市值筛选(USD 美元, 港股已按汇率换算), 如 1e10 = $10B */
+  min_market_cap?: number;
   limit?: number;
   offset?: number;
 }
@@ -359,13 +361,15 @@ export const marketsAPI = {
   getEarningsCalendarMonthSummary: async (
     month: string,
     scope?: 'watchlist' | 'theme' | 'us' | 'hk',
-    search?: string
+    search?: string,
+    minMarketCap?: number
   ): Promise<EarningsMonthSummary> => {
     try {
       const result = await api.get<EarningsMonthSummary>('/markets/earnings-calendar/month-summary', {
         month,
         scope,
         search: search || undefined,
+        min_market_cap: minMarketCap,
       });
       return result;
     } catch (error) {
@@ -412,6 +416,7 @@ export const marketsAPI = {
     to_date?: string;
     scope?: 'watchlist' | 'theme' | 'us' | 'hk';
     search?: string;
+    min_market_cap?: number;
     limit?: number;
   }): Promise<EarningsFeedData> => {
     try {

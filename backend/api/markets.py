@@ -401,6 +401,7 @@ async def get_earnings_calendar(
     before_after: Optional[str] = Query(None, pattern='^(before|after)$', description="发布时间筛选: before=盘前 / after=盘后"),
     search: Optional[str] = Query(None, max_length=50, description="模糊搜索 ticker 或公司名"),
     reported: Optional[str] = Query(None, pattern='^(yes|no)$', description="是否已公布: yes=已公布 / no=未公布"),
+    min_market_cap: Optional[float] = Query(None, description="最小市值筛选(USD 美元, 港股已按汇率换算), 如 1e10=$10B"),
     limit: int = Query(500, ge=1, le=2000, description="返回数量限制 (1-2000)"),
     offset: int = Query(0, ge=0, description="偏移量"),
     current_user=Depends(get_current_user)
@@ -429,7 +430,8 @@ async def get_earnings_calendar(
             search=search,
             reported=reported,
             limit=limit,
-            offset=offset
+            offset=offset,
+            min_market_cap=min_market_cap
         )
 
         # Logo 相对路径补全为 EODHD 完整 URL
@@ -451,6 +453,7 @@ async def get_earnings_calendar_month_summary(
     scope: str = Query('watchlist', pattern='^(watchlist|theme|us|hk)$', description="范围: watchlist=自选 / theme=主题关联公司 / us=全部美股 / hk=全部港股"),
     search: Optional[str] = Query(None, max_length=50, description="模糊搜索 ticker 或公司名"),
     top_n: int = Query(5, ge=1, le=10, description="每日返回的市值 Top N 公司数"),
+    min_market_cap: Optional[float] = Query(None, description="最小市值筛选(USD 美元, 港股已按汇率换算)"),
     current_user=Depends(get_current_user)
 ):
     """
@@ -468,7 +471,8 @@ async def get_earnings_calendar_month_summary(
             month=month,
             scope=scope,
             search=search,
-            top_n=top_n
+            top_n=top_n,
+            min_market_cap=min_market_cap
         )
 
         for day in result.get('days', []):
@@ -524,6 +528,7 @@ async def get_earnings_calendar_feed(
     to_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)，默认今天+14天"),
     scope: str = Query('watchlist', pattern='^(watchlist|theme|us|hk)$', description="范围: watchlist=自选 / theme=主题关联公司 / us=全部美股 / hk=全部港股"),
     search: Optional[str] = Query(None, max_length=50, description="模糊搜索 ticker 或公司名"),
+    min_market_cap: Optional[float] = Query(None, description="最小市值筛选(USD 美元, 港股已按汇率换算)"),
     limit: int = Query(100, ge=1, le=300, description="返回条数上限 (1-300)"),
     current_user=Depends(get_current_user)
 ):
@@ -544,6 +549,7 @@ async def get_earnings_calendar_feed(
             from_date=from_date,
             to_date=to_date,
             scope=scope,
+            min_market_cap=min_market_cap,
             search=search,
             limit=limit
         )

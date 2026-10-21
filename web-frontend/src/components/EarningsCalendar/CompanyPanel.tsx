@@ -43,6 +43,8 @@ interface CompanyPanelProps {
   data: EarningsCompanyPanel | null;
   loading: boolean;
   isDark: boolean;
+  /** 用户所点财报事件的 report_date; 未来日期(未公布)时隐藏 AI Recap 区块 */
+  reportDate?: string | null;
 }
 
 const fmtCap = (v?: number | null): string => {
@@ -224,10 +226,13 @@ const DivChart: React.FC<{
   );
 };
 
-export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading, isDark }) => {
+export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading, isDark, reportDate }) => {
   const [chartMode, setChartMode] = useState<'eps' | 'revenue'>('eps');
   const [recap, setRecap] = useState<EarningsRecapResult | null>(null);
   const [recapLoading, setRecapLoading] = useState(false);
+
+  // Earnings Tab 柱状图下方的子分区(对齐 EarningsHub): Overview=最新一期+AI分析 / History=历史数据
+  const [earnSection, setEarnSection] = useState<'overview' | 'history'>('overview');
   const [activeTab, setActiveTab] = useState<string>('earnings');
 
   // 切换 ticker 时重置 Recap 状态（Tab 保持, 便于连续对比同一维度）
@@ -274,6 +279,15 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
   const price = data.price ?? null;
   const history = data.earnings_history ?? [];
   const revenueHistory = data.revenue_history ?? [];
+
+  // 最新已公布季度(取有 actual 的最后一行, 跳过只有预估的未来季) + 对应营收, 供 Overview 结果卡片
+  const latestQ = history.length
+    ? [...history].reverse().find((q) => q.eps_actual !== null && q.eps_actual !== undefined) ?? null
+    : null;
+  const latestBeat = (latestQ?.surprise_percent ?? 0) >= 0;
+  const latestRev = latestQ
+    ? revenueHistory.find((r) => r.period === latestQ.fiscal_period) ?? null
+    : null;
   const dividendHistory = data.dividend_history ?? [];
   const up = price?.change_percent !== null && price?.change_percent !== undefined && price.change_percent >= 0;
 
@@ -359,55 +373,66 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
           ) : revenueHistory.length > 0 ? (
             <RevChart history={revenueHistory} currency={data.revenue_currency} isDark={isDark} />
           ) : null}
-          {chartMode === 'eps' && (
-            <Table
-            size="small"
-            pagination={false}
-            dataSource={[...history].reverse().slice(0, 6)}
-            rowKey={(r) => `${r.report_date}-${r.fiscal_period}`}
-            style={{ marginTop: 4 }}
-          >
-            <Table.Column
-              title="Quarter"
-              dataIndex="fiscal_period"
-              render={(v: string) => quarterLabel(v)}
-            />
-            <Table.Column title="Date" dataIndex="report_date" render={(v: string) => (v ? dayjs(v).format('MMM D, YY') : '—')} />
-            <Table.Column<EarningsPanelHistoryQuarter>
-              title="EPS"
-              key="eps"
-              render={(_, r) =>
-                r.eps_actual !== null && r.eps_actual !== undefined ? (
-                  <span>{r.eps_actual.toFixed(2)}</span>
-                ) : (
-                  <span style={{ opacity: 0.55 }}>{r.eps_estimate?.toFixed(2) ?? '—'}e</span>
-                )
-              }
-            />
-            <Table.Column<EarningsPanelHistoryQuarter>
-              title="Surprise"
-              key="surprise"
-              align="right"
-              render={(_, r) => {
-                if (r.surprise_percent === null || r.surprise_percent === undefined) {
-                  return <Text type="secondary">—</Text>;
-                }
-                const beat = r.surprise_percent >= 0;
-                return (
-                  <Text strong style={{ color: beat ? '#52c41a' : '#f5222d' }}>
-                    {beat ? '+' : ''}
-                    {r.surprise_percent.toFixed(1)}%
-                  </Text>
-                );
-              }}
-            />
-          </Table>
-          )}
         </>
       )}
 
-      {/* AI Recap: 按需抓取 transcript 并生成分析（美股 only） */}
-      {code && !code.includes('.') && (
+      {/* 柱状图下方分区(对齐 EarningsHub): Overview=最新一期结果卡片+AI分析 / History=历史数据 */}
+      {history.length > 0 && (
+        <Segmented
+          size="small"
+          style={{ marginTop: 14 }}
+          options={[
+            { label: 'Overview', value: 'overview' },
+            { label: 'History', value: 'history' },
+          ]}
+          value={earnSection}
+          onChange={(v) => setEarnSection(v as 'overview' | 'history')}
+        />
+      )}
+
+      {earnSection === 'overview' && history.length > 0 && (
+        <>
+          {/* 最新一期 Earnings 结果卡片 */}
+          {latestQ && latestQ.eps_actual !== null && latestQ.eps_actual !== undefined ? (
+            <div className={`ecp-latest-card${latestBeat ? ' beat' : ' miss'}`}>
+              <div className="ecp-latest-head">
+                <span className="ecp-latest-q">{quarterLabel(latestQ.fiscal_period)}</span>
+                <span className="ecp-latest-date">
+                  {latestQ.report_date ? dayjs(latestQ.report_date).format('MMM D, YY') : ''}
+                </span>
+              </div>
+              <div className="ecp-latest-row">
+                <span className="ecp-latest-label">EPS</span>
+                <span className="ecp-latest-big">{latestQ.eps_actual.toFixed(2)}</span>
+                {latestQ.eps_estimate != null && (
+                  <span className="ecp-latest-sub">vs est {latestQ.eps_estimate.toFixed(2)}</span>
+                )}
+                {latestQ.surprise_percent != null && (
+                  <span
+                    className="ecp-latest-pct"
+                    style={{ color: latestBeat ? '#16a34a' : '#dc2626' }}
+                  >
+                    {latestBeat ? '+' : ''}
+                    {latestQ.surprise_percent.toFixed(1)}%
+                  </span>
+                )}
+              </div>
+              {latestRev?.revenue != null && (
+                <div className="ecp-latest-row">
+                  <span className="ecp-latest-label">REV</span>
+                  <span className="ecp-latest-mid">{fmtCap(latestRev.revenue)}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 10 }}>
+              No reported earnings yet
+            </Text>
+          )}
+
+          {/* AI Recap: 按需抓取 transcript 并生成分析（美股 only）
+              所点事件在未来(未公布)时隐藏 —— 此时"最新电话会"只是上一季旧内容 */}
+          {code && !code.includes('.') && (!reportDate || reportDate <= dayjs().format('YYYY-MM-DD')) && (
         <>
           <SectionTitle>
             AI Recap{' '}
@@ -417,9 +442,7 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
           </SectionTitle>
           {!recap && !recapLoading && (
             <Button
-              type="primary"
-              ghost
-              size="small"
+              className="app-ctl-btn"
               icon={<ThunderboltOutlined />}
               onClick={fetchRecap}
               style={{ width: '100%' }}
@@ -499,6 +522,58 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
             </div>
           )}
         </>
+      )}
+        </>
+      )}
+
+      {/* History 分区: 全部历史季度 */}
+      {earnSection === 'history' && history.length > 0 && (
+        <Table
+          size="small"
+          pagination={false}
+          dataSource={[...history].reverse()}
+          rowKey={(r) => `${r.report_date}-${r.fiscal_period}`}
+          style={{ marginTop: 12 }}
+        >
+          <Table.Column
+            title="Quarter"
+            dataIndex="fiscal_period"
+            render={(v: string) => quarterLabel(v)}
+          />
+          <Table.Column
+            title="Date"
+            dataIndex="report_date"
+            render={(v: string) => (v ? dayjs(v).format('MMM D, YY') : '—')}
+          />
+          <Table.Column<EarningsPanelHistoryQuarter>
+            title="EPS"
+            key="eps"
+            render={(_, r) =>
+              r.eps_actual !== null && r.eps_actual !== undefined ? (
+                <span>{r.eps_actual.toFixed(2)}</span>
+              ) : (
+                <span style={{ opacity: 0.55 }}>{r.eps_estimate?.toFixed(2) ?? '—'}e</span>
+              )
+            }
+          />
+          <Table.Column<EarningsPanelHistoryQuarter>
+            title="Surprise"
+            key="surprise"
+            align="right"
+            render={(_, r) => {
+              if (r.surprise_percent === null || r.surprise_percent === undefined) {
+                return <Text type="secondary">—</Text>;
+              }
+              const beat = r.surprise_percent >= 0;
+              return (
+                <Text strong style={{ color: beat ? '#52c41a' : '#f5222d' }}>
+                  {beat ? '+' : ''}
+                  {r.surprise_percent.toFixed(1)}%
+                </Text>
+              );
+            }}
+          />
+        </Table>
       )}
     </>
   );
@@ -732,7 +807,11 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
       {c.description ? (
         <Paragraph
           type="secondary"
-          ellipsis={{ rows: 2, expandable: true, symbol: 'more' }}
+          ellipsis={{
+            rows: 2,
+            expandable: 'collapsible',
+            symbol: (expanded: boolean) => (expanded ? 'less' : 'more'),
+          }}
           style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}
         >
           {c.description}

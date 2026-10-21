@@ -57,6 +57,7 @@ import SubstackAdminPage from './pages/SubstackAdminPage';
 import { DashboardSettingsProvider } from './contexts/DashboardSettingsContext';
 import { FileProcessingProvider } from './contexts/FileProcessingContext';
 import './App.css';
+import './styles/control-style.css';
 
 // 私有路由组件
 const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {

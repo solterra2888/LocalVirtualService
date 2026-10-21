@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Tooltip } from 'antd';
-import dayjs, { Dayjs } from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import type { EarningsCalendarItem } from '../../services/markets';
 import './WeekBoard.css';
 
@@ -10,8 +10,12 @@ interface WeekBoardProps {
   /** 本周周一 */
   weekStart: Dayjs;
   isDark: boolean;
-  /** 点击卡片打开公司详情面板 */
-  onSelect?: (code: string) => void;
+  /** 点击卡片打开公司详情面板(附带所点事件的 report_date, 供面板判断该事件是否已公布) */
+  onSelect?: (code: string, reportDate?: string | null) => void;
+  /** 当前选中的日期(YYYY-MM-DD), 选中后右栏 Feed 只显示该日财报 */
+  selectedDate?: string | null;
+  /** 点击日期表头选中/取消选中(对齐 EarningsHub: 可按日查看, 整列高亮) */
+  onDateSelect?: (date: string | null) => void;
 }
 
 /** ticker 哈希 → 色相, 保证同一代码的头像颜色稳定 */
@@ -50,7 +54,7 @@ const whenLabel = (v?: string | null): string => {
 const EarningsCard: React.FC<{
   item: EarningsCalendarItem;
   isDark: boolean;
-  onSelect?: (code: string) => void;
+  onSelect?: (code: string, reportDate?: string | null) => void;
 }> = ({ item, isDark, onSelect }) => {
   const [logoFailed, setLogoFailed] = useState(false);
   const beat = item.reported && (item.eps_surprise_percent ?? 0) >= 0;
@@ -77,9 +81,25 @@ const EarningsCard: React.FC<{
     <Tooltip title={tooltipParts.join(' · ')}>
       <div
         className={`ec-card${onSelect ? ' clickable' : ''}`}
-        onClick={onSelect ? () => onSelect(item.code) : undefined}
+        onClick={
+          onSelect
+            ? (e) => {
+                // 阻止冒泡到日期栏: 点股票=打开详情, 不触发日期选中
+                e.stopPropagation();
+                onSelect(item.code, item.report_date);
+              }
+            : undefined
+        }
       >
         {item.reported && <span className={`ec-dot${beat ? ' beat' : ' miss'}`} />}
+        {when && (
+          <span
+            className={`ec-when${when === 'BMO' ? ' bmo' : ' amc'}`}
+            title={when === 'BMO' ? 'Before Market Open' : 'After Market Close'}
+          >
+            {when === 'BMO' ? '☀' : '☾'}
+          </span>
+        )}
         <div className="ec-logo">
           {showImg ? (
             <img
@@ -97,9 +117,14 @@ const EarningsCard: React.FC<{
   );
 };
 
-export const WeekBoard: React.FC<WeekBoardProps> = ({ data, weekStart, isDark, onSelect }) => {
-  const todayStr = dayjs().format('YYYY-MM-DD');
-
+export const WeekBoard: React.FC<WeekBoardProps> = ({
+  data,
+  weekStart,
+  isDark,
+  onSelect,
+  selectedDate,
+  onDateSelect,
+}) => {
   // 周一至周五, 每天一个卡片框(不分盘前/盘后, 发布时点在卡片 Tooltip 的 BMO/AMC)
   const days = Array.from({ length: 5 }, (_, i) => {
     const date = weekStart.add(i, 'day');
@@ -108,7 +133,7 @@ export const WeekBoard: React.FC<WeekBoardProps> = ({ data, weekStart, isDark, o
       key: dateStr,
       dayName: date.format('ddd').toUpperCase(),
       dayNumber: date.format('D'),
-      isToday: dateStr === todayStr,
+      isSelected: dateStr === selectedDate,
       items: data.filter((it) => it.report_date === dateStr),
     };
   });
@@ -116,11 +141,18 @@ export const WeekBoard: React.FC<WeekBoardProps> = ({ data, weekStart, isDark, o
   return (
     <div className={`ec-board${isDark ? ' dark' : ''}`}>
       {days.map((day) => (
-        <div key={day.key} className="ec-day-col">
-          <div className={`ec-day-header${day.isToday ? ' is-today' : ''}`}>
+        <div
+          key={day.key}
+          className={`ec-day-col${day.isSelected ? ' is-selected' : ''}${
+            onDateSelect ? ' clickable' : ''
+          }`}
+          onClick={
+            onDateSelect ? () => onDateSelect(day.isSelected ? null : day.key) : undefined
+          }
+        >
+          <div className={`ec-day-header${day.isSelected ? ' is-selected' : ''}`}>
             <div className="ec-day-name">{day.dayName}</div>
             <div className="ec-day-number">{day.dayNumber}</div>
-            {day.isToday && <span className="ec-today-tag">TODAY</span>}
           </div>
           <div className="ec-section">
             {day.items.length > 0 ? (

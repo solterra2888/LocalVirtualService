@@ -7,7 +7,7 @@ import './FeedList.css';
 interface FeedListProps {
   items: EarningsFeedItem[];
   isDark: boolean;
-  onSelect: (code: string) => void;
+  onSelect: (code: string, reportDate?: string | null) => void;
 }
 
 const fmtB = (v?: number | null): string => {
@@ -39,7 +39,7 @@ const whenLabel = (v?: string | null): string => {
   return '';
 };
 
-const FeedCard: React.FC<{ item: EarningsFeedItem; isDark: boolean; onSelect: (code: string) => void }> = ({
+const FeedCard: React.FC<{ item: EarningsFeedItem; isDark: boolean; onSelect: (code: string, reportDate?: string | null) => void }> = ({
   item,
   isDark,
   onSelect,
@@ -52,7 +52,7 @@ const FeedCard: React.FC<{ item: EarningsFeedItem; isDark: boolean; onSelect: (c
     <div
       className="ecf-card"
       style={{ background: isDark ? 'rgba(148,163,184,0.08)' : 'rgba(0,0,0,0.025)' }}
-      onClick={() => onSelect(item.code)}
+      onClick={() => onSelect(item.code, item.report_date)}
     >
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         {item.logo_url ? (

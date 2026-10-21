@@ -1,0 +1,185 @@
+/* =====================================================================
+   查询控件规范 (UI Control Style Spec) — 全站统一
+   规范文档: docs/instructions/UI_CONTROL_STYLE_SPEC.md
+
+   两个层级:
+   1) 全局层: 所有 antd Segmented 自动套用导航栏蓝色系, 旧模块零改动跟随
+   2) 查询栏层: 控制栏容器加 .app-controls 类, 获得完整版式
+      (药丸/圆形按钮、浅蓝无边框、加粗紧凑标签、同色搜索框)
+
+   色彩语言对齐左侧导航栏:
+   - 导航栏: 渐变 #1b4b7d → #1d5998, 激活项白底胶囊 + 蓝字 #1d5998
+   - 选中 = 白底蓝字(同导航激活项), 未选中 = 蓝灰文字, 轨道 = 浅蓝
+   - 暗色由 Layout 根节点的 .main-layout-dark 类自动适配
+
+   注意: 选择器普遍写到 3 个 class(或 html 前缀)是为了稳定压过
+   antd 运行时注入的样式(后注入方在同等特异性下获胜);
+   Files/Mobile 等页面的旧作用域样式特异性更高, 会继续盖过本层,
+   属于规范迁移遗留清单, 见文档。
+   ===================================================================== */
+
+/* ---------- 全局层: Segmented 蓝色系(所有模块自动生效) ---------- */
+
+html .ant-segmented {
+  background: rgba(29, 89, 152, 0.12);
+  border-radius: 10px;
+}
+
+.ant-segmented .ant-segmented-group .ant-segmented-item,
+.ant-segmented .ant-segmented-group .ant-segmented-thumb {
+  border-radius: 8px;
+}
+
+.ant-segmented .ant-segmented-item .ant-segmented-item-label {
+  color: rgba(27, 75, 125, 0.72);
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+
+.ant-segmented .ant-segmented-item:hover:not(.ant-segmented-item-selected) .ant-segmented-item-label {
+  color: #1b4b7d;
+}
+
+.ant-segmented .ant-segmented-group .ant-segmented-item-selected,
+.ant-segmented .ant-segmented-group .ant-segmented-thumb {
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(27, 75, 125, 0.18);
+}
+
+.ant-segmented .ant-segmented-item.ant-segmented-item-selected .ant-segmented-item-label {
+  color: #1d5998;
+  font-weight: 600;
+}
+
+/* 暗色: 轨道换亮蓝半透明, 选中仍为白底蓝字(对齐导航栏激活态) */
+.main-layout-dark .ant-segmented {
+  background: rgba(125, 175, 225, 0.2);
+}
+
+.main-layout-dark .ant-segmented .ant-segmented-item .ant-segmented-item-label {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.main-layout-dark .ant-segmented .ant-segmented-item:hover:not(.ant-segmented-item-selected) .ant-segmented-item-label {
+  color: #ffffff;
+}
+
+.main-layout-dark .ant-segmented .ant-segmented-group .ant-segmented-item-selected,
+.main-layout-dark .ant-segmented .ant-segmented-group .ant-segmented-thumb {
+  background: #f0f8ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* ---------- 查询栏层: .app-controls 版式(控制栏容器显式添加) ---------- */
+/* 适用: 页面顶部/工具区的查询筛选栏(Segmented + 翻页/刷新按钮 + 搜索框)。
+   不适用: 表单提交按钮、Modal 的确定/取消、行内操作按钮等 —— 这些保持 antd 默认。 */
+
+.app-controls .ant-segmented {
+  padding: 3px;
+}
+
+.app-controls .ant-segmented .ant-segmented-item .ant-segmented-item-label {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 查询栏同一行对齐: 所有控件统一 32px 高(Segmented 轨道 2px 内边距 + 28px 项高) */
+.app-controls .ant-segmented {
+  padding: 2px;
+}
+
+.app-controls .ant-segmented .ant-segmented-item {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.app-controls .ant-segmented .ant-segmented-thumb {
+  height: 28px;
+}
+
+/* 查询栏字体统一 11px: 按钮/搜索框与切换标签同字号 */
+.app-controls .ant-btn,
+.app-ctl-btn.ant-btn {
+  font-size: 11px;
+}
+
+.app-controls .ant-input,
+.app-controls .ant-input-search .ant-input-search-button {
+  font-size: 11px;
+}
+
+/* 日期翻页 / 刷新等按钮: 浅蓝无边框, 图标钮圆形, 文字钮胶囊 */
+.app-controls .ant-btn,
+.app-ctl-btn.ant-btn {
+  border: none;
+  border-radius: 999px;
+  background: rgba(29, 89, 152, 0.1);
+  color: #1d5998;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.app-controls .ant-btn:hover,
+.app-controls .ant-btn:focus-visible,
+.app-ctl-btn.ant-btn:hover,
+.app-ctl-btn.ant-btn:focus-visible {
+  background: rgba(29, 89, 152, 0.18) !important;
+  border: none !important;
+  color: #1b4b7d !important;
+}
+
+.app-controls .ant-btn.ant-btn-icon-only,
+.app-ctl-btn.ant-btn.ant-btn-icon-only {
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-controls .ant-btn:not(.ant-btn-icon-only),
+.app-ctl-btn.ant-btn:not(.ant-btn-icon-only) {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 搜索框: 同色浅蓝无边框 */
+.app-controls .ant-input-search .ant-input,
+.app-controls .ant-input-search .ant-input-search-button {
+  background: rgba(29, 89, 152, 0.08);
+  border-color: transparent;
+  border-radius: 10px;
+}
+
+.app-controls .ant-input-search .ant-input::placeholder {
+  color: rgba(27, 75, 125, 0.45);
+}
+
+/* 暗色变体 */
+.main-layout-dark .app-controls .ant-btn,
+.main-layout-dark .app-ctl-btn.ant-btn {
+  background: rgba(125, 175, 225, 0.14);
+  color: #cfe1f2;
+}
+
+.main-layout-dark .app-controls .ant-btn:hover,
+.main-layout-dark .app-controls .ant-btn:focus-visible,
+.main-layout-dark .app-ctl-btn.ant-btn:hover,
+.main-layout-dark .app-ctl-btn.ant-btn:focus-visible {
+  background: rgba(125, 175, 225, 0.24) !important;
+  color: #ffffff !important;
+}
+
+.main-layout-dark .app-controls .ant-input-search .ant-input,
+.main-layout-dark .app-controls .ant-input-search .ant-input-search-button {
+  background: rgba(125, 175, 225, 0.1);
+  border-color: transparent;
+}
+
+.main-layout-dark .app-controls .ant-input-search .ant-input::placeholder {
+  color: rgba(255, 255, 255, 0.38);
+}
