@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react';
 
 /**
  * 全站统一的 AI 内容标签（sector / ticker / concept / 溢出计数）视觉标准。
+ * 规范文档: docs/instructions/UI_STYLE_SPEC.md (二、标签胶囊规范)
  * 用于 Feeds、Daily、Sources（Upload Files 详情等）中带语义色的胶囊标签。
  */
 export const AI_TAG_CHIP_FONT_SIZE = 9;

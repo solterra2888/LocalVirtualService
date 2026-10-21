@@ -18,6 +18,9 @@ interface WeekBoardProps {
   onDateSelect?: (date: string | null) => void;
 }
 
+/** 周一至周五单字母标识(显式英文, 不受 locale 影响) */
+const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F'];
+
 /** ticker 哈希 → 色相, 保证同一代码的头像颜色稳定 */
 const hueOf = (code: string): number => {
   let h = 0;
@@ -131,7 +134,8 @@ export const WeekBoard: React.FC<WeekBoardProps> = ({
     const dateStr = date.format('YYYY-MM-DD');
     return {
       key: dateStr,
-      dayName: date.format('ddd').toUpperCase(),
+      // 显式英文单字母周标识(M/T/W/T/F), 不随 dayjs locale 变化
+      dayName: DAY_LETTERS[i],
       dayNumber: date.format('D'),
       isSelected: dateStr === selectedDate,
       items: data.filter((it) => it.report_date === dateStr),

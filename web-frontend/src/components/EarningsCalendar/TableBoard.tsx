@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
+import { Tag } from 'antd';
 import dayjs from 'dayjs';
 import type { EarningsCalendarItem } from '../../services/markets';
+import { aiTagChipStyle } from '../shared/aiTagChipStyles';
 import './TableBoard.css';
 
 interface TableBoardProps {
@@ -66,6 +68,8 @@ const Row: React.FC<{
   const [logoFailed, setLogoFailed] = useState(false);
   const showImg = item.logo_url && !logoFailed;
   const surprise = item.eps_surprise_percent;
+  // 标签胶囊统一走全站 Sources Tags 标准样式(aiTagChipStyle)
+  const tagMode = isDark ? 'dark' : 'light';
 
   const epsBlock = item.reported ? (
     <>
@@ -104,7 +108,7 @@ const Row: React.FC<{
             {surprise >= 0 ? '▲' : '▼'} {Math.abs(surprise).toFixed(1)}%
           </span>
         ) : (
-          <span className="etb-pill">Pending</span>
+          <Tag bordered={false} style={aiTagChipStyle('signal-meta', tagMode)}>Pending</Tag>
         )}
       </div>
     </div>
@@ -113,6 +117,7 @@ const Row: React.FC<{
 
 /** Table 视图板: 日期分组 + 盘前/盘后分段（结构对齐 EarningsHub List View） */
 export const TableBoard: React.FC<TableBoardProps> = ({ items, isDark, onSelect }) => {
+  const tagMode = isDark ? 'dark' : 'light';
   // 按 report_date 升序分组, 日内按盘前/盘后分段, 段内按 ticker 字母序
   const days = useMemo(() => {
     const map = new Map<string, EarningsCalendarItem[]>();
@@ -148,7 +153,9 @@ export const TableBoard: React.FC<TableBoardProps> = ({ items, isDark, onSelect 
             <div className={`etb-day-header${isToday ? ' today' : ''}`}>
               <span className="etb-day-title">
                 {dayjs(day.date).format('ddd · MMM D').toUpperCase()}
-                {isToday && <span className="etb-pill">Today</span>}
+                {isToday && (
+                  <Tag bordered={false} style={aiTagChipStyle('signal-neutral', tagMode)}>Today</Tag>
+                )}
               </span>
               <span className="etb-day-stats">
                 {day.total} {day.total > 1 ? 'reports' : 'report'}

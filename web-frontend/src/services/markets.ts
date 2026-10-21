@@ -325,6 +325,24 @@ export interface EarningsFeedItem {
   revenue_period?: string | null;
 }
 
+// ===== EDGAR 财报资料(Slides/Report 外链) =====
+
+export interface EarningsMaterials {
+  found: boolean;
+  code: string;
+  cik?: number;
+  eightk?: {
+    filing_date: string;
+    press_release?: string | null;
+    slides?: string | null;
+  };
+  quarterly?: {
+    form: string;
+    filing_date: string;
+    url: string;
+  };
+}
+
 export interface EarningsFeedData {
   items: EarningsFeedItem[];
   meta: {
@@ -384,6 +402,19 @@ export const marketsAPI = {
   /**
    * 获取 Ticker 财务信息面板（财报日历右侧详情）
    */
+  /**
+   * 获取 EDGAR 财报资料链接(Report/Slides/10-Q, 免费官方源)
+   */
+  getEarningsMaterials: async (code: string): Promise<EarningsMaterials> => {
+    try {
+      const result = await api.get<EarningsMaterials>('/markets/earnings-calendar/company-materials', { code });
+      return result;
+    } catch (error) {
+      console.error('获取 EDGAR 资料链接失败:', error);
+      throw error;
+    }
+  },
+
   getEarningsCompanyPanel: async (code: string): Promise<EarningsCompanyPanel> => {
     try {
       const result = await api.get<EarningsCompanyPanel>('/markets/earnings-calendar/company-panel', {

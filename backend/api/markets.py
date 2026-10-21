@@ -25,6 +25,7 @@ from backend.services.economic_events_service import (
 )
 from backend.services.macro_indicators_service import MacroIndicatorsService
 from backend.services.market_data_service import MarketDataService
+from backend.services.edgar_materials_service import get_edgar_materials_service
 import psycopg2.extras
 
 def process_logo_url(logo_url):
@@ -521,6 +522,26 @@ async def get_earnings_calendar_company_panel(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取公司面板失败: {str(e)}"
         )
+
+@router.get("/earnings-calendar/company-materials", summary="获取 EDGAR 财报资料链接(Slides/Report)")
+async def get_earnings_calendar_company_materials(
+    code: str = Query(..., min_length=1, max_length=20, description="股票代码(美股裸代码)"),
+    current_user=Depends(get_current_user)
+):
+    """
+    获取公司最近财报的 EDGAR 官方资料外链(免费源, 链接指向 SEC 原文):
+    - eightk.press_release: 8-K EX-99.1 业绩新闻稿(Report)
+    - eightk.slides: 8-K EX-99.2 演示稿(Slides, 部分公司没有)
+    - quarterly: 最近 10-Q/10-K 正式季报
+    """
+    try:
+        service = get_edgar_materials_service()
+        result = service.get_materials(code)
+        info(f"获取 EDGAR 资料链接: user={current_user.username}, code={code}, found={result.get('found')}", source="markets_api")
+        return result
+    except Exception as e:
+        error(f"获取 EDGAR 资料链接失败: {str(e)}", source="markets_api")
+        raise HTTPException(status_code=500, detail=f"获取 EDGAR 资料链接失败: {str(e)}")
 
 @router.get("/earnings-calendar/feed", summary="获取 Earnings Feed（右栏默认事件流）")
 async def get_earnings_calendar_feed(

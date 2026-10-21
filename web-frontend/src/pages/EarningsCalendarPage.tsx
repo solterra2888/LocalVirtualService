@@ -321,7 +321,7 @@ const EarningsCalendarPage: React.FC = () => {
             {/* 市值筛选: 三视图通用, 港股已按汇率换算为 USD(默认 $30B+) */}
             <Segmented
               options={[
-                { label: 'No Filter', value: '0' },
+                { label: 'All', value: '0' },
                 { label: '$100B+', value: '100' },
                 { label: '$30B+', value: '30' },
                 { label: '$10B+', value: '10' },

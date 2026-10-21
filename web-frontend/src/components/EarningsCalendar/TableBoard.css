@@ -8,9 +8,6 @@
   --etb-border: #ececec;
   --etb-header-bg: #ffffff;
   --etb-row-hover: rgba(128, 128, 128, 0.08);
-  --etb-pill-bg: rgba(128, 128, 128, 0.1);
-  --etb-pill-color: #666666;
-  --etb-pill-border: rgba(128, 128, 128, 0.3);
 }
 
 .etb-board.dark {
@@ -20,9 +17,6 @@
   --etb-border: #2c3547;
   --etb-header-bg: #1a2234;
   --etb-row-hover: rgba(148, 163, 184, 0.1);
-  --etb-pill-bg: rgba(148, 163, 184, 0.15);
-  --etb-pill-color: #94a3b8;
-  --etb-pill-border: rgba(148, 163, 184, 0.35);
 }
 
 .etb-board {
@@ -184,7 +178,7 @@
   color: var(--etb-text-strong);
 }
 
-/* Surprise 区: ▲▼ 符号 + 深灰粗体(全灰, 不用红绿); 未公布为浅灰胶囊 */
+/* Surprise 区: ▲▼ 符号 + 深灰粗体(全灰, 不用红绿); 未公布为标准灰色胶囊(Tag, 样式走 aiTagChipStyle) */
 .etb-surprise {
   flex: 0 0 auto;
   width: 84px;
@@ -196,18 +190,6 @@
   font-size: 12.5px;
   font-weight: 700;
   color: var(--etb-text-strong);
-}
-
-/* 灰色胶囊: Today / Pending */
-.etb-pill {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  line-height: 1.5;
-  background: var(--etb-pill-bg);
-  color: var(--etb-pill-color);
-  border: 1px solid var(--etb-pill-border);
 }
 
 /* 响应式: 窄屏隐藏公司名, EPS 区收窄 */

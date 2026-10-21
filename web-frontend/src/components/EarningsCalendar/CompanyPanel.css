@@ -16,10 +16,10 @@
   font-size: 13px;
 }
 
+/* 币种胶囊: 视觉走全站 aiTagChipStyle 内联样式, 这里只留与标题的间距 */
 .ecp-currency-tag {
-  font-size: 10px;
-  opacity: 0.65;
   margin-left: 6px;
+  vertical-align: middle;
 }
 
 /* 面板内 Segmented 切换按钮(EPS/Revenue, Overview/History): 统一 11px 字体 */
@@ -220,4 +220,35 @@
 .ecp-latest-pct {
   font-size: 13px;
   font-weight: 700;
+}
+
+/* EDGAR 资料外链行(Overview, 最新卡片与 AI Recap 之间) */
+.ecp-materials {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 11px;
+}
+
+.ecp-materials a {
+  color: #1d5998;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ecp-materials a:hover {
+  text-decoration: underline;
+}
+
+.ecp-materials-info {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  opacity: 0.45;
+  cursor: help;
+}
+
+.ecp-materials-info:hover {
+  opacity: 0.9;
 }

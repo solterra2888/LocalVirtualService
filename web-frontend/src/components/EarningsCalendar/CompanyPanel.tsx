@@ -12,7 +12,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import { GlobalOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { GlobalOutlined, ThunderboltOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
   Bar,
@@ -31,9 +31,11 @@ import type {
   EarningsPanelHistoryQuarter,
   EarningsPanelRevenueQuarter,
   EarningsRecapResult,
+  EarningsMaterials,
 } from '../../services/markets';
 import { marketsAPI } from '../../services/markets';
 import MarkdownRenderer from '../MarkdownRenderer';
+import { aiTagChipStyle } from '../shared/aiTagChipStyles';
 import './CompanyPanel.css';
 
 const { Text } = Typography;
@@ -223,9 +225,13 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
   const [chartMode, setChartMode] = useState<'eps' | 'revenue'>('eps');
   const [recap, setRecap] = useState<EarningsRecapResult | null>(null);
   const [recapLoading, setRecapLoading] = useState(false);
+  // 标签胶囊统一走全站 Sources Tags 标准样式(aiTagChipStyle)
+  const tagMode = isDark ? 'dark' : 'light';
 
   // Earnings Tab 柱状图下方的子分区(对齐 EarningsHub): Overview=最新一期+AI分析 / History=历史数据
   const [earnSection, setEarnSection] = useState<'overview' | 'history'>('overview');
+  // EDGAR 财报资料外链(Report/Slides/10-Q, 美股 only, 免费官方源)
+  const [materials, setMaterials] = useState<EarningsMaterials | null>(null);
   const [activeTab, setActiveTab] = useState<string>('earnings');
 
   // 切换 ticker 时自动恢复服务端已缓存的 Recap（纯读, 不触发生成）;
@@ -239,6 +245,21 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
       .getEarningsRecapCached(code)
       .then((cached) => {
         if (!cancelled && cached) setRecap(cached);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [code]);
+
+  useEffect(() => {
+    setMaterials(null);
+    if (!code || code.includes('.')) return; // 港股无 EDGAR
+    let cancelled = false;
+    marketsAPI
+      .getEarningsMaterials(code)
+      .then((r) => {
+        if (!cancelled) setMaterials(r);
       })
       .catch(() => {});
     return () => {
@@ -326,7 +347,9 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
             <span className="ecp-chart-title">
               Quarterly History
               {chartMode === 'revenue' && data.revenue_currency && data.revenue_currency !== 'USD' && (
-                <span className="ecp-currency-tag">({data.revenue_currency})</span>
+                <span className="ecp-currency-tag" style={aiTagChipStyle('country', tagMode)}>
+                  {data.revenue_currency}
+                </span>
               )}
             </span>
             {history.length > 0 && revenueHistory.length > 0 && (
@@ -410,6 +433,51 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
             </Text>
           )}
 
+          {/* 官方资料外链(同一行): Report(8-K 新闻稿) / Slides(EX-99.2, 部分公司无) / 季报 / Transcript(生成 Recap 后有) */}
+          {((materials?.found &&
+            (materials.eightk?.press_release || materials.eightk?.slides || materials.quarterly)) ||
+            recap?.source_url) && (
+            <div className="ecp-materials">
+              {materials?.eightk?.press_release && (
+                <a href={materials.eightk.press_release} target="_blank" rel="noreferrer">
+                  Report ↗
+                </a>
+              )}
+              {materials?.eightk?.slides && (
+                <a href={materials.eightk.slides} target="_blank" rel="noreferrer">
+                  Slides ↗
+                </a>
+              )}
+              {materials?.quarterly && (
+                <a href={materials.quarterly.url} target="_blank" rel="noreferrer">
+                  {materials.quarterly.form} ↗
+                </a>
+              )}
+              {recap?.source_url && (
+                <a href={recap.source_url} target="_blank" rel="noreferrer">
+                  Transcript ↗
+                </a>
+              )}
+              <Tooltip
+                title={
+                  <div style={{ fontSize: 11, lineHeight: '18px' }}>
+                    <b>Report</b> — 业绩新闻稿(8-K): 财报发布即刻公布的核心数字(EPS/营收), 最快
+                    <br />
+                    <b>Slides</b> — 业绩演示稿(EX-99.2): 电话会 PPT, 部分公司不提交
+                    <br />
+                    <b>10-Q</b> — 正式季报: 完整三大报表+MD&A, 季末后 40-45 天提交, 最权威(Q4 为年报 10-K)
+                    <br />
+                    <b>Transcript</b> — 电话会全文记录, AI Recap 的数据源
+                  </div>
+                }
+              >
+                <span className="ecp-materials-info">
+                  <InfoCircleOutlined />
+                </span>
+              </Tooltip>
+            </div>
+          )}
+
           {/* AI Recap: 按需抓取 transcript 并生成分析（美股 only）
               所点事件在未来(未公布)时隐藏 —— 此时"最新电话会"只是上一季旧内容 */}
           {code && !code.includes('.') && (!reportDate || reportDate <= dayjs().format('YYYY-MM-DD')) && (
@@ -417,7 +485,7 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
           <SectionTitle>
             AI Recap{' '}
             <Tooltip title="AI generated, may be inaccurate — 基于财报电话会 transcript 自动生成">
-              <Tag style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>AI</Tag>
+              <Tag bordered={false} style={aiTagChipStyle('signal-meta', tagMode)}>AI</Tag>
             </Tooltip>
           </SectionTitle>
           {!recap && !recapLoading && (
@@ -450,15 +518,13 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
                   fontSize: 11,
                 }}
               >
-                {recap.period && <Tag color="blue">{recap.period}</Tag>}
-                {recap.call_date && (
-                  <Text type="secondary">{dayjs(recap.call_date).format('MMM D, YYYY')}</Text>
+                {recap.period && (
+                  <Tag bordered={false} style={aiTagChipStyle('ticker', tagMode)}>{recap.period}</Tag>
                 )}
-                {recap.cached && <Tag>cached</Tag>}
-                {recap.source_url && (
-                  <a href={recap.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>
-                    transcript ↗
-                  </a>
+                {recap.call_date && (
+                  <Tag bordered={false} style={aiTagChipStyle('signal-meta', tagMode)}>
+                    {dayjs(recap.call_date).format('MMM D, YYYY')}
+                  </Tag>
                 )}
               </div>
               {recap.stale && (
@@ -734,7 +800,9 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
             <span className="ecp-chart-title">
               Quarterly Dividends Paid
               {data.dividend_currency && data.dividend_currency !== 'USD' && (
-                <span className="ecp-currency-tag">({data.dividend_currency})</span>
+                <span className="ecp-currency-tag" style={aiTagChipStyle('country', tagMode)}>
+                  {data.dividend_currency}
+                </span>
               )}
             </span>
           </div>
