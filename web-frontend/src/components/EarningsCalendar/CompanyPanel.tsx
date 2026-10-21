@@ -36,7 +36,7 @@ import { marketsAPI } from '../../services/markets';
 import MarkdownRenderer from '../MarkdownRenderer';
 import './CompanyPanel.css';
 
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 interface CompanyPanelProps {
   code: string | null;
@@ -354,6 +354,7 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
             {history.length > 0 && revenueHistory.length > 0 && (
               <Segmented
                 size="small"
+                className="ecp-seg"
                 options={[
                   { label: 'EPS', value: 'eps' },
                   { label: 'Revenue', value: 'revenue' },
@@ -380,6 +381,7 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
       {history.length > 0 && (
         <Segmented
           size="small"
+          className="ecp-seg"
           style={{ marginTop: 14 }}
           options={[
             { label: 'Overview', value: 'overview' },
@@ -804,26 +806,12 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
         )}
       </div>
 
-      {c.description ? (
-        <Paragraph
-          type="secondary"
-          ellipsis={{
-            rows: 2,
-            expandable: 'collapsible',
-            symbol: (expanded: boolean) => (expanded ? 'less' : 'more'),
-          }}
-          style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}
-        >
-          {c.description}
-        </Paragraph>
-      ) : null}
-
       {/* Tab 分类（对齐 EarningsHub quote 页导航） */}
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         size="small"
-        style={{ marginTop: 8 }}
+        style={{ marginTop: 12 }}
         items={[
           { key: 'earnings', label: 'Earnings', children: earningsTab },
           { key: 'info', label: 'Info', children: infoTab },

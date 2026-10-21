@@ -1,0 +1,226 @@
+/* Earnings Table 视图（EarningsHub List 风格: 日期分组 + 盘前/盘后分段; 全灰配色,
+   无红绿/彩色, 区分度来自灰阶深浅与 ▲▼ 方向符号） */
+
+.etb-board {
+  --etb-text: #262626;
+  --etb-text-strong: #141414;
+  --etb-sub: #8c8c8c;
+  --etb-border: #ececec;
+  --etb-header-bg: #ffffff;
+  --etb-row-hover: rgba(128, 128, 128, 0.08);
+  --etb-pill-bg: rgba(128, 128, 128, 0.1);
+  --etb-pill-color: #666666;
+  --etb-pill-border: rgba(128, 128, 128, 0.3);
+}
+
+.etb-board.dark {
+  --etb-text: #e0e6f1;
+  --etb-text-strong: #f2f5fb;
+  --etb-sub: #94a3b8;
+  --etb-border: #2c3547;
+  --etb-header-bg: #1a2234;
+  --etb-row-hover: rgba(148, 163, 184, 0.1);
+  --etb-pill-bg: rgba(148, 163, 184, 0.15);
+  --etb-pill-color: #94a3b8;
+  --etb-pill-border: rgba(148, 163, 184, 0.35);
+}
+
+.etb-board {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 2px 2px 12px;
+}
+
+/* 日期分组: 日与日之间用 padding(而非容器 gap), 避免 sticky 头部从缝隙透出内容 */
+.etb-day {
+  padding-bottom: 16px;
+}
+
+.etb-day:last-child {
+  padding-bottom: 4px;
+}
+
+/* 日期头: 滚动时吸附在视图卡片顶部(卡片 body 为滚动容器) */
+.etb-day-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--etb-header-bg);
+  border-bottom: 1px solid var(--etb-border);
+  color: var(--etb-text);
+}
+
+.etb-day-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+}
+
+/* 今日: 文字加深 + 灰色 Today 胶囊 */
+.etb-day-header.today .etb-day-title {
+  color: var(--etb-text-strong);
+}
+
+.etb-day-stats {
+  font-size: 12px;
+  color: var(--etb-sub);
+  white-space: nowrap;
+}
+
+/* 日内分段头 */
+.etb-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--etb-sub);
+}
+
+.etb-section-icon {
+  font-size: 11px;
+  line-height: 1;
+  /* 全灰约束: 图标随分段头灰色, 不允许系统 emoji 彩色 */
+  color: var(--etb-sub);
+}
+
+.etb-section-count {
+  opacity: 0.75;
+}
+
+/* 行: logo + ticker + 公司名 + EPS + surprise */
+.etb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--etb-text);
+  transition: background 0.15s ease;
+}
+
+.etb-row:hover {
+  background: var(--etb-row-hover);
+}
+
+.etb-logo {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.etb-logo img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* 无 Logo 时的首字母方块（颜色由 ticker 哈希生成，随主题适配） */
+.etb-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+.etb-ticker {
+  flex: 0 0 auto;
+  min-width: 52px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--etb-text-strong);
+}
+
+.etb-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--etb-sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* EPS 区: est(灰) → actual(深灰粗体); 数字右对齐保持列感 */
+.etb-eps {
+  flex: 0 0 auto;
+  min-width: 118px;
+  text-align: right;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.etb-est {
+  color: var(--etb-sub);
+}
+
+.etb-actual {
+  font-weight: 700;
+  color: var(--etb-text-strong);
+}
+
+/* Surprise 区: ▲▼ 符号 + 深灰粗体(全灰, 不用红绿); 未公布为浅灰胶囊 */
+.etb-surprise {
+  flex: 0 0 auto;
+  width: 84px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.etb-surprise-value {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--etb-text-strong);
+}
+
+/* 灰色胶囊: Today / Pending */
+.etb-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--etb-pill-bg);
+  color: var(--etb-pill-color);
+  border: 1px solid var(--etb-pill-border);
+}
+
+/* 响应式: 窄屏隐藏公司名, EPS 区收窄 */
+@media (max-width: 768px) {
+  .etb-name {
+    display: none;
+  }
+
+  .etb-eps {
+    min-width: 96px;
+  }
+
+  .etb-surprise {
+    width: 72px;
+  }
+}

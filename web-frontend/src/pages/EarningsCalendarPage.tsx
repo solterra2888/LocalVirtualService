@@ -2,12 +2,9 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Card,
   Typography,
-  Table,
   Space,
   Input,
   message,
-  Tag,
-  Tooltip,
   Button,
   ConfigProvider,
   theme as antdTheme,
@@ -22,7 +19,6 @@ import {
 import dayjs, { Dayjs } from 'dayjs';
 import {
   marketsAPI,
-  EarningsCalendarItem,
   EarningsCalendarData,
   EarningsMonthSummary,
   EarningsCompanyPanel,
@@ -34,6 +30,7 @@ import WeekBoard from '../components/EarningsCalendar/WeekBoard';
 import MonthBoard from '../components/EarningsCalendar/MonthBoard';
 import CompanyPanel from '../components/EarningsCalendar/CompanyPanel';
 import FeedList from '../components/EarningsCalendar/FeedList';
+import TableBoard from '../components/EarningsCalendar/TableBoard';
 import './EarningsCalendarPage.css';
 
 const { Title, Text } = Typography;
@@ -43,25 +40,11 @@ const THEME_COLORS = {
     pageBg: '#f5f5f5',
     cardBg: '#fff',
     cardBorder: '#f0f0f0',
-    text: 'rgba(0, 0, 0, 0.88)',
-    textSecondary: 'rgba(0, 0, 0, 0.45)',
-    neutralTagBg: 'rgba(128, 128, 128, 0.1)',
-    neutralTagColor: '#666',
-    neutralTagBorder: 'rgba(128, 128, 128, 0.3)',
-    beat: '#389e0d',
-    miss: '#cf1322',
   },
   dark: {
     pageBg: '#1a202c',
     cardBg: '#1a2234',
     cardBorder: '#364152',
-    text: '#e0e6f1',
-    textSecondary: 'rgba(255, 255, 255, 0.5)',
-    neutralTagBg: 'rgba(148, 163, 184, 0.15)',
-    neutralTagColor: '#94a3b8',
-    neutralTagBorder: 'rgba(148, 163, 184, 0.35)',
-    beat: '#95de64',
-    miss: '#ff7875',
   },
 } as const;
 
@@ -74,16 +57,13 @@ const getMonday = (d: Dayjs): Dayjs => {
   return d.subtract(dow === 0 ? 6 : dow - 1, 'day').startOf('day');
 };
 
-const formatEps = (v?: number | null): string =>
-  v === null || v === undefined ? '—' : v.toFixed(2);
-
 const EarningsCalendarPage: React.FC = () => {
   const { isAuthenticated } = useAuthStore();
   const { themeMode } = useDashboardSettings();
   const isDark = themeMode === 'dark';
   const colors = THEME_COLORS[themeMode];
 
-  const [scope, setScope] = useState<Scope>('watchlist');
+  const [scope, setScope] = useState<Scope>('us');
   const [viewMode, setViewMode] = useState<ViewMode>('calendar');
   const [weekStart, setWeekStart] = useState<Dayjs>(getMonday(dayjs()));
   const [monthStart, setMonthStart] = useState<Dayjs>(dayjs().startOf('month'));
@@ -126,7 +106,8 @@ const EarningsCalendarPage: React.FC = () => {
         monthStart.format('YYYY-MM'),
         scope,
         searchText.trim() || undefined,
-        mcapUsd
+        mcapUsd,
+        30 // top_n: 月历格子 logo 方块尽量铺满(后端上限 50, 前端按格子容量裁剪)
       );
       setMonthData(result);
     } catch (error) {
@@ -264,131 +245,7 @@ const EarningsCalendarPage: React.FC = () => {
   }, [panelCode, isAuthenticated]);
 
   const items = data?.items ?? [];
-  const todayStr = dayjs().format('YYYY-MM-DD');
   const today = dayjs();
-
-  const columns = [
-    {
-      title: 'Date',
-      dataIndex: 'report_date',
-      key: 'report_date',
-      width: 130,
-      sorter: (a: EarningsCalendarItem, b: EarningsCalendarItem) =>
-        (a.report_date || '').localeCompare(b.report_date || ''),
-      render: (date: string) =>
-        date ? (
-          <Space size={4}>
-            <span>{dayjs(date).format('ddd, MMM D')}</span>
-            {date === todayStr && <Tag color="blue">Today</Tag>}
-          </Space>
-        ) : (
-          '—'
-        ),
-    },
-    {
-      title: 'Ticker',
-      dataIndex: 'code',
-      key: 'code',
-      width: 120,
-      render: (code: string, record: EarningsCalendarItem) => (
-        <Space size={8}>
-          {record.logo_url ? (
-            <img
-              src={record.logo_url}
-              alt={code}
-              style={{ width: 18, height: 18, objectFit: 'contain' }}
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          ) : null}
-          <Text strong>{code}</Text>
-        </Space>
-      ),
-    },
-    {
-      title: 'Company',
-      dataIndex: 'company_name',
-      key: 'company_name',
-      ellipsis: { showTitle: false },
-      render: (name?: string | null) =>
-        name ? (
-          <Tooltip title={name}>
-            <span>{name}</span>
-          </Tooltip>
-        ) : (
-          '—'
-        ),
-    },
-    {
-      title: 'Time',
-      dataIndex: 'before_after_market',
-      key: 'before_after_market',
-      width: 110,
-      render: (v?: string | null) => {
-        const s = (v || '').toUpperCase();
-        if (s.includes('BEFORE')) return <Tag color="orange">BMO</Tag>;
-        if (s.includes('AFTER')) return <Tag color="geekblue">AMC</Tag>;
-        return (
-          <Tag
-            style={{
-              backgroundColor: colors.neutralTagBg,
-              color: colors.neutralTagColor,
-              border: `1px solid ${colors.neutralTagBorder}`,
-            }}
-          >
-            N/A
-          </Tag>
-        );
-      },
-    },
-    {
-      title: 'EPS Est.',
-      dataIndex: 'eps_estimate',
-      key: 'eps_estimate',
-      width: 90,
-      align: 'right' as const,
-      render: (v?: number | null) => (
-        <span style={{ color: colors.textSecondary }}>{formatEps(v)}</span>
-      ),
-    },
-    {
-      title: 'EPS Actual',
-      dataIndex: 'eps_actual',
-      key: 'eps_actual',
-      width: 100,
-      align: 'right' as const,
-      render: (v?: number | null) => formatEps(v),
-    },
-    {
-      title: 'Surprise',
-      dataIndex: 'eps_surprise_percent',
-      key: 'eps_surprise_percent',
-      width: 100,
-      align: 'right' as const,
-      render: (v?: number | null) => {
-        if (v === null || v === undefined) {
-          return (
-            <Tag
-              style={{
-                backgroundColor: colors.neutralTagBg,
-                color: colors.neutralTagColor,
-                border: `1px solid ${colors.neutralTagBorder}`,
-              }}
-            >
-              Pending
-            </Tag>
-          );
-        }
-        const isBeat = v >= 0;
-        return (
-          <Text strong style={{ color: isBeat ? colors.beat : colors.miss }}>
-            {isBeat ? '▲' : '▼'} {Math.abs(v).toFixed(1)}%
-          </Text>
-        );
-      },
-    },
-  ];
 
   const scopeOptions = [
     { label: 'Watchlist', value: 'watchlist' },
@@ -555,20 +412,20 @@ const EarningsCalendarPage: React.FC = () => {
                   }}
                 />
               )
-            ) : (
-              <Table
-                columns={columns}
-                dataSource={items}
-                rowKey={(r) => `${r.code}-${r.report_date}`}
-                loading={loading}
-                size="middle"
-                onRow={(r) => ({
-                  onClick: () => openPanel(r.code, r.report_date),
-                  style: { cursor: 'pointer' },
-                })}
-                pagination={{ pageSize: 50, showSizeChanger: false, showTotal: (t) => `${t} reports` }}
-                scroll={{ x: 800 }}
+            ) : loading ? (
+              <Empty description="Loading..." style={{ padding: '60px 0' }} />
+            ) : items.length === 0 ? (
+              <Empty
+                description={
+                  scope === 'watchlist'
+                    ? 'No earnings found for your watchlist in this window'
+                    : 'No earnings found for the selected filters'
+                }
+                style={{ padding: '60px 0' }}
               />
+            ) : (
+              /* Table 视图: EarningsHub List 风格(日期分组 + 盘前/盘后分段), 全灰配色 */
+              <TableBoard items={items} isDark={isDark} onSelect={openPanel} />
             )}
           </Card>
           </div>

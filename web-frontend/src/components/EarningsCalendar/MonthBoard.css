@@ -26,9 +26,22 @@
   --ecm-out: rgba(255, 255, 255, 0.3);
 }
 
+/* 拉满视图卡片高度: 日期行随剩余空间伸展, 月板底部与卡片底边(≈左侧导航栏底边)齐平 */
+.ecm-board {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .ecm-grid {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
+  /* 第一行(weekday 表头)固定高度, 其余日期行: 最小 96px, 有剩余空间时平均拉伸 */
+  grid-template-rows: auto;
+  grid-auto-rows: minmax(96px, 1fr);
   gap: 6px;
 }
 
@@ -43,7 +56,7 @@
 }
 
 .ecm-cell {
-  min-height: 96px;
+  /* 行高下限由 .ecm-grid 的 grid-auto-rows 统一管理 */
   background: var(--ecm-cell-bg);
   border: 1px solid var(--ecm-cell-border);
   border-radius: 8px;
@@ -90,43 +103,62 @@
   color: var(--ecm-count);
 }
 
+/* chips 区: 撑满格子剩余空间, logo 方块平铺; 溢出隐藏(可见数由 CellChips 按容量测量) */
 .ecm-chips {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-wrap: wrap;
+  align-content: flex-start;
   gap: 3px;
+  overflow: hidden;
 }
 
-.ecm-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
+/* 正方形 logo 方块: 尺寸与 MonthBoard.tsx 的 CHIP_SIZE 保持同步 */
+.ecm-logo-chip {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
   background: var(--ecm-chip-bg);
   border: 1px solid var(--ecm-chip-border);
-  border-radius: 4px;
-  padding: 1px 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--ecm-chip-text);
-  line-height: 16px;
-  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex: 0 0 auto;
+  cursor: inherit;
 }
 
-.ecm-chip img {
-  width: 12px;
-  height: 12px;
+.ecm-logo-chip img {
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
-.ecm-chip.reported {
+/* 无 logo 时: 方块内显示代码(小字号居中) */
+.ecm-logo-text {
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--ecm-chip-text);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+/* 放不下时的 +N 方块 */
+.ecm-logo-chip.more {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--ecm-sub);
+}
+
+.ecm-logo-chip.reported {
   border-color: rgba(82, 196, 26, 0.5);
 }
 
-.ecm-chip-overflow {
-  color: var(--ecm-sub);
-  font-weight: 500;
-}
-
 .ecm-month-total {
+  flex: 0 0 auto;
   font-size: 12px;
   color: var(--ecm-sub);
   margin: 0 0 8px 2px;
@@ -135,14 +167,10 @@
 @media (max-width: 768px) {
   .ecm-grid {
     gap: 3px;
+    grid-auto-rows: minmax(64px, 1fr);
   }
 
   .ecm-cell {
-    min-height: 64px;
     padding: 3px;
-  }
-
-  .ecm-chips {
-    display: none;
   }
 }

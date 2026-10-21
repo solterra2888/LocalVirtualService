@@ -1,7 +1,11 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Tooltip } from 'antd';
 import dayjs, { Dayjs } from 'dayjs';
-import type { EarningsMonthSummary, EarningsMonthDayTopItem } from '../../services/markets';
+import type {
+  EarningsMonthSummary,
+  EarningsMonthDaySummary,
+  EarningsMonthDayTopItem,
+} from '../../services/markets';
 import './MonthBoard.css';
 
 interface MonthBoardProps {
@@ -12,6 +16,13 @@ interface MonthBoardProps {
   /** 点击某天: 页面跳转到该天的周视图 */
   onDayClick: (date: string) => void;
 }
+
+/** logo 方块尺寸/间距(与 MonthBoard.css 的 .ecm-logo-chip 保持同步) */
+const CHIP_SIZE = 22;
+const CHIP_GAP = 3;
+
+/** 方块内显示代码: 去 .HK/.US 后缀 */
+const displayCode = (code: string): string => code.replace(/\.(HK|US)$/i, '');
 
 const formatCap = (cap?: number | null): string => {
   if (cap === null || cap === undefined) return '';
@@ -36,22 +47,71 @@ const chipTooltip = (item: EarningsMonthDayTopItem): string => {
   return parts.join(' · ');
 };
 
-const TopChip: React.FC<{ item: EarningsMonthDayTopItem }> = ({ item }) => (
-  <Tooltip title={chipTooltip(item)}>
-    <span className={`ecm-chip${item.reported ? ' reported' : ''}`}>
-      {item.logo_url ? (
-        <img
-          src={item.logo_url}
-          alt=""
-          onError={(e) => {
-            e.currentTarget.style.display = 'none';
-          }}
-        />
-      ) : null}
-      {item.code}
-    </span>
-  </Tooltip>
-);
+/** 单个 logo 方块: 有图填图, 无图显示代码; Tooltip 保留公司/业绩摘要 */
+const LogoChip: React.FC<{ item: EarningsMonthDayTopItem }> = ({ item }) => {
+  const [logoFailed, setLogoFailed] = useState(false);
+  const showImg = item.logo_url && !logoFailed;
+  return (
+    <Tooltip title={chipTooltip(item)}>
+      <span className={`ecm-logo-chip${item.reported ? ' reported' : ''}`}>
+        {showImg ? (
+          <img
+            src={item.logo_url as string}
+            alt={item.code}
+            onError={() => setLogoFailed(true)}
+          />
+        ) : (
+          <span className="ecm-logo-text">{displayCode(item.code)}</span>
+        )}
+      </span>
+    </Tooltip>
+  );
+};
+
+/** 格子 chips 区: logo 方块尽量铺满, 放不下的以 +N 收尾(容量按格子实际尺寸测量) */
+const CellChips: React.FC<{ day: EarningsMonthDaySummary }> = ({ day }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [capacity, setCapacity] = useState(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const calc = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w <= 0 || h <= 0) return;
+      const perRow = Math.max(1, Math.floor((w + CHIP_GAP) / (CHIP_SIZE + CHIP_GAP)));
+      const rows = Math.max(1, Math.floor((h + CHIP_GAP) / (CHIP_SIZE + CHIP_GAP)));
+      setCapacity(perRow * rows);
+    };
+    calc();
+    const ro = new ResizeObserver(calc);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // 先按"需要给 +N 留一位"计算; 全部放得下且无剩余时不占 +N 位
+  let shown = Math.min(day.top.length, Math.max(0, capacity - 1));
+  let overflow = day.count - shown;
+  if (overflow <= 0) {
+    shown = Math.min(day.top.length, capacity);
+    overflow = day.count - shown;
+  }
+
+  return (
+    <div className="ecm-chips" ref={ref}>
+      {capacity > 0 &&
+        day.top.slice(0, shown).map((item) => <LogoChip key={item.code} item={item} />)}
+      {capacity > 0 && overflow > 0 && (
+        <Tooltip title={`${overflow} more · click to see all`}>
+          <span className="ecm-logo-chip more">
+            +{overflow > 99 ? '99+' : overflow}
+          </span>
+        </Tooltip>
+      )}
+    </div>
+  );
+};
 
 export const MonthBoard: React.FC<MonthBoardProps> = ({ data, monthStart, isDark, onDayClick }) => {
   const todayStr = dayjs().format('YYYY-MM-DD');
@@ -112,18 +172,7 @@ export const MonthBoard: React.FC<MonthBoardProps> = ({ data, monthStart, isDark
                 <span className="ecm-day-number">{cell.format('D')}</span>
                 {day ? <span className="ecm-count-badge">{day.count}</span> : null}
               </div>
-              {day && day.top.length > 0 ? (
-                <div className="ecm-chips">
-                  {day.top.slice(0, 4).map((item) => (
-                    <TopChip key={item.code} item={item} />
-                  ))}
-                  {day.count > day.top.length ? (
-                    <Tooltip title={`${day.count - day.top.length} more · click to see all`}>
-                      <span className="ecm-chip ecm-chip-overflow">+{day.count - day.top.length}</span>
-                    </Tooltip>
-                  ) : null}
-                </div>
-              ) : null}
+              {day ? <CellChips day={day} /> : null}
             </div>
           );
         })}

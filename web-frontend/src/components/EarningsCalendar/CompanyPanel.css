@@ -17,6 +17,11 @@
   margin-left: 6px;
 }
 
+/* 面板内 Segmented 切换按钮(EPS/Revenue, Overview/History): 统一 11px 字体 */
+.ecp-seg .ant-segmented-item-label {
+  font-size: 11px;
+}
+
 /* 关键指标 / 统计 网格（对齐 EarningsHub Highlights 布局） */
 .ecp-stats {
   display: grid;

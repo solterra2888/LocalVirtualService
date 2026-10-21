@@ -452,7 +452,7 @@ async def get_earnings_calendar_month_summary(
     month: Optional[str] = Query(None, description="月份 (YYYY-MM)，默认当月"),
     scope: str = Query('watchlist', pattern='^(watchlist|theme|us|hk)$', description="范围: watchlist=自选 / theme=主题关联公司 / us=全部美股 / hk=全部港股"),
     search: Optional[str] = Query(None, max_length=50, description="模糊搜索 ticker 或公司名"),
-    top_n: int = Query(5, ge=1, le=10, description="每日返回的市值 Top N 公司数"),
+    top_n: int = Query(5, ge=1, le=50, description="每日返回的市值 Top N 公司数"),
     min_market_cap: Optional[float] = Query(None, description="最小市值筛选(USD 美元, 港股已按汇率换算)"),
     current_user=Depends(get_current_user)
 ):

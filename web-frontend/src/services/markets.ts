@@ -362,7 +362,9 @@ export const marketsAPI = {
     month: string,
     scope?: 'watchlist' | 'theme' | 'us' | 'hk',
     search?: string,
-    minMarketCap?: number
+    minMarketCap?: number,
+    /** 每日市值 Top N(月视图格子 logo 方块尽量铺满, 默认取满上限由前端按格子容量裁剪) */
+    topN?: number
   ): Promise<EarningsMonthSummary> => {
     try {
       const result = await api.get<EarningsMonthSummary>('/markets/earnings-calendar/month-summary', {
@@ -370,6 +372,7 @@ export const marketsAPI = {
         scope,
         search: search || undefined,
         min_market_cap: minMarketCap,
+        top_n: topN,
       });
       return result;
     } catch (error) {
