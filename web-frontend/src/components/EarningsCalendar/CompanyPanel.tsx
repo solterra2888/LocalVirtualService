@@ -82,13 +82,6 @@ const quarterLabel = (fp?: string | null): string => {
   return `Q${Math.floor(d.month() / 3) + 1}'${d.format('YY')}`;
 };
 
-const whenLabel = (v?: string | null): string => {
-  const s = (v || '').toUpperCase();
-  if (s.includes('BEFORE')) return 'BMO';
-  if (s.includes('AFTER')) return 'AMC';
-  return '';
-};
-
 const SectionTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div style={{ fontWeight: 600, fontSize: 13, margin: '18px 0 8px' }}>{children}</div>
 );
@@ -235,10 +228,22 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
   const [earnSection, setEarnSection] = useState<'overview' | 'history'>('overview');
   const [activeTab, setActiveTab] = useState<string>('earnings');
 
-  // 切换 ticker 时重置 Recap 状态（Tab 保持, 便于连续对比同一维度）
+  // 切换 ticker 时自动恢复服务端已缓存的 Recap（纯读, 不触发生成）;
+  // 无缓存回到"生成"按钮; cancelled 防快速切换时的竞态（Tab 保持, 便于连续对比同一维度）
   useEffect(() => {
     setRecap(null);
     setRecapLoading(false);
+    if (!code || code.includes('.')) return; // 非美股无缓存可读
+    let cancelled = false;
+    marketsAPI
+      .getEarningsRecapCached(code)
+      .then((cached) => {
+        if (!cancelled && cached) setRecap(cached);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [code]);
 
   const fetchRecap = async () => {
@@ -272,7 +277,6 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
 
   const c = (data.company ?? {}) as EarningsPanelCompany;
   const h = data.highlights ?? null;
-  const next = data.next_earnings ?? null;
   const trend = data.earnings_trend ?? null;
   const ratings = data.analyst_ratings ?? null;
   const tech = data.technicals ?? null;
@@ -315,32 +319,6 @@ export const CompanyPanel: React.FC<CompanyPanelProps> = ({ code, data, loading,
 
   const earningsTab = (
     <>
-      {/* 下次财报 */}
-      <SectionTitle>Next Earnings</SectionTitle>
-      {next?.report_date ? (
-        <div>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
-            <span style={{ fontSize: 20, fontWeight: 700 }}>
-              {dayjs(next.report_date).format('ddd, MMM D, YYYY')}
-            </span>
-            {whenLabel(next.before_after_market) && (
-              <Tag color={whenLabel(next.before_after_market) === 'BMO' ? 'orange' : 'geekblue'}>
-                {whenLabel(next.before_after_market)}
-              </Tag>
-            )}
-          </div>
-          {(next.eps_estimate != null || next.revenue_estimate != null) && (
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {next.eps_estimate != null && <>est EPS {next.eps_estimate.toFixed(2)}</>}
-              {next.eps_estimate != null && next.revenue_estimate != null && ' · '}
-              {next.revenue_estimate != null && <>est REV {fmtCap(next.revenue_estimate)}</>}
-            </Text>
-          )}
-        </div>
-      ) : (
-        <Text type="secondary">No upcoming earnings date in calendar</Text>
-      )}
-
       {/* EPS / Revenue 历史图表 */}
       {(history.length > 0 || revenueHistory.length > 0) && (
         <>

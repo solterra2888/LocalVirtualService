@@ -157,6 +157,11 @@
   border-color: rgba(82, 196, 26, 0.5);
 }
 
+/* 可点击的股票方块: hover 边框提示(与格子 hover 同色系) */
+.ecm-logo-chip:hover {
+  border-color: var(--ecm-count);
+}
+
 .ecm-month-total {
   flex: 0 0 auto;
   font-size: 12px;

@@ -13,8 +13,10 @@ interface MonthBoardProps {
   /** 月视图当前月份第一天 */
   monthStart: Dayjs;
   isDark: boolean;
-  /** 点击某天: 页面跳转到该天的周视图 */
+  /** 点击某天(格子空白处): 页面跳转到该天的周视图 */
   onDayClick: (date: string) => void;
+  /** 点击股票方块: 打开右栏公司详情(不触发跳周) */
+  onSelect?: (code: string, reportDate?: string | null) => void;
 }
 
 /** logo 方块尺寸/间距(与 MonthBoard.css 的 .ecm-logo-chip 保持同步) */
@@ -47,13 +49,27 @@ const chipTooltip = (item: EarningsMonthDayTopItem): string => {
   return parts.join(' · ');
 };
 
-/** 单个 logo 方块: 有图填图, 无图显示代码; Tooltip 保留公司/业绩摘要 */
-const LogoChip: React.FC<{ item: EarningsMonthDayTopItem }> = ({ item }) => {
+/** 单个 logo 方块: 有图填图, 无图显示代码; 点击打开公司详情(阻止冒泡, 不触发格子跳周) */
+const LogoChip: React.FC<{
+  item: EarningsMonthDayTopItem;
+  onSelect?: (code: string) => void;
+}> = ({ item, onSelect }) => {
   const [logoFailed, setLogoFailed] = useState(false);
   const showImg = item.logo_url && !logoFailed;
   return (
     <Tooltip title={chipTooltip(item)}>
-      <span className={`ecm-logo-chip${item.reported ? ' reported' : ''}`}>
+      <span
+        className={`ecm-logo-chip${item.reported ? ' reported' : ''}`}
+        onClick={
+          onSelect
+            ? (e) => {
+                // 阻止冒泡到格子: 点股票=打开详情, 点格子空白=跳周
+                e.stopPropagation();
+                onSelect(item.code);
+              }
+            : undefined
+        }
+      >
         {showImg ? (
           <img
             src={item.logo_url as string}
@@ -69,7 +85,10 @@ const LogoChip: React.FC<{ item: EarningsMonthDayTopItem }> = ({ item }) => {
 };
 
 /** 格子 chips 区: logo 方块尽量铺满, 放不下的以 +N 收尾(容量按格子实际尺寸测量) */
-const CellChips: React.FC<{ day: EarningsMonthDaySummary }> = ({ day }) => {
+const CellChips: React.FC<{
+  day: EarningsMonthDaySummary;
+  onSelect?: (code: string, reportDate?: string | null) => void;
+}> = ({ day, onSelect }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [capacity, setCapacity] = useState(0);
 
@@ -101,7 +120,13 @@ const CellChips: React.FC<{ day: EarningsMonthDaySummary }> = ({ day }) => {
   return (
     <div className="ecm-chips" ref={ref}>
       {capacity > 0 &&
-        day.top.slice(0, shown).map((item) => <LogoChip key={item.code} item={item} />)}
+        day.top.slice(0, shown).map((item) => (
+          <LogoChip
+            key={item.code}
+            item={item}
+            onSelect={onSelect ? (code) => onSelect(code, day.date) : undefined}
+          />
+        ))}
       {capacity > 0 && overflow > 0 && (
         <Tooltip title={`${overflow} more · click to see all`}>
           <span className="ecm-logo-chip more">
@@ -113,7 +138,13 @@ const CellChips: React.FC<{ day: EarningsMonthDaySummary }> = ({ day }) => {
   );
 };
 
-export const MonthBoard: React.FC<MonthBoardProps> = ({ data, monthStart, isDark, onDayClick }) => {
+export const MonthBoard: React.FC<MonthBoardProps> = ({
+  data,
+  monthStart,
+  isDark,
+  onDayClick,
+  onSelect,
+}) => {
   const todayStr = dayjs().format('YYYY-MM-DD');
   const daysByDate = new Map((data?.days ?? []).map((d) => [d.date ?? '', d]));
 
@@ -172,7 +203,7 @@ export const MonthBoard: React.FC<MonthBoardProps> = ({ data, monthStart, isDark
                 <span className="ecm-day-number">{cell.format('D')}</span>
                 {day ? <span className="ecm-count-badge">{day.count}</span> : null}
               </div>
-              {day ? <CellChips day={day} /> : null}
+              {day ? <CellChips day={day} onSelect={onSelect} /> : null}
             </div>
           );
         })}

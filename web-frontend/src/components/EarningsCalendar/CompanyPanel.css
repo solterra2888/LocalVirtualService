@@ -1,3 +1,8 @@
+/* 公司头部 logo 完整显示: contain 防止宽扁 logo 被方形 Avatar 裁剪(antd 默认 cover) */
+.ecp-panel .ant-avatar > img {
+  object-fit: contain;
+}
+
 /* 公司详情面板内图表区 */
 .ecp-chart-header {
   display: flex;

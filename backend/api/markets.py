@@ -594,6 +594,33 @@ async def generate_earnings_company_recap(
             detail=f"生成公司 Recap 失败: {str(e)}"
         )
 
+
+@router.get("/earnings-calendar/company-recap", summary="获取已缓存的财报电话会 AI Recap(不触发生成)")
+async def get_earnings_company_recap_cached(
+    code: str = Query(..., min_length=1, max_length=20, description="股票代码(美股裸代码)"),
+    current_user=Depends(get_current_user)
+):
+    """
+    只读接口(面板打开时自动恢复用): 返回该 ticker 最新一期已生成的 Recap 缓存。
+    从未生成过时返回 204(前端显示"生成"按钮), 不会触发抓取/LLM 生成。
+    """
+    try:
+        from backend.services.earnings_recap_service import EarningsRecapService
+        registry = get_service_registry()
+        service = registry.get_or_create_service("earnings_recap_service", EarningsRecapService)
+
+        result = service.get_cached_latest(code)
+        if not result:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        return result
+
+    except Exception as e:
+        error(f"读取公司 Recap 缓存失败: {str(e)}", source="markets_api")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"读取公司 Recap 缓存失败: {str(e)}"
+        )
+
 @router.get("/indicators", summary="获取可用指标列表")
 async def get_available_indicators(
     country: Optional[str] = Query(None, description="国家代码，获取该国家的可用指标"),

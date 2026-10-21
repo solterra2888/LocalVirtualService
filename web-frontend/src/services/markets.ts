@@ -412,6 +412,21 @@ export const marketsAPI = {
   },
 
   /**
+   * 只读获取已缓存的 Recap（面板打开时自动恢复用; 204/失败返回 null, 不触发生成）
+   */
+  getEarningsRecapCached: async (code: string): Promise<EarningsRecapResult | null> => {
+    try {
+      const result = await api.get<EarningsRecapResult | null>(
+        `/markets/earnings-calendar/company-recap?code=${encodeURIComponent(code)}`
+      );
+      return result || null;
+    } catch (error) {
+      console.error('读取公司 Recap 缓存失败:', error);
+      return null;
+    }
+  },
+
+  /**
    * 获取 Earnings Feed（右栏默认事件流）
    */
   getEarningsCalendarFeed: async (params?: {

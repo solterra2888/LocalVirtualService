@@ -1,4 +1,10 @@
 /* Earnings Feed 卡片流（右栏默认态） */
+
+/* logo 完整显示: contain 防止宽扁 logo 被方形 Avatar 裁剪(antd 默认 cover) */
+.ecf-card .ant-avatar > img {
+  object-fit: contain;
+}
+
 .ecf-card {
   border-radius: 8px;
   padding: 10px 12px;

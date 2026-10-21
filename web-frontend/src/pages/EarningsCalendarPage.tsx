@@ -291,7 +291,8 @@ const EarningsCalendarPage: React.FC = () => {
       <div
         style={{
           // 顶部 padding 为 0: 查询卡片顶边与左侧导航栏顶边(viewport y=12px)对齐
-          padding: '0 24px 24px',
+          // 左 0: 内容与导航栏只保留全站统一 12px 间隙(与顶部对齐逻辑一致); 右/底维持 24px
+          padding: '0 24px 24px 0',
           // 与 .layout-content 的 min-height calc(100vh - 2*inset) 对齐, 拉满白色卡片高度
           height: 'calc(100vh - 24px)',
           backgroundColor: colors.pageBg,
@@ -385,6 +386,7 @@ const EarningsCalendarPage: React.FC = () => {
                 monthStart={monthStart}
                 isDark={isDark}
                 onDayClick={handleMonthDayClick}
+                onSelect={openPanel}
               />
             ) : viewMode === 'calendar' ? (
               loading ? (

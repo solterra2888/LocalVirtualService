@@ -170,6 +170,30 @@ class EarningsRecapService:
             'message': '未找到该公司的财报电话会 transcript（Motley Fool 未覆盖或刚公布尚未上线）',
         }
 
+    def get_cached_latest(self, code: str) -> Optional[Dict[str, Any]]:
+        """
+        只读: 返回某 ticker 最新一期已生成的 Recap 缓存, 无缓存返回 None。
+        纯 DB 查询, 不触发 transcript 抓取/LLM 生成(面板打开时自动恢复用)。
+        """
+        code = (code or '').strip()
+        if not code or '.' in code:
+            return None
+        try:
+            with self.db_manager.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT period_key FROM earnings_call_recaps "
+                    "WHERE code = %s AND status = 'ok' AND recap_md IS NOT NULL "
+                    "ORDER BY call_date DESC NULLS LAST, updated_at DESC LIMIT 1", (code,))
+                row = cursor.fetchone()
+                cursor.close()
+        except Exception as e:
+            logger.warning(f"读取最新 recap 缓存失败: {code}: {e}")
+            return None
+        if not row:
+            return None
+        return self._load_cached(code, row[0])
+
     # ── Motley Fool: 发现 + 抓取 ──────────────────────────────────
 
     def _find_mf_transcript(self, code: str) -> Optional[Dict[str, Any]]:
