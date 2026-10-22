@@ -2109,29 +2109,16 @@ class SchedulerService:
                 logger.info(f"经济事件请求参数: from_date={from_date}, to_date={to_date}, countries={countries if countries else 'All'}")
                 
                 # 收集所有国家的数据
-                def _fetch_window_with_pagination(country=None):
-                    """抓取一个窗口的数据，结果数等于 limit 时用 offset 翻页（EODHD offset 上限 1000，最多 2000 条/窗口）"""
-                    collected = []
-                    for offset in (0, 1000):
-                        api_params = {
-                            'from_date': from_date,
-                            'to_date': to_date,
-                            'limit': 1000
-                        }
-                        if offset:
-                            api_params['offset'] = offset
-                        if country:
-                            api_params['country'] = country
-                        batch = api_client.get_economic_events(**api_params) or []
-                        collected.extend(batch)
-                        if len(batch) < 1000:
-                            break
-                        if offset == 1000:
-                            logger.warning(
-                                f"经济事件窗口 {from_date}~{to_date} "
-                                f"(country={country or 'ALL'}) 结果达 2000 条上限，可能被截断"
-                            )
-                    return collected
+                def _fetch_range_chunked(country=None):
+                    """按 ≤7 天分片抓取 [from_date, to_date]，详见
+                    EconomicEventsService.get_economic_events_chunked 的说明：
+                    EODHD 宽窗口会被静默截断到最新端，lookback 回填依赖分片。"""
+                    return api_client.get_economic_events_chunked(
+                        from_date=from_date,
+                        to_date=to_date,
+                        country=country,
+                        chunk_days=7
+                    ) or []
 
                 all_events_data = []
 
@@ -2139,13 +2126,13 @@ class SchedulerService:
                     # 对每个国家分别请求
                     for country in countries:
                         logger.info(f"获取国家 {country} 的经济事件数据")
-                        country_events = _fetch_window_with_pagination(country)
+                        country_events = _fetch_range_chunked(country)
                         if country_events:
                             all_events_data.extend(country_events)
                             logger.info(f"国家 {country} 获取到 {len(country_events)} 条数据")
                 else:
                     # 没有指定国家，获取所有国家
-                    all_events_data = _fetch_window_with_pagination()
+                    all_events_data = _fetch_range_chunked()
                 
                 if not all_events_data:
                     return {

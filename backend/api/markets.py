@@ -744,14 +744,22 @@ async def fetch_economic_events(
         # 获取经济事件服务
         events_service = get_economic_events_service()
         market_service = get_market_data_service()
-        
-        # 从API获取数据
-        events_data = events_service.get_economic_events(
-            from_date=from_date,
-            to_date=to_date,
-            country=country,
-            limit=limit
-        )
+
+        # 从API获取数据（按 ≤7 天分片抓取：EODHD 宽窗口会被静默截断到最新端，
+        # 单次调用会导致 from_date 之前的日期实际拿不到数据）
+        if from_date and to_date:
+            events_data = events_service.get_economic_events_chunked(
+                from_date=from_date,
+                to_date=to_date,
+                country=country
+            )
+        else:
+            events_data = events_service.get_economic_events(
+                from_date=from_date,
+                to_date=to_date,
+                country=country,
+                limit=limit
+            )
         
         if not events_data:
             return {

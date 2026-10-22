@@ -515,7 +515,67 @@ class EconomicEventsService:
         except Exception as e:
             error(f"获取经济事件数据失败: {str(e)}", source="economic_events")
             raise Exception(f"获取经济事件数据失败: {str(e)}")
-    
+
+    def get_economic_events_chunked(
+        self,
+        from_date: Union[str, datetime],
+        to_date: Union[str, datetime],
+        country: str = None,
+        chunk_days: int = 7,
+        limit: int = 1000
+    ) -> List[Dict[str, Any]]:
+        """
+        按 ≤chunk_days 天分片抓取 [from_date, to_date] 的全部经济事件
+
+        EODHD /economic-events 的结果按日期倒序返回：事件总数超过 limit 时只返回
+        靠 to 端的最新部分（from 形同虚设），且 offset 上限 1000，即宽窗口实际
+        只能拿到最新 ~2000 条。此处把日期范围切成小分片，保证每片一页取全。
+        全库约 70 条/天，默认 7 天分片 ≈ 500 条/片。
+
+        单个分片抓取失败时记日志并跳过，不影响其余分片。
+
+        Args:
+            from_date: 开始日期 (YYYY-MM-DD 或 datetime对象)
+            to_date: 结束日期 (YYYY-MM-DD 或 datetime对象)
+            country: 国家代码，可选
+            chunk_days: 每个分片的天数，默认 7
+            limit: 每片请求的 limit，默认 1000
+
+        Returns:
+            经济事件数据列表（未去重，调用方负责）
+        """
+        def _to_date_obj(value):
+            if isinstance(value, datetime):
+                return value.date()
+            return datetime.strptime(str(value), '%Y-%m-%d').date()
+
+        collected: List[Dict[str, Any]] = []
+        chunk_start = _to_date_obj(from_date)
+        range_end = _to_date_obj(to_date)
+
+        while chunk_start <= range_end:
+            chunk_end = min(chunk_start + timedelta(days=chunk_days - 1), range_end)
+            cs = chunk_start.strftime('%Y-%m-%d')
+            ce = chunk_end.strftime('%Y-%m-%d')
+            try:
+                batch = self.get_economic_events(
+                    from_date=cs,
+                    to_date=ce,
+                    country=country,
+                    limit=limit
+                ) or []
+            except Exception as chunk_err:
+                error(f"经济事件分片 {cs}~{ce} (country={country or 'ALL'}) 抓取失败: {chunk_err}，跳过该分片", source="economic_events")
+                chunk_start = chunk_end + timedelta(days=1)
+                continue
+            collected.extend(batch)
+            info(f"经济事件分片 {cs}~{ce} (country={country or 'ALL'}) 获取 {len(batch)} 条", source="economic_events")
+            if len(batch) >= limit:
+                warning(f"经济事件分片 {cs}~{ce} (country={country or 'ALL'}) 结果达 {limit} 条上限，可能被截断", source="economic_events")
+            chunk_start = chunk_end + timedelta(days=1)
+
+        return collected
+
     def get_recent_events(self, days: int = 7) -> List[Dict[str, Any]]:
         """
         获取最近几天的经济事件

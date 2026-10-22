@@ -129,6 +129,9 @@ PYEOF
 fi
 echo ""
 
+# ── 记录本次重启时间（供定时任务缺口归因 / 数据观察使用）────────
+echo "$(date -Is) restart_services by $(whoami)" >> "$SCRIPT_DIR/logs/restarts.log"
+
 SERVICES=("rc-webapp" "rc-celery-ai" "rc-celery-data" "rc-celery-zsxq-files" "rc-scheduler")
 
 for service in "${SERVICES[@]}"; do
