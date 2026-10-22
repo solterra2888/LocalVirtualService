@@ -47,7 +47,7 @@ const LEGEND_SHORT: Record<string, string> = {
 const fmtQuarter = (q: string): string =>
   q.replace(/^(\d{4})Q(\d)$/, '$1 Q$2');
 
-const BAR_OPACITY = 0.65;
+const BAR_OPACITY = 0.8;
 
 const withAlpha = (hex: string, alpha: number): string => {
   const h = hex.replace('#', '');

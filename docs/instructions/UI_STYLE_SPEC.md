@@ -41,7 +41,8 @@
 | Segmented 标签 | 11px / 700（全局层为 600；查询栏内按钮/搜索框同 11px） | 紧凑加粗 |
 | 图标按钮（翻页/刷新） | 32×32 正圆 | `<Button icon={...}/>` 自动识别 |
 | 文字按钮（日期胶囊） | 高 32px、圆角 999px 胶囊 | |
-| 搜索框 | 圆角 10px、无边框、同色浅蓝底 | |
+| 搜索框 | 圆角 10px、无边框、同色浅蓝底（`Input.Search` 与远程搜索 `Select` 同规则） | |
+| 可换行胶囊切换组 | 高 28px、圆角 999px、11px / 600，选中 = 白底蓝字 + 浮起投影 | `.app-ctl-pills`（选项多于 Segmented 容量时） |
 | 控件高度基准 | 32px | 与图标按钮同高对齐 |
 
 #### 布局对齐
@@ -73,6 +74,21 @@
 
 **单个按钮**（不在查询栏容器里、但需要同款样式的按钮，如面板内的"生成 Recap"）直接加 `className="app-ctl-btn"`，与 `.app-controls .ant-btn` 同一套规则（含暗色）。
 
+查询栏内的**远程搜索 `<Select showSearch>`** 同样自动获得浅蓝无边框样式（`.app-controls` 容器内生效，含 placeholder / 后缀箭头配色），无需额外处理。
+
+#### 层级三：可换行胶囊切换组 `.app-ctl-pills`
+
+选项较多、Segmented（不支持换行）放不下的筛选切换（如 13F 的 20 家预设机构），容器加类，选中项照常用 `type="primary"`：
+
+```tsx
+<div className="app-ctl-pills">
+  <Button size="small" type={active ? 'primary' : 'default'} onClick={...}>Bridgewater</Button>
+  {/* … */}
+</div>
+```
+
+选中态 = 白底蓝字 + 浮起投影，与 Segmented 选中项 / 导航栏激活胶囊同一设计语言；暗色自动适配。**选项 ≤ 6 个时仍优先用 Segmented。**
+
 #### 不适用的场景（保持 antd 默认）
 
 - 表单提交/重置按钮、Modal 的确定/取消、危险操作按钮
@@ -89,7 +105,7 @@
 
 ### 1.4 旧模块迁移
 
-- **已迁移**: Earnings Calendar（`.app-controls` 参考实现）
+- **已迁移**: Earnings Calendar（`.app-controls` 参考实现）、Form 13F（2026-10-22：顶栏 `.app-controls` + 预设机构 `.app-ctl-pills` 首个参考实现）
 - **自动跟随（无需改动）**: 所有使用裸 `<Segmented>` 的页面 —— Economic Events、Feeds Dashboard、Feeds Reader、Finviz Dashboard、LLM Monitoring、Daily Preview Drawer 等，已随全局层生效
 - **遗留清单（自带旧作用域样式，特异性更高，暂覆盖全局层）**: Files 页（`.files-page-layout .files-list-search-segmented`）、Mobile Feeds/Sources 页、Upload Files Modal —— 这些页面自带 `!important` 蓝色系样式，视觉与新规范接近但非同一 token。改版时按本规范重写并删除旧作用域样式即可。
 

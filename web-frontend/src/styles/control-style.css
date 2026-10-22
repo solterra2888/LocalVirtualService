@@ -159,11 +159,79 @@ html .ant-segmented {
   color: rgba(27, 75, 125, 0.45);
 }
 
+/* 远程搜索 Select(查询栏): 同色浅蓝无边框; html 前缀 + !important 压过
+   antd 运行时注入的 hover/focused 描边选择器(特异性高) */
+html .app-controls .ant-select .ant-select-selector {
+  background: rgba(29, 89, 152, 0.08) !important;
+  border-color: transparent !important;
+  border-radius: 10px;
+}
+
+.app-controls .ant-select {
+  font-size: 11px;
+}
+
+.app-controls .ant-select .ant-select-selection-placeholder {
+  color: rgba(27, 75, 125, 0.45);
+}
+
+.app-controls .ant-select .ant-select-arrow {
+  color: rgba(27, 75, 125, 0.72);
+}
+
+/* ---------- 查询栏层: .app-ctl-pills 可换行胶囊切换组 ---------- */
+/* 适用: 选项较多、Segmented(不支持换行)放不下的筛选切换, 如 13F 的 20 家预设机构。
+   用法: 容器加 .app-ctl-pills, 选中项用 type="primary"、未选中用 default(CSS 接管视觉):
+   <div className="app-ctl-pills">
+     <Button size="small" type={active ? 'primary' : 'default'} ...>…</Button>
+   </div>
+   选中态 = 白底蓝字 + 浮起投影, 与 Segmented 选中项/导航栏激活胶囊同一设计语言。 */
+
+.app-ctl-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.app-ctl-pills .ant-btn {
+  height: 28px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(29, 89, 152, 0.1);
+  color: #1d5998;
+  box-shadow: none;
+}
+
+.app-ctl-pills .ant-btn:hover,
+.app-ctl-pills .ant-btn:focus-visible {
+  background: rgba(29, 89, 152, 0.18) !important;
+  border: none !important;
+  color: #1b4b7d !important;
+}
+
+.app-ctl-pills .ant-btn.ant-btn-primary {
+  background: #ffffff;
+  color: #1d5998;
+  box-shadow: 0 2px 8px rgba(27, 75, 125, 0.18);
+}
+
+.app-ctl-pills .ant-btn.ant-btn-primary:hover,
+.app-ctl-pills .ant-btn.ant-btn-primary:focus-visible {
+  background: #ffffff !important;
+  border: none !important;
+  color: #1d5998 !important;
+}
+
 /* 暗色变体 */
-.main-layout-dark .app-controls .ant-btn,
-.main-layout-dark .app-ctl-btn.ant-btn {
-  background: rgba(125, 175, 225, 0.14);
-  color: #cfe1f2;
+.main-layout-dark .app-controls .ant-input-search .ant-input,
+.main-layout-dark .app-controls .ant-input-search .ant-input-search-button {
+  background: rgba(125, 175, 225, 0.1);
+  border-color: transparent;
 }
 
 .main-layout-dark .app-controls .ant-btn:hover,
@@ -182,4 +250,42 @@ html .ant-segmented {
 
 .main-layout-dark .app-controls .ant-input-search .ant-input::placeholder {
   color: rgba(255, 255, 255, 0.38);
+}
+
+/* 暗色: 远程搜索 Select */
+.main-layout-dark .app-controls .ant-select .ant-select-selector {
+  background: rgba(125, 175, 225, 0.1) !important;
+  border-color: transparent !important;
+}
+
+.main-layout-dark .app-controls .ant-select .ant-select-selection-placeholder {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.main-layout-dark .app-controls .ant-select .ant-select-arrow {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* 暗色: 可换行胶囊切换组 */
+.main-layout-dark .app-ctl-pills .ant-btn {
+  background: rgba(125, 175, 225, 0.14);
+  color: #cfe1f2;
+}
+
+.main-layout-dark .app-ctl-pills .ant-btn:hover,
+.main-layout-dark .app-ctl-pills .ant-btn:focus-visible {
+  background: rgba(125, 175, 225, 0.24) !important;
+  color: #ffffff !important;
+}
+
+.main-layout-dark .app-ctl-pills .ant-btn.ant-btn-primary {
+  background: #f0f8ff;
+  color: #1d5998;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.main-layout-dark .app-ctl-pills .ant-btn.ant-btn-primary:hover,
+.main-layout-dark .app-ctl-pills .ant-btn.ant-btn-primary:focus-visible {
+  background: #f0f8ff !important;
+  color: #1d5998 !important;
 }

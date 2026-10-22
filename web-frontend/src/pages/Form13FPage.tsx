@@ -1,21 +1,19 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import {
   Card, Typography, Button, Space, message, Tooltip, Spin, Empty,
-  Table, Select, Tabs,
+  Table, Tabs, Tag,
 } from 'antd';
 import {
-  ReloadOutlined, SearchOutlined,
-} from '@ant-design/icons';
-import {
   form13fAPI, ManifestData, FilerDetail,
-  HoldingItem, FilerSummary,
+  HoldingItem,
 } from '../services/form13f';
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import Form13FSectorChart from '../components/form13f/Form13FSectorChart';
+import { aiTagChipStyle, type AiTagChipVariant } from '../components/shared/aiTagChipStyles';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 // ===== 行业/资产类别（与后端 form13f_sector_map 分类一致）=====
 // 图表配色与交互见 Form13FSectorChart.tsx
@@ -60,7 +58,7 @@ const fmtFull = (v?: number | null): string =>
 const fmtQuarter = (q: string): string =>
   q.replace(/^(\d{4})Q(\d)$/, '$1 Q$2');
 
-/** Feeds「Brief digest」微型标签：大写、字距、10px / 600。 */
+/** 持仓行内 New/Put/Call 标签：全站标签胶囊规范（aiTagChipStyle，见 UI_STYLE_SPEC.md 二） */
 type StatusKind = 'new' | 'put' | 'call';
 
 const STATUS_COPY: Record<StatusKind, string> = {
@@ -69,31 +67,20 @@ const STATUS_COPY: Record<StatusKind, string> = {
   call: 'Call',
 };
 
-type StatusColors = {
-  posColor: string;
-  negColor: string;
-  textSecondary: string;
+const STATUS_VARIANT: Record<StatusKind, AiTagChipVariant> = {
+  new: 'signal-neutral',   // 新建持仓 = 中性状态高亮
+  put: 'signal-bearish',   // Put = 看跌工具
+  call: 'signal-bullish',  // Call = 看涨工具
 };
 
 const StatusLabel: React.FC<{
   kind: StatusKind;
   themeMode: 'light' | 'dark';
-  colors: StatusColors;
-}> = ({ kind, themeMode, colors }) => {
-  const color =
-    kind === 'new' ? colors.posColor
-      : (themeMode === 'dark' ? colors.textSecondary : '#3d4a5c');
-  const style: CSSProperties = {
-    fontSize: 10,
-    letterSpacing: 1.1,
-    textTransform: 'uppercase',
-    fontWeight: 600,
-    color,
-    lineHeight: '12px',
-    flexShrink: 0,
-  };
-  return <span style={style}>{STATUS_COPY[kind]}</span>;
-};
+}> = ({ kind, themeMode }) => (
+  <Tag bordered={false} style={aiTagChipStyle(STATUS_VARIANT[kind], themeMode)}>
+    {STATUS_COPY[kind]}
+  </Tag>
+);
 
 const isPut = (putcall?: string | null) =>
   putcall === 'Put' || putcall === 'P';
@@ -129,12 +116,6 @@ const Form13FPage: React.FC = () => {
   const [detail, setDetail] = useState<FilerDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-
-  // 机构选择器：远程搜索
-  const [options, setOptions] = useState<FilerSummary[]>([]);
-  const [searching, setSearching] = useState(false);
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -143,7 +124,6 @@ const Form13FPage: React.FC = () => {
         const m = await form13fAPI.getManifest();
         setManifest(m);
         // 预设机构作为初始选项；默认选第一个
-        setOptions(m.presets.map((p) => ({ id: p.id, name: p.label })));
         const first = m.presets.find((p) => p.id != null);
         if (first) setFilerId(first.id);
       } catch (error) {
@@ -173,34 +153,6 @@ const Form13FPage: React.FC = () => {
     })();
   }, [filerId]);
 
-  const handleSearch = useCallback((q: string) => {
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    if (!q.trim()) return;
-    searchTimer.current = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const r = await form13fAPI.searchFilers(q, 1, 20);
-        setOptions(r.items.map((it) => ({ id: it.id, name: it.name })));
-      } catch (error) {
-        console.error('13F filer search failed:', error);
-      } finally {
-        setSearching(false);
-      }
-    }, 300);
-  }, []);
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await form13fAPI.refresh('poll');
-      message.success('已派发 13F 同步任务，稍后刷新查看');
-    } catch (error) {
-      message.error('派发刷新失败');
-    } finally {
-      setTimeout(() => setRefreshing(false), 4000);
-    }
-  }, []);
-
   const currentSnap = useMemo(
     () => detail?.quarters.find((q) => q.quarter === selectedQuarter) || null,
     [detail, selectedQuarter]);
@@ -224,7 +176,7 @@ const Form13FPage: React.FC = () => {
 
   const holdingColumns = useMemo(() => [
     {
-      title: '#', width: 44, align: 'center' as const,
+      title: '#', width: 36, align: 'center' as const,
       render: (_: unknown, __: HoldingItem, i: number) => (
         <Text style={{ color: colors.textSecondary }}>{i + 1}</Text>
       ),
@@ -235,18 +187,20 @@ const Form13FPage: React.FC = () => {
         <Space size={4}>
           <span style={{ color: colors.text }}>{v}</span>
           {r.title && r.title !== 'COM' && (
-            <Text type="secondary" style={{ fontSize: 11 }}>{r.title}</Text>
+            <Tag bordered={false} style={aiTagChipStyle('signal-meta', themeMode)}>
+              {r.title}
+            </Tag>
           )}
           {isCall(r.putcall) && (
-            <StatusLabel kind="call" themeMode={themeMode} colors={colors} />
+            <StatusLabel kind="call" themeMode={themeMode} />
           )}
           {isPut(r.putcall) && (
-            <StatusLabel kind="put" themeMode={themeMode} colors={colors} />
+            <StatusLabel kind="put" themeMode={themeMode} />
           )}
         </Space>
       ),
     },
-    { title: 'Value ($)', dataIndex: 'value', align: 'right' as const, width: 120,
+    { title: 'Value ($)', dataIndex: 'value', align: 'right' as const, width: 150,
       render: (v: number) => <span style={{ color: colors.text, fontVariantNumeric: 'tabular-nums' }}>{fmtFull(v)}</span> },
     {
       title: '% of portfolio', dataIndex: 'pct', align: 'right' as const, width: 130,
@@ -263,17 +217,17 @@ const Form13FPage: React.FC = () => {
         </div>
       ),
     },
-    { title: 'Shares', dataIndex: 'shares', align: 'right' as const, width: 120,
+    { title: 'Shares', dataIndex: 'shares', align: 'right' as const, width: 140,
       render: (v: number | null) => (
         <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtFull(v)}</span>) },
     {
-      title: 'Δ Shares (QoQ)', key: 'delta', align: 'right' as const, width: 140,
+      title: 'Δ Shares (QoQ)', key: 'delta', align: 'right' as const, width: 150,
       render: (_: unknown, r: HoldingItem) => {
         if (!hasPrevQuarter) return <Text type="secondary">—</Text>;
         const ps = r.prev_shares;
         if (ps == null || ps === 0) {
           return (
-            <StatusLabel kind="new" themeMode={themeMode} colors={colors} />
+            <StatusLabel kind="new" themeMode={themeMode} />
           );
         }
         const d = (r.shares || 0) - ps;
@@ -294,40 +248,8 @@ const Form13FPage: React.FC = () => {
 
   return (
     <div style={{ padding: 24, background: colors.pageBg, minHeight: '100%' }}>
-      {/* ── 顶栏：标题 + 机构选择 + 刷新 ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
-        <div>
-          <Title level={4} style={{ margin: 0, color: colors.text }}>Form 13F Filings</Title>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            数据来源：SEC EDGAR 13F-HR · 关注机构{manifest?.quarters.length ? `（${manifest.quarters[0]} – ${manifest.quarters[manifest.quarters.length - 1]}）` : ''}
-          </Text>
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Select
-            showSearch
-            value={filerId}
-            placeholder="搜索关注机构…"
-            style={{ minWidth: 300 }}
-            filterOption={false}
-            onSearch={handleSearch}
-            onSelect={(v: number) => setFilerId(v)}
-            notFoundContent={searching ? <Spin size="small" /> : null}
-            options={options.map((o) => ({
-              value: o.id,
-              label: o.name,
-            }))}
-            suffixIcon={<SearchOutlined />}
-          />
-          <Tooltip title="同步关注机构的最新 13F-HR">
-            <Button icon={<ReloadOutlined />} loading={refreshing} onClick={handleRefresh}>
-              刷新
-            </Button>
-          </Tooltip>
-        </div>
-      </div>
-
-      {/* 预设机构快捷胶囊 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+      {/* 预设机构快捷胶囊: 选项多(20 家), 用可换行胶囊切换组 .app-ctl-pills(Segmented 放不下) */}
+      <div className="app-ctl-pills" style={{ marginBottom: 16 }}>
         {(manifest?.presets || []).map((p) => (
           <Button
             key={p.id}

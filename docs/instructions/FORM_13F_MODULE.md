@@ -1,8 +1,8 @@
 # Form 13F 模块（SEC 季度持仓）开发说明
 
 > **创建**：2026-09-02
-> **更新**：2026-09-16 — 13F-NT 跟随 successor CIK；前端不再展示 top5 买卖
-> **相关文档**：`SCHEDULER_DEVELOPMENT_GUIDE.md`（调度器）
+> **更新**：2026-10-22 — 前端样式接入全站 UI 规范（查询控件 + 标签胶囊）；09-16 — 13F-NT 跟随 successor CIK；前端不再展示 top5 买卖
+> **相关文档**：`SCHEDULER_DEVELOPMENT_GUIDE.md`（调度器）、`UI_STYLE_SPEC.md`（UI 样式规范）
 
 ---
 
@@ -111,6 +111,9 @@
 | `backend/api/form13f.py` | `/api/form13f/*` |
 | `backend/utils/form13f_sector_map.py` | CUSIP→GICS + ETF 分类 |
 | `web-frontend/src/pages/Form13FPage.tsx` | 仪表盘 |
+| `web-frontend/src/components/form13f/Form13FSectorChart.tsx` | 行业分布堆叠柱图（echarts） |
+
+**前端样式**（2026-10-22 接入全站 UI 规范 `UI_STYLE_SPEC.md`）：机构切换用 `.app-ctl-pills` 可换行胶囊切换组（Segmented 放不下，该组件以本页为参考实现；原页面标题/副标题与顶栏机构搜索 Select/刷新按钮已按需求移除，机构只能通过预设胶囊切换）；持仓行内 New/Put/Call 与股份类别（CL A 等）标签走 `shared/aiTagChipStyles`（New=`signal-neutral`、Put=`signal-bearish`、Call=`signal-bullish`、类别=`signal-meta`）；行业分布柱图 bar 透明度 0.8（`Form13FSectorChart` 的 `BAR_OPACITY`）。注意 Δ Shares 涨跌色保持本模块红涨绿跌（`THEME_COLORS`），与标签色板互不影响。
 
 ---
 
