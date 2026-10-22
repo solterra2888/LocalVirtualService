@@ -21,7 +21,11 @@ sys.path.insert(0, str(project_root))
 from backend.services.scheduler_service import get_scheduler_service, shutdown_scheduler_service
 from backend.utils.logger import init_logging, get_logger, info, error, warning, shutdown_logging
 from backend.database.db_manager import DatabaseManager
+from backend.utils.datetime_utils import install_psycopg2_utc_adapter
 from config.settings import config
+
+# 时区契约: 本进程写入的 naive datetime 统一转 UTC（与 main.py / celery_app.py 一致）
+install_psycopg2_utc_adapter()
 
 logger = get_logger("scheduler_main")
 

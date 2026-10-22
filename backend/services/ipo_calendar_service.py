@@ -8,6 +8,7 @@ import os
 import requests
 from datetime import datetime, timedelta
 from backend.utils.datetime_utils import utcnow
+from backend.utils.eodhd_quota import EODHDQuotaExhausted, raise_if_quota_exhausted, trip_quota_breaker
 from typing import Dict, Any, List, Optional
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
@@ -101,6 +102,7 @@ class IPOCalendarService:
             }
             
             logger.info(f"请求 EODHD API: {url}")
+            raise_if_quota_exhausted()
             response = requests.get(url, params=params, timeout=30, proxies=proxies)
             response.raise_for_status()
             
@@ -144,7 +146,17 @@ class IPOCalendarService:
             
             return result
             
+        except EODHDQuotaExhausted:
+            # 熔断快速失败：沿用既有失败返回结构
+            return {
+                'success': False,
+                'message': 'EODHD 日配额已耗尽（熔断中），IPO 日历跳过本次抓取'
+            }
         except requests.exceptions.RequestException as e:
+            # 402 = 配额耗尽：写共享熔断键
+            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 402:
+                logger.error(f"🚨 EODHD 配额耗尽 (402): {url[:120]}")
+                trip_quota_breaker()
             error_msg = f"API请求失败: {str(e)}"
             logger.error(error_msg)
             return {

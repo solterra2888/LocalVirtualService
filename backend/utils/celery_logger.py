@@ -151,6 +151,20 @@ class CeleryLogger:
                 f"任务成功 - ID: {task_id}, 名称: {task_name}{runtime_info}"
             )
 
+    def log_task_soft_failed(
+        self, task_id: str, task_name: str, message: str, runtime: float = None
+    ):
+        """任务未抛异常但返回 success=False（静默失败）——以 WARNING 落盘。
+
+        fan-out 子任务（如 update_single_ticker_fundamentals）失败时返回
+        success=False 而不 raise，Celery 状态仍是 SUCCESS，日志若只记
+        "任务成功" 会完全掩盖失败，故单独补一条可检索的告警。
+        """
+        runtime_info = f", 运行时间: {runtime:.2f}秒" if runtime else ""
+        self.task_logger.warning(
+            f"任务返回失败 - ID: {task_id}, 名称: {task_name}, 消息: {message}{runtime_info}"
+        )
+
     def log_task_failed(
         self, task_id: str, task_name: str, exception: str, traceback: str = None
     ):

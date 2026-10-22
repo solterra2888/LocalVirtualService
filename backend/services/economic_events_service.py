@@ -13,6 +13,7 @@ import os
 import time
 from datetime import datetime, timedelta
 from backend.utils.datetime_utils import utcnow
+from backend.utils.eodhd_quota import EODHDQuotaExhausted, raise_if_quota_exhausted, trip_quota_breaker
 from typing import List, Dict, Any, Optional, Union
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -406,6 +407,7 @@ class EconomicEventsService:
     
     def safe_api_request(self, url: str, params: dict, max_retries: int = 3) -> Optional[Dict]:
         """安全的API请求函数，处理SSL错误和各种异常"""
+        raise_if_quota_exhausted()
         session = self.session
         
         # 打印完整的EODHD API请求信息
@@ -434,6 +436,11 @@ class EconomicEventsService:
                     raise
                     
             except requests.exceptions.RequestException as e:
+                # 402 = 配额耗尽：写共享熔断键并立即失败，不做无谓重试
+                if hasattr(e, 'response') and e.response is not None and e.response.status_code == 402:
+                    error(f"🚨 EODHD 配额耗尽 (402): {url[:120]}", source="economic_events")
+                    trip_quota_breaker()
+                    raise EODHDQuotaExhausted()
                 warning(f"请求错误 (第{attempt + 1}次): {e}", source="economic_events")
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)  # 指数退避

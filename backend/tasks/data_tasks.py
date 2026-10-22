@@ -9,6 +9,7 @@ from celery import current_task
 from backend.celery_app import app
 from backend.utils.database_config import get_database_config
 from backend.utils.logger import info, error
+from backend.utils.eodhd_quota import EODHDQuotaExhausted, incr_fund_stat, get_fund_stats
 
 
 @app.task(bind=True, name='fetch_eodhd_fundamentals')
@@ -711,10 +712,29 @@ def update_single_ticker_fundamentals_task(self, symbol: str, exchange: str = 'U
             log_message=f"正在从 EODHD API 获取 {symbol} 的完整基本面数据..."
         )
         
-        # 获取完整的基本面数据
-        full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
-        
+        # 获取完整的基本面数据（配额熔断时 fetch 抛 EODHDQuotaExhausted，单独分类计数）
+        try:
+            full_data = fundamentals_service.fetch_company_full_data(symbol, exchange)
+        except EODHDQuotaExhausted:
+            incr_fund_stat('quota_failed')
+            error_msg = f"EODHD 配额耗尽，跳过 {symbol}.{exchange}（北京时间 08:00 重置）"
+            error(error_msg,
+                  task_id=self.request.id,
+                  symbol=symbol,
+                  exchange=exchange,
+                  source="celery_fundamentals_task")
+            return {
+                'success': False,
+                'reason': 'quota_exhausted',
+                'message': error_msg,
+                'symbol': symbol,
+                'exchange': exchange,
+                'updated_components': [],
+                'execution_time': time.time() - start_time
+            }
+
         if not full_data:
+            incr_fund_stat('failed')
             error_msg = f"未能从 EODHD 获取 {symbol}.{exchange} 的基本面数据"
             error(error_msg, 
                   task_id=self.request.id,
@@ -792,6 +812,7 @@ def update_single_ticker_fundamentals_task(self, symbol: str, exchange: str = 'U
             updated_components=updated_components
         )
         
+        incr_fund_stat('updated')
         return {
             'success': True,
             'message': success_msg,
@@ -803,6 +824,7 @@ def update_single_ticker_fundamentals_task(self, symbol: str, exchange: str = 'U
         }
         
     except Exception as e:
+        incr_fund_stat('failed')
         error_msg = f"更新 {symbol}.{exchange} 基本面数据任务异常: {str(e)}"
         error(error_msg, 
               task_id=self.request.id,

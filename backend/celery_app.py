@@ -232,6 +232,11 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
         logger = get_celery_logger()
         if state == 'SUCCESS':
             logger.log_task_succeeded(task_id, task.name, retval)
+            # 任务未抛异常但返回 success=False（静默失败）——补 WARNING，避免日志全是"任务成功"假象
+            if isinstance(retval, dict) and retval.get('success') is False:
+                logger.log_task_soft_failed(
+                    task_id, task.name, str(retval.get('message', ''))[:200]
+                )
         else:
             logger.log_task_failed(task_id, task.name, f"状态: {state}")
     except Exception as e:

@@ -30,6 +30,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import psycopg2.extras
 
+from backend.utils.eodhd_quota import (
+    EODHDQuotaExhausted,
+    raise_if_quota_exhausted,
+    trip_quota_breaker,
+)
+
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.config.exchange_config import ExchangeConfig, format_ticker_for_eodhd
@@ -209,6 +215,8 @@ class EODHDFundamentalsService:
     
     def _safe_api_request(self, url: str, max_retries: int = 3) -> Optional[Union[Dict[str, Any], str]]:
         """安全的API请求函数，处理SSL错误和各种异常，包含速率限制监控"""
+        # Redis 共享熔断: 配额耗尽期间所有任务快速失败，不再逐个空打 API
+        raise_if_quota_exhausted()
         for attempt in range(max_retries):
             try:
                 logger.debug(f"API请求 (第{attempt + 1}次): {url}")
@@ -271,8 +279,9 @@ class EODHDFundamentalsService:
                     logger.error("🚨 检测到API配额限制，停止所有后续请求以避免浪费资源")
                     # 设置一个标志，表示API配额已用完
                     self.api_quota_exhausted = True
-                    # 抛出特殊异常，让上层调用者知道需要停止
-                    raise Exception("API_QUOTA_EXHAUSTED")
+                    # 写入 Redis 共享熔断键（跨实例/跨任务生效），并抛出让上层停止
+                    trip_quota_breaker()
+                    raise EODHDQuotaExhausted()
                 
                 # 对于429错误（速率限制），实施指数退避策略
                 if hasattr(e, 'response') and e.response is not None and e.response.status_code == 429:
@@ -513,6 +522,9 @@ class EODHDFundamentalsService:
                 logger.debug(f"{symbol} 返回数据格式不正确，缺少必要的General字段")
                 return None
             
+        except EODHDQuotaExhausted:
+            # 配额熔断信号要穿透到任务层（用于失败原因分类），不能吞成通用失败
+            raise
         except Exception as e:
             logger.error(f"获取 {symbol} General数据失败: {str(e)}")
             return None

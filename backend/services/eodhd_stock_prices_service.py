@@ -23,6 +23,8 @@ from urllib3.util.retry import Retry
 import requests
 import psycopg2.extras
 
+from backend.utils.eodhd_quota import is_quota_exhausted, trip_quota_breaker
+
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
 from backend.config.exchange_config import ExchangeConfig, format_ticker_for_eodhd
@@ -100,18 +102,27 @@ class EODHDStockPricesService:
     
     def _safe_api_request(self, url: str, timeout: int = 30) -> Optional[List[Dict[str, Any]]]:
         """安全的API请求"""
+        # 配额熔断中直接快速失败（返回 None 走既有"批量请求失败"路径），不占用 API 连接
+        if is_quota_exhausted():
+            logger.warning("EODHD 配额熔断中，跳过行情请求（北京时间 08:00 重置）")
+            return None
         try:
             logger.debug(f"请求URL: {url[:100]}...")
-            
+
             response = self.session.get(url, timeout=timeout)
             response.raise_for_status()
-            
+
             data = response.json()
             logger.debug(f"API响应成功，返回{len(data) if isinstance(data, list) else 1}条数据")
-            
+
             return data
-            
+
         except requests.exceptions.RequestException as e:
+            # 402 = 配额耗尽：写共享熔断键（此方法约定返回 None，不抛异常）
+            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 402:
+                logger.error(f"🚨 EODHD 配额耗尽 (402): {url[:120]}")
+                trip_quota_breaker()
+                return None
             logger.error(f"API请求失败: {str(e)}")
             return None
         except json.JSONDecodeError as e:

@@ -10,6 +10,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from datetime import date, datetime, timedelta
 from backend.utils.datetime_utils import utcnow
+from backend.utils.eodhd_quota import EODHDQuotaExhausted, raise_if_quota_exhausted, trip_quota_breaker
 from typing import Dict, Any, List, Optional
 from backend.database.db_manager import DatabaseManager
 from backend.utils.logger import get_logger
@@ -145,6 +146,7 @@ class EarningsCalendarService:
         Returns:
             API响应的JSON数据，失败返回None
         """
+        raise_if_quota_exhausted()
         import time
         session = self.session
         
@@ -188,6 +190,11 @@ class EarningsCalendarService:
                     raise
                     
             except requests.exceptions.RequestException as e:
+                # 402 = 配额耗尽：写共享熔断键并立即失败，不做无谓重试
+                if hasattr(e, 'response') and e.response is not None and e.response.status_code == 402:
+                    logger.error(f"🚨 EODHD 配额耗尽 (402): {url[:120]}")
+                    trip_quota_breaker()
+                    raise EODHDQuotaExhausted()
                 logger.warning(f"⚠️ 请求错误 (第 {attempt + 1}/{max_retries} 次): {str(e)[:200]}")
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
