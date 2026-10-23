@@ -105,8 +105,8 @@
 
 ### 1.4 旧模块迁移
 
-- **已迁移**: Earnings Calendar（`.app-controls` 参考实现）、Form 13F（2026-10-22：顶栏 `.app-controls` + 预设机构 `.app-ctl-pills` 首个参考实现）
-- **自动跟随（无需改动）**: 所有使用裸 `<Segmented>` 的页面 —— Economic Events、Feeds Dashboard、Feeds Reader、Finviz Dashboard、LLM Monitoring、Daily Preview Drawer 等，已随全局层生效
+- **已迁移**: Earnings Calendar（`.app-controls` 参考实现）、Form 13F（2026-10-22：顶栏 `.app-controls` + 预设机构 `.app-ctl-pills` 首个参考实现）、Economic Events（2026-10-22：TE 风格经济日历改版——`.app-controls` 查询栏 + `.app-ctl-pills` Impact 星级多选 + `aiTagChipStyle` 期间/口径/Today 标签，配套页面级样式 `pages/EconomicCalendar.css`，暗色走 `.main-layout-dark`）
+- **自动跟随（无需改动）**: 所有使用裸 `<Segmented>` 的页面 —— Feeds Dashboard、Feeds Reader、Finviz Dashboard、LLM Monitoring、Daily Preview Drawer 等，已随全局层生效
 - **遗留清单（自带旧作用域样式，特异性更高，暂覆盖全局层）**: Files 页（`.files-page-layout .files-list-search-segmented`）、Mobile Feeds/Sources 页、Upload Files Modal —— 这些页面自带 `!important` 蓝色系样式，视觉与新规范接近但非同一 token。改版时按本规范重写并删除旧作用域样式即可。
 
 ### 1.5 待决事项

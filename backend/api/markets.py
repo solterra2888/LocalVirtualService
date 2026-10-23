@@ -86,6 +86,7 @@ class EconomicEventResponse(BaseModel):
     calculated_change: Optional[float] = Field(None, description="计算变化值")
     calculated_change_pct: Optional[float] = Field(None, description="计算变化率")
     impact: Optional[int] = Field(None, description="重要性等级 (1-3星)")
+    category: Optional[str] = Field(None, description="事件类别 slug")
 
 class MacroIndicatorResponse(BaseModel):
     """宏观指标响应模型"""
@@ -184,7 +185,11 @@ async def get_economic_events(
     to_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
     country: Optional[str] = Query(None, description="国家代码"),
     comparison: Optional[str] = Query('index', description="对比口径: index=指数级(默认) / yoy / mom / all=全部"),
-    limit: int = Query(100, ge=1, le=1000, description="返回数量限制"),
+    impacts: Optional[str] = Query(None, description="重要性等级, 逗号分隔多选, 如 '2,3'"),
+    categories: Optional[str] = Query(None, description="类别 slug, 逗号分隔多选, 如 'interest-rate,inflation'"),
+    event: Optional[str] = Query(None, description="事件名精确匹配(日历行历史序列查询)"),
+    order: Optional[str] = Query('desc', description="排序方向: desc=新到旧(默认) / asc=旧到新(日历视图)"),
+    limit: int = Query(100, ge=1, le=5000, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
     current_user=Depends(get_current_user)
 ):
@@ -195,11 +200,15 @@ async def get_economic_events(
     - **to_date**: 结束日期，格式 YYYY-MM-DD
     - **country**: 国家代码 (ISO 3166)，支持多个国家用逗号分隔
     - **comparison**: 对比口径。index=指数级(comparison 为空, 默认) / yoy=同比 / mom=环比 / all=全部口径
-    - **limit**: 返回数量限制 (1-1000)
+    - **impacts**: 重要性等级多选 (1/2/3)，逗号分隔
+    - **categories**: 类别 slug 多选，逗号分隔（见 /markets/economic-events/categories）
+    - **event**: 事件名精确匹配
+    - **order**: 排序方向。desc=新到旧(默认) / asc=旧到新(日历视图)
+    - **limit**: 返回数量限制 (1-5000)
     - **offset**: 偏移量
     """
     try:
-        info(f"获取经济事件数据请求: user={current_user.username}, from_date={from_date}, to_date={to_date}, country={country}, comparison={comparison}", source="markets_api")
+        info(f"获取经济事件数据请求: user={current_user.username}, from_date={from_date}, to_date={to_date}, country={country}, comparison={comparison}, impacts={impacts}, categories={categories}, event={event}", source="markets_api")
 
         # 从数据库获取数据
         events_service = get_economic_events_service()
@@ -208,6 +217,10 @@ async def get_economic_events(
             to_date=to_date,
             country=country,
             comparison=None if comparison == 'all' else comparison,
+            impacts=[i for i in (impacts or '').split(',') if i.strip()] or None,
+            categories=[c for c in (categories or '').split(',') if c.strip()] or None,
+            event=event,
+            order=order or 'desc',
             limit=limit,
             offset=offset
         )
@@ -393,6 +406,17 @@ async def get_economic_events_countries(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取经济事件国家列表失败: {str(e)}"
         )
+
+@router.get("/economic-events/categories", summary="获取经济事件类别列表")
+async def get_economic_event_categories(
+    current_user=Depends(get_current_user)
+):
+    """
+    获取经济事件类别定义（slug + 显示名），供日历 Category 筛选使用。
+    分类规则见 backend/services/economic_events_service.py 的 EVENT_CATEGORY_RULES。
+    """
+    from backend.services.economic_events_service import EVENT_CATEGORIES
+    return EVENT_CATEGORIES
 
 @router.get("/earnings-calendar", response_model=EarningsCalendarResponse, summary="获取财报日历数据")
 async def get_earnings_calendar(

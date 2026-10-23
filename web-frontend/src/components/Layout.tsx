@@ -152,6 +152,11 @@ const Layout: React.FC = () => {
       label: 'Earnings Calendar',
     },
     {
+      key: '/markets/economic-events',
+      icon: <CalendarOutlined />,
+      label: 'Economic Calendar',
+    },
+    {
       key: '/central-bank',
       icon: <BankOutlined />,
       label: 'Central Banks',
@@ -186,7 +191,7 @@ const Layout: React.FC = () => {
       icon: <FileTextOutlined />,
       label: 'UG Data',
       children: [
-        { key: '/markets/economic-events', icon: <CalendarOutlined />, label: 'Economic Events' },
+        // Economic Events 已提升为顶级菜单 "Economic Calendar"（/markets/economic-events）
         { key: '/fundamentals', icon: <FileTextOutlined />, label: 'Company Query' },
         { key: '/markets/macro-indicators', icon: <CodeOutlined />, label: 'Macro Indicators' },
         { key: '/eod-fetch', icon: <DatabaseOutlined />, label: 'EOD Fetch' },

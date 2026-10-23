@@ -7,7 +7,9 @@ interface CountryFlagProps {
 }
 
 // 国家代码到国旗emoji的映射
+// UK=EODHD 的英国代码(非标准 ISO 的 GB)、EU=欧元区，经济日历数据源使用这两个代码
 const COUNTRY_FLAGS: { [key: string]: string } = {
+  'EU': '🇪🇺', 'UK': '🇬🇧',
   'AF': '🇦🇫', 'AL': '🇦🇱', 'DZ': '🇩🇿', 'AS': '🇦🇸', 'AD': '🇦🇩', 'AO': '🇦🇴', 'AI': '🇦🇮', 'AQ': '🇦🇶',
   'AG': '🇦🇬', 'AR': '🇦🇷', 'AM': '🇦🇲', 'AW': '🇦🇼', 'AU': '🇦🇺', 'AT': '🇦🇹', 'AZ': '🇦🇿', 'BS': '🇧🇸',
   'BH': '🇧🇭', 'BD': '🇧🇩', 'BB': '🇧🇧', 'BY': '🇧🇾', 'BE': '🇧🇪', 'BZ': '🇧🇿', 'BJ': '🇧🇯', 'BM': '🇧🇲',
@@ -54,6 +56,7 @@ const COUNTRY_FLAGS: { [key: string]: string } = {
 
 // 国家代码到国家名称的映射
 const COUNTRY_NAMES: { [key: string]: string } = {
+  'EU': 'Euro Area', 'UK': 'United Kingdom',
   'AF': 'Afghanistan', 'AL': 'Albania', 'DZ': 'Algeria', 'AS': 'American Samoa', 'AD': 'Andorra',
   'AO': 'Angola', 'AI': 'Anguilla', 'AQ': 'Antarctica', 'AG': 'Antigua and Barbuda', 'AR': 'Argentina',
   'AM': 'Armenia', 'AW': 'Aruba', 'AU': 'Australia', 'AT': 'Austria', 'AZ': 'Azerbaijan',

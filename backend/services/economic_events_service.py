@@ -25,6 +25,153 @@ from backend.database.db_manager import DatabaseManager
 from config.settings import config
 import psycopg2.extras
 
+# 事件类别关键词规则（对齐 Trading Economics Calendar 的类别划分，用于 Category 筛选）。
+# 顺序即优先级：先匹配先命中。事件名统一小写做子串匹配；带 \b 的用正则保证词边界。
+# 覆盖不了的事件归入 'other'。
+EVENT_CATEGORY_RULES: list = [
+    ('holiday', [
+        'christmas', 'new year', 'good friday', 'easter', 'holiday',
+        'thanksgiving', 'boxing day', 'independence day', 'national day',
+        'memorial day', 'victory day', 'labour day', 'labor day',
+        'may day', 'spring festival', 'mid-autumn', 'dragon boat',
+        'qingming', 'national holiday', 'presidents day', "president's day",
+        'martin luther', 'juneteenth', 'columbus day', 'veterans day',
+        'washington\u2019s birthday', 'epiphany', 'assumption', 'all saints',
+        'day of', 'foundation day', 'liberation day', 'republic day',
+        'constitution day', 'harvest festival', 'chinese new year',
+    ]),
+    ('interest-rate', [
+        'interest rate', 'rate decision', 'deposit facility', 'lending facility',
+        'marginal lending', 'reverse repo', 'repo rate', 'prime rate',
+        'loan prime rate', 'overdraft rate', 'cash rate', 'policy rate',
+        'discount rate', 'base rate', 'refinancing rate', 'standing lending',
+        'standing deposit', 'monetary policy', 'key rate', 'ceil rate',
+        'corridor rate', 'bank rate',
+    ]),
+    ('central-bank', [
+        'speech', 'testimony', 'minutes', 'press conference', 'beige book',
+        'fomc', 'summary of opinions', 'chart pack', 'bulletin',
+        'financial stability', 'economic bulletin', 'economic projections',
+        'deliberations', 'monetary policy report', 'meeting', 'decision',
+        'statement', 'projections', 'hearings', 'q&a', 'lecture',
+        'balance sheet', 'focus market readout', 'focus survey',
+    ]),
+    ('inflation', [
+        'cpi', 'inflation', 'ppi', 'pce', 'wpi', 'hicp', 'producer price',
+        'consumer price', 'import price', 'export price', 'core prices',
+        'deflator', 'wholesale price', 'selling price', 'price index',
+        'prices m/m', 'pipc', 'price pressure',
+    ]),
+    ('labour', [
+        'employment', 'unemploy', 'jobless', 'payroll', 'jolts', 'labour',
+        'labor', 'wage', 'hourly earnings', 'participation rate', 'claims',
+        'vacanc', 'hiring', 'redundanc', 'labour force', 'workforce',
+    ]),
+    ('gdp', ['gdp', 'gross domestic']),
+    ('trade', [
+        'trade balance', 'balance of trade', 'current account',
+        'foreign trade', 'goods trade', 'export', 'import',
+        'tourism arrival', 'tourist arrivals', 'trade:',
+    ]),
+    ('government', [
+        'budget', 'fiscal', 'tax revenue', 'government', 'treasury international capital',
+        'net lending', 'public debt', 'government debt', 'consolidated debt',
+        'election',
+    ]),
+    ('housing', [
+        'housing', 'home sales', 'home price', 'house price', 'building permit',
+        'construction permit', 'mortgage', 'property price', 'new home',
+        'existing home', 'construction output', 'land price', 'appraisals',
+        'dwelling', 'residential', 'mba',
+    ]),
+    ('consumer', [
+        'consumer confidence', 'consumer sentiment', 'consumer credit',
+        'retail sales', 'personal spending', 'personal income',
+        'personal consumption', 'household spending', 'household consumption',
+        'consumer spending', 'redbook', 'consumer', 'retail', 'motor vehicle sales',
+        'car sales', 'new car', 'vehicle sales', 'ipsos', 'pcsi',
+    ]),
+    ('business', [
+        'pmi', 'ism', 'business confidence', 'business climate',
+        'industrial production', 'manufacturing', 'industrial',
+        'capacity utilization', 'factory orders', 'durable goods',
+        'machinery orders', 'business survey', 'economic sentiment',
+        'economic confidence', 'zew', 'ifo', 'tankan', 'construction pmi',
+        'industrial confidence', 'production', 'business activity',
+        'new orders', 'business conditions', 'composite output',
+        'confidence index', 'confidence barometer', 'industry confidence',
+        'leading index', 'coincident index', 'business inventories',
+        'economic activity', 'wholesale',
+    ]),
+    ('bonds', ['auction']),
+    ('energy', [
+        'eia', 'api crude', 'baker hughes', 'rig count', 'natural gas',
+        'crude oil', 'gasoline', 'distillate', 'heating oil', 'refinery',
+        'oil market report', 'opec', 'wasde', 'nopa', 'grain stocks',
+        'corn', 'soybean', 'wheat', 'cushing', 'fuel stocks', 'drilling',
+    ]),
+    ('money', [
+        'money supply', 'm1 ', 'm2 ', 'm3 ', 'reserves', 'foreign exchange',
+        'foreign bond investment', 'foreign securities', 'net capital flows',
+        'capital flows', 'tic flows', ' liquidity', 'loan growth',
+        'bank lending', 'total loans', 'credit to', 'private sector credit',
+        'stock investment', 'currency swaps',
+    ]),
+]
+
+# 分类结果缓存（事件名数量 ~1000 量级，进程内缓存足够）
+_EVENT_CATEGORY_CACHE: dict = {}
+
+
+def classify_event_category(event_name: str) -> str:
+    """
+    根据事件名称归类到日历类别（对齐 Trading Economics 的 Category 筛选）
+
+    Args:
+        event_name: 事件名称
+
+    Returns:
+        类别 slug（interest-rate / central-bank / inflation / labour / gdp /
+        trade / government / housing / consumer / business / bonds / energy /
+        money / other）
+    """
+    if not event_name:
+        return 'other'
+
+    cached = _EVENT_CATEGORY_CACHE.get(event_name)
+    if cached is not None:
+        return cached
+
+    name = event_name.lower()
+    for category, keywords in EVENT_CATEGORY_RULES:
+        for kw in keywords:
+            if kw in name:
+                _EVENT_CATEGORY_CACHE[event_name] = category
+                return category
+
+    _EVENT_CATEGORY_CACHE[event_name] = 'other'
+    return 'other'
+
+
+# 前端展示用的类别定义（slug → 显示名），供 API 元数据返回
+EVENT_CATEGORIES: list = [
+    {'slug': 'interest-rate', 'name': 'Interest Rate'},
+    {'slug': 'central-bank', 'name': 'Central Bank'},
+    {'slug': 'inflation', 'name': 'Inflation'},
+    {'slug': 'labour', 'name': 'Labour Market'},
+    {'slug': 'gdp', 'name': 'GDP Growth'},
+    {'slug': 'trade', 'name': 'Foreign Trade'},
+    {'slug': 'government', 'name': 'Government'},
+    {'slug': 'housing', 'name': 'Housing Market'},
+    {'slug': 'consumer', 'name': 'Consumer'},
+    {'slug': 'business', 'name': 'Business & Industry'},
+    {'slug': 'bonds', 'name': 'Bond Auctions'},
+    {'slug': 'energy', 'name': 'Energy & Commodities'},
+    {'slug': 'money', 'name': 'Money & Credit'},
+    {'slug': 'holiday', 'name': 'Holidays'},
+    {'slug': 'other', 'name': 'Other'},
+]
+
 
 def calculate_event_impact(event_name: str) -> int:
     """
@@ -583,6 +730,43 @@ class EconomicEventsService:
 
         return collected
 
+    def backfill_event_categories(self) -> Dict[str, int]:
+        """
+        用 classify_event_category 回填存量事件的 category 列（幂等，可重复执行）
+
+        Returns:
+            {'distinct_events': N, 'updated_rows': N}
+        """
+        conn = None
+        try:
+            conn = self.db_manager.get_connection()
+            if not conn:
+                error("无法连接到数据库", source="economic_events")
+                return {'distinct_events': 0, 'updated_rows': 0}
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT event FROM economic_events")
+            names = [row[0] for row in cursor.fetchall()]
+
+            updated = 0
+            for name in names:
+                cursor.execute(
+                    "UPDATE economic_events SET category = %s WHERE event = %s AND (category IS NULL OR category = '' OR category = 'other')",
+                    (classify_event_category(name), name)
+                )
+                updated += cursor.rowcount
+            conn.commit()
+            cursor.close()
+            info(f"category 回填完成: {len(names)} 个事件名, {updated} 行更新", source="economic_events")
+            return {'distinct_events': len(names), 'updated_rows': updated}
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            error(f"category 回填失败: {str(e)}", source="economic_events")
+            return {'distinct_events': 0, 'updated_rows': 0}
+        finally:
+            if conn:
+                conn.close()
+
     def get_recent_events(self, days: int = 7) -> List[Dict[str, Any]]:
         """
         获取最近几天的经济事件
@@ -723,6 +907,10 @@ class EconomicEventsService:
         to_date: Union[str, datetime] = None,
         country: str = None,
         comparison: str = None,
+        impacts: List[int] = None,
+        categories: List[str] = None,
+        event: str = None,
+        order: str = 'desc',
         offset: int = 0,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
@@ -735,18 +923,22 @@ class EconomicEventsService:
             country: 国家代码 (ISO 3166格式，2个字符)，可以是逗号分隔的多个国家
             comparison: 口径过滤。'index' → 只取指数级(comparison IS NULL)；
                         'yoy'/'mom' → 精确匹配；None → 不过滤(全部口径)
+            impacts: 重要性等级列表 (如 [1,2,3] 或 [3])
+            categories: 类别 slug 列表 (如 ['interest-rate','inflation'])
+            event: 事件名精确匹配（日历行点击后的历史序列查询）
+            order: 排序方向 'desc'(默认, 兼容旧行为) / 'asc'(日历视图)
             offset: 偏移量
             limit: 限制数量
 
         Returns:
             经济事件数据列表
         """
-        info(f"从数据库获取经济事件数据: from_date={from_date}, to_date={to_date}, country={country}, comparison={comparison}", source="economic_events")
-        
+        info(f"从数据库获取经济事件数据: from_date={from_date}, to_date={to_date}, country={country}, comparison={comparison}, impacts={impacts}, categories={categories}, event={event}", source="economic_events")
+
         # 构建SQL查询
         query = "SELECT * FROM economic_events WHERE 1=1"
         params = []
-        
+
         # 处理日期参数
         if from_date:
             if isinstance(from_date, datetime):
@@ -755,7 +947,7 @@ class EconomicEventsService:
                 from_date_str = from_date
             query += " AND date >= %s"
             params.append(from_date_str)
-        
+
         if to_date:
             if isinstance(to_date, datetime):
                 to_date_str = to_date.strftime('%Y-%m-%d')
@@ -763,7 +955,7 @@ class EconomicEventsService:
                 to_date_str = to_date
             query += " AND date <= %s"
             params.append(to_date_str)
-        
+
         # 处理国家参数（支持多个国家）
         if country:
             # 分割国家代码（支持逗号分隔）
@@ -779,9 +971,31 @@ class EconomicEventsService:
         elif comparison in ('yoy', 'mom'):
             query += " AND comparison = %s"
             params.append(comparison)
-        
-        # 添加排序、分页
-        query += " ORDER BY date DESC, time DESC NULLS LAST"
+
+        # 重要性等级过滤（多选）
+        if impacts:
+            valid_impacts = [int(i) for i in impacts if str(i).strip().isdigit() and 1 <= int(i) <= 3]
+            if valid_impacts:
+                placeholders = ','.join(['%s'] * len(valid_impacts))
+                query += f" AND impact IN ({placeholders})"
+                params.extend(valid_impacts)
+
+        # 类别过滤（多选）
+        if categories:
+            valid_categories = [str(c).strip() for c in categories if str(c).strip()]
+            if valid_categories:
+                placeholders = ','.join(['%s'] * len(valid_categories))
+                query += f" AND category IN ({placeholders})"
+                params.extend(valid_categories)
+
+        # 事件名精确匹配
+        if event:
+            query += " AND event = %s"
+            params.append(event)
+
+        # 添加排序、分页（日历视图按时间正序：最旧日期在最上方）
+        direction = 'ASC' if order == 'asc' else 'DESC'
+        query += f" ORDER BY date {direction}, time {direction} NULLS LAST"
         query += " LIMIT %s OFFSET %s"
         params.extend([limit, offset])
         
@@ -813,7 +1027,8 @@ class EconomicEventsService:
                     'change_val': event.get('change_val'),
                     'change_percentage': event.get('change_percentage'),
                     'impact': event.get('impact', 1),
-                    'comparison': event.get('comparison', '')
+                    'comparison': event.get('comparison', ''),
+                    'category': event.get('category') or 'other'
                 }
                 events.append(formatted_event)
             
@@ -865,7 +1080,9 @@ class EconomicEventsService:
                 'ID': 'Indonesia', 'PH': 'Philippines', 'VN': 'Vietnam', 'SA': 'Saudi Arabia',
                 'AE': 'United Arab Emirates', 'ZA': 'South Africa', 'EG': 'Egypt', 'NG': 'Nigeria',
                 'AR': 'Argentina', 'CL': 'Chile', 'CO': 'Colombia', 'PE': 'Peru',
-                'TR': 'Turkey', 'GR': 'Greece', 'HU': 'Hungary', 'RO': 'Romania'
+                'TR': 'Turkey', 'GR': 'Greece', 'HU': 'Hungary', 'RO': 'Romania',
+                # EODHD 专用代码（非标准 ISO Alpha-2）
+                'UK': 'United Kingdom', 'EU': 'Euro Area'
             }
             
             countries = []

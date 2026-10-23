@@ -876,7 +876,10 @@ class MarketDataService:
         
         impact = self._parse_event_impact(event.get('impact'))
         comparison = normalize_text_field(event.get('comparison'))
-        
+        # 事件类别（Trading Economics 风格 Category 筛选）；延迟导入避免潜在循环依赖
+        from backend.services.economic_events_service import classify_event_category
+        category = normalize_text_field(event.get('category')) or classify_event_category(event_name)
+
         return {
             'date': date_str,
             'time': time_str or '',
@@ -889,7 +892,8 @@ class MarketDataService:
             'change_val': change_val,
             'change_percentage': change_pct,
             'impact': impact,
-            'comparison': comparison
+            'comparison': comparison,
+            'category': category
         }
     
     def insert_economic_event(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -922,11 +926,11 @@ class MarketDataService:
             insert_sql = """
             INSERT INTO economic_events
             (date, time, country, event, period, actual, previous, forecast,
-             change_val, change_percentage, impact, comparison)
+             change_val, change_percentage, impact, comparison, category)
             VALUES
             (%(date)s, %(time)s, %(country)s, %(event)s, %(period)s, %(actual)s,
              %(previous)s, %(forecast)s, %(change_val)s, %(change_percentage)s,
-             %(impact)s, %(comparison)s)
+             %(impact)s, %(comparison)s, %(category)s)
             ON CONFLICT ON CONSTRAINT economic_events_unique_constraint
             DO UPDATE SET
                 period = EXCLUDED.period,
@@ -937,6 +941,7 @@ class MarketDataService:
                 change_percentage = EXCLUDED.change_percentage,
                 impact = EXCLUDED.impact,
                 comparison = EXCLUDED.comparison,
+                category = EXCLUDED.category,
                 updated_at = CURRENT_TIMESTAMP
             RETURNING id, (xmax = 0) AS inserted_flag;
             """
@@ -1022,7 +1027,7 @@ class MarketDataService:
             insert_sql = """
             INSERT INTO economic_events
             (date, time, country, event, period, actual, previous, forecast,
-             change_val, change_percentage, impact, comparison)
+             change_val, change_percentage, impact, comparison, category)
             VALUES %s
             ON CONFLICT ON CONSTRAINT economic_events_unique_constraint
             DO UPDATE SET
@@ -1034,6 +1039,7 @@ class MarketDataService:
                 change_percentage = EXCLUDED.change_percentage,
                 impact = EXCLUDED.impact,
                 comparison = EXCLUDED.comparison,
+                category = EXCLUDED.category,
                 updated_at = CURRENT_TIMESTAMP
             RETURNING (xmax = 0) AS inserted_flag;
             """
@@ -1051,18 +1057,19 @@ class MarketDataService:
                     record['change_val'],
                     record['change_percentage'],
                     record['impact'],
-                    record['comparison']
+                    record['comparison'],
+                    record.get('category')
                 )
                 for record in normalized_records
             ]
-            
+
             # 使用 execute_values 进行批量插入
             # 注意：execute_values 的 fetch 参数对 RETURNING 支持有限
             psycopg2.extras.execute_values(
                 cursor,
                 insert_sql,
                 values,
-                template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 page_size=100  # 分批处理，避免单次过大
             )
             

@@ -1,0 +1,280 @@
+/* 经济日历（Trading Economics 风格）——按天分组表格
+   亮色为默认，暗色通过 .main-layout-dark 根节点自动切换（与 control-style.css 同机制） */
+
+.ee-cal {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ee-cal-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* —— 日分组 —— */
+.ee-day {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.main-layout-dark .ee-day {
+  background: #1a2234;
+  border-color: #364152;
+}
+
+/* 日头（含列头）吸顶 */
+.ee-day-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  padding: 6px 12px 2px;
+}
+
+.main-layout-dark .ee-day-header {
+  background: #20293e;
+  border-color: #364152;
+}
+
+.ee-day-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.88);
+  padding-bottom: 4px;
+}
+
+.main-layout-dark .ee-day-title {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.ee-day-title .ee-day-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.35);
+}
+
+.main-layout-dark .ee-day-title .ee-day-count {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* 列头与数据行共用网格: 弹性空间按 Event 2.2 : 数值列各 1 分摊(Event 不再独占拉满) */
+.ee-cols,
+.ee-row {
+  display: grid;
+  grid-template-columns: 56px 42px 78px minmax(220px, 2.2fr) minmax(88px, 1fr) minmax(88px, 1fr) minmax(88px, 1fr) 26px;
+  align-items: center;
+  column-gap: 8px;
+  padding: 0 12px;
+}
+
+.ee-cols {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.4);
+  padding-bottom: 4px;
+}
+
+.main-layout-dark .ee-cols {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.ee-cols > span:nth-child(n + 5),
+.ee-row > span:nth-child(n + 5) {
+  text-align: right;
+}
+
+/* —— 事件行 —— */
+.ee-row {
+  height: 32px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.78);
+  cursor: pointer;
+  border-top: 1px solid #f5f5f5;
+}
+
+.ee-row:first-of-type {
+  border-top: none;
+}
+
+.ee-row:hover {
+  background: rgba(29, 89, 152, 0.05);
+}
+
+.ee-row.ee-row-open {
+  background: rgba(29, 89, 152, 0.08);
+}
+
+.main-layout-dark .ee-row {
+  color: rgba(255, 255, 255, 0.75);
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+.main-layout-dark .ee-row:hover,
+.main-layout-dark .ee-row.ee-row-open {
+  background: rgba(125, 175, 225, 0.1);
+}
+
+/* 时间/星级按重要度着色（TE 惯例: 灰=低 / 橙=中 / 红=高） */
+.ee-imp-1 { color: #8c8c8c; }
+.ee-imp-2 { color: #fa8c16; }
+.ee-imp-3 { color: #f5222d; }
+
+.main-layout-dark .ee-imp-1 { color: #8c8c8c; }
+.main-layout-dark .ee-imp-2 { color: #ffa940; }
+.main-layout-dark .ee-imp-3 { color: #ff7875; }
+
+.ee-time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ee-stars {
+  font-size: 11px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.ee-country {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+
+/* 国旗图标: 不随国名次级文字的半透明色淡化 —— 单独实色, 避免 emoji 文本呈现时发虚 */
+.ee-country-flag {
+  font-size: 15px;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.main-layout-dark .ee-country {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.main-layout-dark .ee-country-flag {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.ee-event {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ee-event-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ee-val {
+  font-variant-numeric: tabular-nums;
+  color: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+
+.main-layout-dark .ee-val {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.ee-val-strong {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.main-layout-dark .ee-val-strong {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.ee-val-neg {
+  color: #cf1322;
+}
+
+.main-layout-dark .ee-val-neg {
+  color: #ff7875;
+}
+
+.ee-chevron {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.25);
+  text-align: center;
+}
+
+.main-layout-dark .ee-chevron {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* —— 展开行：历史序列 —— */
+.ee-history {
+  border-top: 1px dashed #e8e8e8;
+  background: #fafafa;
+  padding: 8px 12px 10px 118px; /* 与事件名列对齐 */
+}
+
+.main-layout-dark .ee-history {
+  background: rgba(255, 255, 255, 0.03);
+  border-top-color: rgba(255, 255, 255, 0.12);
+}
+
+.ee-history-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.45);
+  margin-bottom: 4px;
+}
+
+/* Actual 历史折线图区 */
+.ee-history-chart {
+  margin: 2px 0 6px;
+}
+
+.main-layout-dark .ee-history-title {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.ee-history table {
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ee-history th,
+.ee-history td {
+  padding: 2px 14px 2px 0;
+  text-align: right;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.main-layout-dark .ee-history th,
+.main-layout-dark .ee-history td {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.ee-history th:first-child,
+.ee-history td:first-child {
+  text-align: left;
+}
+
+.ee-history th {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.main-layout-dark .ee-history th {
+  color: rgba(255, 255, 255, 0.4);
+}

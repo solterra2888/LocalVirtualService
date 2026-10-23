@@ -17,6 +17,14 @@ export interface EconomicEvent {
   calculated_change?: number;
   calculated_change_pct?: number;
   impact?: number;
+  /** 事件类别 slug（interest-rate / inflation / ...，见 /markets/economic-events/categories） */
+  category?: string;
+}
+
+/** 经济事件类别（Category 筛选） */
+export interface EconomicEventCategory {
+  slug: string;
+  name: string;
 }
 
 export interface MacroIndicator {
@@ -57,6 +65,14 @@ export interface EconomicEventParams {
   country?: string;
   /** 对比口径: 'index'=指数级(默认) / 'yoy' / 'mom' / 'all'=全部 */
   comparison?: string;
+  /** 重要性等级多选, 逗号分隔, 如 '2,3' */
+  impacts?: string;
+  /** 类别 slug 多选, 逗号分隔, 如 'interest-rate,inflation' */
+  categories?: string;
+  /** 事件名精确匹配（日历行历史序列查询） */
+  event?: string;
+  /** 排序方向: 'desc'=新到旧(默认) / 'asc'=旧到新（日历视图） */
+  order?: string;
   limit?: number;
   offset?: number;
 }
@@ -558,6 +574,19 @@ export const marketsAPI = {
       return result;
     } catch (error) {
       console.error('获取经济事件国家列表失败:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 获取经济事件类别定义（Category 筛选）
+   */
+  getEconomicEventCategories: async (): Promise<EconomicEventCategory[]> => {
+    try {
+      const result = await api.get<EconomicEventCategory[]>('/markets/economic-events/categories');
+      return result;
+    } catch (error) {
+      console.error('获取经济事件类别列表失败:', error);
       throw error;
     }
   },
