@@ -51,7 +51,7 @@ export const downloadElementAsPDF = async (
   const {
     filename = 'ai-analysis-report.pdf',
     title = 'AI Analysis Report',
-    author = process.env.REACT_APP_APP_NAME || 'Broadview Hub',
+    author = process.env.REACT_APP_APP_NAME || 'GuanHe Daily',
     subject = 'AI Analysis Report',
     imageQuality = 0.82,
     scale = 1.5,
@@ -143,7 +143,7 @@ export const downloadElementAsPDF = async (
       title,
       author,
       subject,
-      creator: `${process.env.REACT_APP_APP_NAME || 'Broadview Hub'} AI Analysis Tool`,
+      creator: `${process.env.REACT_APP_APP_NAME || 'GuanHe Daily'} AI Analysis Tool`,
     });
 
     // Slice the single canvas into A4 pages to avoid embedding one
@@ -177,7 +177,7 @@ export const downloadMarkdownAsPDF = async (
   const {
     filename = 'ai-analysis-report.pdf',
     title = 'AI Analysis Report',
-    author = process.env.REACT_APP_APP_NAME || 'Broadview Hub',
+    author = process.env.REACT_APP_APP_NAME || 'GuanHe Daily',
     subject = 'AI Analysis Report'
   } = options;
 

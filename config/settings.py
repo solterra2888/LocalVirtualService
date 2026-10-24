@@ -30,7 +30,7 @@ class AppConfig:
     
     @property
     def APP_NAME(self):
-        return os.getenv("APP_NAME", "Broadview Hub")
+        return os.getenv("APP_NAME", "GuanHe Daily")
     
     @property
     def APP_VERSION(self):

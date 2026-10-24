@@ -1153,7 +1153,7 @@ const FilesPageInner: React.FC = () => {
       await downloadElementAsPDF('ai-analysis-content', {
         filename,
         title: documentName,
-        author: process.env.REACT_APP_APP_NAME || 'Broadview Hub',
+        author: process.env.REACT_APP_APP_NAME || 'GuanHe Daily',
         subject: 'AI Analysis Report'
       });
       

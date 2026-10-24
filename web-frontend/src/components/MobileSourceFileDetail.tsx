@@ -173,7 +173,7 @@ const MobileSourceFileDetail: React.FC<MobileSourceFileDetailProps> = ({
       await downloadElementAsPDF('ai-analysis-content', {
         filename,
         title: documentName,
-        author: process.env.REACT_APP_APP_NAME || 'Broadview Hub',
+        author: process.env.REACT_APP_APP_NAME || 'GuanHe Daily',
         subject: 'AI Analysis Report',
         scale: 1.2,
         imageQuality: 0.80,

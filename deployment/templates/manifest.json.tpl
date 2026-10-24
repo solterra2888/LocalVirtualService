@@ -1,5 +1,5 @@
 {
-  "short_name": "Broadview Hub",
+  "short_name": "GuanHe Daily",
   "name": "{{APP_NAME}}",
   "description": "AI-based file processing and analysis tool",
   "icons": [

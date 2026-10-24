@@ -817,7 +817,7 @@ async def download_execution_report_pdf(
                 document_name=stat[4],
                 analyzed_at=stat[1],
                 model_name=stat[2],
-                author='Broadview Hub',
+                author='GuanHe Daily',
             )
         except ValueError:
             raise HTTPException(

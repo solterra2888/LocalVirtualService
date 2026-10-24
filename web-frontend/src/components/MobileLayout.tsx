@@ -148,7 +148,7 @@ const MobileLayout: React.FC = () => {
             lineHeight: '56px',
           }}
         >
-          Broadview Hub
+          GuanHe Daily
         </span>
 
         <Dropdown
