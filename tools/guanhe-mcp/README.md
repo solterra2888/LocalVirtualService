@@ -1,4 +1,4 @@
-# guanhe-mcp v0.5.0
+# guanhe-mcp v0.5.1
 
 Model Context Protocol (stdio) server that wraps the GuanHe **readonly** Agent HTTP API — `/api/v1/agent` (feed, search, reports) and `/api/v2/agent` (semantic / vector RAG).
 
@@ -39,7 +39,7 @@ The three report tools (`report_latest`, `report_by_date`, `report_list`) share 
 
 ```bash
 # From the published wheel (recommended for end users):
-pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.5.0-py3-none-any.whl"
+pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.5.1-py3-none-any.whl"
 
 # From local source (dev):
 cd tools/guanhe-mcp
@@ -206,8 +206,13 @@ https://www.guanhecapital.hk/agent/skill/GUANHE_DAILY.md
 
 ## Changelog
 
-### Unreleased
-- **Reports:** added `the_close` (Bloomberg The Close PM brief), `closing_bell` (CNBC Closing Bell PM brief), and `bloomberg_surveillance` (Bloomberg Surveillance AM brief).
+### v0.5.1 (2026-10-25)
+- **Reports:** added `the_close` (Bloomberg The Close PM brief), `closing_bell` (CNBC Closing Bell PM brief), and `bloomberg_surveillance` (Bloomberg Surveillance AM brief) — these kinds existed in source but were absent from the published v0.5.0 wheel.
+- **stdio framing:** blank lines between JSON-RPC messages are now skipped iteratively (previously recursive — a long run of blank lines could overflow the stack).
+- **initialize:** protocol version negotiation — a client requesting an unsupported version now gets the server-supported version instead of an echo.
+- **semantic_search:** `source_types` hint now lists `upload_image`.
+- **Dependencies:** httpx floor relaxed to `>=0.24.0` — installing this package no longer pushes httpx past the backend's `httpx==0.25.2` pin (httpx >= 0.28 breaks starlette 0.27's TestClient).
+- Added `scripts/call_guanhe_mcp.py` smoke-test CLI (also referenced from the README quick-start examples).
 
 ### v0.5.0
 - **Reports:** added `market_weekly` (weekly market report) and `theme` (theme performance report).

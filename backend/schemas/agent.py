@@ -250,16 +250,22 @@ class AgentSourcesInfoResponse(BaseModel):
 # Reports
 # ---------------------------------------------------------------------------
 
-class AgentTwitterReportSummary(BaseModel):
+class AgentReportSummary(BaseModel):
     report_date: str
     status: Optional[str] = None
     title: Optional[str] = None
     share_url: Optional[str] = Field(None, description="Public no-auth URL to the rendered report")
 
 
-class AgentTwitterReportListResponse(BaseModel):
-    reports: List[AgentTwitterReportSummary]
+class AgentReportListResponse(BaseModel):
+    reports: List[AgentReportSummary]
     total: int
+
+
+# Backward-compatible aliases — the pre-v0.5 names leaked "Twitter" although
+# these models have carried every report kind since /reports?kind= landed.
+AgentTwitterReportSummary = AgentReportSummary
+AgentTwitterReportListResponse = AgentReportListResponse
 
 
 class AgentReportBodyResponse(BaseModel):

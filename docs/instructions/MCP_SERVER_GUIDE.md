@@ -313,7 +313,10 @@ name = "your-mcp-name"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "httpx>=0.27",      # 按需替换为实际依赖
+    # 只声明真正需要的 API 的最低版本；门槛过高会把宿主环境的 httpx
+    # 拉到与后端钉版冲突的版本（httpx>=0.28 会破坏 starlette 0.27 的
+    # TestClient，见 guanhe-mcp v0.5.1 的教训）
+    "httpx>=0.24",
 ]
 
 [project.scripts]

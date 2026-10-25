@@ -365,7 +365,7 @@ const AgentIntegrationPage: React.FC = () => {
     [apiOrigin]
   );
 
-  /** 与 docs/agent/GUANHE_DAILY.md 工具路由一致（v0.5.0） */
+  /** 与 docs/agent/GUANHE_DAILY.md 工具路由一致（v0.5.1） */
   const skillRoutingRows: IntentRow[] = [
     { intent: '今天有什么值得关注的？最近有什么新动态？', endpoint: 'daily_feed', params: 'since=24h' },
     { intent: '这周的信息帮我总结一下', endpoint: 'daily_feed', params: 'since=7d（默认，可省略）' },
@@ -561,7 +561,7 @@ const AgentIntegrationPage: React.FC = () => {
               直接从服务器下载安装，无需 GitHub 访问权限：
             </p>
             <CodeBlock dark={dark} label="终端">
-              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.5.0-py3-none-any.whl"`}
+              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.5.1-py3-none-any.whl"`}
             </CodeBlock>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '8px 0 0' }}>
               安装后执行 <code style={{ fontSize: 12, color: TEAL }}>which python</code> 记下 Python 绝对路径，下一步需要用。
@@ -643,7 +643,7 @@ const AgentIntegrationPage: React.FC = () => {
 
             {/* 可用工具 */}
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 6px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              可用工具（v0.5.0）
+              可用工具（v0.5.1）
             </h3>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '0 0 14px', lineHeight: 1.6 }}>
               共 12 个工具，分为 v1 关键词 / 时间线 和 v2 语义 / Vector RAG 两类。
@@ -672,7 +672,7 @@ const AgentIntegrationPage: React.FC = () => {
 
             <div style={{ height: 20 }} />
 
-            {/* 报告类型对照（v0.5.0） */}
+            {/* 报告类型对照（v0.5.1） */}
             <IntentTable
               dark={dark}
               col1="kind"
@@ -845,7 +845,7 @@ const AgentIntegrationPage: React.FC = () => {
 
             {/* daily_feed 参数详情 */}
             <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              daily_feed 常用参数（v0.5.0）
+              daily_feed 常用参数（v0.5.1）
             </h4>
             <IntentTable
               dark={dark}
@@ -853,7 +853,7 @@ const AgentIntegrationPage: React.FC = () => {
               col2="说明"
               rows={[
                 { intent: 'since', endpoint: '时间窗口：24h / 7d / 2w / ISO 日期时间。默认 7d；非法值返回 400' },
-                { intent: 'q', endpoint: '全文搜索关键词（可选）；支持多词 AND、减号排除（AI -crypto）；零结果时返回 diagnostics' },
+                { intent: 'q', endpoint: '全文搜索关键词（可选）；空格=AND、OR（大写）=任一匹配、"短语"=精确匹配，勿传整句；零结果时返回 diagnostics' },
                 { intent: 'tickers', endpoint: '按股票代码过滤，逗号分隔多值（须带交易所后缀），如 NVDA.US,AAPL.US' },
                 { intent: 'tags', endpoint: '按概念标签过滤（匹配 concepts JSONB 数组），逗号分隔，如 AI,Chips' },
                 { intent: 'people', endpoint: '按关键人物名过滤，逗号分隔，如 Trump,Musk；大小写不敏感，匹配原文写法' },
@@ -876,7 +876,7 @@ const AgentIntegrationPage: React.FC = () => {
               col1="字段 / 参数"
               col2="说明"
               rows={[
-                { intent: 'id（必填）', endpoint: '来自 daily_feed / search，如 feed_88247、upload_123' },
+                { intent: 'id（必填）', endpoint: '来自 daily_feed / daily_multi_search，如 feed_88247、upload_123' },
                 {
                   intent: 'content',
                   endpoint: '主正文：上传类为解析/Markdown；推文/新闻为全文；YouTube 订阅为视频描述等',
@@ -913,7 +913,9 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'web / news / podcast', endpoint: '订阅的网页 / 新闻 / 播客 Feed' },
                 { intent: 'zhishixingqiu', endpoint: '订阅的知识星球（Knowledge Planet）帖子' },
                 { intent: 'substack', endpoint: '订阅的 Substack 文章与动态' },
-                { intent: 'pdf', endpoint: '用户上传的 PDF' },
+                { intent: 'weibo', endpoint: '订阅的微博' },
+                { intent: 'document', endpoint: '用户上传的文档（PDF/Word/Excel/CSV 及图片的统称，含 image）' },
+                { intent: 'pdf / word / excel', endpoint: '用户上传的指定格式文档（document 的精确子集）' },
                 { intent: 'image', endpoint: '用户上传的图片' },
                 { intent: 'audio', endpoint: '用户上传的音频' },
                 { intent: 'text', endpoint: '用户上传的文本文件' },
@@ -1047,7 +1049,7 @@ const AgentIntegrationPage: React.FC = () => {
             <div style={{ height: 12 }} />
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', lineHeight: 1.6 }}>
               <code style={{ color: TEAL, fontSize: 12 }}>source</code> 可能值：
-              twitter · youtube · web · news · podcast · zhishixingqiu · substack · weibo · pdf · image · audio · text。
+              twitter · youtube · web · news · podcast · zhishixingqiu · substack · weibo · pdf · word · excel · image · audio · text。
               默认限速 <strong style={{ color: dark ? '#cbd5e1' : '#475569' }}>60 次 / 分钟</strong> / PAT。
             </p>
 
@@ -1066,16 +1068,16 @@ const AgentIntegrationPage: React.FC = () => {
               col1="请求"
               col2="说明"
               rows={[
-                { intent: 'POST /api/v2/agent/semantic_search', endpoint: '纯向量语义搜索；body: { query, top_k?, source_types?, file_ids?, since? }；返回按相似度排序的 chunk 列表' },
-                { intent: 'POST /api/v2/agent/hybrid_search', endpoint: '语义 + 关键词混合（RRF）；body: { query, top_k?, source_types?, file_ids?, keyword_weight? }；精确词与语义理解兼顾，推荐首选' },
-                { intent: 'POST /api/v2/agent/chunks_by_locator', endpoint: '按定位取原始 chunk；body: { file_id|content_id, chapter?, chapter_prefix?, page_range?, chunk_idx_range?, max_chars? }；可用于精确读取某章节完整文本' },
+                { intent: 'POST /api/v2/agent/semantic-search', endpoint: '纯向量语义搜索；body: { query, top_k?, source_types?, file_ids?, since? }；返回按相似度排序的 chunk 列表' },
+                { intent: 'POST /api/v2/agent/hybrid-search', endpoint: '语义 + 关键词混合（RRF）；body: { query, top_k?, source_types?, file_ids?, keyword_weight? }；精确词与语义理解兼顾，推荐首选' },
+                { intent: 'POST /api/v2/agent/chunks-by-locator', endpoint: '按定位取原始 chunk；body: { file_id|content_id, chapter?, chapter_prefix?, page_range?, chunk_idx_range?, max_chars? }；可用于精确读取某章节完整文本' },
               ]}
             />
 
             <div style={{ height: 20 }} />
 
             <CodeBlock dark={dark} label="semantic_search / hybrid_search 请求示例">
-              {`POST /api/v2/agent/hybrid_search
+              {`POST /api/v2/agent/hybrid-search
 Authorization: Bearer ght_…
 Content-Type: application/json
 

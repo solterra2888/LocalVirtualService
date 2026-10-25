@@ -360,8 +360,7 @@ GuanHe MCP 新增 3 个工具，与 v1 工具并存：
 {
   "file_id": 1357,
   "chapter": "第三章 价值评估",
-  "chunk_idx_from": 0,
-  "chunk_idx_to": 10
+  "chunk_idx_range": [0, 10]
 }
 ```
 
@@ -391,7 +390,7 @@ GuanHe MCP 新增 3 个工具，与 v1 工具并存：
 {
   "query": "string（必填）",
   "top_k": 10,
-  "source_types": ["upload", "youtube"],
+  "source_types": ["upload", "feed_youtube"],
   "file_ids": [1357],
   "content_ids": [12345],
   "since": "30d | 2026-01-01",
@@ -422,7 +421,7 @@ GuanHe MCP 新增 3 个工具，与 v1 工具并存：
 
 ### `POST /api/v2/agent/hybrid-search`
 
-Request 同 `semantic-search`，额外支持 `keyword_weight`（默认 0.3）和 `semantic_weight`（默认 0.7）。
+Request 同 `semantic-search`，额外支持 `keyword_weight`（0–1，默认 0.5；`0.0`=纯语义，`1.0`=纯关键词。无单独的 `semantic_weight` 参数）。
 
 ### `POST /api/v2/agent/chunks-by-locator`
 
@@ -433,9 +432,9 @@ Request 同 `semantic-search`，额外支持 `keyword_weight`（默认 0.3）和
   "file_id": 1357,
   "content_id": null,
   "chapter": "第三章",
-  "page": null,
-  "chunk_idx_from": 0,
-  "chunk_idx_to": 20
+  "page_range": [12, 15],
+  "chunk_idx_range": [0, 20],
+  "max_chars": 16000
 }
 ```
 

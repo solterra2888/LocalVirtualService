@@ -41,8 +41,8 @@ from backend.schemas.agent import (
     AgentSourcesInfoResponse,
     AgentSubscriptionChannel,
     AgentSubscriptionListResponse,
-    AgentTwitterReportListResponse,
-    AgentTwitterReportSummary,
+    AgentReportListResponse,
+    AgentReportSummary,
 )
 from backend.schemas.daily import DailyFeedItem, DailyItemDetail
 from backend.schemas.user import TokenData
@@ -1187,7 +1187,7 @@ class AgentService:
     def report_list(
         self, user: TokenData, kind: str, limit: int = 30, offset: int = 0,
         request_base: Optional[str] = None,
-    ) -> AgentTwitterReportListResponse:
+    ) -> AgentReportListResponse:
         kind = _normalize_kind(kind)
         svc = _resolve_report_service(kind)
         if kind in _GLOBAL_KINDS:
@@ -1195,7 +1195,7 @@ class AgentService:
         else:
             reports, total = svc.get_user_reports(_uid_for(user, kind), limit, offset)
         summaries = [
-            AgentTwitterReportSummary(
+            AgentReportSummary(
                 report_date=str(r.get("report_date") or r.get("week_end") or r.get("date") or ""),
                 status=r.get("status"),
                 title=r.get("title"),
@@ -1203,7 +1203,7 @@ class AgentService:
             )
             for r in (reports or [])
         ]
-        return AgentTwitterReportListResponse(reports=summaries, total=total)
+        return AgentReportListResponse(reports=summaries, total=total)
 
     def report_latest(
         self, user: TokenData, kind: str, request_base: Optional[str] = None

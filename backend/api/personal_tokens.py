@@ -66,9 +66,9 @@ async def create_token(
             scopes=body.scopes,
             expires_days=exp_days,
         )
-    except Exception as e:
-        logger.error(f"create_token failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("create_token failed")
+        raise HTTPException(status_code=500, detail="创建失败，请稍后重试或联系管理员")
     logger.info(
         f"User {current_user.username} created PAT id={meta.get('id')} prefix={meta.get('prefix')}"
     )

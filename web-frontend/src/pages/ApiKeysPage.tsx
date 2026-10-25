@@ -25,7 +25,7 @@ type TokenRow = {
 
 const SCOPE_OPTIONS = [
   { label: 'Daily feed & search (daily:read)', value: 'daily:read' },
-  { label: 'Twitter / YouTube reports (reports:read)', value: 'reports:read' },
+  { label: 'All reports — Twitter/YouTube/市场日报/周报/主题/收盘简报 (reports:read)', value: 'reports:read' },
 ];
 
 const CodeBlock: React.FC<{
@@ -477,7 +477,8 @@ const ApiKeysPage: React.FC = () => {
         <p style={{ fontSize: 16, lineHeight: 1.75, color: dark ? '#94a3b8' : '#475569', margin: '0 0 20px' }}>
           令牌以 <code style={{ color: TEAL, fontSize: 14 }}>ght_</code> 开头，用于{' '}
           <code style={{ color: TEAL, fontSize: 14 }}>Authorization: Bearer …</code> 调用只读的{' '}
-          <code style={{ color: TEAL, fontSize: 14 }}>/api/v1/agent</code>（Daily 与报告类接口）。
+          <code style={{ color: TEAL, fontSize: 14 }}>/api/v1/agent</code>（Daily 与报告类接口）及{' '}
+          <code style={{ color: TEAL, fontSize: 14 }}>/api/v2/agent</code>（语义检索接口）。
           请勿将令牌写入代码仓库或分享给他人。
         </p>
 

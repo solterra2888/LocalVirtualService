@@ -374,8 +374,8 @@ class TestInitialize:
         assert result["serverInfo"].get("title"), "serverInfo.title must be set"
         assert result.get("instructions"), "instructions must be set"
 
-    def test_version_is_0_5_0(self):
-        assert srv.SERVER_VERSION == "0.5.0"
+    def test_version_is_0_5_1(self):
+        assert srv.SERVER_VERSION == "0.5.1"
 
     def test_daily_feed_has_people_countries_hints(self):
         tool = next(t for t in srv.TOOLS if t["name"] == "daily_feed")

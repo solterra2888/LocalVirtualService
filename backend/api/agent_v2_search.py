@@ -14,8 +14,8 @@ Tool intent:
 The contract: every search response returns *chunk-level* hits with
 `content_id` — clients should call /api/v1/agent/daily/batch (or
 chunks-by-locator) to retrieve full content. See
-``docs/instructions/AGENT_API_V2_SEARCH.md`` for the full tool selection
-decision tree.
+``docs/agent/GUANHE_DAILY.md`` (served at /agent/skill/GUANHE_DAILY.md)
+for the full tool selection decision tree.
 """
 
 from __future__ import annotations

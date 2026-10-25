@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Agent HTTP API v1 (readonly) — v0.2.0
+Agent HTTP API v1 (readonly) — current as of server v0.5.0.
 
-Breaking changes from v0.1:
+Breaking changes from v0.1 (v0.2.0):
   - GET /search removed → use GET /daily?q=...
   - GET /reports/twitter-daily/* and /reports/youtube-daily/* removed
     → use GET /reports?kind=twitter|youtube  etc.
@@ -30,9 +30,9 @@ from backend.schemas.agent import (
     AgentDailyMultiResponse,
     AgentMultiSearchRequest,
     AgentReportBodyResponse,
+    AgentReportListResponse,
     AgentSourcesInfoResponse,
     AgentSubscriptionListResponse,
-    AgentTwitterReportListResponse,
 )
 from backend.schemas.user import TokenData
 from backend.services.agent_service import AgentService
@@ -247,7 +247,7 @@ _REPORT_KIND_QUERY = (
 )
 
 
-@router.get("/reports", response_model=AgentTwitterReportListResponse)
+@router.get("/reports", response_model=AgentReportListResponse)
 def agent_report_list(
     request: Request,
     response: Response,

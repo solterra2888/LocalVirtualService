@@ -19,6 +19,9 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 # ───────────────────────── source types ────────────────────────────────
+# Enforced on requests so typos surface as 422 instead of silently matching
+# 0 chunks. Values mirror what the chunking pipeline writes to
+# document_chunks.source_type (upload_* / feed_{channel_type}).
 AgentSearchSourceType = Literal[
     # Upload
     "upload",
@@ -33,6 +36,9 @@ AgentSearchSourceType = Literal[
     "feed_youtube",
     "feed_news",
     "feed_rss",
+    "feed_zhishixingqiu",
+    "feed_substack",
+    "feed_weibo",
 ]
 
 
@@ -40,10 +46,13 @@ AgentSearchSourceType = Literal[
 class SemanticSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000, description="Natural-language query.")
     top_k: int = Field(10, ge=1, le=50, description="Number of chunk results to return.")
-    source_types: Optional[List[str]] = Field(
+    source_types: Optional[List[AgentSearchSourceType]] = Field(
         None,
         description=(
             "Filter to specific source_types (e.g. ['upload','feed_youtube']). "
+            "Allowed: upload, upload_text, upload_web, upload_youtube, upload_audio, "
+            "upload_podcast, upload_image, feed_twitter, feed_youtube, feed_news, "
+            "feed_rss, feed_zhishixingqiu, feed_substack, feed_weibo. "
             "Omit for all sources the user can access."
         ),
     )

@@ -260,9 +260,9 @@ class VectorSearchService:
             clauses.append({"lang": {"$eq": req.lang}})
 
         if req.since:
+            # raises 400 on invalid values, same contract as Agent v1
             cutoff = _parse_since(req.since)
-            if cutoff is not None:
-                clauses.append({"created_ts": {"$gte": str(int(cutoff))}})
+            clauses.append({"created_ts": {"$gte": str(int(cutoff))}})
 
         if req.file_ids:
             ids = [str(int(i)) for i in req.file_ids]
@@ -429,7 +429,7 @@ class VectorSearchService:
                 user,
                 since=req.since,
                 q=req.query,
-                sources=",".join(req.source_types) if req.source_types else None,
+                sources=_v2_source_types_to_v1_sources(req.source_types),
                 limit=50,
             )
         except Exception as exc:  # noqa: BLE001
@@ -666,8 +666,46 @@ class VectorSearchService:
 
 
 # ───────────────────────── module helpers ──────────────────────────────
+# v2 chunk source_type → Daily v1 sources= tokens. The hybrid keyword branch
+# delegates to AgentService.get_daily_feed, whose source vocabulary differs
+# ('youtube' there means uploaded YouTube videos; feed YouTube is 'youtube_feed';
+# v1's 'document' expands to document+image uploads). feed_rss has no v1
+# equivalent and is dropped — the call falls back to the user's preset,
+# which already includes feed sources.
+_V2_SOURCE_TYPE_TO_V1_SOURCES: Dict[str, str] = {
+    "upload": "document,audio,text,podcast,web,youtube",
+    "upload_text": "text",
+    "upload_web": "web",
+    "upload_youtube": "youtube",
+    "upload_audio": "audio",
+    "upload_podcast": "podcast",
+    "upload_image": "image",
+    "feed_twitter": "twitter",
+    "feed_youtube": "youtube_feed",
+    "feed_news": "news",
+    "feed_zhishixingqiu": "zhishixingqiu",
+    "feed_substack": "substack",
+    "feed_weibo": "weibo",
+}
+
+
+def _v2_source_types_to_v1_sources(source_types: Optional[Sequence[str]]) -> Optional[str]:
+    if not source_types:
+        return None
+    tokens = []
+    for st in source_types:
+        mapped = _V2_SOURCE_TYPE_TO_V1_SOURCES.get(st)
+        if mapped:
+            tokens.append(mapped)
+    return ",".join(tokens) if tokens else None
+
+
 def _parse_since(since: Optional[str]) -> Optional[int]:
-    """Return epoch seconds cutoff, or None if unset/invalid."""
+    """Return epoch seconds cutoff, or None if unset.
+
+    Raises HTTPException 400 on non-empty unrecognised input, matching the
+    Agent v1 contract (_parse_since in agent_service.py).
+    """
     if not since:
         return None
     s = since.strip().lower()
@@ -688,7 +726,12 @@ def _parse_since(since: Optional[str]) -> Optional[int]:
             dt = dt.replace(tzinfo=timezone.utc)
         return int(dt.timestamp())
     except ValueError:
-        return None
+        pass
+    raise HTTPException(
+        status_code=400,
+        detail=f"Invalid 'since' value '{since}'. "
+        "Use Nd (e.g. 7d), Nh (e.g. 24h), Nw (e.g. 2w), or an ISO 8601 datetime.",
+    )
 
 
 _NUM_ID_RE = re.compile(r"(\d+)$")

@@ -437,13 +437,13 @@ class TestReportEndpoints:
 
     def test_market_list_returns_share_url(self):
         from backend.schemas.agent import (
-            AgentTwitterReportListResponse,
-            AgentTwitterReportSummary,
+            AgentReportListResponse,
+            AgentReportSummary,
         )
 
-        list_resp = AgentTwitterReportListResponse(
+        list_resp = AgentReportListResponse(
             reports=[
-                AgentTwitterReportSummary(
+                AgentReportSummary(
                     report_date="2026-06-17",
                     status="completed",
                     share_url="https://example.com/api/daily-market-report/shared/abc123",

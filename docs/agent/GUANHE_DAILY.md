@@ -1,8 +1,8 @@
-# GuanHe Daily — Agent Skill (v0.5.0)
+# GuanHe Daily — Agent Skill (v0.5.1)
 
 这个 skill 让 Cursor、Claude Code、Codex 等 AI 助手能够读取你在 **GuanHe** 平台上积累的信息——包括你订阅的 Feed（Twitter、YouTube、新闻等）、你自己上传的文件（PDF、文档、图片等），以及通过 **Vector RAG** 对长文档进行语义级问答。
 
-> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.5.0`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
+> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.5.1`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
 
 ---
 
@@ -253,7 +253,10 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 | `youtube` / `youtube_feed` | 订阅的 YouTube Feed | ✓ |
 | `news` / `web` / `podcast` | 订阅的网页 / 新闻 / 播客 | ✓ |
 | `zhishixingqiu` | 订阅的知识星球（Knowledge Planet）帖子 | ✓ |
-| `pdf` | 用户上传的 PDF | ✓ |
+| `substack` | 订阅的 Substack 文章与动态 | ✓ |
+| `weibo` | 订阅的微博 | ✓ |
+| `document` | 用户上传的文档统称（PDF/Word/Excel/CSV + 图片） | ✓ |
+| `pdf` / `word` / `excel` | 用户上传的指定格式文档（`document` 的精确子集；别名 doc/docx/xls/xlsx/csv 同样接受） | ✓ |
 | `image` | 用户上传的图片 | ✓ |
 | `audio` | 用户上传的音频 | ✓ |
 | `text` | 用户上传的文本文件 | ✓ |
@@ -346,9 +349,9 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 参数：
 - `query`（必填）：自然语言问题，整句话都可以，不用提取关键词
 - `top_k`：返回块数，1–50，默认 10
-- `source_types`：过滤来源类型，如 `["upload", "youtube"]`
+- `source_types`：过滤来源类型，合法值为 `upload`（PDF/Word/Excel 等文档）/ `upload_text` / `upload_web` / `upload_youtube` / `upload_audio` / `upload_podcast` / `upload_image`，以及 `feed_twitter` / `feed_youtube` / `feed_news` / `feed_rss` / `feed_zhishixingqiu` / `feed_substack` / `feed_weibo`。如 `["upload", "feed_youtube"]`；非法值返回 422
 - `file_ids`：只搜指定文件，如 `[1439]`
-- `since`：时间窗口，如 `30d`、`2026-01-01`
+- `since`：时间窗口，如 `30d`、`2026-01-01`；非法值返回 400
 - `min_score`：相似度下限（0–1），默认不过滤
 
 **示例：**
@@ -387,8 +390,7 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 - 例：`"Powell 降息预期"` = 专有名词 Powell + 概念「降息预期」
 
 参数与 `semantic_search` 相同，额外支持：
-- `keyword_weight`：关键词得分权重，默认 0.3
-- `semantic_weight`：语义得分权重，默认 0.7
+- `keyword_weight`：0–1，默认 **0.5**。`0.0`=纯语义检索，`1.0`=纯关键词检索。查询以专有名词为主时调高（如 0.7+），偏抽象概念时调低（如 0.3）。没有单独的 `semantic_weight` 参数，语义权重即 `1 - keyword_weight`
 
 返回结构与 `semantic_search` 相同，`found_via` 可为 `["vector"]`、`["keyword"]` 或 `["vector", "keyword"]`。
 
@@ -402,12 +404,14 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 - semantic_search 返回了 chapter="第三章 价值评估"，想读完整章节
 - 已知文件结构（如 PDF 目录），直接跳到某章
 
-参数：
+参数（`file_id` 与 `content_id` 二选一）：
 - `file_id`：文件 ID（来自 semantic_search 结果的 `content_id`，当 source_type=upload 时）
 - `content_id`：Feed 内容 ID（当 source_type 为 feed 类型时）
 - `chapter`：章节名（字符串精确匹配，来自 semantic_search 结果的 `chapter` 字段）
-- `page`：页码（PDF 类）
-- `chunk_idx_from` / `chunk_idx_to`：按块序号范围取（0-based）
+- `chapter_prefix`：按章节名前缀匹配（如 `Chapter 5`）
+- `page_range`：页码范围 `[起始页, 结束页]`（闭区间，PDF 类），如 `[12, 15]`
+- `chunk_idx_range`：块序号范围 `[起始, 结束]`（闭区间，0-based），如 `[0, 10]`
+- `max_chars`：返回总字符数上限，200–64000，默认 16000，防止上下文溢出
 
 **典型用法（两步）：**
 ```

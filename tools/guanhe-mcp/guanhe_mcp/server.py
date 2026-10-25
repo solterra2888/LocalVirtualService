@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-GuanHe MCP stdio server v0.2.0 (JSON-RPC over NDJSON).
+GuanHe MCP stdio server v0.5.1 (JSON-RPC over NDJSON).
 
 Wraps the GuanHe Agent HTTP API /api/v1/agent/*.
 No dependency on the official `mcp` PyPI package — only httpx.
@@ -23,7 +23,7 @@ import sys
 from typing import Any, Dict, List, Optional, Union
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.5.0"
+SERVER_VERSION = "0.5.1"
 
 _Q_SYNTAX_HINT = (
     "q syntax: space=AND (all terms match), OR (uppercase)=any match, "
@@ -128,21 +128,22 @@ def _client():
 
 
 def _read_message() -> Optional[Union[Dict[str, Any], List[Any]]]:
-    """Read one MCP NDJSON message from stdin."""
-    line = sys.stdin.buffer.readline()
-    if not line:
-        return None
-    if line.startswith(b"\xef\xbb\xbf"):
-        line = line[3:]
-    stripped = line.strip()
-    if not stripped:
-        return _read_message()
-    if stripped.lower().startswith(b"content-length:"):
-        n = int(stripped.split(b":", 1)[1].strip())
-        sys.stdin.buffer.readline()
-        body = sys.stdin.buffer.read(n)
-        return json.loads(body.decode("utf-8"))
-    return json.loads(stripped.decode("utf-8"))
+    """Read one MCP NDJSON message from stdin (skipping blank lines iteratively)."""
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            return None
+        if line.startswith(b"\xef\xbb\xbf"):
+            line = line[3:]
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.lower().startswith(b"content-length:"):
+            n = int(stripped.split(b":", 1)[1].strip())
+            sys.stdin.buffer.readline()
+            body = sys.stdin.buffer.read(n)
+            return json.loads(body.decode("utf-8"))
+        return json.loads(stripped.decode("utf-8"))
 
 
 def _write_message(payload: Union[Dict[str, Any], List[Any]]) -> None:
@@ -393,10 +394,11 @@ TOOLS: List[Dict[str, Any]] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "Filter to specific source types. Values: 'upload' (PDFs/Word/CSV), 'upload_text', "
-                        "'upload_web', 'upload_youtube', 'upload_audio', 'upload_podcast', "
-                        "'feed_twitter', 'feed_youtube', 'feed_news', 'feed_rss', "
-                        "'feed_zhishixingqiu', 'feed_substack', 'feed_weibo'. Omit for all."
+                        "Filter to specific source types. Values: 'upload' (PDFs/Word/Excel), "
+                        "'upload_text', 'upload_web', 'upload_youtube', 'upload_audio', "
+                        "'upload_podcast', 'upload_image', 'feed_twitter', 'feed_youtube', "
+                        "'feed_news', 'feed_rss', 'feed_zhishixingqiu', 'feed_substack', "
+                        "'feed_weibo'. Omit for all."
                     ),
                 },
                 "file_ids": {
@@ -656,12 +658,15 @@ def run() -> None:
 
         if method == "initialize":
             initialized = True
+            # Per MCP spec: echo the client version only when supported;
+            # otherwise respond with the version this server implements.
             req_pv = params.get("protocolVersion") or PROTOCOL_VERSION
+            negotiated = req_pv if req_pv == PROTOCOL_VERSION else PROTOCOL_VERSION
             return {
                 "jsonrpc": "2.0",
                 "id": mid,
                 "result": {
-                    "protocolVersion": req_pv,
+                    "protocolVersion": negotiated,
                     "capabilities": {"tools": {"listChanged": False}},
                     "serverInfo": {
                         "name": "guanhe-mcp",
