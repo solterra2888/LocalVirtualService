@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """macro_pillars — MACROS 章节的确定性数据底座(全部免费源,不经 LLM)。
 
-对照 CNT 报告已证实的数据管线(作者自述 + 报告内归因)实现的六个子块:
+对照 CNT 报告已证实的数据管线(作者自述 + 报告内归因)实现的子块:
 
   pillar            source                                          用途
   ─────────────────────────────────────────────────────────────────────────
@@ -10,9 +10,13 @@
   fred_ranks        FRED DGS2/5/10/20/30 全历史(近1万条)           "highest since YYYY-MM" 断言
   fred_extras       FRED T10YIE/DFII10/HY-OAS/IG-OAS/PMMS/柴油/DFF  盈亏平衡/实际利率/利差/EFFR
   fed_odds          Yahoo 30天联邦基金期货(ZQ*)合约价 vs EFFR 自算  加息概率(CNT 的自算方法)
+  next_fomc_odds    下次会议对应的会后整月合约                      含 prior:前一交易日同一合约
   fomc_calendar     federalreserve.gov FOMC 日历页                  下次/未来会议日期
-  auction_events    economic_events 表中 auction 类事件(EODHD)     今日结果 + 未来拍卖日历
-  nowcasts          Cleveland Fed / Atlanta GDPNow(尽力抓取)      CPI/PCE/GDP 前瞻(常失败,容错)
+  auction_events    economic_events 中的拍卖 + FiscalData 补字段    今日结果 + 未来拍卖;
+                    (只取 Note/Bond;期限按 "7year" 归一;上一场       规模、上次中标、日期
+                    必须有 high_yield;"null" 字符串当空值)
+  release_series    FRED 月度序列(HOUST 等用环比百分比,不用绝对差)  Release 图数据底座
+  nowcasts          网页抓取,失败则回退日历里的 Atlanta Fed GDPNow  CPI/PCE/GDP 前瞻(可选)
 
 设计约束:
   - 每个子块独立 try/except;失败只写入 errors,绝不阻塞快照;
@@ -294,6 +298,33 @@ def _yahoo_close_on(symbol: str, report_date: date) -> Optional[Tuple[date, floa
     return best
 
 
+def _prev_weekday(d: date) -> date:
+    d -= timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def fetch_prior_contract_odds(report_date: date, effr: Optional[float],
+                              month_key: str) -> Optional[Dict[str, Any]]:
+    """前一交易日同一合约的加息概率 —— 直接用 Yahoo 历史日线算,
+    不依赖"上一期快照是否存在"(CNT 每期都有 prior 对比)。"""
+    if effr is None:
+        return None
+    cy, cm = (int(x) for x in month_key.split("-"))
+    prev_d = _prev_weekday(report_date)
+    got = _yahoo_close_on(_zq_symbol(cy, cm), prev_d)
+    if got is None:
+        return None
+    d, price = got
+    implied = round(100 - price, 3)
+    return {
+        "as_of": d.isoformat(), "price": price,
+        "odds_pct": round(max(0.0, (implied - effr) / (HIKE_BP / 100)) * 100, 1),
+        "cum_bp_priced": round((implied - effr) * 100, 1),
+    }
+
+
 def fetch_fed_odds(report_date: date, effr: Optional[float]) -> Dict[str, Any]:
     """ZQ 合约价 → 隐含均值利率 → 相对 EFFR 的 +25bp 概率。
 
@@ -464,8 +495,10 @@ def build_macro_pillars(report_date: date, fred_api_key: str,
             "fomc_calendar": pool.submit(fetch_fomc_calendar, report_date),
             "nowcasts": pool.submit(fetch_nowcasts),
             "effr": pool.submit(_fetch_effr),
+            "release_series": pool.submit(
+                fetch_release_series, fred_api_key, report_date),
         }
-        # auction_events 纯内存
+        # auction_events 纯内存 + 可选 FiscalData 补字段
         _run("auction_events", lambda: _auction_events(economic_events))
         _wait(pool, futures)
 
@@ -492,26 +525,207 @@ def build_macro_pillars(report_date: date, fred_api_key: str,
         c = next((x for x in contracts if x["month"] == month_key), None)
         if not c:
             raise RuntimeError(f"no contract for {month_key}")
-        return {
+        out = {
             "meeting": meetings[0]["text"], "contract_month": month_key,
             "odds_pct": c["odds_of_25bp_hike_pct"],
             "cum_bp_priced": c["cum_bp_priced"],
         }
+        try:  # prior 对比口径:best-effort,失败不影响当日数
+            prior = fetch_prior_contract_odds(
+                report_date, pillars.get("effr"), month_key)
+            if prior:
+                out["prior"] = prior
+        except Exception as e:  # noqa: BLE001
+            out["prior_error"] = str(e)[:120]
+        return out
     _run("next_fomc_odds", _next_odds)
+
+    # nowcasts 网页抓取失败 → 回退经济日历里的 Atlanta Fed GDPNow 行
+    if not pillars.get("nowcasts"):
+        fb = _nowcasts_from_calendar(economic_events)
+        if fb:
+            pillars["nowcasts"] = fb
+            errors.pop("nowcasts", None)
 
     return pillars, errors
 
 
+def _nowcasts_from_calendar(economic_events: Optional[Dict[str, Any]]
+                            ) -> Optional[Dict[str, str]]:
+    """经济日历(EODHD)含 'Atlanta Fed GDPNow' 行:取最新一条有 actual 的。"""
+    if not economic_events:
+        return None
+    rows = [e for k in ("recent", "upcoming") for e in economic_events.get(k, [])
+            if e.get("country") == "US" and "gdpnow" in (e.get("event") or "").lower()
+            and e.get("actual") not in (None, "")]
+    if not rows:
+        return None
+    rows.sort(key=lambda e: (e.get("date") or "", e.get("time") or ""))
+    last = rows[-1]
+    return {"gdpnow_qoq_ann": str(last["actual"]), "gdpnow_as_of": last.get("date"),
+            "source": "economic_events (Atlanta Fed GDPNow)"}
+
+
 def _auction_events(economic_events: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """从快照的经济日历(US)中抽出国债拍卖事件:recent(含 actual=stop)与 upcoming。"""
+    """从快照的经济日历(US)中抽出国债拍卖事件:recent(含 actual=stop)与 upcoming。
+
+    尽量用 Treasury FiscalData 补 size / prior stop(失败则保留日历字段)。
+    """
     if not economic_events:
         return {"today": [], "upcoming": []}
     rx = re.compile(r"(note|bond|bill)\s+auction|treasury auction", re.IGNORECASE)
     today, upcoming = [], []
     for e in economic_events.get("recent", []):
         if e.get("country") == "US" and rx.search(e.get("event", "")):
-            today.append(e)
+            today.append(dict(e))
     for e in economic_events.get("upcoming", []):
         if e.get("country") == "US" and rx.search(e.get("event", "")):
-            upcoming.append(e)
+            upcoming.append(dict(e))
+    try:
+        _enrich_auctions_from_fiscaldata(today + upcoming)
+    except Exception as e:  # noqa: BLE001
+        # enrichment is best-effort
+        for row in today + upcoming:
+            row.setdefault("enrichment_error", str(e)[:120])
     return {"today": today, "upcoming": upcoming}
+
+
+# CNT Forward Catalysts 拍卖行常用字段:规模 + 上次中标
+FISCALDATA_AUCTIONS_URL = (
+    "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
+    "v1/accounting/od/auctions_query"
+)
+
+
+def _enrich_auctions_from_fiscaldata(rows: List[Dict[str, Any]]) -> None:
+    """为拍卖事件补 offering_amt / prior auction high_yield(若 API 可用)。"""
+    if not rows:
+        return
+    # 只取 Note/Bond(排除同期限的 TIPS/FRN/Bill 串味),一次拉近一批结果
+    params = {
+        "fields": "auction_date,security_type,security_term,high_yield,"
+                  "offering_amt,allocation_pctage",
+        "filter": "security_type:in:(Note,Bond)",
+        "sort": "-auction_date",
+        "page[size]": 150,
+    }
+    try:
+        data = _get(FISCALDATA_AUCTIONS_URL, params=params).json()
+    except Exception:
+        return
+    def _clean(v: Any) -> Any:
+        # FiscalData 用字符串 "null" 表示空值
+        return None if v in (None, "", "null") else v
+
+    records = []
+    for r in (data.get("data") or []):
+        if (r.get("security_type") or "") not in ("Note", "Bond"):
+            continue
+        records.append({k: _clean(v) for k, v in r.items()})
+    if not records:
+        return
+
+    def _term_key(s: str) -> str:
+        # "7-Year" / "7 Year" / "7-year" → "7year"(连字符与空白都剥掉,两侧同口径)
+        return re.sub(r"[\s\-]+", "", (s or "").lower())
+
+    for row in rows:
+        name = (row.get("event") or "").lower()
+        m = re.search(r"(\d+)[\s\-]*year", name)
+        if not m:
+            continue
+        tenor_key = f"{m.group(1)}year"
+        row_date = row.get("date")  # YYYY-MM-DD(UTC 日期)
+        same_tenor = [r for r in records
+                      if _term_key(r.get("security_term", "")) == tenor_key]
+        # 本场(同日已入库则有 offering_amt)与"上一场"(严格早于本场日期的最新一场)
+        own = next((r for r in same_tenor if r.get("auction_date") == row_date), None)
+        # 上一场必须已有中标收益率(无 high_yield 的是 TIPS 增发/未结算记录,不能当对比口径)
+        prior = next((r for r in same_tenor
+                      if row_date and (r.get("auction_date") or "") < row_date
+                      and r.get("high_yield") is not None), None)
+        if not (own or prior):
+            continue
+        fd: Dict[str, Any] = {}
+        if own:
+            fd["offering_amt"] = own.get("offering_amt")
+            fd["high_yield"] = own.get("high_yield")
+        if prior:
+            fd["prior_auction_date"] = prior.get("auction_date")
+            fd["prior_high_yield"] = prior.get("high_yield")
+            if "offering_amt" not in fd:
+                fd["prior_offering_amt"] = prior.get("offering_amt")
+        row["fiscaldata"] = fd
+
+
+# 美国一线发布 → FRED series(供 Release 图与 since 断言)
+RELEASE_FRED_SERIES = {
+    "nonfarm": ("PAYEMS", "level", "Nonfarm Payrolls"),
+    "cpi": ("CPIAUCSL", "mom_pct", "CPI"),
+    "core_cpi": ("CPILFESL", "mom_pct", "Core CPI"),
+    "ppi": ("PPIFIS", "mom_pct", "PPI Final Demand"),
+    "retail": ("RSAFS", "mom_pct", "Retail Sales"),
+    "durable": ("DGORDER", "mom_pct", "Durable Goods Orders"),
+    "housing_starts": ("HOUST", "mom_pct", "Housing Starts"),
+    "jolts": ("JTSJOL", "level", "JOLTS Job Openings"),
+}
+
+
+def fetch_release_series(api_key: str, report_date: date) -> Dict[str, Any]:
+    """为一线发布拉取近 3 年月度序列 + 近 10 年同比(CNT Release 图数据底座)。"""
+    out: Dict[str, Any] = {}
+    start_3y = report_date - timedelta(days=365 * 3 + 30)
+    for key, (series, mode, label) in RELEASE_FRED_SERIES.items():
+        try:
+            obs = _fred_observations(api_key, series, report_date)
+            if not obs:
+                continue
+            # obs is newest-first
+            recent = [(d, v) for d, v in obs if d >= start_3y]
+            recent_asc = list(reversed(recent))
+            mom = []
+            for i, (d, v) in enumerate(recent_asc):
+                if mode == "level":
+                    if i == 0:
+                        continue
+                    prev = recent_asc[i - 1][1]
+                    mom.append({"date": d.isoformat(), "value": round(v - prev, 3)})
+                else:
+                    if i == 0:
+                        continue
+                    prev = recent_asc[i - 1][1]
+                    if prev:
+                        mom.append({
+                            "date": d.isoformat(),
+                            "value": round((v / prev - 1) * 100, 3),
+                        })
+            # YoY over ~10y
+            yoy = []
+            by_date = {d: v for d, v in obs}
+            for d, v in reversed(obs):
+                if d < report_date - timedelta(days=365 * 10):
+                    break
+                prior = by_date.get(date(d.year - 1, d.month, min(d.day, 28)))
+                # fallback: find closest prior year obs
+                if prior is None:
+                    candidates = [v2 for d2, v2 in obs
+                                  if d2.year == d.year - 1 and d2.month == d.month]
+                    prior = candidates[0] if candidates else None
+                if prior:
+                    yoy.append({
+                        "date": d.isoformat(),
+                        "value": round((v / prior - 1) * 100, 3),
+                    })
+            yoy = list(reversed(yoy))
+            latest = mom[-1] if mom else None
+            out[key] = {
+                "series": series,
+                "label": label,
+                "mode": mode,
+                "latest": latest,
+                "mom_3y": mom[-36:],
+                "yoy_10y": yoy[-120:],
+            }
+        except Exception as e:  # noqa: BLE001
+            out[key] = {"series": series, "label": label, "error": str(e)[:200]}
+    return out

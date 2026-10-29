@@ -1,21 +1,14 @@
 # -*- coding: utf-8 -*-
-"""章节任务书与核验任务书(CNT 风格 Daily Market Brief,v3)。
+"""章节任务书与核验任务书(CNT 风格 Daily Market Brief,v4)。
 
-v3 核心变化 —— 严格的"章节 × 信源"映射(对照用户验证过的 CNT 对应关系):
-
-    第一部分 OVERALL MARKET(narrative/drivers/positioning)
-        ⟵ 只有 The Close 摘要(节目自带数字;缺失即「不可得」)
-    第二部分 EQUITY MARKET(sector_action/movers/deep_dives)
-        ⟵ 只有 Closing Bell 摘要 + Finviz/板块结构化数据(数字锚)
-    第三部分 MACROS(macro)
-        ⟵ 只有经济日历 + macro_pillars(曲线/FRED/自算概率/拍卖/Fed日历)
-
-v2 的问题:每节都可引用全部信源 → 内容跨节重复(同一事实在 4 个章节出现)、
-任务书臃肿、且偏离"节目→报告段落"的对应假设。v3 由 prompt 约束映射、
-由核验器按 SECTION_SOURCE_MATRIX 执法(越界归因 = high)。
-
-其余 v2 机制保留: STYLE_PROFILE(en/cn)、审计注释化、三元组/since-claims/
-概率断言、MACROS 块矩阵、CNT 句式惯例。
+v4 对齐 CNT 现行版式(2026-10-12 之后):
+  - Drivers/Positioning 允许结构化数字锚(曲线/fed_odds/跨资产)
+  - Sector Action = 主题块(无板块记分牌)
+  - Deep Dives = What happened / Key numbers / Management said / Analyst reaction
+  - Macros: Releases 仅美国一线白名单; Rate Expectations/跨资产仅周五或极端行情;
+    Forward Catalysts 恒在; 拍卖并入 Forward Catalysts
+  - Macros 反应引语可引 Surveillance / The Close(唯一放开节目的章节)
+  - 数字对账由仓库内 verify_checks.py 执行; ZCode 核验只做叙事质量审查
 """
 
 from typing import Any, Dict, Optional
@@ -44,29 +37,36 @@ STYLE_PROFILES: Dict[str, Dict[str, Any]] = {
 ATTRIBUTION_MAP = {
     "(The Close)": "the_close.summary_markdown",
     "(Closing Bell)": "cnbc_closing_bell.summary_markdown",
+    "(Surveillance)": "surveillance.summary_markdown",
     "(cross-asset)": "market.cross_asset",
     "(sector averages)": "market.sp500_sector_avg",
-    "(Finviz)": "market.top_movers",
+    "(breadth)": "market.breadth",
+    "(Finviz)": "market.sp500_constituents / market.top_movers",
+    "(earnings calendar)": "earnings_calendar",
     "(economic calendar)": "economic_events",
     "(Treasury curve)": "macro_pillars.par_curve",
-    "(FRED)": "macro_pillars.fred_ranks / fred_extras",
+    "(FRED)": "macro_pillars.fred_ranks / fred_extras / release_series",
     "(fed funds futures)": "macro_pillars.fed_odds",
     "(Fed calendar)": "macro_pillars.fomc_calendar",
     "(auction calendar)": "macro_pillars.auction_events",
     "(nowcasts)": "macro_pillars.nowcasts",
 }
 
-# 严格"章节 × 信源"矩阵:每节允许出现的括号归因标签(核验执法依据)
+# 章节 × 信源矩阵(v4: Drivers/Positioning 可带数字锚; macro 可引节目反应)
 SECTION_SOURCE_MATRIX = {
-    "narrative": {"(The Close)"},
-    "drivers": {"(The Close)"},
-    "positioning": {"(The Close)"},
-    "sector_action": {"(Closing Bell)", "(sector averages)", "(Finviz)"},
-    "movers": {"(Finviz)"},          # 确定性渲染,核验只对数字
-    "deep_dives": {"(Closing Bell)", "(Finviz)"},
+    "narrative": {"(The Close)", "(cross-asset)"},
+    "drivers": {"(The Close)", "(cross-asset)", "(Treasury curve)",
+                "(fed funds futures)", "(FRED)", "(breadth)"},
+    "positioning": {"(The Close)", "(cross-asset)", "(breadth)",
+                    "(Treasury curve)", "(fed funds futures)", "(Finviz)"},
+    "sector_action": {"(Closing Bell)", "(sector averages)", "(Finviz)",
+                      "(breadth)", "(earnings calendar)"},
+    "movers": {"(Finviz)", "(earnings calendar)"},
+    "deep_dives": {"(Closing Bell)", "(Finviz)", "(earnings calendar)"},
     "macro": {"(economic calendar)", "(Treasury curve)", "(FRED)",
               "(fed funds futures)", "(Fed calendar)", "(auction calendar)",
-              "(nowcasts)"},
+              "(nowcasts)", "(Surveillance)", "(The Close)",
+              "(earnings calendar)"},
 }
 
 
@@ -87,11 +87,10 @@ def _common_rules(style: str, allowed_tags: Optional[set] = None) -> str:
         tags = ", ".join(sorted(allowed_tags)) or "(none)"
         tag_line = f"""
    SOURCE RESTRICTION for THIS section: the ONLY permitted attribution tags are
-   {tags}. Content, quotes, numbers and companies come ONLY from the snapshot
-   sources those tags map to; other sources in the snapshot are OFF-LIMITS for
-   this section (verification fails on any violation). If your assigned source
-   lacks a number or fact you want to state, mark it {p['missing_mark']} — do not
-   borrow from another source.
+   {tags}. Narrative/quotes come from show digests when tagged with a show tag;
+   numbers may be anchored to structured sources listed above. If your assigned
+   source lacks a number or fact you want to state, mark it {p['missing_mark']}
+   — do not borrow from a source outside this whitelist.
 """
     return f"""\
 You are one section-writer inside a scheduled report pipeline. You are writing ONE
@@ -100,11 +99,11 @@ section of a "Daily market brief" in the style of a professional financial newsl
 daily brief: dense bullets, bold lead-ins, parenthetical source attributions).
 
 HARD RULES (violating any of these fails pipeline verification):
-1. The ONLY data source is the attached snapshot.json (a frozen data snapshot).
-   Do NOT invent numbers. Do NOT fetch anything from the internet.
-2. Every number you state must exist in snapshot.json. If the snapshot lacks a
-   number you would like to state, either omit the sentence or mark the gap
-   explicitly as {p['missing_mark']}.
+1. The ONLY data source is the attached snapshot.json (a frozen data snapshot)
+   plus any transcript files attached for this agent. Do NOT invent numbers.
+   Do NOT fetch anything from the internet.
+2. Every number you state must exist in snapshot.json (or the attached transcript
+   when quoting). If absent, omit the sentence or mark {p['missing_mark']}.
 3. Write the section to the exact output file specified below, as Markdown.
    Do not create any other files.
 {_style_rules(style)}
@@ -137,18 +136,12 @@ HARD RULES (violating any of these fails pipeline verification):
      "since" assertion yourself.
    - No vague quantifiers ("sharply", "significantly") without a number.
    - Quotes need name + affiliation, verbatim from your assigned source; never
-     construct a quote that is not in the snapshot.
+     construct a quote that is not in the snapshot or attached transcript.
 10. End the file with a line containing only: <!-- SECTION DONE -->
 """
 
 
 # ── 章节任务书 ─────────────────────────────────────────────────────────
-#
-# 执行分组: narrative + drivers 由同一个 agent 一次分析、两个文件分别导出
-# ("overall_market" 组)。理由: 两节读同一份 The Close 摘要,拆成两个 agent
-# 互相看不到对方输出,"速览不带数字/深挖带数字"的分工只能靠各自自觉,主题与
-# 数字必然重复;合并后同一上下文里天然知道哪些数字已放进 drivers,narrative
-# 才可能真正做成无重复的速览层。文件契约不变(01/02 两个文件)、核验矩阵不变。
 
 OVERALL_MARKET_TASK = """\
 ## Part 1 — Today's Narrative + Top Market Drivers (one analysis, two files)
@@ -163,6 +156,8 @@ Write "## Today's Narrative" with EXACTLY 3-4 bullets. Rules:
 - Each bullet is ONE short sentence: bold lead-in naming ONE dominant story
   from The Close, plus at most ONE number (an index move or the single most
   salient figure — and prefer numbers you did NOT use in the drivers file).
+- Index / cross-asset levels may be tagged (cross-asset) when taken from
+  market.cross_asset.
 - No detailed figures, unit economics, multi-number lists, or quotes here —
   analytical depth belongs to Top Market Drivers. A narrative bullet that
   reads like a drivers bullet is a failure.
@@ -185,13 +180,14 @@ combined picture of BOTH files.
 
 ### File B — sections/02_drivers.md  (ANALYSIS layer)
 
-Write "## Top Market Drivers" with up to 5 driver blocks derived ONLY from
-The Close (its 市场主线/市场驱动因素/核心分歧 segments). This is where the
-day's stories get mechanism, transmission logic, full number reference
-frames, and quotes. Each block:
+Write "## Top Market Drivers" with up to 5 driver blocks derived from The Close
+(its Main Narrative / Top Market Drivers / Cross-Asset segments), with structured
+numbers as anchors when the digest states a level or move that also appears in
+the snapshot. Each block:
 - A bold lead-in headline (one clause, e.g. **A soft print could not hold the long end.**)
-- 2-5 factual bullets with numbers as stated in The Close, each tagged
-  (The Close) and carrying an audit comment.
+- 2-5 factual bullets with numbers as stated in The Close and/or matching
+  snapshot fields (par_curve change_bp, next_fomc_odds, cross_asset, breadth),
+  each tagged with the appropriate attribution and carrying an audit comment.
 - A final one-line takeaway, exactly: **Take:** <one sentence> — the actionable
   reading of the block (unlabeled interpretation is allowed ONLY on this line;
   everywhere else interpretation needs the read prefix).
@@ -200,39 +196,40 @@ Do not exceed 5 blocks; pick the ones The Close actually supports.
 BOTH files end with the <!-- SECTION DONE --> marker on their own last line.
 """
 
-NARRATIVE_TASK = None   # 并入 OVERALL_MARKET_TASK(由 overall_market 组执行)
-DRIVERS_TASK = None     # 同上
+NARRATIVE_TASK = None
+DRIVERS_TASK = None
 
 POSITIONING_TASK = """\
 ## Section 3 — Positioning / Flow
 
 Write "## Positioning / Flow" with three labeled items, in this order (skip any
 whose material is genuinely absent, marking it {missing_mark} in one short line
-instead). Material comes ONLY from the_close.positioning_material — the bundle
-of the digest's 跨资产信号/核心分歧/分歧解决框架/关键嘉宾语录/投资组合启示
-segments:
+instead). Narrative material comes from the_close.positioning_material — the
+bundle of Cross-Asset Signals / Key Disagreements / Resolution Framework /
+Time Horizons / PM Takeaway segments. Structured numbers (breadth, curve,
+fed_odds, Finviz) may anchor Primary/Secondary when they corroborate the digest:
 - **Primary positioning:** the dominant positioning theme of the day (rates,
-  equity beta, duration) with the digest's prescribed response.
+  equity beta, duration, rotation) with the digest's prescribed response.
 - **Secondary positioning:** a second flow/positioning thread (credit, gold,
   FX, sector rotation, buybacks, ETF flows).
 - **Guest positioning:** the most decision-relevant strategist/guest call —
   name + firm + the call, verbatim where possible.
-Rules: every claim tagged (The Close); numbers only as stated in the digest.
+Rules: show claims tagged (The Close); structured numbers use their own tags.
 """
 
 SECTOR_ACTION_TASK = """\
 ## Section 4 — Sector Action
 
-Write "## Sector Action" as:
-1. **Sector scorecard** — from market.sp500_sector_avg: best and worst sectors
-   with average moves; name 2-3 standout tickers per side from market.top_movers
-   with their numbers.
-2. **Thematic blocks** — 2-4 blocks synthesized ONLY from the Closing Bell
-   digest (an earnings story, a policy story, a disruption story), each with a
-   bold lead-in, 2-4 bullets tagged (Closing Bell).
-Every ticker mentioned must come from top_movers or the Closing Bell digest.
-Interpretive sentences need the read prefix unless they are the block's
-one-line takeaway. The overall index/tape recap is NOT part of this section
+Write "## Sector Action" as 4–7 thematic blocks (NO sector scorecard / league
+table). Synthesize from the Closing Bell digest; use market.sp500_constituents /
+top_movers / breadth / earnings_calendar only as number anchors for named tickers.
+Each block:
+- A bold lead-in naming the theme (e.g. **Funding, not demand, sank AI hardware.**)
+- 2–4 bullets with company moves and catalysts, tagged (Closing Bell) and/or
+  (Finviz)/(earnings calendar) for numbers.
+- Optional one-line takeaway unlabeled.
+Every ticker mentioned must appear in Closing Bell, sp500_constituents, or
+top_movers. The overall index/tape recap is NOT part of this section
 (it lives in Today's Narrative).
 """
 
@@ -242,116 +239,147 @@ DEEP_DIVES_TASK = """\
 ## Section 6 — Company Deep Dives
 
 Write "## Company Deep Dives". Pick the 3-5 companies most prominently discussed
-in the Closing Bell digest (tie-break: appearance in market.top_movers). For
-each company write a subsection headed by its ticker:
+in the Closing Bell digest (tie-break: appearance in market.top_movers /
+sp500_constituents / earnings_calendar.today / earnings_calendar.prior_after_close;
+the earnings calendar is pre-filtered to US large caps, fields: code, session,
+eps_actual, eps_estimate, eps_surprise_pct). For each company write a
+subsection headed by its ticker:
 
 ### $TICKER — Company Name
 
 - **What happened:** the event/coverage as told by Closing Bell, with the price
-  move if in top_movers.
-- **Key numbers:** only numbers present in the Closing Bell digest or
-  top_movers (with attribution tags and audit comments); if none, write
+  move if in the snapshot.
+- **Key numbers:** only numbers present in Closing Bell, earnings_calendar, or
+  Finviz fields (with attribution tags and audit comments); if none, write
   {missing_mark}.
 - **Management said:** a verbatim quote from an executive, ONLY if a direct
-  quote exists in the Closing Bell digest (name + title + the quote). If no
-  direct quote exists, OMIT this line entirely — do not paraphrase into a quote
-  and do not write the label with nothing under it.
-- **Analyst reaction:** analyst/strategist reactions ONLY if present in the
-  Closing Bell digest (name + firm + view). Same omission rule as above.
-- **Bull case / Bear case:** each side must cite its basis in the digest;
-  omit the missing side rather than inventing it.
-- One synthesis line prefixed with the read prefix.
+  quote exists in Closing Bell or the attached transcript (name + title + the
+  quote). If no direct quote exists, OMIT this line entirely — do not paraphrase
+  into a quote and do not write the label with nothing under it.
+- **Analyst reaction:** analyst/strategist reactions ONLY if present in Closing
+  Bell or the attached transcript (name + firm + view). Same omission rule.
 
+Do NOT write Bull case / Bear case labels. Do NOT write a Read: synthesis line.
 STRICT: do not add companies not discussed by Closing Bell; do not fabricate
 estimates, EPS, guidance numbers, or quotes; do not pull material from The Close.
 """
 
 
 def _macro_task(blocks: Dict[str, Any]) -> str:
-    """MACROS 任务书按块矩阵动态拼装 —— 内容源只有结构化数据(经济日历 +
-    macro_pillars),不复刻 CNT "不是每期一致" 的伸缩,且不含节目内容。
+    """MACROS 任务书按块矩阵动态拼装(CNT 现行版式 2026-10-12+)。
 
     blocks 由编排器从快照确定性判定:
-      releases   当日 recent 有含 actual 的事件 → 写 Releases 块
-      auction    拍卖事件存在(今日有结果或未来有拍卖)→ 写拍卖块
-      fomc       FOMC 在 recent/upcoming 窗口内 → 写 Fed 块
-      rate_expectations  恒 True(fed_odds 可用)→ Rate Expectations 块
-      forward    恒 True → Forward Catalysts 块
+      releases            T 日美国一线白名单事件(最多 2 个)
+      rate_expectations   周五或极端行情
+      cross_asset_review  同 rate_expectations
+      forward             恒 True
+      selected_releases   选中的事件列表(供任务书点名)
     """
     parts = ["""\
 ## Section 7 — Macros
 
 Write "## Macros" with the blocks below, in the order given. A block listed as
 OFF must NOT appear in your output at all (its absence is correct house style:
-the Macros section flexes with the calendar). This section uses ONLY structured
-data (economic calendar + macro pillars) — never the show digests."""]
+the Macros section flexes with the calendar).
 
-    if blocks.get("releases"):
-        parts.append("""\
+Numbers and calendar facts come from economic_events + macro_pillars +
+earnings_calendar. Calendar `time`/`date` are UTC — ALWAYS quote times from the
+`time_et` field (US Eastern; use `date_et` when present), never the raw `time`.
+Rows with the same event name but a different `comparison` (mom / yoy / level)
+are different measures — do not mix their actual/est/prior. Sell-side / guest reaction quotes for Releases and Rate
+Expectations may come from Surveillance and/or The Close digests (and their
+attached transcripts) — tag them (Surveillance) or (The Close)."""]
+
+    selected = blocks.get("selected_releases") or []
+    if blocks.get("releases") and selected:
+        def _fmt(e: Dict[str, Any]) -> str:
+            cmp_ = f" [{e['comparison']}]" if e.get("comparison") else ""
+            when = f" @ {e['time_et']} ET" if e.get("time_et") else ""
+            s = (f"{e.get('event', '?')}{cmp_}{when} (actual={e.get('actual')}, "
+                 f"est={e.get('forecast')}, prior={e.get('previous')})")
+            rel = e.get("related") or []
+            if rel:
+                s += " + related rows: " + ", ".join(
+                    f"{r.get('event')}[{r.get('comparison') or 'level'}]"
+                    f"={r.get('actual')}" for r in rel)
+            return s
+        names = "; ".join(_fmt(e) for e in selected)
+        parts.append(f"""\
 
 ### Releases (ON)
-From economic_events.recent, for each major release that HAS an actual value,
-one block:
-- **Headline line:** event name — actual vs forecast vs previous, house style
-  `+29K (est: +90K, prior: +162K)`. Add revision/subread detail ONLY if the
-  calendar carries it.
-- At most 1-2 bullets of factual context from the calendar fields (subreads,
-  related series). Data fields with no actual value are marked {missing_mark},
-  never filled with substitutes.""")
+Write "#### Releases" then one "#### <Event Name>" subsection for EACH of these
+selected events ONLY (max 2; do not invent others): {names}
+
+For each event:
+- **Headline line:** house style `**+29K** (est: +90K, prior: +162K → +133K rev)`
+  using economic_events fields (and prior revision only if present in snapshot).
+- 4–6 detail bullets: subreads / components / revisions / "highest since" ONLY
+  when backed by macro_pillars.fred_ranks.*.claim or release_series. Tag
+  (economic calendar) / (FRED).
+- 2–4 **Sell-Side Reaction** bullets: named economist + firm + view, ONLY if
+  present in Surveillance or The Close (tag accordingly). If no quote exists,
+  omit the reaction bullets rather than inventing them.""")
     else:
         parts.append("""\
 
 ### Releases (OFF)
-No recent event in the snapshot carries an actual value — do NOT write a
+No T-day US tier-1 release with an actual is in the snapshot — do NOT write a
 Releases block at all today.""")
 
-    if blocks.get("auction"):
-        parts.append("""\
-
-### Treasury Auctions (ON)
-From macro_pillars.auction_events (economic calendar rows):
-- For TODAY's auctions with results: the security, size if present, the
-  actual (stop yield) vs previous — house style `5.033% (prior: 4.393%)`.
-- For UPCOMING auctions within the forward window: date, security, the level
-  context (e.g. where the tenor closed today, from macro_pillars.par_curve) —
-  house style "the 20-year closed at 5.47%, 5bp above September's 5.420% stop"
-  only when both numbers exist in the snapshot.""")
-    if blocks.get("fomc"):
-        parts.append("""\
-
-### Fed block (ON)
-Cover the FOMC-relevant material the structured sources support: decision/
-dots/minutes items in economic_events, the next meeting from
-macro_pillars.fomc_calendar, and the rate-expectations headline below. If the
-Fed event is in `recent` (with actual), lead with it; if it is upcoming, frame
-it as forward catalyst context only.""")
     if blocks.get("rate_expectations"):
         parts.append("""\
 
-### Rate Expectations (ON — always present when fed_odds is in the snapshot)
-Headline from macro_pillars.next_fomc_odds: odds of a hike at the next
-meeting, with the prior comparison ONLY if sources.prior_odds exists —
-house style `Hike Odds ~20% (prior: ~24%)`. Add 1-3 supporting bullets from
-macro_pillars.fed_odds.contracts (cum bp priced through following meetings)
-and curve moves (par_curve change_bp). Attribution tag: (fed funds futures).
+### Rate Expectations (ON — Friday or extreme move day)
+Write "#### Rate Expectations · <next FOMC>" with:
+- Headline from macro_pillars.next_fomc_odds: odds of a hike at the next
+  meeting, with the prior comparison ONLY if sources.prior_odds exists —
+  house style `Hike Odds ~20% (prior: ~24%)`.
+- 1–4 supporting bullets from fed_odds.contracts (cum bp) and par_curve
+  change_bp. Attribution: (fed funds futures) / (Treasury curve).
+- Optional guest reaction bullets from Surveillance / The Close.
 Do NOT invent a prior if sources.prior_odds is absent.""")
+    else:
+        parts.append("""\
+
+### Rate Expectations (OFF)
+Not Friday and no extreme odds/yield move — do NOT write a Rate Expectations
+block. Fold any needed odds into Forward Catalysts' FOMC line instead.""")
+
+    if blocks.get("cross_asset_review"):
+        parts.append("""\
+
+### Treasuries / Cross-Asset review (ON — Friday or extreme move day)
+Write one or two short subsections (e.g. "#### Treasuries and oil" /
+"#### Equities and credit") covering curve moves, oil if in cross_asset,
+breadth, HY/IG OAS from fred_extras, using only snapshot numbers. Guest
+quotes optional from Surveillance / The Close.""")
+    else:
+        parts.append("""\
+
+### Treasuries / Cross-Asset review (OFF)
+Do NOT write a Treasuries or Cross-Asset review subsection today.""")
+
     parts.append("""\
 
 ### Forward Catalysts (ON — always present)
-From economic_events.upcoming plus macro_pillars.fomc_calendar and
-macro_pillars.auction_events.upcoming: a date-grouped list covering the next
-~7 days. Each line: date — event — time if present — forecast vs previous
-when both exist — one short relevance note ONLY for the biggest items.
-US impact-3 events first; compress impact-2 lines; keep non-US to the
-notable few. Attribution: (economic calendar) / (Fed calendar) /
-(auction calendar). Add nowcast lines ONLY from macro_pillars.nowcasts.""")
+Write "#### Forward Catalysts" as a date-grouped list covering the next ~7–10
+days from economic_events.upcoming, macro_pillars.fomc_calendar,
+macro_pillars.auction_events.upcoming, and earnings_calendar.upcoming.
+Each line: date — event — time if present — forecast vs previous when both
+exist. For Treasury auctions include size / prior stop / today's tenor close
+when present in auction_events or par_curve. For earnings include ticker and
+before/after market when present. US impact-3 first; compress impact-2;
+notable non-US / central-bank / geopolitical items only when in the snapshot.
+Attribution: (economic calendar) / (Fed calendar) / (auction calendar) /
+(earnings calendar). Add nowcast lines ONLY from macro_pillars.nowcasts.
+If next_fomc_odds exists, include a FOMC line with odds and prior when available.""")
     return "\n".join(parts)
 
 
 SECTION_SPECS: Dict[str, Dict[str, Any]] = {
     "narrative": {
         "output_file": "sections/01_narrative.md",
-        "agent": "overall_market",   # 与 drivers 同一 agent 一次产出(防重复)
+        "agent": "overall_market",
         "task": NARRATIVE_TASK,
     },
     "drivers": {
@@ -369,7 +397,7 @@ SECTION_SPECS: Dict[str, Dict[str, Any]] = {
     },
     "movers": {
         "output_file": "sections/05_movers.md",
-        "mode": "deterministic",  # 编排器渲染,无 LLM
+        "mode": "deterministic",
     },
     "deep_dives": {
         "output_file": "sections/06_deep_dives.md",
@@ -377,18 +405,25 @@ SECTION_SPECS: Dict[str, Dict[str, Any]] = {
     },
     "macro": {
         "output_file": "sections/07_macro.md",
-        "task": None,  # 由 _macro_task(blocks) 动态生成
+        "task": None,
     },
 }
 
 SECTION_ORDER = ["narrative", "drivers", "positioning", "sector_action",
                  "movers", "deep_dives", "macro"]
 
-# agent 执行顺序(narrative+drivers 合并为 overall_market 一次调用)
 AGENT_ORDER = ["overall_market", "positioning", "sector_action", "movers",
                "deep_dives", "macro"]
 
-# fake 模式占位文案(结构上必须过 lint:narrative 带 HEADLINE_CANDIDATES)
+# Agent → optional transcript attach keys (relative to workspace transcripts/)
+AGENT_TRANSCRIPT_KEYS = {
+    "overall_market": ["the_close"],
+    "positioning": ["the_close"],
+    "sector_action": ["cnbc_closing_bell"],
+    "deep_dives": ["cnbc_closing_bell"],
+    "macro": ["surveillance", "the_close"],
+}
+
 _FAKE_SECTIONS = {
     "narrative": (
         "## Today's Narrative\n"
@@ -411,7 +446,7 @@ _FAKE_SECTIONS = {
     ),
     "sector_action": (
         "## Sector Action\n"
-        "- Placeholder sector action (fake mode). "
+        "- **Placeholder theme.** Placeholder sector action (fake mode). "
         "<!-- audit: [show cnbc_closing_bell] -->\n"
     ),
     "deep_dives": (
@@ -419,12 +454,10 @@ _FAKE_SECTIONS = {
         "### $FAKE — Placeholder Corp\n"
         "- **What happened:** placeholder (fake mode). "
         "<!-- audit: [show cnbc_closing_bell] -->\n"
+        "- **Key numbers:** (not in snapshot).\n"
     ),
     "macro": (
         "## Macros\n"
-        "### Rate Expectations\n"
-        "- Placeholder rate expectations (fake mode). "
-        "<!-- audit: [data macro_pillars.fed_odds] -->\n"
         "### Forward Catalysts\n"
         "- Placeholder catalyst (fake mode). "
         "<!-- audit: [data economic_events.upcoming] -->\n"
@@ -434,7 +467,15 @@ _FAKE_SECTIONS = {
 
 def fake_section_text(name: str, corrected: bool = False,
                       spx_move: str = "+9.99%") -> str:
-    return _FAKE_SECTIONS[name]
+    text = _FAKE_SECTIONS[name]
+    if corrected and name == "drivers":
+        return (
+            "## Top Market Drivers\n"
+            "- **Placeholder driver.** Placeholder fact aligned with snapshot "
+            "(fake mode corrected). <!-- audit: [show the_close] -->\n"
+            "- **Take:** placeholder take (fake mode).\n"
+        )
+    return text
 
 
 def build_section_prompt(spec: dict, style: str = "en",
@@ -442,7 +483,7 @@ def build_section_prompt(spec: dict, style: str = "en",
     if spec.get("mode") == "deterministic":
         raise ValueError("deterministic sections have no prompt")
     task = spec["task"]
-    if task is None:  # 组执行章节(narrative/drivers)或 macro 动态任务书
+    if task is None:
         raise ValueError("section has no standalone task — use build_agent_prompt")
     if spec is SECTION_SPECS["macro"]:
         task = _macro_task(blocks or {})
@@ -482,82 +523,44 @@ def build_agent_prompt(agent: str, style: str = "en",
         allowed |= SECTION_SOURCE_MATRIX.get(n, set())
     p = STYLE_PROFILES[style]
     task = task.replace("{missing_mark}", p["missing_mark"])
-    return (f"{_common_rules(style, allowed_tags=allowed or None)}\n{task}\n\n"
-            f"{out_line}\n")
+    transcript_note = ""
+    keys = AGENT_TRANSCRIPT_KEYS.get(agent) or []
+    if keys:
+        files = ", ".join(f"transcripts/{k}.txt" for k in keys)
+        transcript_note = (
+            f"\nIf present, also read attached transcript file(s): {files}. "
+            "Prefer verbatim English quotes from the transcript over the Chinese "
+            "digest paraphrase.\n"
+        )
+    return (f"{_common_rules(style, allowed_tags=allowed or None)}\n{task}\n"
+            f"{transcript_note}\n{out_line}\n")
 
 
-# ── 核验任务书 ─────────────────────────────────────────────────────────
+# ── 核验任务书(叙事质量;数字对账由编排器跑 verify_checks.py) ──────────
 
 def build_verifier_prompt(style: str = "en") -> str:
     p = STYLE_PROFILES[style]
-    attrib_list = "\n   ".join(f"{k} → {v}" for k, v in ATTRIBUTION_MAP.items())
-    matrix_lines = "\n   ".join(
-        f"{sec}: {', '.join(sorted(tags)) or '(none)'}"
-        for sec, tags in SECTION_SOURCE_MATRIX.items())
     return f"""\
-You are the verification agent of a scheduled report pipeline. You have Bash.
-Your job has two layers:
+You are the narrative-quality verification agent of a scheduled report pipeline.
+A deterministic audit script (verify/check_results.json) has ALREADY been run by
+the orchestrator against snapshot.json. Read that file first.
 
-LAYER 1 — Deterministic audit (primary). Read every file in sections/*.md and
-snapshot.json, then write verify/check.py and RUN it (python3 verify/check.py).
-check.py must implement ALL of the following and print a JSON array:
-[{{"section","claim","snapshot_value","match": true|false,"severity"}}]
-
-1. NUMBER AUDIT — extract numeric claims (percentages, prices, levels, counts,
-   bp) and check each against snapshot.json. Tolerance: 0.05 absolute or 0.1
-   relative, whichever is larger. Untraceable hard numbers = high.
-2. TRIPLE AUDIT — every "actual (est: X, prior: Y)" shape must match the
-   economic_events / macro_pillars fields exactly. Mismatched triple = high.
-3. SINCE-CLAIM AUDIT — every "highest/lowest since <date>" in the text must
-   equal a macro_pillars.fred_ranks.*.claim (or be derived verbatim from it).
-   A since-claim not backed by fred_ranks = high.
-4. ODDS AUDIT — hike-odds percentages must match macro_pillars.next_fomc_odds
-   / fed_odds within ±2 percentage points; a "(prior: ...)" must match
-   sources.prior_odds if present, and must NOT exist if prior_odds is absent
-   (fabricated prior = high).
-5. ATTRIBUTION + SOURCE-MATRIX AUDIT — every parenthetical source tag in the
-   prose must be one of the house tags AND must be permitted for that section
-   by the source matrix (violation = high — this is the核心纪律: each section
-   draws only from its assigned source):
-   {matrix_lines}
-   Additionally a tag must point at a NON-EMPTY snapshot source:
-   {attrib_list}
-   A tag pointing at an empty/missing source = high. An unrecognized tag = medium.
-6. AUDIT-COMMENT AUDIT — `<!-- audit: [data ...] -->` must reference keys that
-   exist in the snapshot's structured parts AND be permitted for that section
-   by the matrix; `<!-- audit: [show ...] -->` must reference the_close /
-   cnbc_closing_bell as allowed by the matrix. Wrong layer or wrong section
-   = high. Factual bullets missing an audit comment = medium.
-7. 不可得 AUDIT — every {p['missing_mark']} must correspond to a real gap in
-   that section's assigned source; a fake one used to dodge available assigned-
-   source data = high. A section writing about a source flagged in
-   snapshot.errors (when that source is in its matrix) without the mark = medium.
-8. STRUCTURE LINT — (a) each section file starts with its exact heading
-   (## Today's Narrative / ## Top Market Drivers / ## Positioning / Flow /
-   ## Sector Action / ## Company Deep Dives / ## Macros); (b) narrative file
-   contains a <!-- HEADLINE_CANDIDATES ... --> block with >=1 quoted line;
-   (c) every drivers block ends with a **Take:** line; (d) deep dives use the
-   template where present fields are exactly What happened / Key numbers /
-   Management said / Analyst reaction / Bull case / Bear case —
-   "Management said"/"Analyst reaction" may be absent entirely but must never
-   be present with paraphrase-as-quote; (e) sections/05_movers.md was rendered
-   deterministically — only check its numbers against market.top_movers;
-   (f) the Macros file must contain exactly the blocks the snapshot supports:
-   Releases only if some recent event has an actual, auctions only if
-   macro_pillars.auction_events has entries, Rate Expectations only if
-   macro_pillars.fed_odds exists, Forward Catalysts always. Violations = medium
-   (structural) or high (missing Forward Catalysts).
-9. CAUSAL DISCIPLINE — an unlabeled causal conclusion resting on a single show
-   tag with no second anchor = medium.
-
-LAYER 2 — Narrative quality review ({p['quality_review_language']}):
+Your job is ONLY Layer 2 — narrative quality review
+({p['quality_review_language']}):
 - Contradictions between sections or between a section and the data.
 - Unsupported causal claims presented as facts.
 - House-style violations that matter: vague quantifiers without numbers,
   constructed quotes, yield moves stated in % instead of bp.
+- Deep Dives must NOT contain Bull case / Bear case labels or a Read: line.
+- Macros must not invent Releases / Rate Expectations blocks that the
+  deterministic audit already flagged as structural violations.
 - Missing sections, empty files, missing <!-- SECTION DONE --> markers.
-high-severity narrative problems (fabricated facts, wrong direction of a move)
+High-severity narrative problems (fabricated facts, wrong direction of a move)
 fail the verdict.
+
+Merge: if verify/check_results.json contains any high-severity mismatch
+(match=false), the overall verdict MUST be "fail" and those issues must appear
+in issues[]. You may add additional narrative issues.
 
 OUTPUT CONTRACT — write verify/verdict.json (this file is what the orchestrator
 reads; your chat reply is ignored):
@@ -574,11 +577,11 @@ reads; your chat reply is ignored):
   "quality_notes": ["..."]
 }}
 Rules: an empty issues array with verdict "pass" is valid. Do not modify
-sections/, and do NOT touch state.json — the orchestrator owns it. Keep
-check.py on disk for the audit trail.
+sections/, and do NOT touch state.json — the orchestrator owns it. Do NOT
+rewrite verify/check.py.
 
-Your task now: verify sections/*.md in this working directory against
-snapshot.json, then write verify/verdict.json.
+Your task now: read verify/check_results.json and sections/*.md, then write
+verify/verdict.json.
 
 Output file: verify/verdict.json
 """

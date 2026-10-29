@@ -10,6 +10,7 @@
 import requests
 import json
 import os
+import re
 import time
 from datetime import datetime, timedelta
 from backend.utils.datetime_utils import utcnow
@@ -171,6 +172,11 @@ EVENT_CATEGORIES: list = [
     {'slug': 'holiday', 'name': 'Holidays'},
     {'slug': 'other', 'name': 'Other'},
 ]
+
+
+def _scrub_token(err: Any) -> str:
+    """异常信息里 requests 会带完整 URL(含 api_token=...),日志/抛出前脱敏。"""
+    return re.sub(r'(api_token=)[^&\s\)\'"]+', r'\1***', str(err))
 
 
 def calculate_event_impact(event_name: str) -> int:
@@ -560,7 +566,9 @@ class EconomicEventsService:
         # 打印完整的EODHD API请求信息
         info(f"EODHD API请求详情:", source="economic_events")
         info(f"  URL: {url}", source="economic_events")
-        info(f"  参数: {json.dumps(params, indent=2, ensure_ascii=False)}", source="economic_events")
+        # 日志中屏蔽 api_token,避免密钥落入日志/终端
+        safe_params = {k: ('***' if k == 'api_token' else v) for k, v in params.items()}
+        info(f"  参数: {json.dumps(safe_params, indent=2, ensure_ascii=False)}", source="economic_events")
         
         for attempt in range(max_retries):
             try:
@@ -571,7 +579,7 @@ class EconomicEventsService:
                 return response.json()
                 
             except requests.exceptions.SSLError as e:
-                warning(f"SSL错误 (第{attempt + 1}次): {e}", source="economic_events")
+                warning(f"SSL错误 (第{attempt + 1}次): {_scrub_token(e)}", source="economic_events")
                 if attempt < max_retries - 1:
                     # 重新创建session以解决SSL连接问题
                     session.close()
@@ -588,7 +596,7 @@ class EconomicEventsService:
                     error(f"🚨 EODHD 配额耗尽 (402): {url[:120]}", source="economic_events")
                     trip_quota_breaker()
                     raise EODHDQuotaExhausted()
-                warning(f"请求错误 (第{attempt + 1}次): {e}", source="economic_events")
+                warning(f"请求错误 (第{attempt + 1}次): {_scrub_token(e)}", source="economic_events")
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)  # 指数退避
                 else:
@@ -667,8 +675,8 @@ class EconomicEventsService:
                 return []
                 
         except Exception as e:
-            error(f"获取经济事件数据失败: {str(e)}", source="economic_events")
-            raise Exception(f"获取经济事件数据失败: {str(e)}")
+            error(f"获取经济事件数据失败: {_scrub_token(e)}", source="economic_events")
+            raise Exception(f"获取经济事件数据失败: {_scrub_token(e)}")
 
     def get_economic_events_chunked(
         self,
