@@ -30,6 +30,9 @@ INDEX_MAP = {
     "Nasdaq Composite Index": ("IXIC.INDX", "index", "us_equity"),
     "PHLX Semiconductor Index": ("SOX.INDX", "index", "us_equity"),
     "Dow Jones": ("DIA.US", "index", "us_equity"),
+    # 道指指数本体(区别于上面的 DIA ETF):S&P DJI 授权限制 EODHD 不提供,
+    # 走 YAHOO_CHART_CODES 路由(与 Russell/FTSE 同模式)
+    "Dow Jones Industrial Average Index": ("DJI.INDX", "index", "us_equity"),
     "STOXX 50": ("FEZ.US", "index", "eu_equity"),
     "DAX (Germany)": ("EWG.US", "index", "eu_equity"),
     "DAX Index": ("GDAXI.INDX", "index", "eu_equity"),
@@ -53,6 +56,7 @@ INDEX_MAP = {
 YAHOO_CHART_CODES = {
     "RUT.INDX": "^RUT",       # Russell 2000 Index
     "FTSE.INDX": "^FTSE",     # FTSE 100 Index
+    "DJI.INDX": "^DJI",       # Dow Jones Industrial Average (S&P DJI IP,EODHD 无授权)
     "GC1.COMMODITY": "GC=F",  # Gold front-month continuous (COMEX)
     "CL1.COMMODITY": "CL=F",  # WTI Crude front-month continuous (NYMEX)
     "BZ1.COMMODITY": "BZ=F",  # Brent Crude front-month continuous (NYMEX)

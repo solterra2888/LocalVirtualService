@@ -16,6 +16,7 @@ US_CASH_INDEX_CODES = frozenset({
     "NDX.INDX",
     "SOX.INDX",
     "RUT.INDX",
+    "DJI.INDX",
 })
 
 # 温度卡片里的外汇。官方日线经常晚于实时价发布，允许用实时价补一根未完成 K 线。
