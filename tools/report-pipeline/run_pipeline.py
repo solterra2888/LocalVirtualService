@@ -39,15 +39,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from prompts import (  # noqa: E402
     AGENT_ORDER,
-    AGENT_TRANSCRIPT_KEYS,
     SECTION_ORDER,
     SECTION_SPECS,
     agent_section_names,
     build_agent_prompt,
+    build_light_verifier_prompt,
     build_verifier_prompt,
     fake_section_text,
 )
-from verify_checks import run_checks  # noqa: E402
+from verify_checks import claims_path, run_checks  # noqa: E402
 
 DEFAULT_ZCODE_BIN = "/root/.zcode/server/bin/zcode"
 DEFAULT_TIMEOUT_SEC = 900
@@ -110,7 +110,7 @@ def run_agent(
     zcode_bin: str,
     ws: Path,
     prompt: str,
-    snapshot: Path,
+    snapshot: Optional[Path],
     timeout: int,
     resume_session: Optional[str] = None,
     extra_attachments: Optional[List[Path]] = None,
@@ -122,8 +122,9 @@ def run_agent(
     产物有效性以文件为准,不以进程退出为准。
     """
     cmd = [zcode_bin, "-p", prompt, "--json", "--mode", "yolo",
-           "--surface", "terminal", "--cwd", str(ws),
-           "--attach", str(snapshot)]
+           "--surface", "terminal", "--cwd", str(ws)]
+    if snapshot is not None:  # 轻量核验不挂快照
+        cmd += ["--attach", str(snapshot)]
     for p in extra_attachments or []:
         if p.exists():
             cmd += ["--attach", str(p)]
@@ -137,20 +138,18 @@ def run_agent(
     return _parse_zcode_json(proc.stdout)
 
 
-def _agent_transcript_paths(ws: Path, agent: str) -> List[Path]:
-    """按 agent 挂载对应英文转录(快照阶段写入 transcripts/)。"""
-    keys = AGENT_TRANSCRIPT_KEYS.get(agent) or []
-    return [ws / "transcripts" / f"{k}.txt" for k in keys]
-
-
 # ── fake mode(无 ZCode 时测试状态机/门控/重试) ────────────────────────
 
 def _fake_section(ws: Path, name: str, corrected: bool = False,
-                  blocks: Optional[Dict[str, Any]] = None) -> None:
+                  blocks: Optional[Dict[str, Any]] = None,
+                  style: str = "en") -> None:
     """占位章节:故意让 drivers 含一个与快照矛盾的数字,供核验流程抓出来。"""
     f = ws / SECTION_SPECS[name]["output_file"]
     f.parent.mkdir(parents=True, exist_ok=True)
     text = fake_section_text(name, corrected=corrected)
+    if style == "cn":
+        text = text.replace("Placeholder headline clause. Other clause.",
+                            "占位标题一。占位标题二。")
     if name == "macro" and blocks:
         parts = ["## Macros\n"]
         if blocks.get("releases"):
@@ -179,26 +178,10 @@ def _fake_section(ws: Path, name: str, corrected: bool = False,
         )
         text = "\n".join(parts)
     f.write_text(text + f"\n{DONE_MARKER}\n", encoding="utf-8")
+    claims_path(ws, name).write_text("[]\n", encoding="utf-8")
 
 
 # ── movers 确定性渲染 + Macros 块矩阵 ─────────────────────────────────
-
-FINVIZ_GAINERS_URL = "https://finviz.com/screener.ashx?v=111&s=ta_topgainers"
-FINVIZ_LOSERS_URL = "https://finviz.com/screener.ashx?v=111&s=ta_toplosers"
-
-
-def _fmt_volume(v) -> str:
-    if v is None:
-        return "—"
-    try:
-        n = float(v)
-    except (TypeError, ValueError):
-        return str(v)
-    for div, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
-        if n >= div:
-            return f"{n / div:.1f}{suffix}"
-    return str(int(n))
-
 
 # CNT 美国一线 Releases 事件族(按优先级从高到低);每天最多 2 个族。
 # main: 命中则该行可作为本族主行;also: 同日同族的辅助行(挂在 related 里,不单独占名额)。
@@ -293,65 +276,60 @@ def select_tier1_releases(snapshot: Dict[str, Any],
     return picked
 
 
-def render_movers(ws: Path, snapshot: Dict[str, Any], style: str = "en") -> None:
-    """sections/05_movers.md —— CNT 风格长表:Ticker / Move / Catalyst。
+# Closing Bell 摘要里 Stock Movers 段的标题(中英都有:模板要求英文,实际输出常为中文)
+_MOVERS_START_RE = re.compile(
+    r"^##\s+(Stock Movers|股市异动股)\s*$", re.I | re.M)
+_MOVERS_END_RE = re.compile(
+    r"^##\s+(Company Deep Dives|公司深度|Sector Action|行业板块|交易策略)",
+    re.I | re.M)
+_SUBHEAD_MAP = (
+    (re.compile(r"^###\s+(Winners|涨幅居前)\s*$", re.I | re.M), "### Winners"),
+    (re.compile(r"^###\s+(Losers|跌幅居前)\s*$", re.I | re.M), "### Losers"),
+    (re.compile(r"^###\s+(After[-\s]?Hours Movers|盘后异动)\s*$", re.I | re.M),
+     "### After-Hours Movers"),
+)
 
-    催化剂:当日财报用 earnings_calendar.today 的 actual vs estimate;
-    否则写「信源未提及个股消息」,不编造。
+
+def extract_closing_bell_movers(digest: Optional[str]) -> Optional[str]:
+    """从 Closing Bell 摘要抽出 Winners / Losers / After-Hours 表。
+
+    这是 CNT Today's Movers 的真正来源(节目点名的异动股 + 催化剂),
+    不是 Finviz 按绝对涨跌幅排的全市场榜。摘要没有该段时返回 None。
     """
+    if not digest or not _MOVERS_START_RE.search(digest):
+        return None
+    start = _MOVERS_START_RE.search(digest)
+    end = _MOVERS_END_RE.search(digest, start.end())
+    body = digest[start.end(): end.start() if end else None].strip()
+    if "|" not in body:  # 没有表格就不是可用的 movers 段
+        return None
+    for rx, repl in _SUBHEAD_MAP:
+        body = rx.sub(repl, body)
+    return body
+
+
+def render_movers(ws: Path, snapshot: Dict[str, Any], style: str = "en") -> None:
+    """sections/05_movers.md —— 从 Closing Bell 摘要的 Stock Movers 表抽出,不编造。"""
     sources = snapshot.get("sources") or {}
-    market = sources.get("market") or {}
-    movers = market.get("top_movers") or []
-    as_of = market.get("snapshot_date") or "?"
-    # T 日异动的财报催化剂 = T-1 盘后公布 + T 盘前公布(T 盘后的要到 T+1 才反应)
-    ec = sources.get("earnings_calendar") or {}
-    earnings_today = {
-        (r.get("code") or "").upper(): r
-        for r in (ec.get("prior_after_close") or [])
-    }
-    earnings_today.update({
-        (r.get("code") or "").upper(): r
-        for r in (ec.get("today") or []) if r.get("session") == "before"
-    })
+    digest = ((sources.get("cnbc_closing_bell") or {}).get("summary_markdown") or "")
     cn = style == "cn"
+    extracted = extract_closing_bell_movers(digest)
     lines = ["## Today's Movers", ""]
-    if not movers:
-        missing = "「不可得」——finviz 异动数据缺失" if cn else \
-            "(not in snapshot) — no finviz movers available"
-        lines += [f"{missing}. <!-- audit: [data market.top_movers] -->"]
+    if extracted:
+        lines += [
+            ("来自 Closing Bell 摘要的节目点名异动(非 Finviz 全市场排名)。 "
+             if cn else
+             "Named movers as covered by Closing Bell (not a Finviz ranked tape). ")
+            + "<!-- audit: [show cnbc_closing_bell] -->",
+            "",
+            extracted,
+            "",
+        ]
     else:
-        lead = (f"按单日绝对涨跌幅排序(截至 {as_of}, Finviz);"
-                f"催化剂仅在快照有财报数字时填写:"
-                if cn else
-                f"Top absolute daily moves as of {as_of} (Finviz). "
-                f"Catalyst filled only from earnings_calendar when present:")
-        lines += [f"{lead} <!-- audit: [data market.top_movers] -->", ""]
-        if cn:
-            lines += ["| 代码 | 涨跌幅 | 催化剂 |", "|---|---:|---|"]
-        else:
-            lines += ["| Ticker | Move | Catalyst |", "|---|---:|---|"]
-        ordered = sorted(movers, key=lambda m: -abs(m.get("change_percent") or 0))
-        for m in ordered:
-            t = (m.get("ticker") or "?").upper()
-            chg = m.get("change_percent") or 0
-            arrow = "▲" if chg > 0 else "▼"
-            er = earnings_today.get(t)
-            if er and er.get("eps_actual") is not None and er.get("eps_estimate") is not None:
-                cat = (f"EPS {er['eps_actual']} vs est {er['eps_estimate']}"
-                       f" (earnings calendar)" if not cn else
-                       f"EPS {er['eps_actual']} vs 预期 {er['eps_estimate']} (财报日历)")
-                audit = "earnings_calendar.today"
-            else:
-                cat = ("信源未提及个股消息" if cn else
-                       "No company-specific news in snapshot sources")
-                audit = "market.top_movers"
-            lines.append(
-                f"| {arrow} {t} | {chg:+.2f}% | {cat} "
-                f"<!-- audit: [data {audit}] --> |"
-            )
-    screeners = ("完整榜单:[涨幅榜]({g}) · [跌幅榜]({l}) (Finviz)" if cn else
-                 "Full screeners: [top gainers]({g}) · [top losers]({l}) (Finviz)")
-    lines += ["", screeners.format(g=FINVIZ_GAINERS_URL, l=FINVIZ_LOSERS_URL), ""]
+        missing = ("「不可得」——Closing Bell 摘要中没有 Stock Movers 表"
+                   if cn else
+                   "(not in snapshot) — Closing Bell digest has no Stock Movers table")
+        lines += [f"{missing}. <!-- audit: [show cnbc_closing_bell] -->", ""]
     f = ws / SECTION_SPECS["movers"]["output_file"]
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text("\n".join(lines) + f"\n{DONE_MARKER}\n", encoding="utf-8")
@@ -448,65 +426,99 @@ def section_done(ws: Path, name: str) -> bool:
     return f.exists() and DONE_MARKER in f.read_text(encoding="utf-8")
 
 
+def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
+                   snapshot_data: Dict[str, Any], blocks: Dict[str, Any],
+                   agent: str) -> Dict[str, Any]:
+    """跑一个写作 agent(或确定性 movers)。返回要合并进 state 的片段。
+
+    不写 state.json:并行时由调用方持锁合并,避免交错写入。
+    """
+    names = agent_section_names(agent)
+    if all(section_done(ws, n) for n in names):
+        return {n: {"status": "done"} for n in names}
+    print(f"[agent] {agent} ({', '.join(names)}) ...", flush=True)
+    t0 = time.time()
+    specs = [SECTION_SPECS[n] for n in names]
+    sections: Dict[str, Any] = {}
+    usage = None
+    if specs[0].get("mode") == "deterministic":
+        render_movers(ws, snapshot_data, style=args.style)
+        sections = {n: {"status": "done", "mode": "deterministic"} for n in names}
+    elif args.fake_zcode:
+        for n in names:
+            _fake_section(ws, n, blocks=blocks, style=args.style)
+        sections = {n: {"status": "done"} for n in names}
+    else:
+        try:
+            result = run_agent(
+                args.zcode_bin, ws,
+                build_agent_prompt(agent, style=args.style, blocks=blocks),
+                snapshot, args.timeout)
+            usage = result.get("usage")
+            for n in names:
+                sections[n] = {
+                    "status": "done" if section_done(ws, n) else "missing_output",
+                    "session_id": result.get("sessionId"),
+                    "usage": usage if n == names[0] else None,
+                }
+        except subprocess.TimeoutExpired:
+            if not all(section_done(ws, n) for n in names):
+                raise
+            sections = {n: {"status": "done",
+                            "note": "agent timed out but output file complete"}
+                        for n in names}
+        for n in names:
+            if sections[n]["status"] != "done":
+                raise RuntimeError(
+                    f"agent {agent}: finished but output file "
+                    f"{SECTION_SPECS[n]['output_file']} missing/incomplete"
+                )
+    elapsed = round(time.time() - t0, 1)
+    for n in names:
+        print(f"[section] {n} done in {elapsed}s", flush=True)
+    return {"sections": sections, "elapsed": elapsed, "names": names,
+            "usage": usage}
+
+
 def run_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
                  state: Dict[str, Any]) -> None:
-    """按 agent 分组执行:narrative+drivers = overall_market 一次调用产两文件
-    (防重复 + 省一次调用);movers 确定性渲染;其余单章节一调用。"""
+    """按信源三组并行:overall_market(The Close) / company_desk(Closing Bell) /
+    macro;movers 确定性、立刻跑。互不依赖,墙钟 ≈ 最慢那一组。"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     snapshot_data = json.loads(snapshot.read_text(encoding="utf-8"))
     blocks = macro_blocks(snapshot_data)
     state["macro_blocks"] = blocks
     print(f"[macro] blocks: { {k: v for k, v in blocks.items()} }", flush=True)
+
+    def _apply(result: Dict[str, Any]) -> None:
+        for n, rec in (result.get("sections") or {}).items():
+            state["sections"][n] = rec
+            _record_timing(state, f"section:{n}", result["elapsed"])
+        _add_usage(state, result.get("usage"))
+        save_state(ws, state)
+
+    pending = []
     for agent in AGENT_ORDER:
         names = agent_section_names(agent)
-        if all(section_done(ws, n) for n in names):
-            for n in names:
-                state["sections"].setdefault(n, {"status": "done"})
-            continue
-        print(f"[agent] {agent} ({', '.join(names)}) ...", flush=True)
-        t0 = time.time()
         specs = [SECTION_SPECS[n] for n in names]
-        if specs[0].get("mode") == "deterministic":
-            render_movers(ws, snapshot_data, style=args.style)
-            for n in names:
-                state["sections"][n] = {"status": "done", "mode": "deterministic"}
-        elif args.fake_zcode:
-            for n in names:
-                _fake_section(ws, n, blocks=blocks)
-                state["sections"][n] = {"status": "done"}
+        if specs[0].get("mode") == "deterministic" or args.fake_zcode:
+            # 确定性 / fake:秒级,串行即可,避免线程里抢写同一份 fake 文件
+            _apply(_run_one_agent(args, ws, snapshot, snapshot_data, blocks, agent))
         else:
-            try:
-                result = run_agent(
-                    args.zcode_bin, ws,
-                    build_agent_prompt(agent, style=args.style, blocks=blocks),
-                    snapshot, args.timeout,
-                    extra_attachments=_agent_transcript_paths(ws, agent))
-                _add_usage(state, result.get("usage"))
-                for n in names:
-                    state["sections"][n] = {
-                        "status": "done" if section_done(ws, n) else "missing_output",
-                        "session_id": result.get("sessionId"),
-                        "usage": result.get("usage") if n == names[0] else None,
-                    }
-            except subprocess.TimeoutExpired:
-                # 文件契约: 超时但产物文件完整 → 接受(usage 未知,不计)
-                if not all(section_done(ws, n) for n in names):
-                    raise
-                for n in names:
-                    state["sections"][n] = {
-                        "status": "done",
-                        "note": "agent timed out but output file complete",
-                    }
-            for n in names:
-                if state["sections"][n]["status"] != "done":
-                    raise RuntimeError(
-                        f"agent {agent}: finished but output file "
-                        f"{SECTION_SPECS[n]['output_file']} missing/incomplete"
-                    )
-        for n in names:
-            _record_timing(state, f"section:{n}", time.time() - t0)
-            print(f"[section] {n} done in "
-                  f"{state['timings'][f'section:{n}'][-1]}s", flush=True)
-        save_state(ws, state)
+            pending.append(agent)
+    if pending:
+        with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+            futs = {pool.submit(_run_one_agent, args, ws, snapshot,
+                                snapshot_data, blocks, a): a for a in pending}
+            first_err: Optional[BaseException] = None
+            for fut in as_completed(futs):
+                try:
+                    _apply(fut.result())
+                except BaseException as e:  # noqa: BLE001
+                    first_err = first_err or e
+            if first_err:
+                raise first_err
     missing = [n for n in SECTION_ORDER
                if state["sections"].get(n, {}).get("status") != "done"]
     if missing:
@@ -561,13 +573,30 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
           f"{len(high_fails)} high fails", flush=True)
 
     mtime_before = verdict_file.stat().st_mtime if verdict_file.exists() else 0
-    if args.fake_zcode:
+    mode = getattr(args, "llm_verify", "light")
+    verdict_file.parent.mkdir(parents=True, exist_ok=True)
+    if high_fails:
+        # 脚本已定位到具体数字/结构错误:直接按清单修订,不再花一轮 LLM 核验
+        verdict_file.write_text(json.dumps({
+            "verdict": "fail", "summary": "deterministic checks failed",
+            "issues": [], "quality_notes": [], "source": "deterministic",
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        state["verify"][f"llm_attempt_{attempt}"] = "skipped: deterministic high fails"
+    elif args.fake_zcode:
         _fake_verdict(ws, attempt)
+    elif mode == "off":
+        verdict_file.write_text(json.dumps({
+            "verdict": "pass", "summary": "deterministic checks passed; LLM review off",
+            "issues": [], "quality_notes": [], "source": "deterministic",
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
+        light = mode == "light"
         try:
-            result = run_agent(args.zcode_bin, ws,
-                               build_verifier_prompt(style=args.style),
-                               snapshot, args.timeout)
+            result = run_agent(
+                args.zcode_bin, ws,
+                (build_light_verifier_prompt(style=args.style) if light
+                 else build_verifier_prompt(style=args.style)),
+                None if light else snapshot, args.timeout)
             _add_usage(state, result.get("usage"))
             state["verify"]["session_id"] = result.get("sessionId")
             state["verify"][f"usage_attempt_{attempt}"] = result.get("usage")
@@ -598,7 +627,8 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
                 "claim": row.get("claim"),
                 "snapshot_value": row.get("snapshot_value"),
                 "severity": "high",
-                "suggestion": "align with snapshot / source matrix / block matrix",
+                "suggestion": row.get("suggestion")
+                or "align with snapshot / source matrix / block matrix",
             })
         verdict["issues"] = merged
         verdict["verdict"] = "fail"
@@ -631,7 +661,7 @@ def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
         t0 = time.time()
         if args.fake_zcode:
             for n in names:
-                _fake_section(ws, n, corrected=True,
+                _fake_section(ws, n, corrected=True, style=args.style,
                               blocks=state.get("macro_blocks"))
             _record_timing(state, f"revise:{agent}", time.time() - t0)
             continue
@@ -645,14 +675,14 @@ def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
             "Verification failed. Fix ONLY the issues below in your section "
             f"file(s) ({files_note}); leave everything else unchanged. Rules "
             "from the original task still apply — including the division of "
-            "labor between the files if you wrote more than one.\n\n"
+            "labor between the files if you wrote more than one. Update the "
+            "matching .claims.json ledger so it reflects the revised text.\n\n"
             f"Issues:\n{feedback}"
         )
         session_id = state["sections"].get(names[0], {}).get("session_id")
         try:
             run_agent(args.zcode_bin, ws, prompt, snapshot, args.timeout,
-                      resume_session=session_id,
-                      extra_attachments=_agent_transcript_paths(ws, agent))
+                      resume_session=session_id)
         except subprocess.TimeoutExpired:
             if not all(section_done(ws, n) for n in names):
                 raise
@@ -680,7 +710,8 @@ def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
         if isinstance(v, dict) and v.get("report_date"):
             lag = v.get("lag_days") or 0
             suffix = f"(滞后{lag}天)" if (cn and lag) else (f"(lag {lag}d)" if lag else "")
-            return f"{label}✓{v['report_date']}{suffix}"
+            # 展示美东场次;report_date 是北京生成日,会比报告日晚一天
+            return f"{label}✓{v.get('session_date') or v['report_date']}{suffix}"
         return f"{label}✗{'不可得' if cn else 'unavailable'}"
 
     market = src.get("market") or {}
@@ -833,6 +864,11 @@ def main() -> int:
     parser.add_argument("--max-verify-retries", type=int, default=DEFAULT_MAX_VERIFY_RETRIES)
     parser.add_argument("--style", choices=("en", "cn"), default=DEFAULT_STYLE,
                         help="风格档案: en=与 CNT 一致的英文正文(默认); cn=中文正文")
+    parser.add_argument(
+        "--llm-verify", choices=("off", "light", "full"), default="light",
+        help="确定性台账核验通过后的 LLM 叙事核验: off=不跑; light(默认)=只读七节"
+             "正文、不挂快照与转录,查跨节矛盾与文风; full=旧版全量核验(挂快照)。"
+             "确定性核验有 high 失败时一律跳过 LLM、直接修订")
     parser.add_argument("--fake-zcode", action="store_true",
                         help="不用 ZCode:写占位章节,核验先 fail 后 pass,验证门控逻辑")
     parser.add_argument("--publish-cmd",

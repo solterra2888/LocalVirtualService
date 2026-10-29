@@ -518,7 +518,15 @@ def build_macro_pillars(report_date: date, fred_api_key: str,
         contracts = (pillars.get("fed_odds") or {}).get("contracts") or []
         if not (meetings and contracts):
             raise RuntimeError("fomc_calendar or fed_odds missing")
-        nxt = date.fromisoformat(meetings[0]["end"])
+        # 决议日(end == T)当天的会议已经出结果,"下一场"是之后那场;
+        # 否则 FOMC 日会拿已结束会议的残余概率(10-28 实测:11 月合约 2%,
+        # 而正文与 CNT 讨论的是 12 月 62%)。
+        upcoming = [x for x in meetings
+                    if date.fromisoformat(x["end"]) > report_date]
+        if not upcoming:
+            raise RuntimeError("no FOMC meeting after report_date")
+        meeting = upcoming[0]
+        nxt = date.fromisoformat(meeting["end"])
         total = nxt.year * 12 + (nxt.month - 1) + 1
         my, mm = total // 12, total % 12 + 1
         month_key = f"{my}-{mm:02d}"
@@ -526,7 +534,8 @@ def build_macro_pillars(report_date: date, fred_api_key: str,
         if not c:
             raise RuntimeError(f"no contract for {month_key}")
         out = {
-            "meeting": meetings[0]["text"], "contract_month": month_key,
+            "meeting": meeting["text"], "meeting_end": meeting["end"],
+            "contract_month": month_key,
             "odds_pct": c["odds_of_25bp_hike_pct"],
             "cum_bp_priced": c["cum_bp_priced"],
         }

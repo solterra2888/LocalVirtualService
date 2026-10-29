@@ -6,9 +6,11 @@
   1. the_close_summaries          — Bloomberg The Close 八段式 PM Brief (LLM 已生成);
                                      去掉开头客套前言;Cross-Asset / 分歧 / 解决框架 /
                                      时间维度 / PM Takeaway 聚合为 positioning_material
-  2. cnbc_closing_bell_summaries  — CNBC Closing Bell 摘要 (LLM 已生成),≤T 最新一份
-  3. bloomberg_surveillance       — 按节目标题里的美东播出日期匹配 T
-                                     (标题无日期时回退北京日 T+1 那一行)
+  2. cnbc_closing_bell_summaries  — CNBC Closing Bell 摘要 (LLM 已生成)
+     两档节目按美东场次匹配 T(_show_summary):摘要表 report_date 是北京
+     生成日(T 场次 stamped T+1);标题带日期以标题为准,否则 session = stamped
+     日的前一个工作日。写出 session_date / lag_days,落后时记入 errors。
+     不取 Surveillance,不拉节目转录 —— 写作只读摘要。
   4. economic_events              — 近 3 天实际值 + 未来 7 天日历(读库,impact≥2,
                                      仅 US/CN/JP/DE/KR);保留 comparison(mom/yoy/水平);
                                      time 是 UTC,另写 time_et / date_et(美东,含夏令时)。
@@ -29,10 +31,6 @@
   7. macro_pillars                — MACROS 确定性底座(fetch_macro_pillars.py)
   8. prior_odds                   — 优先用前一交易日 ZQ 收盘自算的加息概率
                                      (next_fomc_odds.prior);没有时回退最近一期更早快照
-
-转录附件写到同目录 transcripts/{the_close,cnbc_closing_bell,surveillance}.txt,
-不进 JSON。每次先删旧文件(取数失败不得残留上一次的文本);远端断连重试 3 次;
-超限时头 60% + 尾 40%(Surveillance 上限 22 万字符,避免砍掉 8:30 ET 后的讨论)。
 
 设计约束: 快照一经生成本轮不可变 —— 后续章节 Agent 与核验 Agent 只看这一份
 冻结数据,数字对账才可能成立。任何一个数据源失败只记录 errors,不阻塞整体
@@ -117,13 +115,38 @@ def _strip_preamble(md: Optional[str]) -> Optional[str]:
     return md
 
 
-def _latest_completed_summary(table: str, on_or_before: date,
-                              report_date: date) -> Optional[Dict[str, Any]]:
-    """取指定日期(含)之前最新一份 completed 摘要;找不到返回 None。
+_TITLE_DATE_RE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4}|\d{2})\b")
 
-    同日锚定纪律: 摘要 report_date 落后报告日时计算 lag_days 随快照冻结,
-    由口径块显式披露(如 "The Close 摘要✓2026-10-24(滞后2天)"),
-    不再静默当作同日口径使用。
+
+def _prev_weekday(d: date) -> date:
+    d -= timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def _title_session(title: Optional[str]) -> Optional[date]:
+    """节目标题里的美东播出日期(如 "Closing Bell 10/28/26"、"Surveillance 10/27/2026")。"""
+    m = _TITLE_DATE_RE.search(title or "")
+    if not m:
+        return None
+    y = int(m.group(3))
+    y = y + 2000 if y < 100 else y
+    try:
+        return date(y, int(m.group(1)), int(m.group(2)))
+    except ValueError:
+        return None
+
+
+def _show_summary(table: str, report_date: date) -> Optional[Dict[str, Any]]:
+    """取美东交易日 T 那一场节目的 completed 摘要。
+
+    摘要表的 report_date 是**北京生成日**:美东 T 晚间(或 T 早盘)的节目在北京
+    T+1 早晨生成,stamped T+1。按 report_date ≤ T 匹配会系统性拿到 T-1 场次
+    (10-28 实测:周三数据配上周二 "…Earnings Ahead" 那期)。
+
+    场次判定: 标题带日期则以标题为准;否则 session = stamped 北京日的前一个工作日。
+    优先 session == T;没有则回退最近一场更早的,lag_days 记场次落后天数并由口径块披露。
     """
     conn = _conn()
     try:
@@ -135,27 +158,36 @@ def _latest_completed_summary(table: str, on_or_before: date,
                 FROM {table}
                 WHERE status = 'completed'
                   AND summary_content IS NOT NULL
-                  AND video_id IS NOT NULL
-                  AND report_date <= %(d)s
-                ORDER BY report_date DESC
-                LIMIT 1
+                  AND report_date BETWEEN %(lo)s AND %(hi)s
+                ORDER BY report_date DESC, updated_at DESC
                 """,
-                {"d": on_or_before},
+                {"lo": report_date - timedelta(days=6),
+                 "hi": report_date + timedelta(days=2)},
             )
-            row = cur.fetchone()
-        if not row:
-            return None
-        return {
-            "report_date": row[0].isoformat(),
-            "lag_days": (report_date - row[0]).days,
-            "video_title": row[1],
-            "video_url": row[2],
-            "summary_markdown": _strip_preamble(row[3]),
-            "generated_at": row[4].isoformat() if row[4] else None,
-            "video_id": row[5],
-        }
+            rows = cur.fetchall()
     finally:
         conn.close()
+    scored = []
+    for r in rows:
+        session = _title_session(r[1]) or _prev_weekday(r[0])
+        if session <= report_date:
+            scored.append((session, r))
+    if not scored:
+        return None
+    # 同一场次多行(周末北京日重复 stamp 等)取最新生成的一行
+    scored.sort(key=lambda x: (x[0], x[1][0],
+                               x[1][4].timestamp() if x[1][4] else 0.0), reverse=True)
+    session, row = scored[0]
+    return {
+        "report_date": row[0].isoformat(),
+        "session_date": session.isoformat(),
+        "lag_days": (report_date - session).days,
+        "video_title": row[1],
+        "video_url": row[2],
+        "summary_markdown": _strip_preamble(row[3]),
+        "generated_at": row[4].isoformat() if row[4] else None,
+        "video_id": row[5],
+    }
 
 
 # 对齐 insert_the_close_pm_brief_template.sql 真实八段标题
@@ -410,58 +442,6 @@ def _finviz_snapshot(report_date: date) -> Dict[str, Any]:
         conn.close()
 
 
-def _surveillance_summary(report_date: date) -> Optional[Dict[str, Any]]:
-    """Bloomberg Surveillance AM Brief。
-
-    表内 report_date 是北京自然日(与 DMR 口径一致),美股交易日 T 对应的
-    摘要通常落在 T 或 T+1 —— 取 [T, T+1] 内最新一份 completed。
-    """
-    conn = _conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT report_date, video_title, video_url, summary_content,
-                       updated_at, video_id
-                FROM bloomberg_surveillance_summaries
-                WHERE status = 'completed'
-                  AND summary_content IS NOT NULL
-                  AND report_date BETWEEN %(lo)s AND %(hi)s
-                ORDER BY report_date DESC
-                """,
-                {"lo": report_date, "hi": report_date + timedelta(days=2)},
-            )
-            rows = cur.fetchall()
-        # 以节目标题里的美东播出日期(如 "Bloomberg Surveillance 10/27/2026")为准匹配 T,
-        # 而不是只看北京 report_date:T+1 的摘要尚未生成时,按日期倒序取会静默
-        # 拿到前一天的节目。标题无日期时才回退到 T+1(北京)那一行。
-        row = None
-        for r in rows:
-            m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", r[1] or "")
-            if m and date(int(m.group(3)), int(m.group(1)), int(m.group(2))) == report_date:
-                row = r
-                break
-        if row is None:
-            undated = [r for r in rows
-                       if not re.search(r"\d{1,2}/\d{1,2}/\d{4}", r[1] or "")]
-            row = next((r for r in undated
-                        if r[0] == report_date + timedelta(days=1)), None)
-        if not row:
-            return None
-        return {
-            "report_date": row[0].isoformat(),
-            "beijing_date": row[0].isoformat(),
-            "lag_days": 0,
-            "video_title": row[1],
-            "video_url": row[2],
-            "summary_markdown": _strip_preamble(row[3]),
-            "generated_at": row[4].isoformat() if row[4] else None,
-            "video_id": row[5],
-        }
-    finally:
-        conn.close()
-
-
 def _earnings_calendar(report_date: date) -> Dict[str, Any]:
     """当日已公布 + 未来 10 日安排(喂 Deep Dives / Movers / Forward Catalysts)。"""
     from backend.services.earnings_calendar_service import EarningsCalendarService
@@ -539,91 +519,6 @@ def _session(raw: Optional[str]) -> Optional[str]:
     if s.startswith("after"):
         return "after"
     return None
-
-
-# 单个转录的 attach 上限(字符)。Surveillance 是 3 小时节目、8:30 ET 数据发布后的
-# 讨论在中后段,旧的 80k 头部截断恰好砍掉最需要的部分 → 放宽;仍超限时头尾各留一段,
-# 不再只留开头。
-TRANSCRIPT_CAPS = {"the_close": 120_000, "cnbc_closing_bell": 100_000,
-                   "surveillance": 220_000}
-TRANSCRIPT_DEFAULT_CAP = 100_000
-
-
-def _fetch_transcript_by_video_id(video_id: Optional[str],
-                                  retries: int = 3) -> Optional[str]:
-    """按 video_id 取全文;远端库偶发断连,每次尝试新开连接,最多重试 retries 次。"""
-    if not video_id:
-        return None
-    last: Optional[Exception] = None
-    for attempt in range(retries):
-        conn = None
-        try:
-            conn = _conn()
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT COALESCE(transcript_cleaned, transcript)
-                    FROM subscription_content
-                    WHERE content_id = %(vid)s
-                      AND (transcript IS NOT NULL OR transcript_cleaned IS NOT NULL)
-                    LIMIT 1
-                    """,
-                    {"vid": video_id},
-                )
-                row = cur.fetchone()
-            return row[0] if row and row[0] else None
-        except Exception as e:  # noqa: BLE001
-            last = e
-            time.sleep(2 * (attempt + 1))
-        finally:
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:  # noqa: BLE001
-                    pass
-    raise RuntimeError(f"transcript fetch failed after {retries} tries: {last}")
-
-
-def _cap_transcript(text: str, cap: int) -> str:
-    """超限时保留头 60% + 尾 40%(开场要闻与收尾结论都留),中间以标记替代。"""
-    if len(text) <= cap:
-        return text
-    head, tail = int(cap * 0.6), cap - int(cap * 0.6)
-    cut = len(text) - head - tail
-    return (text[:head] + f"\n\n[... {cut} chars omitted from the middle for "
-            f"attach size ...]\n\n" + text[-tail:])
-
-
-def write_transcript_attachments(ws: Path, sources: Dict[str, Any],
-                                 errors: Dict[str, str]) -> None:
-    """按 show 写出 transcripts/{key}.txt,供编排器按 agent --attach。
-
-    纪律:每次先删除同名旧文件 —— 取数失败时旧运行遗留的文件会被 agent 静默
-    当作当日转录挂载(曾发生:surveillance 取数失败,16:47 的旧文件仍在)。
-    """
-    tdir = ws / "transcripts"
-    tdir.mkdir(parents=True, exist_ok=True)
-    for src_key in ("the_close", "cnbc_closing_bell", "surveillance"):
-        path = tdir / f"{src_key}.txt"
-        if path.exists():
-            path.unlink()
-        src = sources.get(src_key) or {}
-        vid = src.get("video_id")
-        try:
-            text = _fetch_transcript_by_video_id(vid)
-            if text:
-                full_len = len(text)
-                text = _cap_transcript(
-                    text, TRANSCRIPT_CAPS.get(src_key, TRANSCRIPT_DEFAULT_CAP))
-                path.write_text(text, encoding="utf-8")
-                src["transcript"] = {"file": f"transcripts/{src_key}.txt",
-                                     "full_chars": full_len,
-                                     "attached_chars": len(text),
-                                     "truncated": len(text) < full_len}
-            else:
-                errors[f"transcript.{src_key}"] = f"no transcript for video_id={vid}"
-        except Exception as e:  # noqa: BLE001
-            errors[f"transcript.{src_key}"] = str(e)[:300]
 
 
 def _to_et(date_str: Optional[str], time_str: Optional[str]) -> Dict[str, str]:
@@ -779,9 +674,13 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
         ("cnbc_closing_bell", "cnbc_closing_bell_summaries"),
     ):
         try:
-            sources[key] = _latest_completed_summary(table, report_date, report_date)
+            sources[key] = _show_summary(table, report_date)
             if sources[key] is None:
-                errors[key] = f"no completed summary on/before {report_date}"
+                errors[key] = f"no completed summary for session on/before {report_date}"
+            elif sources[key]["lag_days"]:
+                errors[f"{key}.lag"] = (
+                    f"session {sources[key]['session_date']} lags T by "
+                    f"{sources[key]['lag_days']}d")
             elif key == "the_close":
                 pos = _extract_positioning(sources[key]["summary_markdown"])
                 sources[key]["positioning_material"] = pos
@@ -793,16 +692,6 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
         except Exception as e:  # noqa: BLE001 — 单源失败不阻塞
             sources[key] = None
             errors[key] = str(e)
-
-    try:
-        sources["surveillance"] = _surveillance_summary(report_date)
-        if sources["surveillance"] is None:
-            errors["surveillance"] = (
-                f"no completed Surveillance summary on {report_date}~+1d"
-            )
-    except Exception as e:  # noqa: BLE001
-        sources["surveillance"] = None
-        errors["surveillance"] = str(e)
 
     if do_backfill:
         try:
@@ -881,14 +770,6 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
         "errors": errors,
         "notes": notes,
     }
-
-    # 转录附件写到快照同目录(不塞进 snapshot.json,避免每个 agent 都付费)
-    if out_dir is not None:
-        try:
-            write_transcript_attachments(out_dir, sources, errors)
-        except Exception as e:  # noqa: BLE001
-            errors["transcripts"] = str(e)[:300]
-            snapshot["errors"] = errors
 
     return snapshot
 

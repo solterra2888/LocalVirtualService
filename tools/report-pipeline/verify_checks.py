@@ -39,7 +39,7 @@ HEADINGS = {
     "macro": "## Macros",
 }
 HOUSE_TAGS = set(ATTRIBUTION_MAP.keys())
-TAG_RE = re.compile(r"\((The Close|Closing Bell|Surveillance|cross-asset|"
+TAG_RE = re.compile(r"\((The Close|Closing Bell|cross-asset|"
                     r"sector averages|breadth|Finviz|earnings calendar|"
                     r"economic calendar|Treasury curve|FRED|fed funds futures|"
                     r"Fed calendar|auction calendar|nowcasts)\)")
@@ -83,11 +83,6 @@ def _flatten_numbers(obj: Any, out: Set[float]) -> None:
                 pass
 
 
-def _near(a: float, b: float) -> bool:
-    tol = max(0.05, abs(b) * 0.1)
-    return abs(a - b) <= tol
-
-
 def _macro_blocks_from_state(ws: Path, snapshot: Dict[str, Any]) -> Dict[str, Any]:
     state_f = ws / "state.json"
     if state_f.exists():
@@ -102,6 +97,250 @@ def _macro_blocks_from_state(ws: Path, snapshot: Dict[str, Any]) -> Dict[str, An
     return macro_blocks(snapshot)
 
 
+# ── claims ledger ──────────────────────────────────────────────────────
+
+SHOW_KEYS = ("the_close", "cnbc_closing_bell")
+_MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+           "August", "September", "October", "November", "December"]
+_VALUE_RE = re.compile(r"([+\-−]?)\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(%|bp|K|M|B|T|万亿|亿)?",
+                       re.I)
+_UNIT_SCALE = {"k": 1e3, "m": 1e6, "b": 1e9, "t": 1e12, "亿": 1e8, "万亿": 1e12}
+# 正文里需要台账覆盖的数字:带 % 或 bp 的(价格、指数点位噪音太多,不在兜底范围)
+_PROSE_NUM_RE = re.compile(r"[+\-−]?\d+(?:\.\d+)?\s*(?:%|bp)")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def claims_path(ws: Path, name: str) -> Path:
+    out = SECTION_SPECS[name]["output_file"]
+    return ws / re.sub(r"\.md$", ".claims.json", out)
+
+
+def _strip_audit(text: str) -> str:
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    return text
+
+
+def _meeting_month_words(meeting: str) -> List[str]:
+    """"December 8-9, 2026" → ["December", "Dec", "12月"]。"""
+    for i, m in enumerate(_MONTHS):
+        if m.lower() in meeting.lower():
+            return [m, m[:3] + " ", m[:3] + ".", f"{i + 1}月"]
+    return []
+
+
+def _show_texts(ws: Path, sources: Dict[str, Any]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for k in SHOW_KEYS:
+        parts = []
+        src = sources.get(k) or {}
+        for fld in ("summary_markdown", "positioning_material"):
+            if src.get(fld):
+                parts.append(src[fld])
+        out[k] = "\n".join(parts).replace(",", "")
+    return out
+
+
+def _parse_value(raw: Any) -> Optional[Dict[str, Any]]:
+    m = _VALUE_RE.search(str(raw or "").replace("−", "-"))
+    if not m:
+        return None
+    num_s = m.group(2).replace(",", "")
+    try:
+        val = float(num_s)
+    except ValueError:
+        return None
+    if m.group(1) in ("-", "−"):
+        val = -val
+    dec = len(num_s.split(".")[1]) if "." in num_s else 0
+    return {"value": val, "decimals": dec, "unit": (m.group(3) or "").lower(),
+            "digits": num_s}
+
+
+def _candidates(pv: Dict[str, Any]) -> List[float]:
+    """台账数字在快照里可能的存储口径(单位换算 + 正负号)。"""
+    a, unit = pv["value"], pv["unit"]
+    out = [a]
+    if unit in _UNIT_SCALE:
+        out.append(a * _UNIT_SCALE[unit])
+    if unit in ("%", "bp"):
+        out.append(a / 100)          # 小数口径 / 百分点口径的 bp
+    if unit == "bp":
+        out.append(a * 100)
+    return out + [-x for x in out]
+
+
+def _close(a: float, b: float, decimals: int) -> bool:
+    tol = max(0.5 * 10 ** (-decimals), abs(b) * 0.005) + 1e-9
+    return abs(a - b) <= tol
+
+
+def _split_path(path: str) -> List[str]:
+    """按 . 切分,但不切 [] 里的内容(代码里有 GSPC.INDX 这种点)。"""
+    toks, buf, depth = [], "", 0
+    for ch in path:
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+        if ch == "." and depth == 0:
+            toks.append(buf)
+            buf = ""
+        else:
+            buf += ch
+    if buf:
+        toks.append(buf)
+    return [t for t in toks if t]
+
+
+def _resolve_path(root: Any, path: str):
+    """返回 (节点, 是否完整解析)。解析失败时返回已解析到的最深前缀节点。"""
+    path = re.sub(r"^(snapshot\.)?(sources\.)?", "", path.strip())
+    cur = root
+    for tok in _split_path(path):
+        m = re.match(r"^([^\[]*)((?:\[[^\]]*\])*)$", tok)
+        if not m:
+            return cur, False
+        key, sels = m.group(1), re.findall(r"\[([^\]]*)\]", m.group(2))
+        if key:
+            if isinstance(cur, dict) and key in cur:
+                cur = cur[key]
+            else:
+                return cur, False
+        for sel in sels:
+            if not isinstance(cur, list):
+                return cur, False
+            if sel.isdigit():
+                i = int(sel)
+                if i >= len(cur):
+                    return cur, False
+                cur = cur[i]
+                continue
+            if "=" in sel:
+                k, v = (x.strip() for x in sel.split("=", 1))
+                hits = [x for x in cur if isinstance(x, dict)
+                        and str(x.get(k, "")).strip().lower() == v.lower()]
+            else:
+                hits = [x for x in cur if isinstance(x, dict) and any(
+                    str(vv).strip().lower() == sel.strip().lower() for vv in x.values())]
+            if not hits:
+                return cur, False
+            cur = hits[0] if len(hits) == 1 else hits
+    return cur, True
+
+
+def _subtree_numbers(node: Any) -> Set[float]:
+    out: Set[float] = set()
+    _flatten_numbers(node, out)
+    return out
+
+
+def _matches(pv: Dict[str, Any], pool: Set[float]) -> bool:
+    return any(_close(c, b, pv["decimals"]) for c in _candidates(pv) for b in pool)
+
+
+def _check_ledger(ws: Path, name: str, sources: Dict[str, Any],
+                  snap_nums: Set[float], show_texts: Dict[str, str], add) -> None:
+    """台账逐条对账 + 正文 %/bp 数字的覆盖兜底。"""
+    text = _section_text(ws, name)
+    if not text.strip():
+        return
+    lf = claims_path(ws, name)
+    if not lf.exists():
+        add(name, "claims ledger missing", lf.name, False, "medium",
+            f"write {lf.relative_to(ws)} per rule 11")
+        claims: List[Dict[str, Any]] = []
+    else:
+        try:
+            claims = json.loads(lf.read_text(encoding="utf-8"))
+            if not isinstance(claims, list):
+                raise ValueError("not a list")
+        except (json.JSONDecodeError, ValueError) as e:
+            add(name, f"claims ledger unreadable: {e}", lf.name, False, "high",
+                "rewrite the ledger as a JSON array")
+            return
+    prose = _strip_audit(text).replace(",", "")
+    ledger_vals: List[Dict[str, Any]] = []
+    for c in claims:
+        if not isinstance(c, dict):
+            continue
+        pv = _parse_value(c.get("value"))
+        if pv is None:
+            continue
+        ledger_vals.append(pv)
+        path = str(c.get("path") or "")
+        label = f"{c.get('value')} @ {path}"
+        head = path.split(".")[0].split("[")[0]
+        if head in SHOW_KEYS:
+            blob = show_texts.get(head, "")
+            if blob and pv["digits"] not in blob:
+                add(name, label, f"number not found in {head} digest",
+                    False, "medium", "quote the number exactly as the show states it")
+            continue
+        node, full = _resolve_path(sources, path)
+        if full:
+            at_path = _subtree_numbers(node)
+            if _matches(pv, at_path):
+                continue
+            # 路径精确指到了字段、值却对不上 —— 这是真错,不因"快照别处有同数"而放过
+            shown = ", ".join(f"{x:g}" for x in sorted(at_path)[:4]) or "no number"
+            add(name, label, f"value at path: {shown}", False, "high",
+                "state the number at this path, or fix the path")
+            continue
+        if node is not sources and _matches(pv, _subtree_numbers(node)):
+            add(name, label, "path partly unresolved; number found under its prefix",
+                False, "low")
+            continue
+        if _matches(pv, snap_nums):
+            add(name, label, "path does not resolve; number exists elsewhere in "
+                "snapshot", False, "medium", "fix the ledger path")
+            continue
+        add(name, label, "absent from snapshot", False, "high",
+            "use the snapshot value at this path, or remove the number")
+    # 兜底:正文里带 %/bp 的数字既不在台账、也不在快照或节目文本里 → 可疑。
+    # 比对池按章节收窄:非个股章节不含 500 只成分股/财报数字(否则几乎任何数
+    # 都能"碰上"),且只按小数位严格比对、不做 /100 等换算。
+    if name in ("sector_action", "deep_dives"):
+        pool = snap_nums
+    else:
+        core = {k: v for k, v in sources.items() if k != "earnings_calendar"}
+        if isinstance(core.get("market"), dict):
+            core["market"] = {k: v for k, v in core["market"].items()
+                              if k not in ("sp500_constituents", "top_movers")}
+        pool = _subtree_numbers(core)
+    stray = []
+    show_blob = " ".join(show_texts.values())
+    for m in _PROSE_NUM_RE.finditer(prose):
+        pv = _parse_value(m.group(0))
+        if pv is None or any(_close(abs(pv["value"]), abs(lv["value"]), pv["decimals"])
+                             for lv in ledger_vals):
+            continue
+        tol = 0.5 * 10 ** (-pv["decimals"]) + 1e-9
+        if any(abs(abs(pv["value"]) - abs(b)) <= tol for b in pool) \
+                or pv["digits"] in show_blob:
+            continue
+        stray.append(m.group(0).strip())
+    if stray:
+        add(name, "numbers not in ledger and not found in snapshot/shows: "
+            + ", ".join(sorted(set(stray))[:8]), "absent", False,
+            "high" if lf.exists() else "medium",
+            "source each number from the snapshot (and list it in the ledger) "
+            "or remove it")
+
+
+def _check_headline_language(ws: Path, style: str, add) -> None:
+    if style != "cn":
+        return
+    text = _section_text(ws, "narrative")
+    m = re.search(r"<!--\s*HEADLINE_CANDIDATES\s*\n(.*?)-->", text, re.DOTALL)
+    if not m:
+        return
+    first = next((ln.strip().strip('"') for ln in m.group(1).splitlines()
+                  if ln.strip()), "")
+    if first and not _CJK_RE.search(first):
+        add("narrative", f"headline not Chinese: {first[:80]}", "cn style",
+            False, "high", "rewrite HEADLINE_CANDIDATES in Simplified Chinese")
+
+
 def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
     snapshot = _load_snapshot(ws)
     sources = snapshot.get("sources") or {}
@@ -111,14 +350,24 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
     _flatten_numbers(sources, snap_nums)
 
     def add(section: str, claim: str, snap_val: str, match: bool,
-            severity: str) -> None:
-        issues.append({
+            severity: str, suggestion: Optional[str] = None) -> None:
+        row = {
             "section": section,
             "claim": claim,
             "snapshot_value": snap_val,
             "match": match,
             "severity": severity,
-        })
+        }
+        if suggestion:
+            row["suggestion"] = suggestion
+        issues.append(row)
+
+    show_texts = _show_texts(ws, sources)
+    for name in SECTION_ORDER:
+        if SECTION_SPECS[name].get("mode") == "deterministic":
+            continue
+        _check_ledger(ws, name, sources, snap_nums, show_texts, add)
+    _check_headline_language(ws, style, add)
 
     # Structure lint
     for name in SECTION_ORDER:
@@ -183,12 +432,24 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
                 # soft check — presence of prior_odds is enough if number near
                 if pm:
                     pass
-        if odds.get("odds_pct") is not None and name == "macro":
+        # 只核对明确指向"下一场会议"的加息概率行;其他月份的概率走台账按合约月对账。
+        # 旧做法把全文任何 "hike … N%" 都和下一场比,FOMC 日会把 "12 月 62%"
+        # 判成与 2% 不符,白白多跑一轮修订和核验。
+        if (odds.get("odds_pct") is not None
+                and name in ("drivers", "macro", "positioning")):
             target = float(odds["odds_pct"])
-            for m in re.finditer(r"[Hh]ike[^\n%]{0,40}[~≈]?\s*(\d{1,3})\s*%", text):
-                val = float(m.group(1))
-                if abs(val - target) > 2:
-                    add(name, m.group(0), f"next_fomc_odds={target}", False, "high")
+            month_words = _meeting_month_words(odds.get("meeting") or "")
+            for line in _strip_audit(text).splitlines():
+                if not month_words or not any(w in line for w in month_words):
+                    continue
+                if not re.search(r"hike|加息", line, re.I):
+                    continue
+                pcts = [float(x) for x in re.findall(r"(\d{1,3}(?:\.\d+)?)\s*%", line)]
+                if pcts and not any(abs(v - target) <= 2 for v in pcts):
+                    add(name, line.strip()[:160],
+                        f"next_fomc_odds={target} ({odds.get('meeting')})", False,
+                        "high", f"use next_fomc_odds.odds_pct={target} for "
+                        f"{odds.get('meeting')}")
 
         # Triple shapes vs economic_events
         events = (sources.get("economic_events") or {})
@@ -216,7 +477,7 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
         for m in AUDIT_RE.finditer(text):
             body = m.group(1)
             if "show" in body and not any(
-                k in body for k in ("the_close", "cnbc_closing_bell", "surveillance")
+                k in body for k in SHOW_KEYS
             ):
                 add(name, f"audit show key odd: {body}", "known show keys",
                     False, "medium")
@@ -244,25 +505,22 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
         if not has_forward:
             add("macro", "Forward Catalysts always required", "required", False, "high")
 
-    # Movers numbers vs top_movers / constituents
+    # Movers 必须是 Closing Bell 摘要里的 Stock Movers 表,不是 Finviz 全市场榜。
+    from run_pipeline import extract_closing_bell_movers
+    digest = ((sources.get("cnbc_closing_bell") or {}).get("summary_markdown") or "")
+    extracted = extract_closing_bell_movers(digest)
     movers_text = _section_text(ws, "movers")
-    market = sources.get("market") or {}
-    mover_nums = {
-        float(m["change_percent"])
-        for m in (market.get("top_movers") or [])
-        if m.get("change_percent") is not None
-    }
-    for m in re.finditer(r"([+\-]\d+\.\d+)%", movers_text):
-        val = float(m.group(1))
-        if mover_nums and not any(_near(val, x) for x in mover_nums):
-            # also allow constituent list
-            cons = {
-                float(c["change_percent"])
-                for c in (market.get("sp500_constituents") or [])
-                if c.get("change_percent") is not None
-            }
-            if cons and not any(_near(val, x) for x in cons):
-                add("movers", m.group(0), "market.top_movers", False, "high")
+    if extracted:
+        tickers = re.findall(r"\$[A-Z]{1,5}\b", extracted)
+        missing = [t for t in tickers[:4] if t not in movers_text]
+        if missing or "### Winners" not in movers_text:
+            add("movers", "Closing Bell Stock Movers table not copied",
+                "cnbc_closing_bell.summary_markdown", False, "high",
+                "copy the digest Winners/Losers/After-Hours tables into Today's Movers")
+    elif re.search(r"^###\s+(Winners|Losers)\b", movers_text, re.M):
+        add("movers", "Stock Movers table present but Closing Bell digest has none",
+            "cnbc_closing_bell.summary_markdown", False, "high",
+            "degrade to the missing-mark; do not invent a ranked tape")
 
     return issues
 
