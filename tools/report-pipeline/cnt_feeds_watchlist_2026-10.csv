@@ -1,0 +1,37 @@
+﻿优先级,动作,信源,类别,建议渠道,账号/标识,guanhetech现状,CNT月引用(约),采样出现日,典型用途,备注
+P0,已接入,CNBC Closing Bell(主段+Overtime),电视节目,podcast,CNBC Closing Bell feed,Kevin已订且v5管线已接入转录,~200(记者具名),全部14份,Part 2 主叙事源,_CNT从不写节目名只写记者人名_Santoli/Sigalos/Fortt/LeBeau等
+P0,已接入,Bloomberg The Close,电视节目,youtube,Bloomberg Television,Kevin已订且v5管线已接入转录,~15,全部14份,Part 1 主叙事源与嘉宾,"显式""on The Close""署名少_内容经嘉宾人名入文"
+P0,新增订阅(需评估全文抓取),Bloomberg(通讯社文章),通讯社,news,bloomberg.com RSS/付费源,无全文_仅@DeItaone标题转述,~47,10-02/06/08/12/14/16/20/21/22/23/26/27/28/29,并购传闻_CDS_统计类driver_央行采访,最大通讯社缺口_Marvell-Lumentum型独家
+P0,已有-建议开启,Reuters,通讯社,news,Reuters(Kevin订阅列表已有OFF项),Kevin列表OFF_0条_另youtube/Reuters已ON(文本稿),~49,全部14份,地缘_央行_公司事件_卖方转引,最高性价比_开启即回血
+P0,已有-建议开启+管线项,公司一手材料(财报release/电话会),公司声明,news+API,Globenewswire(Kevin OFF)+EODHD电话会端点评估,Globenewswire库内12k条但停更2026-05-08,~120,全部14份,Deep Dives的Management said,与CNT最大单项差距_两步走
+P1,已有-建议开启,CNBC(网络文章),新闻网站,news,CNBC(Kevin订阅列表已有OFF项),Kevin列表OFF_库内183条全文(质量最好_8k字符/篇),~50,10-02/06/08/12/14/16/20/21/22/23/26/27/28/29,财报数字补充口径_公司新闻,历史样本全文质量最佳
+P1,数据已在库-管线可直接用,Yahoo Finance,新闻网站+聚合,news,Yahoo Finance feed,库内31k条_近30天活跃_订阅人是Liang(users=[15]),~18,10-02/12/14/16/20/22/23/27/28/29,卖方笔记转引主渠道,注意正文仅140-400字符导语级
+P1,新增订阅,Investing.com(含investingLive),聚合+数据,twitter,@InvestingCom,无,~19,10-02/06/08/14/16/20/21/22/23/27/28/29,财报数字_卖方观点_电话会转引,出现份数最多(10/14份)的聚合商
+P1,已有-建议开启,WSJ,通讯社,news,Wall Street Journal(Kevin OFF)+Nick Timiraos(已ON),Kevin列表OFF_另Timiraos推文已覆盖美联储线,~9,10-08/20/26/28,Timiraos美联储线_并购_深度报道,Timiraos本体订阅已拿住WSJ最值的一条线
+P1,数据已在库-管线可直接用,Earnings Whispers,财报数据,twitter,@eWhispers,库内195条活跃_订阅人是Jimbo(users=[8]),~8,10-20/28,beat/miss+guidance快讯,数据共享表已有_管线可直接消费
+P2,已有-建议开启,Financial Times,通讯社,news,Financial Times(Kevin订阅列表已有OFF项),Kevin列表OFF_0条,~4,10-08/28,微软capex线_OpenAI_深度,付费墙抓取能力需验证
+P2,已有-建议开启,MarketWatch,新闻网站,news,MarketWatch(Kevin OFF),Kevin列表OFF_0条,~1,10-26,板块评论,开启成本低
+P2,已有-建议开启,Nasdaq.com,新闻+盘后数据,news,Nasdaq(Kevin OFF),Kevin列表OFF_库内19.4k条_停更2026-09-10,~4,10-21,盘后价格引用_新闻转载,恢复抓取即可
+P2,已有-建议开启,Seeking Alpha,卖方聚合,news,Seeking Alpha(Kevin OFF),Kevin列表OFF_库内4.5k条_停更2026-06-09,~3,10-22,卖方笔记转引,恢复抓取即可
+P2,已有-建议开启,Globenewswire,公司PR,news,Globenewswire(Kevin OFF),Kevin列表OFF_库内12.2k条_停更2026-05-08,"见""公司一手材料""行",10-08等,公司公告一手稿,噪音较高需过滤_配合P0管线项
+P2,新增订阅,Barron's,垂直媒体,twitter/RSS,@BarronOnline(待核验),无,~4,10-22/26/28,个股bull/bear_房产_公司深度,个股深度常用引语源
+P2,新增订阅,TechCrunch,科技媒体,twitter,@TechCrunch,无,~2,10-06/26,科技公司交易_融资报道,科技公司交易线
+P2,新增订阅,Stocktwits(含TheFly转引),聚合+卖方,twitter,@Stocktwits,无,~10,10-12/14/20/26,卖方评级变动_个股异动转引,含TheFly卖方笔记转引
+P2,新增订阅,Benzinga,快讯,twitter,@Benzinga,无,~2,10-23/29,个股异动_炼厂等快讯,快讯级
+P2,新增订阅,AP,通讯社,twitter,@AP,无,~2,10-23,以色列选举_FOMC异议等快讯,大选/央行现场快讯
+P2,新增订阅(可选),Alex Kantrowitz(Big Technology),科技分析,twitter/substack,@kantrowitz,无,~5,10-08/26/28,OpenAI/Anthropic一线分析,CNT科技报道常客
+P2,新增订阅(可选),Mohamed El-Erian,宏观观点,twitter,@elerianm,无,~4,10-16/21/23,on X引用型宏观评论,FT/Bloomberg专栏作者_推文即源
+P2,新增订阅(可选),Newsquawk,squawk,twitter,@Newsquawk,无,~2,10-22,财报快讯,LiveSquawk已覆盖同类_可选
+P3,不追,Investor's Business Daily,垂直媒体,-,@IBDinvestors,无,~1,10-22,交易所数据,单次引用
+P3,不追,Axios,新闻,-,@axios,无,~1,10-27,PHP漏洞报道,单次引用
+P3,不追,BBC/AFP/CNN/Fox Business/O Globo/Nikkei,综合媒体,-,-,无,各~1,10-02/21/26,国际事件补充,CNT一次性引用
+P3,不追,Rigzone,油气垂直,-,@Rigzone,无,~3,10-14/20/28,油价细节,"CNT全是""Bloomberg via Rigzone""转引_接Bloomberg即覆盖"
+P3,不追,FreightWaves,货运垂直,-,@FreightWaves,无,~1,10-28,货运保险成本,单次引用
+P3,不追,SiliconANGLE/Stock Titan/TokenPost,科技垂直,-,-,无,各~1,10-28,公司细节补充,单次引用
+P3,不追,TipRanks/MT Newswires/MarketBeat,聚合,-,-,无,各~1,10-22/28/29,期权隐含波动_卖方转引,单次引用
+P3,不追,GuruFocus,数据聚合,-,-,无,~4,10-08/21/22,星级评级_FCF数据,可经Investing.com部分替代
+P3,不追,24/7 Wall St./Zacks/Investopedia/Proactive/Puck,聚合/付费,-,-,无,各1-6,10-16/22/23/29,个股共识与背景,长尾_性价比低
+P3,不追,Nielsen/Sensor Tower/Apptopia/Consumer Edge/Edmunds/J.D. Power/FactSet/Mortgage News Daily,垂直数据商,-,-,无,各1-2,10-02/06/12/14/16,App下载_车贷_房贷数据,CNT一次性购买数据_无feed形态
+P-已对齐,无需订阅,数据商与官方(LSEG/S&P Global/CBOE/ICE BofA/Haver/TradingEconomics/UMich/BEA/Cleveland Fed/Freddie Mac/Fitch/IMF/CME FedWatch/Treasury),数据商,,-,guanhetech已有等价物(macro_pillars/FRED/EODHD/Finviz/fomc_calendar),~30,全部14份,PMI_利差_拍卖_nowcast_三元组,CNT自己也在用EODHD和Finviz_这一层已对齐
+P-已对齐,已覆盖,squawk层(DeItaone/LiveSquawk/Wall St Engine/Kobeissi/Daily Shot/RenMac/Timiraos/Dan Ives/The Information/unusual_whales),快讯,twitter,Kevin全部已ON,活跃,~45,全部14份,头条快讯_财报三元组_央行头条_KOL观点,Kevin与CNT重合度最高的一层
+P-已对齐,无需单订,卖方研究(Jefferies/Evercore/Bernstein/Wedbush/Bespoke/Mahaney等),卖方观点,-,-,经Yahoo/SA/Investing/MTNW转引获得,~60,全部14份,分析师反应_评级_目标价,不直接订阅_随聚合层覆盖;节目嘉宾部分已由转录覆盖

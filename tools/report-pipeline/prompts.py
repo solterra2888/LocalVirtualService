@@ -7,13 +7,14 @@ v4 对齐 CNT 现行版式(2026-10-12 之后):
   - Deep Dives = What happened / Key numbers / Management said / Analyst reaction
   - Macros: Releases 仅美国一线白名单; Rate Expectations/跨资产仅周五或极端行情;
     Forward Catalysts 恒在; 拍卖并入 Forward Catalysts
-  - Macros 反应引语只引 The Close 摘要(不用 Surveillance,不挂转录)
+  - Macros 反应引语只引 The Close 转录(不用 Surveillance)
   - 数字对账由仓库内 verify_checks.py 执行; ZCode 核验只做叙事质量审查
 
-写作按信源分三组并行:overall_market(The Close: narrative/drivers/positioning)、
-company_desk(Closing Bell: sector_action/deep_dives)、macro(日历 + macro_pillars)。
-Today's Movers 不走 Finviz 全市场榜,确定性抽出 Closing Bell 摘要里的
-Stock Movers / 股市异动股表(Winners / Losers / After-Hours)。
+写作按信源分三组并行:overall_market(The Close 转录: narrative/drivers/
+positioning)、company_desk(Closing Bell 主段+Overtime 转录: sector_action/
+movers/deep_dives)、macro(日历 + macro_pillars)。
+Today's Movers 不走 Finviz 全市场榜,由 company_desk 从 Closing Bell 转录的
+节目点名抽出(Winners / Losers / After-Hours),走台账核验。
 """
 
 from typing import Any, Dict, Optional
@@ -43,8 +44,8 @@ STYLE_PROFILES: Dict[str, Dict[str, Any]] = {
 
 # 括号归因词 → snapshot 源(核验据此做归因映射审计)
 ATTRIBUTION_MAP = {
-    "(The Close)": "the_close.summary_markdown",
-    "(Closing Bell)": "cnbc_closing_bell.summary_markdown",
+    "(The Close)": "the_close.clean_transcript",
+    "(Closing Bell)": "cnbc_closing_bell.clean_transcript / clean_transcript_ot",
     "(cross-asset)": "market.cross_asset",
     "(sector averages)": "market.sp500_sector_avg",
     "(breadth)": "market.breadth",
@@ -68,7 +69,7 @@ SECTION_SOURCE_MATRIX = {
                     "(Treasury curve)", "(fed funds futures)", "(Finviz)"},
     "sector_action": {"(Closing Bell)", "(sector averages)", "(Finviz)",
                       "(breadth)", "(earnings calendar)"},
-    "movers": {"(Closing Bell)"},
+    "movers": {"(Closing Bell)", "(Finviz)"},
     "deep_dives": {"(Closing Bell)", "(Finviz)", "(earnings calendar)"},
     "macro": {"(economic calendar)", "(Treasury curve)", "(FRED)",
               "(fed funds futures)", "(Fed calendar)", "(auction calendar)",
@@ -95,9 +96,9 @@ def _common_rules(style: str, allowed_tags: Optional[set] = None) -> str:
         tags = ", ".join(sorted(allowed_tags)) or "(none)"
         tag_line = f"""
    SOURCE RESTRICTION for THIS section: the ONLY permitted attribution tags are
-   {tags}. Narrative/quotes come from show digests when tagged with a show tag;
-   numbers may be anchored to structured sources listed above. If your assigned
-   source lacks a number or fact you want to state, mark it {p['missing_mark']}
+   {tags}. Narrative/quotes come from show transcripts when tagged with a show
+   tag; numbers may be anchored to structured sources listed above. If your
+   assigned source lacks a number or fact you want to state, mark it {p['missing_mark']}
    — do not borrow from a source outside this whitelist.
 """
     return f"""\
@@ -108,8 +109,16 @@ daily brief: dense bullets, bold lead-ins, parenthetical source attributions).
 
 HARD RULES (violating any of these fails pipeline verification):
 1. The ONLY data source is the attached snapshot.json (a frozen data snapshot).
-   Do NOT invent numbers. Do NOT fetch anything from the internet. There is no
-   show transcript — quotes come from the digest fields in the snapshot only.
+   Do NOT invent numbers. Do NOT fetch anything from the internet.
+   SHOW CONTENT: the shows' cleaned transcripts are the content of record —
+   sources.the_close.clean_transcript (">>" speaker turns; Bloomberg's The Close)
+   and sources.cnbc_closing_bell.clean_transcript + clean_transcript_ot
+   ([mm:ss] paragraphs; CNBC Closing Bell MAIN hour and its OVERTIME hour,
+   which covers the after-close earnings block). There are no show digests.
+   Quote guests with the speaker attribution spoken on air (name + title/firm
+   when stated; do not guess names or affiliations). If a transcript field is
+   absent from the snapshot, that show's material is unavailable — do not
+   paraphrase from memory.
 2. Every number you state must exist in snapshot.json. If absent, omit the
    sentence or mark {p['missing_mark']}.
 3. Write the section to the exact output file specified below, as Markdown,
@@ -147,8 +156,8 @@ HARD RULES (violating any of these fails pipeline verification):
      MONTHLY AVERAGE contracts — never call a contract month's number "<month>
      meeting odds"; phrase it as "the <month> contract prices ~Nbp".
    - No vague quantifiers ("sharply", "significantly") without a number.
-   - Quotes need name + affiliation, verbatim from your assigned digest; never
-     construct a quote that is not in the snapshot.
+   - Quotes need name + affiliation, verbatim from your assigned show
+     transcript; never construct a quote that is not in the snapshot.
 10. End the file with a line containing only: <!-- SECTION DONE -->
 11. CLAIMS LEDGER (machine-checked; this replaces a separate verification pass):
    next to each section file write `<same name>.claims.json` (e.g.
@@ -161,8 +170,9 @@ HARD RULES (violating any of these fails pipeline verification):
      market.cross_asset[code=GSPC.INDX].pct_change_1d,
      economic_events.recent[event=Fed Interest Rate Decision].actual,
      macro_pillars.par_curve.change_bp.10y
-   - Numbers quoted from a show: path = the_close.summary_markdown or
-     cnbc_closing_bell.summary_markdown (digests only; no transcripts).
+   - Numbers quoted from a show: path = the_close.clean_transcript,
+     cnbc_closing_bell.clean_transcript or cnbc_closing_bell.clean_transcript_ot
+     (spoken numbers; value exactly as spoken, e.g. "48" not "47.6%").
    - `value` exactly as written in the prose (keep %, bp, K, $, sign).
    A script checks every entry against the snapshot; an entry whose number is
    not at its path fails the section. Write the ledger AFTER the prose so it
@@ -175,7 +185,7 @@ HARD RULES (violating any of these fails pipeline verification):
 OVERALL_MARKET_TASK = """\
 ## Part 1 — Today's Narrative + Top Market Drivers (one analysis, two files)
 
-You analyze The Close digest ONCE and export TWO files. The two parts
+You analyze The Close transcript ONCE and export TWO files. The two parts
 complement, never repeat: numbers and depth live in the drivers file; the
 narrative file is the scan layer — a market-wrap chyron, not a mini-drivers.
 
@@ -210,11 +220,11 @@ combined picture of BOTH files.
 ### File B — sections/02_drivers.md  (ANALYSIS layer)
 
 Write "## Top Market Drivers" with up to 5 driver blocks derived from The Close
-(its Main Narrative / Top Market Drivers / Cross-Asset segments), with structured
-numbers as anchors when the digest states a level or move that also appears in
-the snapshot. Each block:
+(its market-wrap desk segments, guest interviews, and data reads), with
+structured numbers as anchors when the show states a level or move that also
+appears in the snapshot. Each block:
 - A bold lead-in headline (one clause, e.g. **A soft print could not hold the long end.**)
-- 2-5 factual bullets with numbers as stated in The Close and/or matching
+- 2-5 factual bullets with numbers as stated on The Close and/or matching
   snapshot fields (par_curve change_bp, next_fomc_odds, cross_asset, breadth),
   each tagged with the appropriate attribution and carrying an audit comment.
 - A final one-line takeaway, exactly: **Take:** <one sentence> — the actionable
@@ -226,12 +236,13 @@ Do not exceed 5 blocks; pick the ones The Close actually supports.
 
 Write "## Positioning / Flow" with three labeled items, in this order (skip any
 whose material is genuinely absent, marking it {missing_mark} in one short line
-instead). Narrative material comes from the_close.positioning_material — the
-bundle of Cross-Asset Signals / Key Disagreements / Resolution Framework /
-Time Horizons / PM Takeaway segments. Structured numbers (breadth, curve,
-fed_odds, Finviz) may anchor Primary/Secondary when they corroborate the digest:
+instead). Mine the positioning material directly from the The Close transcript
+— the guest-strategist segments (asset allocators, fixed-income and credit
+views, cross-asset reads, disagreements and time horizons) plus the hosts'
+positioning discussion. Structured numbers (breadth, curve, fed_odds, Finviz)
+may anchor Primary/Secondary when they corroborate the show:
 - **Primary positioning:** the dominant positioning theme of the day (rates,
-  equity beta, duration, rotation) with the digest's prescribed response.
+  equity beta, duration, rotation) with the prescribed response.
 - **Secondary positioning:** a second flow/positioning thread (credit, gold,
   FX, sector rotation, buybacks, ETF flows).
 - **Guest positioning:** the most decision-relevant strategist/guest call —
@@ -251,12 +262,13 @@ POSITIONING_TASK = """\
 
 Write "## Positioning / Flow" with three labeled items, in this order (skip any
 whose material is genuinely absent, marking it {missing_mark} in one short line
-instead). Narrative material comes from the_close.positioning_material — the
-bundle of Cross-Asset Signals / Key Disagreements / Resolution Framework /
-Time Horizons / PM Takeaway segments. Structured numbers (breadth, curve,
-fed_odds, Finviz) may anchor Primary/Secondary when they corroborate the digest:
+instead). Mine the positioning material directly from the The Close transcript
+— the guest-strategist segments (asset allocators, fixed-income and credit
+views, cross-asset reads, disagreements and time horizons) plus the hosts'
+positioning discussion. Structured numbers (breadth, curve, fed_odds, Finviz)
+may anchor Primary/Secondary when they corroborate the show:
 - **Primary positioning:** the dominant positioning theme of the day (rates,
-  equity beta, duration, rotation) with the digest's prescribed response.
+  equity beta, duration, rotation) with the prescribed response.
 - **Secondary positioning:** a second flow/positioning thread (credit, gold,
   FX, sector rotation, buybacks, ETF flows).
 - **Guest positioning:** the most decision-relevant strategist/guest call —
@@ -268,8 +280,10 @@ SECTOR_ACTION_TASK = """\
 ## Section 4 — Sector Action
 
 Write "## Sector Action" as 4–7 thematic blocks (NO sector scorecard / league
-table). Synthesize from the Closing Bell digest; use market.sp500_constituents /
-top_movers / breadth / earnings_calendar only as number anchors for named tickers.
+table). Synthesize from the Closing Bell transcripts (MAIN hour clean_transcript
++ OVERTIME hour clean_transcript_ot — after-close earnings coverage lives in
+Overtime); use market.sp500_constituents / top_movers / breadth /
+earnings_calendar only as number anchors for named tickers.
 Each block:
 - A bold lead-in naming the theme (e.g. **Funding, not demand, sank AI hardware.**)
 - 2–4 bullets with company moves and catalysts, tagged (Closing Bell) and/or
@@ -284,54 +298,79 @@ DEEP_DIVES_TASK = """\
 ## Section 6 — Company Deep Dives
 
 Write "## Company Deep Dives". Pick the 3-5 companies most prominently discussed
-in the Closing Bell digest (tie-break: appearance in market.top_movers /
-sp500_constituents / earnings_calendar.today / earnings_calendar.prior_after_close;
-the earnings calendar is pre-filtered to US large caps, fields: code, session,
-eps_actual, eps_estimate, eps_surprise_pct). For each company write a
-subsection headed by its ticker:
+across the Closing Bell transcripts (main + Overtime; tie-break: appearance in
+market.top_movers / sp500_constituents / earnings_calendar.today /
+earnings_calendar.prior_after_close; the earnings calendar is pre-filtered to US
+large caps, fields: code, session, eps_actual, eps_estimate, eps_surprise_pct).
+For each company write a subsection headed by its ticker:
 
 ### $TICKER — Company Name
 
 - **What happened:** the event/coverage as told by Closing Bell, with the price
   move if in the snapshot.
-- **Key numbers:** only numbers present in Closing Bell, earnings_calendar, or
-  Finviz fields (with attribution tags and audit comments); if none, write
-  {missing_mark}.
+- **Key numbers:** only numbers present in the Closing Bell transcripts,
+  earnings_calendar, or Finviz fields (with attribution tags and audit
+  comments); if none, write {missing_mark}.
 - **Management said:** a verbatim quote from an executive, ONLY if a direct
-  quote exists in the Closing Bell digest (name + title + the quote). If none,
+  quote exists in the Closing Bell transcripts (name + title + the quote; the
+  Overtime hour carries most after-close management comments). If none,
   OMIT this line entirely — do not paraphrase into a quote.
 - **Analyst reaction:** analyst/strategist reactions ONLY if present in the
-  Closing Bell digest (name + firm + view). Same omission rule.
+  Closing Bell transcripts (name + firm + view). Same omission rule.
 
 Do NOT write Bull case / Bear case labels. Do NOT write a Read: synthesis line.
 STRICT: do not add companies not discussed by Closing Bell; do not fabricate
 estimates, EPS, guidance numbers, or quotes; do not pull material from The Close.
 """
 
+MOVERS_TASK = """\
+## Section 5 — Today's Movers
+
+Write "## Today's Movers" as the show's named-movers tables, built from the
+Closing Bell transcripts (main hour + Overtime after-hours block) — NOT a
+Finviz ranked tape. Exactly three Markdown tables, in this order:
+
+### Winners
+### Losers
+### After-Hours Movers
+
+Columns for Winners/Losers: `| Ticker | Company | Change | Catalyst |`;
+for After-Hours: `| Ticker | Company | Move | Catalyst |`.
+
+- Include ONLY companies the shows actually named as notable movers, with the
+  catalyst as stated on air (earnings beat/miss, guidance, deal, downgrade…).
+  2–8 rows per table; a table with no names in the transcripts gets a single
+  {missing_mark} line instead of an empty table.
+- Change/Move: prefer the show's spoken number tagged (Closing Bell); a Finviz
+  close change may anchor it tagged (Finviz). If neither quantifies it, write
+  "未提及" / "not stated" in the cell — never invent a number.
+- After-Hours rows come from the Overtime hour; note the move as "AH -x%" style.
+- One intro line above the tables noting these are show-named movers
+  (not a full-market ranking).
+Every number goes into the claims ledger (rule 11).
+"""
+
 COMPANY_DESK_TASK = """\
-## Part 2 — Sector Action + Company Deep Dives (one Closing Bell pass, two files)
+## Part 2 — Sector Action + Today's Movers + Company Deep Dives
+(one Closing Bell pass, three files)
 
-You analyze the Closing Bell digest ONCE and export TWO files. Deep Dives
-companies MUST be a subset of the names that appear in Sector Action — pick
-the 3–5 most prominently discussed, tie-break by market.top_movers /
-sp500_constituents / earnings_calendar. There is no show transcript; quotes
-come from the digest only.
-
-Do NOT write sections/05_movers.md. Today's Movers is copied separately from
-the digest's Stock Movers / 股市异动股 tables (Winners / Losers / After-Hours).
-If those tables are missing from the digest, the orchestrator degrades to
-{missing_mark} — do not invent a ranked tape from Finviz.
+You analyze the Closing Bell transcripts ONCE (main hour + Overtime) and
+export THREE files. Deep Dives companies MUST be a subset of the names that
+appear in Sector Action — pick the 3–5 most prominently discussed, tie-break
+by market.top_movers / sp500_constituents / earnings_calendar. Movers rows
+must also be names the shows actually covered.
 
 ### File A — sections/04_sector_action.md
 
 """ + SECTOR_ACTION_TASK + """
+### File B — sections/05_movers.md
 
-### File B — sections/06_deep_dives.md
+""" + MOVERS_TASK + """
+### File C — sections/06_deep_dives.md
 
 """ + DEEP_DIVES_TASK + """
-
-BOTH files end with the <!-- SECTION DONE --> marker on their own last line.
-Each file also gets its own claims ledger (rule 11).
+ALL THREE files end with the <!-- SECTION DONE --> marker on their own last
+line. Each file also gets its own claims ledger (rule 11).
 """
 
 
@@ -358,8 +397,7 @@ earnings_calendar. Calendar `time`/`date` are UTC — ALWAYS quote times from th
 Rows with the same event name but a different `comparison` (mom / yoy / level)
 are different measures — do not mix their actual/est/prior. Sell-side / guest
 reaction quotes for Releases and Rate Expectations may come from The Close
-digest only — tag them (The Close). Do not cite any other show; there is no
-show transcript."""]
+transcript only — tag them (The Close). Do not cite any other show."""]
 
     selected = blocks.get("selected_releases") or []
     if blocks.get("releases") and selected:
@@ -388,7 +426,7 @@ For each event:
   when backed by macro_pillars.fred_ranks.*.claim or release_series. Tag
   (economic calendar) / (FRED).
 - 2–4 **Sell-Side Reaction** bullets: named economist + firm + view, ONLY if
-  present in The Close digest (tag (The Close)). If no quote exists, omit the
+  present in The Close transcript (tag (The Close)). If no quote exists, omit the
   reaction bullets rather than inventing them.""")
     else:
         parts.append("""\
@@ -407,7 +445,7 @@ Write "#### Rate Expectations · <next FOMC>" with:
   house style `Hike Odds ~20% (prior: ~24%)`.
 - 1–4 supporting bullets from fed_odds.contracts (cum bp) and par_curve
   change_bp. Attribution: (fed funds futures) / (Treasury curve).
-- Optional guest reaction bullets from The Close digest only.
+- Optional guest reaction bullets from The Close transcript only.
 Do NOT invent a prior if sources.prior_odds is absent.""")
     else:
         parts.append("""\
@@ -423,7 +461,7 @@ block. Fold any needed odds into Forward Catalysts' FOMC line instead.""")
 Write one or two short subsections (e.g. "#### Treasuries and oil" /
 "#### Equities and credit") covering curve moves, oil if in cross_asset,
 breadth, HY/IG OAS from fred_extras, using only snapshot numbers. Guest
-quotes optional from The Close digest only.""")
+quotes optional from The Close transcript only.""")
     else:
         parts.append("""\
 
@@ -470,7 +508,8 @@ SECTION_SPECS: Dict[str, Dict[str, Any]] = {
     },
     "movers": {
         "output_file": "sections/05_movers.md",
-        "mode": "deterministic",
+        "agent": "company_desk",
+        "task": MOVERS_TASK,
     },
     "deep_dives": {
         "output_file": "sections/06_deep_dives.md",
@@ -499,8 +538,9 @@ _FAKE_SECTIONS = {
     ),
     "drivers": (
         "## Top Market Drivers\n"
-        "- **Placeholder driver.** Placeholder fact as told by The Close "
-        "(fake mode value). <!-- audit: [show the_close] -->\n"
+        "- **Placeholder driver.** Index {spx_move} as told by The Close "
+        "(fake mode value — deterministic check must flag this). "
+        "<!-- audit: [show the_close] -->\n"
         "- **Take:** placeholder take (fake mode).\n"
     ),
     "positioning": (
@@ -511,6 +551,16 @@ _FAKE_SECTIONS = {
     "sector_action": (
         "## Sector Action\n"
         "- **Placeholder theme.** Placeholder sector action (fake mode). "
+        "<!-- audit: [show cnbc_closing_bell] -->\n"
+    ),
+    "movers": (
+        "## Today's Movers\n"
+        "Named movers as covered by Closing Bell (fake mode). "
+        "<!-- audit: [show cnbc_closing_bell] -->\n"
+        "### Winners\n"
+        "| Ticker | Company | Change | Catalyst |\n"
+        "| --- | --- | --- | --- |\n"
+        "| $FAKE | Placeholder Corp | not stated | placeholder beat "
         "<!-- audit: [show cnbc_closing_bell] -->\n"
     ),
     "deep_dives": (
@@ -531,7 +581,7 @@ _FAKE_SECTIONS = {
 
 def fake_section_text(name: str, corrected: bool = False,
                       spx_move: str = "+9.99%") -> str:
-    text = _FAKE_SECTIONS[name]
+    text = _FAKE_SECTIONS[name].replace("{spx_move}", spx_move)
     if corrected and name == "drivers":
         return (
             "## Top Market Drivers\n"

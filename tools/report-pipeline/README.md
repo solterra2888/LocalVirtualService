@@ -1,12 +1,12 @@
-# report-pipeline — CNT 风格 Daily Market Brief 生成管线(v4)
+# report-pipeline — CNT 风格 Daily Market Brief 生成管线(v5)
 
-用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。对齐 CNT **现行版式**(2026-10-12 之后)。
+用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。对齐 CNT **现行版式**(2026-10-12 之后)。v5 起节目正文**只用清洗转录、不读摘要表**(The Close youtube 自识别 + Closing Bell 主段/Overtime 播客双行直查)。
 
 | 报告部分 | 章节 | 叙事 / 数据源 |
 |---|---|---|
-| OVERALL MARKET | narrative / drivers / positioning | **The Close**(叙事) + 跨资产/曲线/fed_odds/广度(数字锚) |
-| EQUITY MARKET | sector_action / movers / deep_dives | **Closing Bell**(movers 抽节目点名表) + Finviz 全成分/财报日历(数字锚) |
-| MACROS | macro | **经济日历 + macro_pillars**; Releases 反应可引 **The Close 摘要**; Rate Expectations / 跨资产复盘仅周五或极端行情 |
+| OVERALL MARKET | narrative / drivers / positioning | **The Close 转录**(叙事) + 跨资产/曲线/fed_odds/广度(数字锚) |
+| EQUITY MARKET | sector_action / movers / deep_dives | **Closing Bell 主段+Overtime 转录**(movers 三表从转录写) + Finviz 全成分/财报日历(数字锚) |
+| MACROS | macro | **经济日历 + macro_pillars**; Releases 反应可引 **The Close 转录**; Rate Expectations / 跨资产复盘仅周五或极端行情 |
 
 ## 全流程图
 
@@ -15,15 +15,26 @@
  第一层 · 上游数据摄入(仓库现有服务,日常定时运行,不在本管线内)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Bloomberg TV ──► the_close / cnbc_closing_bell 摘要表
+  YouTube(Bloomberg Television) ──► subscription_content(youtube 行)
+  CNBC Closing Bell 播客 feed ────► subscription_content(podcast 行,主段+OT 各一行)
   EODHD 经济日历 / 行情 · Finviz screener · earnings_calendar
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  第二层 · Stage 0 冻结快照  脚本: build_snapshot.py + fetch_macro_pillars.py
+                                    + transcript_prep.py(转录直查与清洗)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  The Close / Closing Bell:按美东场次匹配 T(摘要去掉客套前言)
-  不取 Surveillance,不拉节目转录
+  节目转录直查(不经摘要表,按节目当晚 UTC 发布时间锚定 T,无 T+1 戳错位):
+    the_close         youtube + Bloomberg Television 频道 + T 晚 21:00-23:00
+                      UTC 窗口 + 转录≥50k + 开场白 "THIS IS THE CLOSE" 自识别
+                      (同窗口有 Surveillance/Businessweek 等干扰项)
+    cnbc_closing_bell podcast 行,标题带 T 的 MM/DD/YY 后缀(主段与 Overtime 行
+                      都有;日间节目行无后缀天然排除);published_at 早=主段、
+                      晚=OT。OT 标题有时是纯副标题(无 "Closing Bell" 字样),
+                      不可按标题关键字过滤
+  Layer 1 确定性清洗后内联:
+    sources.the_close.clean_transcript
+    sources.cnbc_closing_bell.clean_transcript(主段) / clean_transcript_ot(OT)
   market 拆成两块,各自容错:
     cross_asset ← market_data_eod(≤T,可回溯)
     finviz ← 当前状态表(snapshot_date ≤ T+1;历史日期无快照)
@@ -43,16 +54,17 @@
  第三层 · 生成与核验  脚本: run_pipeline.py + prompts.py + verify_checks.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  三组并行(墙钟 ≈ 最慢一组;不挂转录):
-    overall_market → 01+02+03  The Close 一遍: narrative / drivers / positioning
-    company_desk   → 04+06     Closing Bell 一遍: sector_action / deep_dives
+  三组并行(墙钟 ≈ 最慢一组):
+    overall_market → 01+02+03  The Close 转录: narrative / drivers / positioning
+    company_desk   → 04+05+06  Closing Bell 主段+OT 转录:
+                               sector_action / movers(三表) / deep_dives
     macro          → 07        经济日历 + macro_pillars + The Close 反应引语
-  movers         → 05  从 Closing Bell 摘要的 Stock Movers 表抽出(非 Finviz 榜)
   ▼
-  每节同会话写 sections/NN_*.claims.json(数字台账:value + snapshot 路径)
+  每节同会话写 sections/NN_*.claims.json(数字台账:value + snapshot 路径;
+  节目数字路径 = the_close.clean_transcript / cnbc_closing_bell.clean_transcript[_ot])
   verify_checks.py(确定性,秒级) → check_results.json
     台账逐条按路径对数 · 正文 %/bp 数字覆盖兜底 · 下一场 FOMC 概率 ·
-    三元组/since/块矩阵/标签矩阵/结构 · cn 标题语言
+    三元组/since/块矩阵/标签矩阵/结构(含 movers 三表)· cn 标题语言
   有 high fail → 不调 LLM,直接按清单 --resume 修订
   全绿 → --llm-verify light(默认,只读七节正文,不挂快照/转录)| off | full
   Gate → assemble(正文无口径块) + render_charts.py → final/
@@ -115,15 +127,16 @@ $PY tools/report-pipeline/render_charts.py backend/reports/pipeline/2026-10-27
    分项;同族其他口径放 related);Rate Expectations / 跨资产复盘 = 周五或
    概率≥10pt / 10Y≥8bp 变动;Forward Catalysts 恒在;拍卖并入 Forward Catalysts。
 7. **审计分层** — 正文 CNT 表面文体;口径块与 `<!-- audit: -->` 进 sidecar。
-8. **不拉转录、不用 Surveillance** — 写作只读 The Close / Closing Bell 摘要;
-   Macros 反应引语只引 The Close。三组写作 agent 并行,墙钟 ≈ 最慢一组。
+8. **转录为正文、不用 Surveillance、不读摘要表** — 写作只读 The Close /
+   Closing Bell(主段+OT)清洗转录;Macros 反应引语只引 The Close 转录。
+   三组写作 agent 并行,墙钟 ≈ 最慢一组。
 9. **时间口径** — 经济日历的 `time` 是 UTC,正文只引用 `time_et`(美东)。
    同一事件名、不同 `comparison`(mom / yoy / 水平)是不同口径,不得混用。
 10. **回填写库** — `build_snapshot.py` 默认对生产 `economic_events` 做
     [T-2, T] 的 COALESCE upsert;调试用 `--no-backfill`。
-11. **节目按美东场次匹配** — 摘要表 `report_date` 是北京生成日(T 场次 stamped
-    T+1);`_show_summary` 以标题日期或"stamped 日前一个工作日"为场次,写出
-    `session_date` / `lag_days`,落后时记入 errors。
+11. **节目转录按当晚 UTC 锚定** — 转录行自身 `published_at` 即美东场次当晚,
+    直查匹配无摘要表 T+1 北京戳问题;缺行(上游 ingest 滞后/断更)记入
+    `errors`,该节目章节按缺源降级,不回退摘要。
 
 ## 已知边界
 
@@ -131,8 +144,13 @@ $PY tools/report-pipeline/render_charts.py backend/reports/pipeline/2026-10-27
 - Finviz 是整表刷新的当前状态,不能回溯历史交易日。测管线用最新有快照的日期。
 - Finviz 热力图、真 RRG、ETF/个股 K 线未做。现有图是跨资产面板、板块表、
   1M 对 1D 的轮动散点(RRG 的简化替代)、Release 柱状图、个股收盘价折线。
-- Today's Movers 抽 Closing Bell 摘要的 Stock Movers 表。摘要是占位(播客无转录)
-  时写不可得,不回退 Finviz 全市场榜。Finviz 热力图未做。
+- Today's Movers 由 company_desk 从 Closing Bell 转录的节目点名写三表
+  (Winners / Losers / After-Hours),走台账核验;无转录时按「不可得」降级,
+  不回退 Finviz 全市场榜。
+- 节目转录 ingest 偶发滞后(历史批次晚 5-7 天):cron/手动构建应晚于当晚
+  转录入库(北京时间次日上午 10 点后实测稳定);缺哪行记 `errors`。
+- 节目口播数字是约数且偶有口误/ASR 断词(如 "SERVICE. NOW"),引用时以
+  数据层口径为锚、转录数字逐条入台账对账。
 - 盘中时间戳 / CDS / 10-Q 承诺等一手材料不在本管线范围内。
-- 不拉节目转录:Management said / Analyst / 卖方反应只在摘要里有原话时才写,
-  否则省略。Macros 不再引用 Surveillance。
+- Management said / Analyst / 卖方反应只在转录里有原话时才写,否则省略。
+  Macros 不引用 Surveillance。

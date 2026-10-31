@@ -4,8 +4,10 @@
 
 流程(详见 tools/report-pipeline/README.md):
     Stage 0   build_snapshot.py 产出的冻结快照(本脚本不重建,只校验存在)
-    Stage 1-6 章节 Agent + movers 确定性渲染; macro 块矩阵由编排器按
-              美国一线白名单 / 周五规则纯代码判定后注入任务书
+    Stage 1-6 三组章节 Agent 并行(节目转录为正文,无摘要):
+              overall_market(The Close) / company_desk(Closing Bell 主段+OT,
+              含 movers) / macro;macro 块矩阵由编排器按美国一线白名单 /
+              周五规则纯代码判定后注入任务书
     Stage 7a  确定性 verify_checks.py(数字/三元组/since/概率/矩阵/结构)
     Stage 7b  核验 Agent:叙事质量审查 → verify/verdict.json
     Gate      纯 Python 门控: pass → 拼接发布(审计注释+口径块进 sidecar);
@@ -50,7 +52,7 @@ from prompts import (  # noqa: E402
 from verify_checks import claims_path, run_checks  # noqa: E402
 
 DEFAULT_ZCODE_BIN = "/root/.zcode/server/bin/zcode"
-DEFAULT_TIMEOUT_SEC = 900
+DEFAULT_TIMEOUT_SEC = 1200
 DEFAULT_MAX_VERIFY_RETRIES = 2
 DEFAULT_STYLE = "en"
 DONE_MARKER = "<!-- SECTION DONE -->"
@@ -276,63 +278,8 @@ def select_tier1_releases(snapshot: Dict[str, Any],
     return picked
 
 
-# Closing Bell 摘要里 Stock Movers 段的标题(中英都有:模板要求英文,实际输出常为中文)
-_MOVERS_START_RE = re.compile(
-    r"^##\s+(Stock Movers|股市异动股)\s*$", re.I | re.M)
-_MOVERS_END_RE = re.compile(
-    r"^##\s+(Company Deep Dives|公司深度|Sector Action|行业板块|交易策略)",
-    re.I | re.M)
-_SUBHEAD_MAP = (
-    (re.compile(r"^###\s+(Winners|涨幅居前)\s*$", re.I | re.M), "### Winners"),
-    (re.compile(r"^###\s+(Losers|跌幅居前)\s*$", re.I | re.M), "### Losers"),
-    (re.compile(r"^###\s+(After[-\s]?Hours Movers|盘后异动)\s*$", re.I | re.M),
-     "### After-Hours Movers"),
-)
-
-
-def extract_closing_bell_movers(digest: Optional[str]) -> Optional[str]:
-    """从 Closing Bell 摘要抽出 Winners / Losers / After-Hours 表。
-
-    这是 CNT Today's Movers 的真正来源(节目点名的异动股 + 催化剂),
-    不是 Finviz 按绝对涨跌幅排的全市场榜。摘要没有该段时返回 None。
-    """
-    if not digest or not _MOVERS_START_RE.search(digest):
-        return None
-    start = _MOVERS_START_RE.search(digest)
-    end = _MOVERS_END_RE.search(digest, start.end())
-    body = digest[start.end(): end.start() if end else None].strip()
-    if "|" not in body:  # 没有表格就不是可用的 movers 段
-        return None
-    for rx, repl in _SUBHEAD_MAP:
-        body = rx.sub(repl, body)
-    return body
-
-
-def render_movers(ws: Path, snapshot: Dict[str, Any], style: str = "en") -> None:
-    """sections/05_movers.md —— 从 Closing Bell 摘要的 Stock Movers 表抽出,不编造。"""
-    sources = snapshot.get("sources") or {}
-    digest = ((sources.get("cnbc_closing_bell") or {}).get("summary_markdown") or "")
-    cn = style == "cn"
-    extracted = extract_closing_bell_movers(digest)
-    lines = ["## Today's Movers", ""]
-    if extracted:
-        lines += [
-            ("来自 Closing Bell 摘要的节目点名异动(非 Finviz 全市场排名)。 "
-             if cn else
-             "Named movers as covered by Closing Bell (not a Finviz ranked tape). ")
-            + "<!-- audit: [show cnbc_closing_bell] -->",
-            "",
-            extracted,
-            "",
-        ]
-    else:
-        missing = ("「不可得」——Closing Bell 摘要中没有 Stock Movers 表"
-                   if cn else
-                   "(not in snapshot) — Closing Bell digest has no Stock Movers table")
-        lines += [f"{missing}. <!-- audit: [show cnbc_closing_bell] -->", ""]
-    f = ws / SECTION_SPECS["movers"]["output_file"]
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text("\n".join(lines) + f"\n{DONE_MARKER}\n", encoding="utf-8")
+# Today's Movers(v5)由 company_desk agent 从 Closing Bell 转录直接写出,
+# 走与其他章节相同的 claims 台账核验 —— 确定性渲染层已随摘要源一并移除。
 
 
 def macro_blocks(snapshot: Dict[str, Any]) -> Dict[str, Any]:
@@ -438,13 +385,9 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
         return {n: {"status": "done"} for n in names}
     print(f"[agent] {agent} ({', '.join(names)}) ...", flush=True)
     t0 = time.time()
-    specs = [SECTION_SPECS[n] for n in names]
     sections: Dict[str, Any] = {}
     usage = None
-    if specs[0].get("mode") == "deterministic":
-        render_movers(ws, snapshot_data, style=args.style)
-        sections = {n: {"status": "done", "mode": "deterministic"} for n in names}
-    elif args.fake_zcode:
+    if args.fake_zcode:
         for n in names:
             _fake_section(ws, n, blocks=blocks, style=args.style)
         sections = {n: {"status": "done"} for n in names}
@@ -500,10 +443,8 @@ def run_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
 
     pending = []
     for agent in AGENT_ORDER:
-        names = agent_section_names(agent)
-        specs = [SECTION_SPECS[n] for n in names]
-        if specs[0].get("mode") == "deterministic" or args.fake_zcode:
-            # 确定性 / fake:秒级,串行即可,避免线程里抢写同一份 fake 文件
+        if args.fake_zcode:
+            # fake:秒级,串行即可,避免线程里抢写同一份 fake 文件
             _apply(_run_one_agent(args, ws, snapshot, snapshot_data, blocks, agent))
         else:
             pending.append(agent)
@@ -525,6 +466,15 @@ def run_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
         raise RuntimeError(f"sections incomplete: {missing}")
 
 
+def _read_verdict(path: Path) -> Dict[str, Any]:
+    """读核验 agent 手写的 verdict.json;容忍 JSON 非法转义(如 \' )。"""
+    text = path.read_text(encoding="utf-8")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(re.sub(r"\\(['\"])", r"\1", text))
+
+
 def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
                  state: Dict[str, Any]) -> Dict[str, Any]:
     verdict_file = ws / "verify" / "verdict.json"
@@ -542,7 +492,7 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
         newest_section = max(f.stat().st_mtime for f in section_files)
         if v_mtime > newest_section:
             try:
-                verdict = json.loads(verdict_file.read_text(encoding="utf-8"))
+                verdict = _read_verdict(verdict_file)
                 if verdict.get("verdict") in ("pass", "fail"):
                     print("[verify] reusing existing verdict (newer than all "
                           "sections)", flush=True)
@@ -612,7 +562,7 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
           f"{state['timings'][f'verify:attempt_{attempt}'][-1]}s", flush=True)
     if not verdict_file.exists():
         raise RuntimeError("verifier finished but verify/verdict.json missing")
-    verdict = json.loads(verdict_file.read_text(encoding="utf-8"))
+    verdict = _read_verdict(verdict_file)
 
     # Merge deterministic high fails into verdict (orchestrator owns the gate)
     if high_fails:
@@ -641,6 +591,28 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
     return verdict
 
 
+_SEC_TOKEN_RE = re.compile(r"\d{2}_([a-z_]+)")
+
+
+def _issue_section_keys(section_field: str) -> List[str]:
+    """verdict 的 section 字段 → SECTION_SPECS 键列表。
+
+    核验 agent 的写法不固定:裸键("macro")、文件名("06_deep_dives.md")、
+    或带跨节装饰("02_drivers.md(与 04_sector_action.md 交叉)")。提取字段中
+    出现的全部 NN_name token 映射回章节键;跨节问题映射到多组、各自修订 ——
+    旧版只认裸键,跨节矛盾映射不到任何修订组,修订空转直至轮次耗尽。
+    """
+    keys: List[str] = []
+    for m in _SEC_TOKEN_RE.finditer(section_field or ""):
+        name = m.group(1)
+        if name in SECTION_SPECS and name not in keys:
+            keys.append(name)
+    bare = (section_field or "").strip()
+    if bare in SECTION_SPECS and bare not in keys:
+        keys.append(bare)
+    return keys
+
+
 def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
                     state: Dict[str, Any], issues: List[Dict[str, Any]]) -> None:
     """按核验问题清单定向修订(--resume 续接原会话)。
@@ -650,9 +622,8 @@ def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
     """
     by_agent: Dict[str, List[Dict[str, Any]]] = {}
     for issue in issues:
-        sec = issue.get("section")
-        if sec in SECTION_SPECS:
-            agent = SECTION_SPECS[sec].get("agent", sec)
+        for name in _issue_section_keys(str(issue.get("section") or "")):
+            agent = SECTION_SPECS[name].get("agent", name)
             by_agent.setdefault(agent, []).append(issue)
     for agent, agent_issues in by_agent.items():
         names = agent_section_names(agent)
@@ -707,12 +678,19 @@ def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
 
     def _show(key: str, label: str) -> str:
         v = src.get(key)
-        if isinstance(v, dict) and v.get("report_date"):
-            lag = v.get("lag_days") or 0
-            suffix = f"(滞后{lag}天)" if (cn and lag) else (f"(lag {lag}d)" if lag else "")
-            # 展示美东场次;report_date 是北京生成日,会比报告日晚一天
-            return f"{label}✓{v.get('session_date') or v['report_date']}{suffix}"
-        return f"{label}✗{'不可得' if cn else 'unavailable'}"
+        if not (isinstance(v, dict)
+                and (v.get("clean_transcript") or v.get("clean_transcript_ot"))):
+            return f"{label}转录✗{'不可得' if cn else 'unavailable'}"
+        s = v.get("session_date") or "?"
+        if key == "cnbc_closing_bell":
+            m = len(v.get("clean_transcript") or "")
+            o = len(v.get("clean_transcript_ot") or "")
+            slots = (f"主段{m // 1000}k" if cn else f"main {m // 1000}k") \
+                + ("/" if cn else "/") \
+                + (f"OT {o // 1000}k" if o else ("OT✗" if cn else "OT none"))
+            return f"{label}转录✓{s}({slots})"
+        t = len(v.get("clean_transcript") or "")
+        return f"{label}转录✓{s}({t // 1000}k)"
 
     market = src.get("market") or {}
     cross = market.get("cross_asset") or []
@@ -741,8 +719,8 @@ def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
             f"正文所有数字以该快照为准,禁止替代指标。",
             "> **数据源** "
             + " · ".join(filter(None, [
-                _show("the_close", "The Close 摘要"),
-                _show("cnbc_closing_bell", "CNBC Closing Bell 摘要"),
+                _show("the_close", "The Close"),
+                _show("cnbc_closing_bell", "CNBC Closing Bell"),
                 (f"跨资产行情✓{cross_span}({len(cross)}项)" if cross_span else "跨资产行情✗不可得"),
                 (f"板块/个股(finviz✓{market.get('snapshot_date') or '?'})"
                  f"✓{len(market.get('sp500_sector_avg') or [])}板块"
@@ -757,8 +735,8 @@ def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
             f"all numbers in this brief refer to that snapshot only.",
             "> **Sources** "
             + " · ".join(filter(None, [
-                _show("the_close", "The Close digest"),
-                _show("cnbc_closing_bell", "Closing Bell digest"),
+                _show("the_close", "The Close transcript"),
+                _show("cnbc_closing_bell", "Closing Bell transcript"),
                 (f"cross-asset✓{cross_span}({len(cross)} series)" if cross_span else "cross-asset✗unavailable"),
                 (f"sectors/stocks(finviz✓{market.get('snapshot_date') or '?'})"
                  f"✓{len(market.get('sp500_sector_avg') or [])} sectors"

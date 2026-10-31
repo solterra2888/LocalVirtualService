@@ -3,14 +3,13 @@
 """Stage 0 — 为 CNT 风格 Daily Market Brief 管线构建冻结数据快照。
 
 从仓库现有数据源拉取当日全部素材,写入 reports/pipeline/{date}/snapshot.json:
-  1. the_close_summaries          — Bloomberg The Close 八段式 PM Brief (LLM 已生成);
-                                     去掉开头客套前言;Cross-Asset / 分歧 / 解决框架 /
-                                     时间维度 / PM Takeaway 聚合为 positioning_material
-  2. cnbc_closing_bell_summaries  — CNBC Closing Bell 摘要 (LLM 已生成)
-     两档节目按美东场次匹配 T(_show_summary):摘要表 report_date 是北京
-     生成日(T 场次 stamped T+1);标题带日期以标题为准,否则 session = stamped
-     日的前一个工作日。写出 session_date / lag_days,落后时记入 errors。
-     不取 Surveillance,不拉节目转录 —— 写作只读摘要。
+  1-2. the_close / cnbc_closing_bell   — 节目转录直查(v5,不经摘要表):
+        The Close(YouTube,Bloomberg Television 频道)按 T 晚间发布窗口 +
+        开场白 "THIS IS THE CLOSE" 自识别;Closing Bell(播客)按标题
+        MM/DD/YY 日期后缀取主段 + Overtime 两行。Layer 1 确定性清洗后内联为
+        sources.the_close.clean_transcript 与 sources.cnbc_closing_bell.
+        clean_transcript / clean_transcript_ot。不取 Surveillance,不读摘要。
+        转录行自身 published_at 即美东场次日(同 UTC 晚),无 T+1 戳错位问题。
   4. economic_events              — 近 3 天实际值 + 未来 7 天日历(读库,impact≥2,
                                      仅 US/CN/JP/DE/KR);保留 comparison(mom/yoy/水平);
                                      time 是 UTC,另写 time_et / date_et(美东,含夏令时)。
@@ -36,14 +35,14 @@
 冻结数据,数字对账才可能成立。任何一个数据源失败只记录 errors,不阻塞整体
 (章节 Agent 会在 prompt 约束下对缺失源降级处理)。
 
-同日锚定: 行情/日历/曲线锚定交易日 T;The Close / Closing Bell 取 ≤T 最新一份
-并披露 lag_days,不再静默混入跨交易日口径。
+同日锚定: 行情/日历/曲线/节目转录均锚定交易日 T(转录按节目当晚 UTC 发布
+时间匹配,不存在摘要表的北京 T+1 戳问题)。
 
 用法:
     python tools/report-pipeline/build_snapshot.py \
         [--date 2026-10-28] [--out PATH] [--no-backfill]
 
-    不传 --date 时自动取 the_close_summaries 中最新 completed 的 report_date。
+    不传 --date 时取美东最近一个已收盘的交易日(≥18:30 ET 视为当日已收盘)。
     Finviz 无法回溯,测历史日期时 market.finviz 会记入 errors,其余源照常。
 """
 
@@ -102,124 +101,6 @@ TOP_MOVERS_MIN_CAP_M = 2000  # finviz market_cap 单位:百万美元 → $20 亿
 def _conn() -> Any:
     db = DatabaseManager(get_database_config())
     return db.get_connection()
-
-
-def _strip_preamble(md: Optional[str]) -> Optional[str]:
-    """去掉摘要开头的 LLM 客套前言(如 "这是一份基于…转录生成的结构化 PM Brief…"):
-    正文不以标题开头且 500 字内出现首个 Markdown 标题时,从该标题起算。"""
-    if not md or md.lstrip().startswith("#"):
-        return md
-    idx = md.find("\n#")
-    if 0 <= idx < 500:
-        return md[idx + 1:]
-    return md
-
-
-_TITLE_DATE_RE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4}|\d{2})\b")
-
-
-def _prev_weekday(d: date) -> date:
-    d -= timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    return d
-
-
-def _title_session(title: Optional[str]) -> Optional[date]:
-    """节目标题里的美东播出日期(如 "Closing Bell 10/28/26"、"Surveillance 10/27/2026")。"""
-    m = _TITLE_DATE_RE.search(title or "")
-    if not m:
-        return None
-    y = int(m.group(3))
-    y = y + 2000 if y < 100 else y
-    try:
-        return date(y, int(m.group(1)), int(m.group(2)))
-    except ValueError:
-        return None
-
-
-def _show_summary(table: str, report_date: date) -> Optional[Dict[str, Any]]:
-    """取美东交易日 T 那一场节目的 completed 摘要。
-
-    摘要表的 report_date 是**北京生成日**:美东 T 晚间(或 T 早盘)的节目在北京
-    T+1 早晨生成,stamped T+1。按 report_date ≤ T 匹配会系统性拿到 T-1 场次
-    (10-28 实测:周三数据配上周二 "…Earnings Ahead" 那期)。
-
-    场次判定: 标题带日期则以标题为准;否则 session = stamped 北京日的前一个工作日。
-    优先 session == T;没有则回退最近一场更早的,lag_days 记场次落后天数并由口径块披露。
-    """
-    conn = _conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT report_date, video_title, video_url, summary_content,
-                       updated_at, video_id
-                FROM {table}
-                WHERE status = 'completed'
-                  AND summary_content IS NOT NULL
-                  AND report_date BETWEEN %(lo)s AND %(hi)s
-                ORDER BY report_date DESC, updated_at DESC
-                """,
-                {"lo": report_date - timedelta(days=6),
-                 "hi": report_date + timedelta(days=2)},
-            )
-            rows = cur.fetchall()
-    finally:
-        conn.close()
-    scored = []
-    for r in rows:
-        session = _title_session(r[1]) or _prev_weekday(r[0])
-        if session <= report_date:
-            scored.append((session, r))
-    if not scored:
-        return None
-    # 同一场次多行(周末北京日重复 stamp 等)取最新生成的一行
-    scored.sort(key=lambda x: (x[0], x[1][0],
-                               x[1][4].timestamp() if x[1][4] else 0.0), reverse=True)
-    session, row = scored[0]
-    return {
-        "report_date": row[0].isoformat(),
-        "session_date": session.isoformat(),
-        "lag_days": (report_date - session).days,
-        "video_title": row[1],
-        "video_url": row[2],
-        "summary_markdown": _strip_preamble(row[3]),
-        "generated_at": row[4].isoformat() if row[4] else None,
-        "video_id": row[5],
-    }
-
-
-# 对齐 insert_the_close_pm_brief_template.sql 真实八段标题
-# (Cross-Asset / Key Disagreements / Resolution / Time Horizons / PM Takeaway)
-# 以及中文别名;旧正则里的「嘉宾语录」在模板中不存在。
-_POSITIONING_RE = re.compile(
-    r"(^|\n)(#{1,4}\s*\d?\.?\s*(?:[^\n]*?(?:跨资产信号|核心分歧|分歧解决框架|"
-    r"时间维度|投资组合启示|Cross[\-\s]?Asset|Key\s+Disagreement|"
-    r"Resolution\s+Framework|Time\s+Horizon|PM\s+Takeaway|"
-    r"Positioning[^\n]*))[^\n]*\n)"
-    r"(.*?)(?=\n#{1,4}\s|\Z)",
-    re.IGNORECASE | re.DOTALL,
-)
-
-
-def _extract_positioning(summary_markdown: str) -> Optional[str]:
-    """从 The Close 八段式摘要抽取 positioning 章素材。
-
-    The Close PM Brief 实际段落为: 1 Main Narrative / 2 Top Market Drivers /
-    3 Cross-Asset Signals / 4 Key Disagreements / 5 Resolution Framework /
-    6 Time Horizons / 7 (varies) / 8 PM Takeaway —— positioning 素材分散在
-    3/4/5/6/8 段,这里按标题聚合抽出。
-    """
-    if not summary_markdown:
-        return None
-    chunks = []
-    for m in _POSITIONING_RE.finditer(summary_markdown):
-        heading = m.group(2).strip()
-        body = (m.group(3) or "").strip()
-        if body:
-            chunks.append(f"{heading}\n{body}")
-    return "\n\n".join(chunks) or None
 
 
 def backfill_actuals(report_date: date) -> Dict[str, int]:
@@ -610,28 +491,17 @@ def _economic_events(report_date: date) -> Dict[str, Any]:
 
 
 def resolve_report_date(conn_date: Optional[str]) -> date:
-    """默认锚定最新一份 The Close 摘要的交易日(快照与节目摘要同日)。"""
+    """默认锚定美东最近一个已收盘的交易日(≤18:30 ET 视为当日收盘线节目已出)。"""
     if conn_date:
         return date.fromisoformat(conn_date)
-    conn = _conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT MAX(report_date) FROM the_close_summaries
-                WHERE status = 'completed' AND summary_content IS NOT NULL
-                  AND video_id IS NOT NULL
-                """
-            )
-            row = cur.fetchone()
-        if row and row[0]:
-            return row[0]
-        raise SystemExit(
-            "the_close_summaries 中没有 completed 摘要 —— 请先运行 The Close 摘要任务, "
-            "或用 --date 显式指定日期。"
-        )
-    finally:
-        conn.close()
+    from zoneinfo import ZoneInfo
+    et_now = datetime.now(ZoneInfo("America/New_York"))
+    d = et_now.date()
+    if et_now.hour < 18 or (et_now.hour == 18 and et_now.minute < 30):
+        d -= timedelta(days=1)
+    while d.weekday() >= 5:  # 周六日无收盘线节目
+        d -= timedelta(days=1)
+    return d
 
 
 def _prior_odds(report_date: date) -> Optional[Dict[str, Any]]:
@@ -669,29 +539,9 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
     sources: Dict[str, Any] = {}
     notes: Dict[str, Any] = {}
 
-    for key, table in (
-        ("the_close", "the_close_summaries"),
-        ("cnbc_closing_bell", "cnbc_closing_bell_summaries"),
-    ):
-        try:
-            sources[key] = _show_summary(table, report_date)
-            if sources[key] is None:
-                errors[key] = f"no completed summary for session on/before {report_date}"
-            elif sources[key]["lag_days"]:
-                errors[f"{key}.lag"] = (
-                    f"session {sources[key]['session_date']} lags T by "
-                    f"{sources[key]['lag_days']}d")
-            elif key == "the_close":
-                pos = _extract_positioning(sources[key]["summary_markdown"])
-                sources[key]["positioning_material"] = pos
-                if pos is None:
-                    notes["positioning_material"] = (
-                        "The Close 摘要中未找到 Cross-Asset / Disagreements / "
-                        "Resolution / Time Horizons / PM Takeaway 段落"
-                    )
-        except Exception as e:  # noqa: BLE001 — 单源失败不阻塞
-            sources[key] = None
-            errors[key] = str(e)
+    # 节目源(the_close / cnbc_closing_bell)不再读摘要表:main() 写出快照后由
+    # transcript_prep.prep_workspace 按 T 直查 subscription_content 转录行
+    # (The Close youtube 自识别 + Closing Bell 主段/Overtime 双行)清洗内联。
 
     if do_backfill:
         try:
@@ -795,6 +645,16 @@ def main() -> int:
         json.dumps(snapshot, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
+
+    # 节目转录直查 + Layer 1 清洗(不经摘要表):The Close youtube 自识别 +
+    # Closing Bell 主段/Overtime 双行,内联为 sources.{show}.clean_transcript
+    # (CB 另有 clean_transcript_ot)。转录缺失记 errors,该节目按缺源降级。
+    import transcript_prep  # 同目录;仅 CLI 构建路径需要,故局部导入
+    try:
+        transcript_prep.prep_workspace(out_path.parent)
+        snapshot = json.loads(out_path.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001 — 预处理失败不阻塞快照产出
+        print(f"  [transcripts] prep skipped: {e}")
 
     loaded = [k for k, v in snapshot["sources"].items() if v]
     print(f"snapshot written: {out_path}")

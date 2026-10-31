@@ -133,7 +133,8 @@ def _show_texts(ws: Path, sources: Dict[str, Any]) -> Dict[str, str]:
     for k in SHOW_KEYS:
         parts = []
         src = sources.get(k) or {}
-        for fld in ("summary_markdown", "positioning_material"):
+        # 节目转录(主段 + Overtime)是唯一节目正文;无摘要兜底
+        for fld in ("clean_transcript", "clean_transcript_ot"):
             if src.get(fld):
                 parts.append(src[fld])
         out[k] = "\n".join(parts).replace(",", "")
@@ -273,7 +274,7 @@ def _check_ledger(ws: Path, name: str, sources: Dict[str, Any],
         if head in SHOW_KEYS:
             blob = show_texts.get(head, "")
             if blob and pv["digits"] not in blob:
-                add(name, label, f"number not found in {head} digest",
+                add(name, label, f"number not found in {head} transcript",
                     False, "medium", "quote the number exactly as the show states it")
             continue
         node, full = _resolve_path(sources, path)
@@ -375,10 +376,8 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
         if not text.strip():
             add(name, "missing section file", "required", False, "high")
             continue
-        if DONE_MARKER not in text and name != "movers":
-            # movers still ends with DONE_MARKER from renderer
-            if DONE_MARKER not in text:
-                add(name, "missing SECTION DONE marker", "required", False, "medium")
+        if DONE_MARKER not in text:
+            add(name, "missing SECTION DONE marker", "required", False, "medium")
         heading = HEADINGS[name]
         if not text.lstrip().startswith(heading):
             add(name, f"heading must be {heading}", text.splitlines()[0][:80],
@@ -505,21 +504,21 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
         if not has_forward:
             add("macro", "Forward Catalysts always required", "required", False, "high")
 
-    # Movers 必须是 Closing Bell 摘要里的 Stock Movers 表,不是 Finviz 全市场榜。
-    from run_pipeline import extract_closing_bell_movers
-    digest = ((sources.get("cnbc_closing_bell") or {}).get("summary_markdown") or "")
-    extracted = extract_closing_bell_movers(digest)
+    # Today's Movers(v5:company_desk 从 Closing Bell 转录写,走台账核验):
+    # 有 CB 转录时必须有 Winners/Losers 表结构;无转录时不得凭空造表。
+    cb_src = sources.get("cnbc_closing_bell") or {}
+    cb_has_text = bool(cb_src.get("clean_transcript")
+                       or cb_src.get("clean_transcript_ot"))
     movers_text = _section_text(ws, "movers")
-    if extracted:
-        tickers = re.findall(r"\$[A-Z]{1,5}\b", extracted)
-        missing = [t for t in tickers[:4] if t not in movers_text]
-        if missing or "### Winners" not in movers_text:
-            add("movers", "Closing Bell Stock Movers table not copied",
-                "cnbc_closing_bell.summary_markdown", False, "high",
-                "copy the digest Winners/Losers/After-Hours tables into Today's Movers")
-    elif re.search(r"^###\s+(Winners|Losers)\b", movers_text, re.M):
-        add("movers", "Stock Movers table present but Closing Bell digest has none",
-            "cnbc_closing_bell.summary_markdown", False, "high",
+    has_tables = bool(re.search(r"^###\s+(Winners|Losers)\b", movers_text, re.M))
+    if cb_has_text and not has_tables:
+        add("movers", "Closing Bell transcripts present but no Winners/Losers "
+            "tables in Today's Movers", "cnbc_closing_bell.clean_transcript",
+            False, "high",
+            "build the named-movers tables from the show transcripts")
+    if (not cb_has_text) and has_tables:
+        add("movers", "Movers tables present but Closing Bell transcripts absent",
+            "cnbc_closing_bell.clean_transcript", False, "high",
             "degrade to the missing-mark; do not invent a ranked tape")
 
     return issues
