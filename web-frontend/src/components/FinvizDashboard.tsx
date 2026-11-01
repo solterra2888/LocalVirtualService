@@ -66,7 +66,9 @@ import {
   DeleteOutlined,
   CalculatorOutlined,
   HolderOutlined,
-  UnorderedListOutlined
+  UnorderedListOutlined,
+  FolderAddOutlined,
+  CloseOutlined
 } from '@ant-design/icons';
 import DailyCard from './daily/DailyCard';
 import DailyTimelineItem from './daily/DailyTimelineItem';
@@ -1376,6 +1378,54 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
     setAddToGroupModalVisible(true);
   };
 
+  // 批量删除选中的ticker
+  const handleBatchDelete = () => {
+    if (selectedWatchlistIds.size === 0) {
+      message.warning('Please select at least one ticker');
+      return;
+    }
+    const symbols = filteredStocks
+      .filter(item => selectedWatchlistIds.has(item.watchlist_id))
+      .map(item => item.symbol);
+    const preview = symbols.slice(0, 8).join(', ') + (symbols.length > 8 ? ` … +${symbols.length - 8}` : '');
+    Modal.confirm({
+      title: `Delete ${symbols.length} Watchlist Item${symbols.length > 1 ? 's' : ''}`,
+      content: `Are you sure you want to remove ${preview} from your watchlist? This cannot be undone.`,
+      okText: 'Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      centered: true,
+      onOk: async () => {
+        try {
+          const result = await dashboardAPI.batchRemoveFromWatchlist(Array.from(selectedWatchlistIds));
+          message.success(result.message);
+
+          // 如果删除项包含当前选中的股票，清空选择
+          if (selectedStock && selectedWatchlistIds.has(selectedStock.watchlist_id)) {
+            setSelectedStock(null);
+            setNewsData([]);
+            setOverviewData(null);
+            setOverviewError(null);
+            setOverviewLoading(false);
+            setActiveTab('news');
+          }
+
+          // 退出编辑模式并清空选择
+          setIsEditMode(false);
+          setSelectedWatchlistIds(new Set());
+
+          await loadUserWatchlist();
+          await loadCustomGroups();
+          if (selectedCustomGroupId) {
+            await loadCustomGroupMembers(selectedCustomGroupId);
+          }
+        } catch (error) {
+          message.error('Failed to remove');
+        }
+      },
+    });
+  };
+
   // 添加到自定义组成功的回调
   const handleAddToGroupSuccess = async () => {
     // 重新加载自定义组列表
@@ -2238,29 +2288,44 @@ const ANALYSIS_MODAL_BODY_HEIGHT = '68vh'; // AI 分析详情弹窗固定高度�
                   </>
                 ) : (
                   <>
-                    <Button 
-                      type="primary"
-                      size="small"
-                      onClick={handleOpenAddToGroup}
-                      disabled={selectedWatchlistIds.size === 0}
-                      style={{
-                        borderRadius: 8,
-                        fontWeight: 500,
-                        ...(themeMode === 'dark' ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
-                      }}
-                    >
-                      Add to ({selectedWatchlistIds.size})
-                    </Button>
-                    <Button 
-                      size="small"
-                      onClick={handleToggleEditMode}
-                      style={{
-                        borderRadius: 8,
-                        ...(themeMode === 'dark' ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
-                      }}
-                    >
-                      Cancel
-                    </Button>
+                    <Tooltip title={`Add to group - Add ${selectedWatchlistIds.size} selected ticker(s) to a custom group`}>
+                      <Button
+                        type="primary"
+                        size="small"
+                        icon={<FolderAddOutlined />}
+                        onClick={handleOpenAddToGroup}
+                        disabled={selectedWatchlistIds.size === 0}
+                        style={{
+                          borderRadius: 8,
+                          fontWeight: 500,
+                          ...(themeMode === 'dark' ? { background: '#2196F3', borderColor: '#2196F3' } : {}),
+                        }}
+                      />
+                    </Tooltip>
+                    <Tooltip title={`Delete - Remove ${selectedWatchlistIds.size} selected ticker(s) from watchlist`}>
+                      <Button
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={handleBatchDelete}
+                        disabled={selectedWatchlistIds.size === 0}
+                        style={{
+                          borderRadius: 8,
+                          fontWeight: 500,
+                        }}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Cancel - Exit edit mode">
+                      <Button
+                        size="small"
+                        icon={<CloseOutlined />}
+                        onClick={handleToggleEditMode}
+                        style={{
+                          borderRadius: 8,
+                          ...(themeMode === 'dark' ? { color: colors.textSecondary, borderColor: colors.cardBorder } : {}),
+                        }}
+                      />
+                    </Tooltip>
                   </>
                 )}
                 <Button

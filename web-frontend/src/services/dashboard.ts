@@ -328,6 +328,23 @@ export const dashboardAPI = {
     }
   },
 
+  // 批量从watchlist移除股票
+  batchRemoveFromWatchlist: async (watchlistIds: number[]): Promise<{
+    message: string;
+    removed_count: number;
+    removed_symbols: string[];
+    deleted_events: number;
+  }> => {
+    try {
+      return await api.post('/dashboard/watchlist/batch-delete', {
+        watchlist_ids: watchlistIds
+      });
+    } catch (error) {
+      console.error('Failed to batch remove from watchlist:', error);
+      throw error;
+    }
+  },
+
   // 调整watchlist排序
   reorderWatchlist: async (items: Array<{ watchlist_id: number; sort_order: number; group_name?: string | null }>): Promise<{
     message: string;

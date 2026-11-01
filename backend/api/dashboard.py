@@ -2100,6 +2100,112 @@ async def remove_from_watchlist(
             detail=f"Failed to remove watchlist item: {str(e)}"
         )
 
+@router.post("/watchlist/batch-delete", summary="Batch remove stocks from watchlist")
+async def batch_remove_from_watchlist(
+    request: dict,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    批量从watchlist移除股票，并级联删除相关图表事件及自定义组成员记录
+
+    请求参数:
+    - watchlist_ids: watchlist ID列表 (必需)
+    """
+    try:
+        db_conn_params = get_database_config()
+        db_manager = DatabaseManager(db_conn_params)
+
+        watchlist_ids = request.get('watchlist_ids', [])
+        if not watchlist_ids or not isinstance(watchlist_ids, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="watchlist_ids must be a non-empty list"
+            )
+
+        # 去重后只保留属于当前用户的watchlist项
+        watchlist_ids = list(dict.fromkeys(int(i) for i in watchlist_ids))
+        placeholders = ','.join(['%s'] * len(watchlist_ids))
+
+        fetch_query = f"""
+        SELECT id, symbol FROM target_tracking_config
+        WHERE user_id = %s AND id IN ({placeholders})
+        """
+        rows = db_manager.fetch_all(fetch_query, [current_user.user_id] + watchlist_ids)
+
+        if not rows:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No matching watchlist items found or permission denied"
+            )
+
+        owned_ids = [row[0] for row in rows]
+        owned_placeholders = ','.join(['%s'] * len(owned_ids))
+
+        conn = db_manager.get_connection()
+        if not conn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database connection failed"
+            )
+
+        try:
+            cursor = conn.cursor()
+            # 删除watchlist项
+            cursor.execute(
+                f"DELETE FROM target_tracking_config WHERE user_id = %s AND id IN ({owned_placeholders})",
+                [current_user.user_id] + owned_ids
+            )
+            removed_count = cursor.rowcount
+            # 清理自定义组中的悬空成员记录
+            cursor.execute(
+                f"DELETE FROM watchlist_custom_group_members WHERE user_id = %s AND watchlist_id IN ({owned_placeholders})",
+                [current_user.user_id] + owned_ids
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            if conn:
+                conn.rollback()
+                conn.close()
+            raise e
+
+        # 级联删除这些股票的所有图表事件
+        from backend.services.chart_events_service import get_chart_events_service
+        chart_events_service = get_chart_events_service()
+        deleted_events_count = 0
+        removed_symbols = []
+        for _, symbol in rows:
+            removed_symbols.append(symbol)
+            deleted_events_count += chart_events_service.delete_events_by_symbol(
+                current_user.user_id,
+                symbol
+            )
+
+        logger.info(
+            f"Batch removed tickers from watchlist",
+            user_id=current_user.user_id,
+            removed_count=removed_count,
+            symbols=removed_symbols,
+            deleted_events=deleted_events_count
+        )
+
+        return {
+            "message": f"Successfully removed {removed_count} ticker(s) from watchlist",
+            "removed_count": removed_count,
+            "removed_symbols": removed_symbols,
+            "deleted_events": deleted_events_count
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to batch remove watchlist items: {str(e)}"
+        )
+
+
 @router.get("/search/stocks", summary="Search stocks (for adding to watchlist)")
 async def search_stocks(
     q: str = Query(..., description="Search keywords"),
