@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Stage 0 — 为 CNT 风格 Daily Market Brief 管线构建冻结数据快照。
+"""Stage 0 — 为 GuanHe 风格 Daily Market Brief 管线构建冻结数据快照。
 
 从仓库现有数据源拉取当日全部素材,写入 reports/pipeline/{date}/snapshot.json:
   1-2. the_close / cnbc_closing_bell   — 节目转录直查(v5,不经摘要表):
@@ -427,7 +427,7 @@ def _to_et(date_str: Optional[str], time_str: Optional[str]) -> Dict[str, str]:
 
 # ── 新闻事件层(v6):L2 快讯 + L3 通讯社全文 + L4 财报电话会 ─────────────
 
-# 快讯账号白名单(subscription_content.twitter 已订阅且活跃;与 CNT 的
+# 快讯账号白名单(subscription_content.twitter 已订阅且活跃;与 GuanHe 的
 # squawk/独家层对应:@DeItaone 头条、LiveSquawk 财报三元组、独家并购线等)
 NEWS_FLASH_AUTHORS = (
     "*Walter Bloomberg", "LiveSquawk", "Wall St Engine",
@@ -665,7 +665,7 @@ def resolve_report_date(conn_date: Optional[str]) -> date:
 
 
 def _prior_odds(report_date: date) -> Optional[Dict[str, Any]]:
-    """最近一期更早快照的加息概率 —— 供 "(prior: ~x%)" 对比口径(CNT 惯例)。"""
+    """最近一期更早快照的加息概率 —— 供 "(prior: ~x%)" 对比口径(GuanHe 惯例)。"""
     base = REPO_ROOT / "backend" / "reports" / "pipeline"
     best: Optional[Path] = None
     best_date = ""

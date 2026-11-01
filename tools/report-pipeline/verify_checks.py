@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Deterministic section audit for the CNT daily brief pipeline.
+"""Deterministic section audit for the GuanHe daily brief pipeline.
 
 Run from a report workspace (directory containing snapshot.json + sections/):
     python verify_checks.py [/path/to/workspace]

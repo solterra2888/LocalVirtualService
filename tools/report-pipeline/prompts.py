@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""章节任务书与核验任务书(CNT 风格 Daily Market Brief,v4)。
+"""章节任务书与核验任务书(GuanHe 风格 Daily Market Brief,v4)。
 
-v4 对齐 CNT 现行版式(2026-10-12 之后):
+v4 对齐 GuanHe 现行版式(2026-10-12 之后):
   - Drivers/Positioning 允许结构化数字锚(曲线/fed_odds/跨资产)
   - Sector Action = 主题块(无板块记分牌)
   - Deep Dives = What happened / Key numbers / Management said / Analyst reaction
@@ -111,7 +111,7 @@ def _common_rules(style: str, allowed_tags: Optional[set] = None) -> str:
     return f"""\
 You are one section-writer inside a scheduled report pipeline. You are writing ONE
 section of a "Daily market brief" in the style of a professional financial newsletter
-(think: concise, data-anchored, every claim traceable — house style mirrors the CNT
+(think: concise, data-anchored, every claim traceable — house style mirrors the GuanHe
 daily brief: dense bullets, bold lead-ins, parenthetical source attributions).
 
 HARD RULES (violating any of these fails pipeline verification):
@@ -404,7 +404,7 @@ line. Each file also gets its own claims ledger (rule 11).
 
 
 def _macro_task(blocks: Dict[str, Any]) -> str:
-    """MACROS 任务书按块矩阵动态拼装(CNT 现行版式 2026-10-12+)。
+    """MACROS 任务书按块矩阵动态拼装(GuanHe 现行版式 2026-10-12+)。
 
     blocks 由编排器从快照确定性判定:
       releases            T 日美国一线白名单事件(最多 2 个)

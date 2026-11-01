@@ -1,6 +1,6 @@
-# report-pipeline — CNT 风格 Daily Market Brief 生成管线(v6)
+# report-pipeline — GuanHe 风格 Daily Market Brief 生成管线(v6)
 
-用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。对齐 CNT **现行版式**(2026-10-12 之后)。v5 起节目正文**只用清洗转录、不读摘要表**(The Close youtube 自识别 + Closing Bell 主段/Overtime 播客双行直查);v6 增**新闻事件层**(`sources.news`:twitter 快讯 flash + Yahoo/Seeking Alpha 全文 wire + SA 电话会纪要 calls),drivers 双引擎选题(节目块 + 新闻事件块)。
+用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。对齐 GuanHe **现行版式**(2026-10-12 之后)。v5 起节目正文**只用清洗转录、不读摘要表**(The Close youtube 自识别 + Closing Bell 主段/Overtime 播客双行直查);v6 增**新闻事件层**(`sources.news`:twitter 快讯 flash + Yahoo/Seeking Alpha 全文 wire + SA 电话会纪要 calls),drivers 双引擎选题(节目块 + 新闻事件块)。
 
 | 报告部分 | 章节 | 叙事 / 数据源 |
 |---|---|---|
@@ -107,8 +107,8 @@ backend/reports/pipeline/{date}/
 | `run_pipeline.py` | 编排器:块矩阵、movers、门控、组装 |
 | `verify_checks.py` | 确定性数字/矩阵/结构对账 |
 | `render_charts.py` | matplotlib 确定性出图 |
-| `us_close_chart.py` | CNT 同款 "US close" 总览图(FT 表格风,7 分组×Last/1D/1W/1M/YTD) |
-| `finviz_map_chart.py` | CNT 同款 finviz 板块热力图(Equity Market 首图,自绘) |
+| `us_close_chart.py` | GuanHe 同款 "US close" 总览图(FT 表格风,7 分组×Last/1D/1W/1M/YTD) |
+| `finviz_map_chart.py` | GuanHe 同款 finviz 板块热力图(Equity Market 首图,自绘) |
 
 ## 使用
 
@@ -124,11 +124,11 @@ $PY tools/report-pipeline/render_charts.py backend/reports/pipeline/2026-10-27  
 $PY tools/report-pipeline/us_close_chart.py --workspace backend/reports/pipeline/2026-10-30   # 单独重出 final/charts/01_us_close.png
 ```
 
-`us_close_chart.py` 数据映射(逆向 CNT 10-30 图并逐格数值验证):Last/1D 与板块行
+`us_close_chart.py` 数据映射(逆向 GuanHe 10-30 图并逐格数值验证):Last/1D 与板块行
 perf 列取 finviz 快照(MAX(snapshot_date)≤T+1);1W/1M=T-7/T-30 日历日前最近收盘;
 ETF 的 W/M/YTD 用 adjusted_close 总回报;利率行优先 FRED 财政部曲线(DGS2/10/30,
 发布滞后时自动回落 EODHD 并在页脚注明);DXY 走 Yahoo;MOVE 无源跳过。
-嵌入版式与 CNT 一致:01_us_close 放正文 "## Overall Market" 标题下(顶部),
+嵌入版式与 GuanHe 一致:01_us_close 放正文 "## Overall Market" 标题下(顶部),
 02_finviz_map 放 "## Equity Market" 段、紧贴 Sector Action 上方,不使用顶部
 Charts 图廊;03/04/05 系列图表暂停生成(待逐张优化,函数保留在 render_charts.py)。
 
@@ -140,7 +140,7 @@ Charts 图廊;03/04/05 系列图表暂停生成(待逐张优化,函数保留在 
 [Comm Services, Financial, Consumer Cyclical] | [Healthcare, Consumer
 Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
 列宽 ∝ 组市值;行业/个股在块内市值降序 squarify,最大者恒在左上(画时镜像);
-配色自 CNT 原图采样,±3% 即达最亮档。
+配色自 GuanHe 原图采样,±3% 即达最亮档。
 
 退出码:`0` 已发布 / `1` 运行错误 / `2` 核验未通过 → `NEEDS_HUMAN_REVIEW.md`。
 
@@ -158,7 +158,7 @@ Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
    (FOMC > 非农 > CPI > PCE > GDP > … > 耐用品 > 房屋;排除 Ex-*/Non-Defense
    分项;同族其他口径放 related);Rate Expectations / 跨资产复盘 = 周五或
    概率≥10pt / 10Y≥8bp 变动;Forward Catalysts 恒在;拍卖并入 Forward Catalysts。
-7. **审计分层** — 正文 CNT 表面文体;口径块与 `<!-- audit: -->` 进 sidecar。
+7. **审计分层** — 正文 GuanHe 表面文体;口径块与 `<!-- audit: -->` 进 sidecar。
 8. **转录为正文、不用 Surveillance、不读摘要表** — 写作只读 The Close /
    Closing Bell(主段+OT)清洗转录;Macros 反应引语只引 The Close 转录。
    三组写作 agent 并行,墙钟 ≈ 最慢一组。

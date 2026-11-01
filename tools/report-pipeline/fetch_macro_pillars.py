@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """macro_pillars — MACROS 章节的确定性数据底座(全部免费源,不经 LLM)。
 
-对照 CNT 报告已证实的数据管线(作者自述 + 报告内归因)实现的子块:
+对照 GuanHe 报告已证实的数据管线(作者自述 + 报告内归因)实现的子块:
 
   pillar            source                                          用途
   ─────────────────────────────────────────────────────────────────────────
   par_curve         home.treasury.gov 每日面值收益率曲线 CSV        收盘水平 + 日变动 bp
   fred_ranks        FRED DGS2/5/10/20/30 全历史(近1万条)           "highest since YYYY-MM" 断言
   fred_extras       FRED T10YIE/DFII10/HY-OAS/IG-OAS/PMMS/柴油/DFF  盈亏平衡/实际利率/利差/EFFR
-  fed_odds          Yahoo 30天联邦基金期货(ZQ*)合约价 vs EFFR 自算  加息概率(CNT 的自算方法)
+  fed_odds          Yahoo 30天联邦基金期货(ZQ*)合约价 vs EFFR 自算  加息概率(GuanHe 的自算方法)
   next_fomc_odds    下次会议对应的会后整月合约                      含 prior:前一交易日同一合约
   fomc_calendar     federalreserve.gov FOMC 日历页                  下次/未来会议日期
   auction_events    economic_events 中的拍卖 + FiscalData 补字段    今日结果 + 未来拍卖;
@@ -66,7 +66,7 @@ EXTRA_SERIES = {
 # ZQ(30 天联邦基金期货)月代码:1=F 2=G 3=H 4=J 5=K 6=M 7=N 8=Q 9=U 10=V 11=X 12=Z
 ZQ_MONTH_CODES = {1: "F", 2: "G", 3: "H", 4: "J", 5: "K", 6: "M",
                   7: "N", 8: "Q", 9: "U", 10: "V", 11: "X", 12: "Z"}
-HIKE_BP = 25.0  # 单次加息幅度假设(bp),与 CNT 的自算口径一致
+HIKE_BP = 25.0  # 单次加息幅度假设(bp),与 GuanHe 的自算口径一致
 PILLAR_TIMEOUT_SEC = 200  # 单块看门狗:Stage 0 总耗时有界
 
 
@@ -207,7 +207,7 @@ def fetch_fred_ranks(api_key: str, report_date: date,
                      par_levels: Dict[str, float]) -> Dict[str, Any]:
     """对每个关键期限预计算 "highest since" 断言 —— LLM 只能引用,禁止自算。
 
-    优先用 par curve 的当日水平(CNT 口径),FRED 序列仅用于历史比较;
+    优先用 par curve 的当日水平(GuanHe 口径),FRED 序列仅用于历史比较;
     par curve 缺该期限时回退 FRED 最新值。
     """
     out: Dict[str, Any] = {}
@@ -264,7 +264,7 @@ def fetch_fred_extras(api_key: str, report_date: date) -> Dict[str, Any]:
     return out
 
 
-# ── fed funds odds(自算,CNT 方法)──────────────────────────────────────
+# ── fed funds odds(自算,GuanHe 方法)──────────────────────────────────────
 
 def _zq_symbol(y: int, m: int) -> str:
     return f"ZQ{ZQ_MONTH_CODES[m]}{str(y)[2:]}.CBT"
@@ -308,7 +308,7 @@ def _prev_weekday(d: date) -> date:
 def fetch_prior_contract_odds(report_date: date, effr: Optional[float],
                               month_key: str) -> Optional[Dict[str, Any]]:
     """前一交易日同一合约的加息概率 —— 直接用 Yahoo 历史日线算,
-    不依赖"上一期快照是否存在"(CNT 每期都有 prior 对比)。"""
+    不依赖"上一期快照是否存在"(GuanHe 每期都有 prior 对比)。"""
     if effr is None:
         return None
     cy, cm = (int(x) for x in month_key.split("-"))
@@ -328,7 +328,7 @@ def fetch_prior_contract_odds(report_date: date, effr: Optional[float],
 def fetch_fed_odds(report_date: date, effr: Optional[float]) -> Dict[str, Any]:
     """ZQ 合约价 → 隐含均值利率 → 相对 EFFR 的 +25bp 概率。
 
-    odds = (100 - price - effr) / 0.25(CNT 已被证实的自算口径,用会后整月合约)。
+    odds = (100 - price - effr) / 0.25(GuanHe 已被证实的自算口径,用会后整月合约)。
     14 个月度合约并行抓取(Yahoo 单发可达 10-20s,串行会拖死 Stage 0)。
     """
     from concurrent.futures import ThreadPoolExecutor
@@ -520,7 +520,7 @@ def build_macro_pillars(report_date: date, fred_api_key: str,
             raise RuntimeError("fomc_calendar or fed_odds missing")
         # 决议日(end == T)当天的会议已经出结果,"下一场"是之后那场;
         # 否则 FOMC 日会拿已结束会议的残余概率(10-28 实测:11 月合约 2%,
-        # 而正文与 CNT 讨论的是 12 月 62%)。
+        # 而正文与 GuanHe 讨论的是 12 月 62%)。
         upcoming = [x for x in meetings
                     if date.fromisoformat(x["end"]) > report_date]
         if not upcoming:
@@ -599,7 +599,7 @@ def _auction_events(economic_events: Optional[Dict[str, Any]]) -> Dict[str, Any]
     return {"today": today, "upcoming": upcoming}
 
 
-# CNT Forward Catalysts 拍卖行常用字段:规模 + 上次中标
+# GuanHe Forward Catalysts 拍卖行常用字段:规模 + 上次中标
 FISCALDATA_AUCTIONS_URL = (
     "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
     "v1/accounting/od/auctions_query"
@@ -681,7 +681,7 @@ RELEASE_FRED_SERIES = {
 
 
 def fetch_release_series(api_key: str, report_date: date) -> Dict[str, Any]:
-    """为一线发布拉取近 3 年月度序列 + 近 10 年同比(CNT Release 图数据底座)。"""
+    """为一线发布拉取近 3 年月度序列 + 近 10 年同比(GuanHe Release 图数据底座)。"""
     out: Dict[str, Any] = {}
     start_3y = report_date - timedelta(days=365 * 3 + 30)
     for key, (series, mode, label) in RELEASE_FRED_SERIES.items():

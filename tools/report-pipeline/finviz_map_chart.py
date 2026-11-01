@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Finviz-style market heatmap (sector > industry > stock treemap).
 
-Replicates the heatmap CNT embeds under "Equity Market", matching the live
+Replicates the heatmap GuanHe embeds under "Equity Market", matching the live
 elite.finviz.com/map (filters: map · s&p500 · 1-day performance). Spec was
 reverse-engineered from the user's screenshots and verified cell-by-cell:
 
@@ -20,7 +20,7 @@ reverse-engineered from the user's screenshots and verified cell-by-cell:
              (STOCK_CAP), actual size computed per cell so BOTH lines fit
              (measured width + two-line height check); regular weight
   palette    finviz's compressed 1-day scale — bright red/green from ±3%
-             (sampled off CNT's published heatmap)
+             (sampled off GuanHe's published heatmap)
 
 Why self-rendered instead of screenshotting elite.finviz.com/map: every
 finviz HTML/asset path sits behind an interactive Cloudflare Turnstile
@@ -70,7 +70,7 @@ from backend.database.db_manager import DatabaseManager  # noqa: E402
 from backend.utils.database_config import get_database_config  # noqa: E402
 
 # ---------------------------------------------------------------- canvas spec
-W, H, DPI = 1683, 899, 100          # same canvas as CNT's published heatmap
+W, H, DPI = 1683, 899, 100          # same canvas as GuanHe's published heatmap
 BG, HEADER_BG, INK, WHITE = "#262931", "#262931", "#262931", "#ffffff"
 GAP = 1.5                           # px gutter between cells (thin dark seams)
 SECTOR_HEADER_H = 18                # px, sector title strip
@@ -407,7 +407,7 @@ def build_render(out: Path, t: date, rows: List[Dict[str, Any]]) -> Path:
                 _stock_cells(ax, ind["stocks"], ix, iy + strip_h, iw, ih - strip_h)
         x0 += gw
 
-    # CNT-style corner overlay (their published map carries "1D" + date)
+    # GuanHe-style corner overlay (their published map carries "1D" + date)
     ax.text(10, 14, f"1D \u00b7 {t:%A, %B %d, %Y}", fontsize=8, color=WHITE,
             family=FONT_FAMILY, zorder=5)
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""CNT-style "US close" overview chart (FT-market-table look) from guanhetech DB.
+"""GuanHe-style "US close" overview chart (FT-market-table look) from guanhetech DB.
 
-Replicates the first chart of CNT Trading's daily report (Overall Market section):
+Replicates the first chart of GuanHe Trading's daily report (Overall Market section):
 a cream-background table grouped into EQUITIES / RATES / CREDIT / COMMODITIES /
 FX / VOLATILITY / S&P 500 SECTORS. Each row shows Name (TICKER), Last, a
 zero-centred 1-day bar, and 1D/1W/1M/YTD columns. Rows whose |1D| passes the
@@ -10,13 +10,13 @@ section threshold (0.75% / 8bp / 8%) are bold; bars past the per-section scale
 get an arrowhead; the scale itself is printed at the bar-zone edges of each
 group header.
 
-Methodology (reverse-engineered from CNT 2026-10-30 chart, verified numerically):
+Methodology (reverse-engineered from GuanHe 2026-10-30 chart, verified numerically):
   - Last & 1D quotes      -> finviz_screener snapshot MAX(snapshot_date) <= T+1
-                             (ETF/sector rows match CNT value-for-value)
+                             (ETF/sector rows match GuanHe value-for-value)
   - 1W / 1M windows       -> close on the last trading day <= T-7d / <= T-30d
                              (calendar windows; 21-trading-days was ruled out)
   - ETF/sector W/M/YTD    -> total return from market_data_eod adjusted_close
-                             (matches CNT incl. dividends: GLD -6.6/USO +15.9)
+                             (matches GuanHe incl. dividends: GLD -6.6/USO +15.9)
   - indices/yields/FX/VIX -> market_data_eod close history (EODHD); yields and
                              2s10s quoted in bp; 2s10s spread computed inline
   - DXY                   -> Yahoo best-effort; MOVE unavailable (footnote)
@@ -60,7 +60,7 @@ BG, INK = "#fbf7f0", "#16130f"
 GRAY, GRAY_LT = "#6b6863", "#8a857c"
 GREEN, RED = "#0d7757", "#b63a26"
 BAND, RULE, ZERO_LINE = "#f3eee2", "#d8d2c5", "#cfc9bb"
-ROW_RULE = "#e9e5de"  # hairline separator at each row bottom (CNT style)
+ROW_RULE = "#e9e5de"  # hairline separator at each row bottom (GuanHe style)
 
 M_L, M_R = 64, 1376
 NAME_X, LAST_R = 64, 560
@@ -255,8 +255,8 @@ def build_sections(conn: Any, t: date) -> List[Dict[str, Any]]:
     def etf_row(name: str, ticker: str, perf_source: str = "tr") -> Optional[Dict[str, Any]]:
         """Last/1D from finviz quote; 1W/1M/YTD via perf_source:
         "tr"     total return from adjusted closes — DB first, Yahoo for EEM/FXI,
-                 finviz perf columns as last resort (CNT credit/commodities style)
-        "finviz" finviz performance columns verbatim (CNT sector-ETF style)
+                 finviz perf columns as last resort (GuanHe credit/commodities style)
+        "finviz" finviz performance columns verbatim (GuanHe sector-ETF style)
         """
         db_code = ETF_DB_CODE.get(ticker) or SECTOR_DB_CODE.get(ticker)
         s_adj = _series(conn, db_code, t, column="adjusted_close") if db_code else None

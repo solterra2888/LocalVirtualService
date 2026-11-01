@@ -15,7 +15,7 @@ REPO=/opt/guanhetech
 PIPE=$REPO/tools/report-pipeline
 PY_BIN_DIR=/root/miniconda3/envs/guanhe/bin
 PY=$PY_BIN_DIR/python
-STYLE=en   # en=CNT 风格英文正文(调优基准); cn=中文正文
+STYLE=en   # en=GuanHe 风格英文正文(调优基准); cn=中文正文
 
 export HOME=/root
 export ZCODE_DATA_BASE_DIR=/root

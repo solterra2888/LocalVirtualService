@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Deterministic CNT-style charts from a frozen snapshot (no LLM).
+"""Deterministic GuanHe-style charts from a frozen snapshot (no LLM).
 
 Outputs PNGs under {workspace}/final/charts/:
   01_us_close.png          cross-asset panel (1D / 1W / 1M / YTD when present)
@@ -51,7 +51,7 @@ def _savefig(path: Path) -> None:
 def render_us_close(snapshot: Dict[str, Any], out: Path) -> Optional[Path]:
     """Legacy fallback: simple cross-asset bar from snapshot cross_asset.
 
-    Superseded by us_close_chart.render_for_workspace (CNT-style FT table);
+    Superseded by us_close_chart.render_for_workspace (GuanHe-style FT table);
     render_all tries that first and only lands here when it fails (e.g. no
     finviz snapshot or DB unreachable).
     """
@@ -294,7 +294,7 @@ def render_all(ws: Path) -> List[Path]:
     out = ws / "final" / "charts"
     out.mkdir(parents=True, exist_ok=True)
     written: List[Path] = []
-    # 01_us_close: CNT-style FT table first (needs DB + finviz snapshot);
+    # 01_us_close: GuanHe-style FT table first (needs DB + finviz snapshot);
     # the legacy snapshot-only bar chart covers failures so report.md
     # always has a chart at charts/01_us_close.png.
     us_close_done = False
@@ -304,7 +304,7 @@ def render_all(ws: Path) -> List[Path]:
         if p:
             written.append(p)
             us_close_done = True
-            print(f"[charts] wrote {p.name} (CNT-style FT table)", flush=True)
+            print(f"[charts] wrote {p.name} (GuanHe-style FT table)", flush=True)
     except Exception as e:  # noqa: BLE001
         print(f"[charts] us_close FT chart failed, legacy fallback: {e}", flush=True)
     if not us_close_done:
@@ -315,9 +315,9 @@ def render_all(ws: Path) -> List[Path]:
                 print(f"[charts] wrote {p.name} (legacy)", flush=True)
         except Exception as e:  # noqa: BLE001
             print(f"[charts] render_us_close failed: {e}", flush=True)
-    # 02_finviz_map: finviz 风格板块热力图(CNT Equity Market 首图;自绘自
+    # 02_finviz_map: finviz 风格板块热力图(GuanHe Equity Market 首图;自绘自
     # finviz_screener 快照 —— elite.finviz.com/map 在本机 IP 被 Cloudflare
-    # 交互挑战拦截,无法程序化截图;快照数值与 CNT 截图逐格一致)
+    # 交互挑战拦截,无法程序化截图;快照数值与 GuanHe 截图逐格一致)
     try:
         from finviz_map_chart import render_for_workspace as _render_map
         p = _render_map(ws)

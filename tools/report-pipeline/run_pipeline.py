@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""CNT 风格 Daily Market Brief 生成管线编排器(v4)。
+"""GuanHe 风格 Daily Market Brief 生成管线编排器(v4)。
 
 流程(详见 tools/report-pipeline/README.md):
     Stage 0   build_snapshot.py 产出的冻结快照(本脚本不重建,只校验存在)
@@ -185,7 +185,7 @@ def _fake_section(ws: Path, name: str, corrected: bool = False,
 
 # ── movers 确定性渲染 + Macros 块矩阵 ─────────────────────────────────
 
-# CNT 美国一线 Releases 事件族(按优先级从高到低);每天最多 2 个族。
+# GuanHe 美国一线 Releases 事件族(按优先级从高到低);每天最多 2 个族。
 # main: 命中则该行可作为本族主行;also: 同日同族的辅助行(挂在 related 里,不单独占名额)。
 # 事件名以 EODHD 日历为准(如 "Non Farm Payrolls" / "Fed Interest Rate Decision")。
 US_TIER1_FAMILIES = (
@@ -213,7 +213,7 @@ US_TIER1_FAMILIES = (
 _SUBCOMPONENT_RE = re.compile(r"\bex\b|excluding|non[\s\-]?defense|\bnsa\b", re.I)
 _FAMILIES = [(k, re.compile(m, re.I), re.compile(a, re.I) if a else None)
              for k, m, a in US_TIER1_FAMILIES]
-# 同一事件多口径行时的取舍:m/m 优先(CNT 以环比为题),其次指数/水平,最后 y/y
+# 同一事件多口径行时的取舍:m/m 优先(GuanHe 以环比为题),其次指数/水平,最后 y/y
 _COMPARISON_RANK = {"mom": 0, "": 1, None: 1, "index": 1, "yoy": 2}
 
 # 极端行情阈值:加息概率变动(百分点)或 10Y 变动(bp)
@@ -283,7 +283,7 @@ def select_tier1_releases(snapshot: Dict[str, Any],
 
 
 def macro_blocks(snapshot: Dict[str, Any]) -> Dict[str, Any]:
-    """纯代码判定 Macros 当日块矩阵 —— 对齐 CNT 2026-10-12 后现行版式。
+    """纯代码判定 Macros 当日块矩阵 —— 对齐 GuanHe 2026-10-12 后现行版式。
 
     releases              T 日美国一线白名单 + actual,最多 2 个
     rate_expectations     周五,或加息概率/10Y 相对 prior 超阈值
@@ -790,7 +790,7 @@ AUDIT_SIDECAR_HEADER = (
 
 def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
              style: str) -> Path:
-    """拼接成品:正文仅标题+七节(CNT 表面文体);口径块与审计注释进 sidecar。"""
+    """拼接成品:正文仅标题+七节(GuanHe 表面文体);口径块与审计注释进 sidecar。"""
     snapshot = json.loads((ws / "snapshot.json").read_text(encoding="utf-8"))
     narrative_raw = (ws / SECTION_SPECS["narrative"]["output_file"]
                      ).read_text(encoding="utf-8")
@@ -827,7 +827,7 @@ def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
         clean = re.sub(r"\n{3,}", "\n\n", clean).rstrip()
         audit_parts.append("\n".join(found))
         parts += [clean, "", "---", ""]
-    # 图表嵌入(与 CNT 版式一致): US close 总览在正文首个 "## Overall Market"
+    # 图表嵌入(与 GuanHe 版式一致): US close 总览在正文首个 "## Overall Market"
     # 标题下(顶部); finviz 热力图放 "## Equity Market" 段、紧贴 Sector Action
     # 上方。其余图表暂不嵌入(逐张优化中)。
     charts_dir = ws / "final" / "charts"
@@ -862,7 +862,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SEC)
     parser.add_argument("--max-verify-retries", type=int, default=DEFAULT_MAX_VERIFY_RETRIES)
     parser.add_argument("--style", choices=("en", "cn"), default=DEFAULT_STYLE,
-                        help="风格档案: en=与 CNT 一致的英文正文(默认); cn=中文正文")
+                        help="风格档案: en=与 GuanHe 一致的英文正文(默认); cn=中文正文")
     parser.add_argument(
         "--llm-verify", choices=("off", "light", "full"), default="light",
         help="确定性台账核验通过后的 LLM 叙事核验: off=不跑; light(默认)=只读七节"
