@@ -5,8 +5,12 @@
 | 报告部分 | 章节 | 叙事 / 数据源 |
 |---|---|---|
 | OVERALL MARKET | narrative / drivers / positioning | **The Close 转录**(叙事) + 跨资产/曲线/fed_odds/广度(数字锚) |
-| EQUITY MARKET | sector_action / movers / deep_dives | **Closing Bell 主段+Overtime 转录**(movers 三表从转录写) + Finviz 全成分/财报日历(数字锚) |
-| MACROS | macro | **经济日历 + macro_pillars**; Releases 反应可引 **The Close 转录**; Rate Expectations / 跨资产复盘仅周五或极端行情 |
+| EQUITY MARKET | sector_action / movers / deep_dives | 按市场重要性选题:Finviz 全成分涨跌 + **Closing Bell 主段+Overtime 转录** + 新闻层(催化剂、评级/目标价); movers 由成分股快照确定性渲染 |
+| MACROS | macro | **经济日历 + macro_pillars**; Releases 反应可引 **The Close 转录**; Rate Expectations / 跨资产复盘仅极端行情 |
+
+v7(2026-11,对照 CNT 参考稿评估后)文风契约:正文只给原始出处(Reuters/FT/CNBC/券商),
+管线标签与生产过程用语(snapshot/transcript/on air/节目名/不可得)不进正文,由
+`verify_checks.py` 以 high 拦截;可追溯性全部落在 audit 注释 + claims 台账。
 
 ## 全流程图
 
@@ -66,16 +70,17 @@
 
   三组并行(墙钟 ≈ 最慢一组):
     overall_market → 01+02+03  The Close 转录: narrative / drivers / positioning
-    company_desk   → 04+05+06  Closing Bell 主段+OT 转录:
-                               sector_action / movers(三表) / deep_dives
+    company_desk   → 04+06     Closing Bell 主段+OT 转录 + 成分股 + 新闻层:
+                               sector_action / deep_dives
+    movers         → 05        确定性渲染(S&P 500 ≥$100 亿,涨跌各 8 只 + EPS 对预期)
     macro          → 07        经济日历 + macro_pillars + The Close 反应引语
   ▼
   每节同会话写 sections/NN_*.claims.json(数字台账:value + snapshot 路径;
   节目数字路径 = the_close.clean_transcript / cnbc_closing_bell.clean_transcript[_ot])
   verify_checks.py(确定性,秒级) → check_results.json
     台账逐条按路径对数(节目/news 文本按 digits-in-blob) · 正文 %/bp 数字
-    覆盖兜底 · 下一场 FOMC 概率 · 三元组/since/块矩阵/标签矩阵/
-    结构(含 movers 三表)· cn 标题语言
+    覆盖兜底 · 下一场 FOMC 概率 · 三元组/since/块矩阵 · 正文管线标签/
+    生产过程用语/动词后带符号 · audit 来源白名单 · 结构 · cn 标题语言
   有 high fail → 不调 LLM,直接按清单 --resume 修订
   全绿 → --llm-verify light(默认,只读七节正文,不挂快照/转录)| off | full
   Gate → assemble(正文无口径块) + render_charts.py → final/
@@ -156,11 +161,14 @@ Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
    是月均合约,不得称作某场会议的概率。
 6. **Macros 块矩阵** — Releases = T 日美国一线、按事件族优先级取 ≤2
    (FOMC > 非农 > CPI > PCE > GDP > … > 耐用品 > 房屋;排除 Ex-*/Non-Defense
-   分项;同族其他口径放 related);Rate Expectations / 跨资产复盘 = 周五或
-   概率≥10pt / 10Y≥8bp 变动;Forward Catalysts 恒在;拍卖并入 Forward Catalysts。
-7. **审计分层** — 正文 GuanHe 表面文体;口径块与 `<!-- audit: -->` 进 sidecar。
-8. **转录为正文、不用 Surveillance、不读摘要表** — 写作只读 The Close /
-   Closing Bell(主段+OT)清洗转录;Macros 反应引语只引 The Close 转录。
+   分项;同族其他口径放 related);Rate Expectations / 跨资产复盘 = 概率≥10pt /
+   10Y≥8bp 变动(v7 去掉周五触发,参考稿周五也只写 Forward Catalysts);
+   Forward Catalysts 恒在、只收未发生事件;拍卖并入 Forward Catalysts。
+7. **审计分层** — 正文只有读者文体与原始出处;管线标签、口径块与
+   `<!-- audit: -->` 全部进 sidecar,正文出现管线标签或生产过程用语即 high。
+8. **转录为素材、不用 Surveillance、不读摘要表** — 节目只读 The Close /
+   Closing Bell(主段+OT)清洗转录,与新闻层、成分股数据一起作为素材;
+   选题按市场重要性,不按节目时长。Macros 反应引语只引 The Close 转录。
    三组写作 agent 并行,墙钟 ≈ 最慢一组。
 9. **时间口径** — 经济日历的 `time` 是 UTC,正文只引用 `time_et`(美东)。
    同一事件名、不同 `comparison`(mom / yoy / 水平)是不同口径,不得混用。
@@ -176,9 +184,9 @@ Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
 - Finviz 是整表刷新的当前状态,不能回溯历史交易日。测管线用最新有快照的日期。
 - Finviz 热力图、真 RRG、ETF/个股 K 线未做。现有图是跨资产面板、板块表、
   1M 对 1D 的轮动散点(RRG 的简化替代)、Release 柱状图、个股收盘价折线。
-- Today's Movers 由 company_desk 从 Closing Bell 转录的节目点名写三表
-  (Winners / Losers / After-Hours),走台账核验;无转录时按「不可得」降级,
-  不回退 Finviz 全市场榜。
+- Today's Movers(v7)由编排器从 S&P 500 成分股快照确定性渲染 Winners / Losers
+  两表(市值 ≥$100 亿,各 8 只),Earnings 栏只陈述 EPS 对预期、不写 beat/miss;
+  没有盘后行情源,故不出 After-Hours 表。
 - 节目转录 ingest 偶发滞后(历史批次晚 5-7 天):cron/手动构建应晚于当晚
   转录入库(北京时间次日上午 10 点后实测稳定);缺哪行记 `errors`。
 - 节目口播数字是约数且偶有口误/ASR 断词(如 "SERVICE. NOW"),引用时以

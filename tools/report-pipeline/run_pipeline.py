@@ -4,10 +4,10 @@
 
 流程(详见 tools/report-pipeline/README.md):
     Stage 0   build_snapshot.py 产出的冻结快照(本脚本不重建,只校验存在)
-    Stage 1-6 三组章节 Agent 并行(节目转录为正文,无摘要):
-              overall_market(The Close) / company_desk(Closing Bell 主段+OT,
-              含 movers) / macro;macro 块矩阵由编排器按美国一线白名单 /
-              周五规则纯代码判定后注入任务书
+    Stage 1-6 三组章节 Agent 并行(节目转录 + 新闻层为素材,无摘要):
+              overall_market(The Close) / company_desk(Closing Bell 主段+OT)
+              / macro;Today's Movers 由成分股快照确定性渲染;macro 块矩阵由
+              编排器按美国一线白名单 / 极端行情阈值纯代码判定后注入任务书
     Stage 7a  确定性 verify_checks.py(数字/三元组/since/概率/矩阵/结构)
     Stage 7b  核验 Agent:叙事质量审查 → verify/verdict.json
     Gate      纯 Python 门控: pass → 拼接发布(审计注释+口径块进 sidecar);
@@ -183,7 +183,7 @@ def _fake_section(ws: Path, name: str, corrected: bool = False,
     claims_path(ws, name).write_text("[]\n", encoding="utf-8")
 
 
-# ── movers 确定性渲染 + Macros 块矩阵 ─────────────────────────────────
+# ── Releases 事件族 + movers 确定性渲染 + Macros 块矩阵 ─────────────────
 
 # GuanHe 美国一线 Releases 事件族(按优先级从高到低);每天最多 2 个族。
 # main: 命中则该行可作为本族主行;also: 同日同族的辅助行(挂在 related 里,不单独占名额)。
@@ -278,15 +278,90 @@ def select_tier1_releases(snapshot: Dict[str, Any],
     return picked
 
 
-# Today's Movers(v5)由 company_desk agent 从 Closing Bell 转录直接写出,
-# 走与其他章节相同的 claims 台账核验 —— 确定性渲染层已随摘要源一并移除。
+# Today's Movers(v7):S&P 500 成分股按当日涨跌幅确定性渲染,催化剂只取
+# 能解释当日股价的财报(前一交易日盘后 / 当日盘前),不经 LLM、无台账。
+MOVERS_MIN_CAP_MN = 10_000   # finviz market_cap 单位是百万美元 → $100 亿
+MOVERS_ROWS = 8
+STYLE_NOTHING = "Nothing notable today."
+
+
+def _fmt_eps(v: Any) -> str:
+    v = float(v)
+    return f"-${abs(v):.2f}" if v < 0 else f"${v:.2f}"
+
+
+def _earnings_cell(row: Dict[str, Any]) -> str:
+    """只陈述 EPS 对预期;不写 beat/miss —— 股价常由指引而非当季 EPS 驱动。"""
+    est, act = row.get("eps_estimate"), row.get("eps_actual")
+    if est is None or act is None:
+        return ""
+    try:
+        return f"EPS {_fmt_eps(act)} vs {_fmt_eps(est)} est"
+    except (TypeError, ValueError):
+        return ""
+
+
+def render_movers(snapshot: Dict[str, Any]) -> str:
+    sources = snapshot.get("sources") or {}
+    rows = ((sources.get("market") or {}).get("sp500_constituents") or [])
+    universe = []
+    for r in rows:
+        try:
+            cap = float(r.get("market_cap") or 0)
+            chg = float(r.get("change_percent"))
+        except (TypeError, ValueError):
+            continue
+        if cap >= MOVERS_MIN_CAP_MN:
+            universe.append((chg, r))
+    if not universe:
+        return f"## Today's Movers\n\n{STYLE_NOTHING}\n"
+
+    earnings: Dict[str, Dict[str, Any]] = {}
+    ec = sources.get("earnings_calendar") or {}
+    for e in ec.get("prior_after_close") or []:
+        earnings[str(e.get("code", "")).upper()] = e
+    for e in ec.get("today") or []:
+        if e.get("session") != "after":
+            earnings[str(e.get("code", "")).upper()] = e
+
+    def _table(picked: List[tuple]) -> List[str]:
+        out = ["| Ticker | Company | Change | Price | Earnings |",
+               "|---|---|---|---|---|"]
+        for chg, r in picked:
+            tk = str(r.get("ticker", ""))
+            price = r.get("price")
+            price_s = f"${float(price):,.2f}" if price not in (None, "") else ""
+            cat = _earnings_cell(earnings.get(tk.upper(), {}))
+            out.append(f"| {tk} | {r.get('company', '')} | {chg:+.1f}% | "
+                       f"{price_s} | {cat} |")
+        return out
+
+    universe.sort(key=lambda x: x[0], reverse=True)
+    winners = [x for x in universe if x[0] > 0][:MOVERS_ROWS]
+    losers = [x for x in reversed(universe) if x[0] < 0][:MOVERS_ROWS]
+    lines = ["## Today's Movers", "",
+             "S&P 500 members above $10bn market value, ranked by "
+             "one-day change.", ""]
+    if winners:
+        lines += ["### Winners", "", *_table(winners), ""]
+    if losers:
+        lines += ["### Losers", "", *_table(losers), ""]
+    return "\n".join(lines)
+
+
+def write_movers(ws: Path, snapshot: Dict[str, Any]) -> None:
+    f = ws / SECTION_SPECS["movers"]["output_file"]
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(render_movers(snapshot).rstrip() + f"\n{DONE_MARKER}\n",
+                 encoding="utf-8")
+    claims_path(ws, "movers").write_text("[]\n", encoding="utf-8")
 
 
 def macro_blocks(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """纯代码判定 Macros 当日块矩阵 —— 对齐 GuanHe 2026-10-12 后现行版式。
 
     releases              T 日美国一线白名单 + actual,最多 2 个
-    rate_expectations     周五,或加息概率/10Y 相对 prior 超阈值
+    rate_expectations     加息概率/10Y 相对 prior 超阈值(参考稿周五也不开)
     cross_asset_review    同 rate_expectations
     forward               恒 True
     selected_releases     供任务书点名的事件列表
@@ -322,7 +397,7 @@ def macro_blocks(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         except (TypeError, ValueError):
             pass
 
-    open_review = is_friday or extreme
+    open_review = extreme
     return {
         "releases": bool(selected),
         "selected_releases": selected,
@@ -389,7 +464,10 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
     t0 = time.time()
     sections: Dict[str, Any] = {}
     usage = None
-    if args.fake_zcode:
+    if all(SECTION_SPECS[n].get("mode") == "deterministic" for n in names):
+        write_movers(ws, snapshot_data)
+        sections = {n: {"status": "done", "mode": "deterministic"} for n in names}
+    elif args.fake_zcode:
         for n in names:
             _fake_section(ws, n, blocks=blocks, style=args.style)
         sections = {n: {"status": "done"} for n in names}
@@ -632,6 +710,10 @@ def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
         print(f"[revise] {agent} ({', '.join(names)}; "
               f"{len(agent_issues)} issue(s)) ...", flush=True)
         t0 = time.time()
+        if all(SECTION_SPECS[n].get("mode") == "deterministic" for n in names):
+            write_movers(ws, json.loads(snapshot.read_text(encoding="utf-8")))
+            _record_timing(state, f"revise:{agent}", time.time() - t0)
+            continue
         if args.fake_zcode:
             for n in names:
                 _fake_section(ws, n, corrected=True, style=args.style,

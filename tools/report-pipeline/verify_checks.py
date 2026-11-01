@@ -22,10 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from prompts import (  # noqa: E402
     ATTRIBUTION_MAP,
+    PIPELINE_TAGS,
     SECTION_ORDER,
     SECTION_SOURCE_MATRIX,
     SECTION_SPECS,
     STYLE_PROFILES,
+    allowed_source_paths,
 )
 
 DONE_MARKER = "<!-- SECTION DONE -->"
@@ -38,11 +40,24 @@ HEADINGS = {
     "deep_dives": "## Company Deep Dives",
     "macro": "## Macros",
 }
-HOUSE_TAGS = set(ATTRIBUTION_MAP.keys())
-TAG_RE = re.compile(r"\((The Close|Closing Bell|cross-asset|"
-                    r"sector averages|breadth|Finviz|earnings calendar|"
-                    r"economic calendar|Treasury curve|FRED|fed funds futures|"
-                    r"Fed calendar|auction calendar|nowcasts)\)")
+# 正文(剥掉 HTML 注释后)不得出现的生产过程用语
+PROCESS_LEAK_RES = [
+    re.compile(p, re.I) for p in (
+        r"\bsnapshot\b", r"\btranscripts?\b", r"\bdegraded\b",
+        r"\bdisclosure:", r"\bon[\s-]air\b", r"\bthe desk\b",
+        r"\bthe shows?\b", r"\bas relayed\b", r"\bdata layer\b",
+        r"快照", r"转录", r"节目", r"主持人", r"不可得", r"口径", r"数据层",
+    )
+] + [re.compile(p) for p in (r"\bThe Close\b", r"\bClosing Bell\b",
+                             r"\bOvertime\b")]
+DOUBLE_SIGN_RE = re.compile(
+    r"\b(fell|fall|falls|slid|slipped|dropped|declined|lost|sank|rose|rise|"
+    r"rises|gained|climbed|jumped|added|down|up)\s+"
+    r"[+\-−]\d", re.I)
+# audit 注释里出现的 snapshot 顶层键
+KNOWN_SOURCE_HEADS = {p.split(".")[0] for v in ATTRIBUTION_MAP.values()
+                      for p in v.split(" / ")}
+AUDIT_COMMENT_RE = re.compile(r"<!--\s*audit:(.*?)-->", re.S)
 SINCE_RE = re.compile(r"(highest|lowest)\s+since\s+[A-Za-z0-9 ,\-]+", re.I)
 TRIPLE_RE = re.compile(
     r"([+\-]?\d[\d,]*(?:\.\d+)?%?[KMB]?)\s*\(est:\s*([^,)]+),\s*prior:\s*([^)]+)\)",
@@ -393,40 +408,65 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
                 False, "medium")
         if name == "narrative" and "HEADLINE_CANDIDATES" not in text:
             add(name, "missing HEADLINE_CANDIDATES block", "required", False, "medium")
-        if name == "drivers" and "**Take:**" not in text and "**Take:**" not in text:
-            if "Take:" not in text:
-                add(name, "drivers blocks need **Take:** lines", "required",
-                    False, "medium")
-        if name == "deep_dives":
-            if re.search(r"\*\*Bull case\*\*|\*\*Bear case\*\*", text, re.I):
-                add(name, "Bull/Bear case labels not allowed in v4", "omit",
-                    False, "medium")
-            if re.search(r"(^|\n)\s*(Read:|推断:)", text):
-                add(name, "Read:/推断: synthesis line not allowed in deep dives",
-                    "omit", False, "medium")
+        if name == "deep_dives" and re.search(r"(^|\n)\s*(Read:|推断:)", text):
+            add(name, "Read:/推断: synthesis line not allowed in deep dives",
+                "omit", False, "medium")
 
-        # Attribution + matrix
-        allowed = SECTION_SOURCE_MATRIX.get(name, set())
-        for tag in TAG_RE.findall(text):
-            full = f"({tag})"
-            if full not in HOUSE_TAGS:
-                add(name, f"unrecognized tag {full}", "house tags", False, "medium")
-            elif full not in allowed:
-                add(name, f"tag {full} not permitted for section",
-                    ",".join(sorted(allowed)), False, "high")
+        prose = _strip_audit(text)
+        if name == "narrative":
+            prose = re.sub(r"HEADLINE_CANDIDATES.*", "", prose, flags=re.S)
 
-        # Since-claims
+        # 正文只给原始出处:管线标签 / 生产过程用语一律不得出现
+        labels = [t for t in PIPELINE_TAGS if t in prose]
+        if labels:
+            add(name, "pipeline labels in prose: " + " ".join(labels),
+                "reader credits only", False, "high",
+                "drop the labels; credit the originating outlet only when the "
+                "fact needs a source")
+        leaks = sorted({m.group(0) for rx in PROCESS_LEAK_RES
+                        for m in rx.finditer(prose)})
+        if leaks:
+            add(name, "production-process wording in prose: " + ", ".join(leaks[:8]),
+                "omit", False, "high",
+                "state the facts directly; never mention snapshot/transcripts/"
+                "shows or missing data in the prose")
+        doubles = sorted({m.group(0) for m in DOUBLE_SIGN_RE.finditer(prose)})
+        if doubles:
+            add(name, "signed number after a direction verb: " + ", ".join(doubles[:6]),
+                "fell 1.8%", False, "high", "drop the sign after fell/rose/etc.")
+
+        # 来源白名单改按 audit 注释审计(正文不再挂管线标签)
+        allowed_heads = {p.split(".")[0] for p in allowed_source_paths(
+            SECTION_SOURCE_MATRIX.get(name, set()))}
+        outside = set()
+        for body in AUDIT_COMMENT_RE.findall(text):
+            for br in re.findall(r"\[([^\]]+)\]", body):
+                toks = br.split()
+                if not toks:
+                    continue
+                head = ("news" if toks[0] == "news"
+                        else toks[-1].split(".")[0].split("[")[0])
+                if head in KNOWN_SOURCE_HEADS and head not in allowed_heads:
+                    outside.add(head)
+        if outside and allowed_heads:
+            add(name, "audit cites sources outside section whitelist: "
+                + ", ".join(sorted(outside)), ",".join(sorted(allowed_heads)),
+                False, "medium")
+
+        # Since-claims: fred_ranks 预计算口径,或新闻/节目原文里的同一说法
         ranks = ((sources.get("macro_pillars") or {}).get("fred_ranks") or {})
         claims = {v.get("claim") for v in ranks.values()
                   if isinstance(v, dict) and v.get("claim")}
-        for m in SINCE_RE.finditer(text):
-            phrase = m.group(0)
-            if not any(c and c.lower() in phrase.lower() or phrase.lower() in (c or "").lower()
-                       for c in claims):
-                # Also allow exact claim substring
-                ok = any(c and (c in phrase or phrase in c) for c in claims)
-                if not ok:
-                    add(name, phrase, "fred_ranks.claim", False, "high")
+        source_blob = " ".join(show_texts.values()).lower()
+        for m in SINCE_RE.finditer(prose):
+            phrase = m.group(0).strip()
+            low = phrase.lower()
+            if any(c and (c.lower() in low or low in c.lower()) for c in claims):
+                continue
+            tail = re.sub(r"^(highest|lowest)\s+", "", low)
+            if tail and tail in source_blob:
+                continue
+            add(name, phrase, "fred_ranks.claim / source text", False, "high")
 
         # Odds
         odds = ((sources.get("macro_pillars") or {}).get("next_fomc_odds") or {})
@@ -513,22 +553,14 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
         if not has_forward:
             add("macro", "Forward Catalysts always required", "required", False, "high")
 
-    # Today's Movers(v5:company_desk 从 Closing Bell 转录写,走台账核验):
-    # 有 CB 转录时必须有 Winners/Losers 表结构;无转录时不得凭空造表。
-    cb_src = sources.get("cnbc_closing_bell") or {}
-    cb_has_text = bool(cb_src.get("clean_transcript")
-                       or cb_src.get("clean_transcript_ot"))
+    # Today's Movers(v7:编排器按成分股快照确定性渲染)
+    has_constituents = bool((sources.get("market") or {}).get("sp500_constituents"))
     movers_text = _section_text(ws, "movers")
     has_tables = bool(re.search(r"^###\s+(Winners|Losers)\b", movers_text, re.M))
-    if cb_has_text and not has_tables:
-        add("movers", "Closing Bell transcripts present but no Winners/Losers "
-            "tables in Today's Movers", "cnbc_closing_bell.clean_transcript",
-            False, "high",
-            "build the named-movers tables from the show transcripts")
-    if (not cb_has_text) and has_tables:
-        add("movers", "Movers tables present but Closing Bell transcripts absent",
-            "cnbc_closing_bell.clean_transcript", False, "high",
-            "degrade to the missing-mark; do not invent a ranked tape")
+    if has_constituents and not has_tables:
+        add("movers", "S&P 500 constituents present but no Winners/Losers tables",
+            "market.sp500_constituents", False, "high",
+            "re-render Today's Movers from the constituents snapshot")
 
     return issues
 
