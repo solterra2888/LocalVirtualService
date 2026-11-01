@@ -52,9 +52,9 @@ from prompts import (  # noqa: E402
 from verify_checks import claims_path, run_checks  # noqa: E402
 
 DEFAULT_ZCODE_BIN = "/root/.zcode/server/bin/zcode"
-DEFAULT_TIMEOUT_SEC = 1200
+DEFAULT_TIMEOUT_SEC = 1800  # v7 任务书更重:company_desk 连续两次撞 1200s 线(1169/1200.1s),留余量
 DEFAULT_MAX_VERIFY_RETRIES = 2
-DEFAULT_STYLE = "en"
+DEFAULT_STYLE = "cn"
 DONE_MARKER = "<!-- SECTION DONE -->"
 HEADLINE_RE = re.compile(
     r"<!--\s*HEADLINE_CANDIDATES\s*\n(.*?)-->", re.DOTALL)
