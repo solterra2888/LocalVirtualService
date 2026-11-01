@@ -1,6 +1,6 @@
-# report-pipeline — CNT 风格 Daily Market Brief 生成管线(v5)
+# report-pipeline — CNT 风格 Daily Market Brief 生成管线(v6)
 
-用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。对齐 CNT **现行版式**(2026-10-12 之后)。v5 起节目正文**只用清洗转录、不读摘要表**(The Close youtube 自识别 + Closing Bell 主段/Overtime 播客双行直查)。
+用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。对齐 CNT **现行版式**(2026-10-12 之后)。v5 起节目正文**只用清洗转录、不读摘要表**(The Close youtube 自识别 + Closing Bell 主段/Overtime 播客双行直查);v6 增**新闻事件层**(`sources.news`:twitter 快讯 flash + Yahoo/Seeking Alpha 全文 wire + SA 电话会纪要 calls),drivers 双引擎选题(节目块 + 新闻事件块)。
 
 | 报告部分 | 章节 | 叙事 / 数据源 |
 |---|---|---|
@@ -43,6 +43,16 @@
     构建前回填 [T-2,T] 的 actual(写生产库;--no-backfill 跳过)
   财报日历:美股普通股、去重;前一交易日盘后+当日 ≥$100 亿,
     未来 5 天 ≥$500 亿
+  news(新闻事件层,v6):
+    flash ← twitter 白名单 9 账号(DeItaone/LiveSquawk/Wall St Engine/
+            Kobeissi/The Information/Timiraos/RenMac/Earnings Whispers/
+            Daily Shot),窗口 T 00:00-24:00 ET,RT 去重 + $TICKER 提取
+    wire  ← news 频道全文(Yahoo Finance + Seeking Alpha),窗口
+            [T-1 20:00 ET, T 24:00 ET),≥800 字符截 1200
+    calls ← SA 电话会纪要(正文 "Earnings Call Insights" 特征 + ≥8k 字符),
+            仅保留财报日历命中 ticker,截 8000,≤6 篇
+    已知边界:T 晚间盘后财报的 SA 纪要 T+1 白天才到,赶不上晨间构建 ——
+    此类 Management said 仍由 CB Overtime 转录覆盖
   macro_pillars: 曲线 / FRED ranks+extras / fed_odds(+前一交易日 prior) /
                  FOMC / auction(FiscalData,仅 Note/Bond) /
                  release_series(环比百分比) / nowcasts(失败回退日历 GDPNow)
@@ -63,8 +73,9 @@
   每节同会话写 sections/NN_*.claims.json(数字台账:value + snapshot 路径;
   节目数字路径 = the_close.clean_transcript / cnbc_closing_bell.clean_transcript[_ot])
   verify_checks.py(确定性,秒级) → check_results.json
-    台账逐条按路径对数 · 正文 %/bp 数字覆盖兜底 · 下一场 FOMC 概率 ·
-    三元组/since/块矩阵/标签矩阵/结构(含 movers 三表)· cn 标题语言
+    台账逐条按路径对数(节目/news 文本按 digits-in-blob) · 正文 %/bp 数字
+    覆盖兜底 · 下一场 FOMC 概率 · 三元组/since/块矩阵/标签矩阵/
+    结构(含 movers 三表)· cn 标题语言
   有 high fail → 不调 LLM,直接按清单 --resume 修订
   全绿 → --llm-verify light(默认,只读七节正文,不挂快照/转录)| off | full
   Gate → assemble(正文无口径块) + render_charts.py → final/
@@ -96,6 +107,8 @@ backend/reports/pipeline/{date}/
 | `run_pipeline.py` | 编排器:块矩阵、movers、门控、组装 |
 | `verify_checks.py` | 确定性数字/矩阵/结构对账 |
 | `render_charts.py` | matplotlib 确定性出图 |
+| `us_close_chart.py` | CNT 同款 "US close" 总览图(FT 表格风,7 分组×Last/1D/1W/1M/YTD) |
+| `finviz_map_chart.py` | CNT 同款 finviz 板块热力图(Equity Market 首图,自绘) |
 
 ## 使用
 
@@ -107,8 +120,27 @@ $PY tools/report-pipeline/build_snapshot.py [--date 2026-10-28] [--no-backfill]
 $PY tools/report-pipeline/run_pipeline.py 2026-10-27 --style en
 $PY tools/report-pipeline/run_pipeline.py 2026-10-27 --llm-verify off   # 只用确定性核验
 $PY tools/report-pipeline/run_pipeline.py 2026-10-27 --fake-zcode   # 状态机自测
-$PY tools/report-pipeline/render_charts.py backend/reports/pipeline/2026-10-27
+$PY tools/report-pipeline/render_charts.py backend/reports/pipeline/2026-10-27   # 01_us_close 自动走 FT 版,失败回落旧简版
+$PY tools/report-pipeline/us_close_chart.py --workspace backend/reports/pipeline/2026-10-30   # 单独重出 final/charts/01_us_close.png
 ```
+
+`us_close_chart.py` 数据映射(逆向 CNT 10-30 图并逐格数值验证):Last/1D 与板块行
+perf 列取 finviz 快照(MAX(snapshot_date)≤T+1);1W/1M=T-7/T-30 日历日前最近收盘;
+ETF 的 W/M/YTD 用 adjusted_close 总回报;利率行优先 FRED 财政部曲线(DGS2/10/30,
+发布滞后时自动回落 EODHD 并在页脚注明);DXY 走 Yahoo;MOVE 无源跳过。
+嵌入版式与 CNT 一致:01_us_close 放正文 "## Overall Market" 标题下(顶部),
+02_finviz_map 放 "## Equity Market" 段、紧贴 Sector Action 上方,不使用顶部
+Charts 图廊;03/04/05 系列图表暂停生成(待逐张优化,函数保留在 render_charts.py)。
+
+`finviz_map_chart.py` 背景:elite.finviz.com/map 在本服务器 IP 上被 Cloudflare
+交互式 Turnstile 拦截(无头/有头/stealth/curl_cffi 均实测不通),无法程序化截图;
+故改从 finviz_screener 快照自绘同款热力图。布局规则(从用户实拍截图倒推并经
+视觉验收确认):宇宙 = map · s&p500 · 1-day performance(index_name 含 'S&P 500',
+排除 Shell Companies);板块层按实拍 4 列组强制分列 —— [Technology] |
+[Comm Services, Financial, Consumer Cyclical] | [Healthcare, Consumer
+Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
+列宽 ∝ 组市值;行业/个股在块内市值降序 squarify,最大者恒在左上(画时镜像);
+配色自 CNT 原图采样,±3% 即达最亮档。
 
 退出码:`0` 已发布 / `1` 运行错误 / `2` 核验未通过 → `NEEDS_HUMAN_REVIEW.md`。
 

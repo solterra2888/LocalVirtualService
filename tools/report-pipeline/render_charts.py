@@ -49,6 +49,12 @@ def _savefig(path: Path) -> None:
 
 
 def render_us_close(snapshot: Dict[str, Any], out: Path) -> Optional[Path]:
+    """Legacy fallback: simple cross-asset bar from snapshot cross_asset.
+
+    Superseded by us_close_chart.render_for_workspace (CNT-style FT table);
+    render_all tries that first and only lands here when it fails (e.g. no
+    finviz snapshot or DB unreachable).
+    """
     market = (snapshot.get("sources") or {}).get("market") or {}
     cross = market.get("cross_asset") or []
     if not cross:
@@ -288,27 +294,41 @@ def render_all(ws: Path) -> List[Path]:
     out = ws / "final" / "charts"
     out.mkdir(parents=True, exist_ok=True)
     written: List[Path] = []
-    for fn in (render_us_close, render_sector_table, render_sector_rotation):
+    # 01_us_close: CNT-style FT table first (needs DB + finviz snapshot);
+    # the legacy snapshot-only bar chart covers failures so report.md
+    # always has a chart at charts/01_us_close.png.
+    us_close_done = False
+    try:
+        from us_close_chart import render_for_workspace
+        p = render_for_workspace(ws)
+        if p:
+            written.append(p)
+            us_close_done = True
+            print(f"[charts] wrote {p.name} (CNT-style FT table)", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[charts] us_close FT chart failed, legacy fallback: {e}", flush=True)
+    if not us_close_done:
         try:
-            p = fn(snapshot, out)
+            p = render_us_close(snapshot, out)
             if p:
                 written.append(p)
-                print(f"[charts] wrote {p.name}", flush=True)
+                print(f"[charts] wrote {p.name} (legacy)", flush=True)
         except Exception as e:  # noqa: BLE001
-            print(f"[charts] {fn.__name__} failed: {e}", flush=True)
+            print(f"[charts] render_us_close failed: {e}", flush=True)
+    # 02_finviz_map: finviz 风格板块热力图(CNT Equity Market 首图;自绘自
+    # finviz_screener 快照 —— elite.finviz.com/map 在本机 IP 被 Cloudflare
+    # 交互挑战拦截,无法程序化截图;快照数值与 CNT 截图逐格一致)
     try:
-        for p in render_release_charts(snapshot, out):
+        from finviz_map_chart import render_for_workspace as _render_map
+        p = _render_map(ws)
+        if p:
             written.append(p)
-            print(f"[charts] wrote {p.name}", flush=True)
+            print(f"[charts] wrote {p.name} (finviz treemap)", flush=True)
     except Exception as e:  # noqa: BLE001
-        print(f"[charts] release charts failed: {e}", flush=True)
-    try:
-        tickers = deep_dive_tickers_from_sections(ws)
-        for p in render_deep_dive_charts(snapshot, out, tickers):
-            written.append(p)
-            print(f"[charts] wrote {p.name}", flush=True)
-    except Exception as e:  # noqa: BLE001
-        print(f"[charts] deep dive charts failed: {e}", flush=True)
+        print(f"[charts] finviz map skipped: {e}", flush=True)
+    # 02/03/04/05 系列图表暂不生成(未达要求,待逐张按需求优化);
+    # render_sector_table / render_sector_rotation / render_release_charts /
+    # render_deep_dive_charts 保留,恢复时在 render_all 里重新挂回即可。
     return written
 
 

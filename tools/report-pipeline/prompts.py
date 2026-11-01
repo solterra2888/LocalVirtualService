@@ -58,23 +58,30 @@ ATTRIBUTION_MAP = {
     "(Fed calendar)": "macro_pillars.fomc_calendar",
     "(auction calendar)": "macro_pillars.auction_events",
     "(nowcasts)": "macro_pillars.nowcasts",
+    "(news flash)": "news.flash",
+    "(newswire)": "news.wire / news.calls",
 }
 
-# 章节 × 信源矩阵(v4: Drivers/Positioning 可带数字锚; macro 可引节目反应)
+# 章节 × 信源矩阵(v6: 节目转录为叙事正文; news flash/wire 补事件选题;
+# drivers 双引擎 = 节目块 + 新闻事件块; deep_dives 可引 SA 电话会纪要)
 SECTION_SOURCE_MATRIX = {
     "narrative": {"(The Close)", "(cross-asset)"},
     "drivers": {"(The Close)", "(cross-asset)", "(Treasury curve)",
-                "(fed funds futures)", "(FRED)", "(breadth)"},
+                "(fed funds futures)", "(FRED)", "(breadth)",
+                "(news flash)", "(newswire)"},
     "positioning": {"(The Close)", "(cross-asset)", "(breadth)",
-                    "(Treasury curve)", "(fed funds futures)", "(Finviz)"},
+                    "(Treasury curve)", "(fed funds futures)", "(Finviz)",
+                    "(newswire)"},
     "sector_action": {"(Closing Bell)", "(sector averages)", "(Finviz)",
-                      "(breadth)", "(earnings calendar)"},
+                      "(breadth)", "(earnings calendar)",
+                      "(news flash)", "(newswire)"},
     "movers": {"(Closing Bell)", "(Finviz)"},
-    "deep_dives": {"(Closing Bell)", "(Finviz)", "(earnings calendar)"},
+    "deep_dives": {"(Closing Bell)", "(Finviz)", "(earnings calendar)",
+                   "(newswire)"},
     "macro": {"(economic calendar)", "(Treasury curve)", "(FRED)",
               "(fed funds futures)", "(Fed calendar)", "(auction calendar)",
               "(nowcasts)", "(The Close)",
-              "(earnings calendar)"},
+              "(earnings calendar)", "(news flash)"},
 }
 
 
@@ -119,6 +126,13 @@ HARD RULES (violating any of these fails pipeline verification):
    when stated; do not guess names or affiliations). If a transcript field is
    absent from the snapshot, that show's material is unavailable — do not
    paraphrase from memory.
+   NEWS LAYER: sources.news.flash[] are same-day squawk/headline tweets
+   ({{time_et, author, text, tickers}}); sources.news.wire[] are full-text
+   articles (Yahoo Finance / Seeking Alpha); sources.news.calls[] are
+   earnings-call insight excerpts carrying VERBATIM management quotes.
+   News facts are cited tagged (news flash)/(newswire) ONLY where your
+   section's source list allows them; when the same number exists in the
+   structured data layer, anchor it there instead of the news text.
 2. Every number you state must exist in snapshot.json. If absent, omit the
    sentence or mark {p['missing_mark']}.
 3. Write the section to the exact output file specified below, as Markdown,
@@ -173,6 +187,8 @@ HARD RULES (violating any of these fails pipeline verification):
    - Numbers quoted from a show: path = the_close.clean_transcript,
      cnbc_closing_bell.clean_transcript or cnbc_closing_bell.clean_transcript_ot
      (spoken numbers; value exactly as spoken, e.g. "48" not "47.6%").
+   - Numbers quoted from news: path = news.flash, news.wire or news.calls
+     (text sources; value exactly as printed in the item).
    - `value` exactly as written in the prose (keep %, bp, K, $, sign).
    A script checks every entry against the snapshot; an entry whose number is
    not at its path fails the section. Write the ledger AFTER the prose so it
@@ -219,10 +235,15 @@ combined picture of BOTH files.
 
 ### File B — sections/02_drivers.md  (ANALYSIS layer)
 
-Write "## Top Market Drivers" with up to 5 driver blocks derived from The Close
-(its market-wrap desk segments, guest interviews, and data reads), with
-structured numbers as anchors when the show states a level or move that also
-appears in the snapshot. Each block:
+Write "## Top Market Drivers" with up to 5 driver blocks of TWO kinds:
+(a) SHOW blocks derived from The Close (market-wrap desk segments, guest
+interviews, data reads); (b) EVENT blocks for market-moving news the shows did
+NOT cover — M&A rumors/reports, geopolitical incidents, central-bank or
+government headlines — each supported ONLY by trading-day items in
+news.flash / news.wire. Tag event facts (news flash)/(newswire); anchor
+numbers to the structured layer (cross_asset, par_curve, finviz) whenever the
+same figure exists there. If the day's news adds nothing the shows missed,
+write show blocks only. Each block:
 - A bold lead-in headline (one clause, e.g. **A soft print could not hold the long end.**)
 - 2-5 factual bullets with numbers as stated on The Close and/or matching
   snapshot fields (par_curve change_bp, next_fomc_odds, cross_asset, breadth),
@@ -289,9 +310,15 @@ Each block:
 - 2–4 bullets with company moves and catalysts, tagged (Closing Bell) and/or
   (Finviz)/(earnings calendar) for numbers.
 - Optional one-line takeaway unlabeled.
-Every ticker mentioned must appear in Closing Bell, sp500_constituents, or
-top_movers. The overall index/tape recap is NOT part of this section
-(it lives in Today's Narrative).
+- Intraday or after-hours events the shows skipped may be added from
+  news.flash / news.wire, tagged accordingly.
+- DATA-ANCHORED blocks: a name with a large same-day move AND an
+  earnings-calendar catalyst that NEITHER show mentioned may form a block
+  tagged only (Finviz)/(earnings calendar), with a one-line disclosure that
+  the shows did not cover it (degraded-source note).
+Every ticker mentioned must appear in Closing Bell, sp500_constituents,
+top_movers, or news items. The overall index/tape recap is NOT part of this
+section (it lives in Today's Narrative).
 """
 
 DEEP_DIVES_TASK = """\
@@ -312,9 +339,11 @@ For each company write a subsection headed by its ticker:
   earnings_calendar, or Finviz fields (with attribution tags and audit
   comments); if none, write {missing_mark}.
 - **Management said:** a verbatim quote from an executive, ONLY if a direct
-  quote exists in the Closing Bell transcripts (name + title + the quote; the
-  Overtime hour carries most after-close management comments). If none,
-  OMIT this line entirely — do not paraphrase into a quote.
+  quote exists in the Closing Bell transcripts (name + title + the quote;
+  the Overtime hour carries most after-close management comments) OR in
+  news.calls (Seeking Alpha earnings-call insights carry verbatim quotes;
+  tag (newswire)). If neither has a quote, OMIT this line entirely — do not
+  paraphrase into a quote.
 - **Analyst reaction:** analyst/strategist reactions ONLY if present in the
   Closing Bell transcripts (name + firm + view). Same omission rule.
 
@@ -397,7 +426,9 @@ earnings_calendar. Calendar `time`/`date` are UTC — ALWAYS quote times from th
 Rows with the same event name but a different `comparison` (mom / yoy / level)
 are different measures — do not mix their actual/est/prior. Sell-side / guest
 reaction quotes for Releases and Rate Expectations may come from The Close
-transcript only — tag them (The Close). Do not cite any other show."""]
+transcript only — tag them (The Close). Do not cite any other show.
+Central-bank / government / policy headlines of the trading day may come
+from news.flash (e.g. Timiraos, RenMac) — tag them (news flash)."""]
 
     selected = blocks.get("selected_releases") or []
     if blocks.get("releases") and selected:

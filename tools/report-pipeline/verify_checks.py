@@ -129,6 +129,7 @@ def _meeting_month_words(meeting: str) -> List[str]:
 
 
 def _show_texts(ws: Path, sources: Dict[str, Any]) -> Dict[str, str]:
+    """节目转录 + 新闻事件层的文本池(供台账数字按 digits-in-blob 对账)。"""
     out: Dict[str, str] = {}
     for k in SHOW_KEYS:
         parts = []
@@ -138,6 +139,14 @@ def _show_texts(ws: Path, sources: Dict[str, Any]) -> Dict[str, str]:
             if src.get(fld):
                 parts.append(src[fld])
         out[k] = "\n".join(parts).replace(",", "")
+    # news 层(v6):flash/wire/calls 全部文本进 "news" 池
+    news = sources.get("news") or {}
+    nparts = []
+    for bucket in ("flash", "wire", "calls"):
+        for item in news.get(bucket) or []:
+            if isinstance(item, dict) and item.get("text"):
+                nparts.append(str(item["text"]))
+    out["news"] = "\n".join(nparts).replace(",", "")
     return out
 
 
@@ -271,7 +280,7 @@ def _check_ledger(ws: Path, name: str, sources: Dict[str, Any],
         path = str(c.get("path") or "")
         label = f"{c.get('value')} @ {path}"
         head = path.split(".")[0].split("[")[0]
-        if head in SHOW_KEYS:
+        if head in SHOW_KEYS or head == "news":
             blob = show_texts.get(head, "")
             if blob and pv["digits"] not in blob:
                 add(name, label, f"number not found in {head} transcript",

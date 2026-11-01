@@ -425,6 +425,166 @@ def _to_et(date_str: Optional[str], time_str: Optional[str]) -> Dict[str, str]:
     return out
 
 
+# ── 新闻事件层(v6):L2 快讯 + L3 通讯社全文 + L4 财报电话会 ─────────────
+
+# 快讯账号白名单(subscription_content.twitter 已订阅且活跃;与 CNT 的
+# squawk/独家层对应:@DeItaone 头条、LiveSquawk 财报三元组、独家并购线等)
+NEWS_FLASH_AUTHORS = (
+    "*Walter Bloomberg", "LiveSquawk", "Wall St Engine",
+    "The Kobeissi Letter", "The Information", "Nick Timiraos",
+    "RenMac: Renaissance Macro Research", "Earnings Whispers",
+    "(((The Daily Shot)))",
+)
+# 通讯社全文(news 频道,订阅活跃且为全文;CNBC/Globenewswire 抓取断流中,
+# Reuters/FT/WSJ 未订 —— 恢复/补订后加入本元组即可)
+NEWS_WIRE_AUTHORS = ("Yahoo Finance", "Seeking Alpha")
+_NEWS_TICKER_RE = re.compile(r"\$([A-Z]{1,5})\b")
+_FLASH_MAX_ITEMS = 300      # 超出时优先保留带 $TICKER 的条目
+_FLASH_TEXT_CAP = 300
+_WIRE_MAX_ITEMS = 50
+_WIRE_MIN_CHARS = 800       # 导语/标题级短条目不进 wire(全文层)
+_WIRE_TEXT_CAP = 1200
+_CALLS_MAX_ITEMS = 6        # SA 电话会节选(Deep Dives 的 Management said 素材)
+_CALLS_TEXT_CAP = 8000
+
+
+def _news_snapshot(report_date: date,
+                   earnings_calendar: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """T 日新闻事件层,冻结为 sources.news(独立容错,不影响其余源)。
+
+    flash  twitter 白名单账号,窗口 = T 00:00–24:00 ET;RT/同文去重;
+           提取 $TICKER;每条截 _FLASH_TEXT_CAP。
+    wire   news 频道全文源,窗口 [T-1 20:00 ET, T+1 00:00 ET) 覆盖隔夜报道;
+           ≥_WIRE_MIN_CHARS 的截 _WIRE_TEXT_CAP。
+    calls  wire 中的 earnings call transcript(标题特征),只保留财报日历
+           (当日 + 前一交易日盘后)命中的 ticker,截 _CALLS_TEXT_CAP。
+    """
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    t0 = datetime(report_date.year, report_date.month, report_date.day,
+                  tzinfo=et).astimezone(timezone.utc)
+    t1 = t0 + timedelta(days=1)
+    w0 = t0 - timedelta(hours=4)  # T-1 20:00 ET
+
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT author_name, published_at, coalesce(content, '')
+                FROM subscription_content
+                WHERE channel_type = 'twitter'
+                  AND author_name = ANY(%(a)s)
+                  AND published_at >= %(t0)s AND published_at < %(t1)s
+                ORDER BY published_at
+                """,
+                {"a": list(NEWS_FLASH_AUTHORS), "t0": t0, "t1": t1},
+            )
+            frows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT author_name, title, published_at, coalesce(content, '')
+                FROM subscription_content
+                WHERE channel_type = 'news'
+                  AND author_name = ANY(%(a)s)
+                  AND published_at >= %(w0)s AND published_at < %(t1)s
+                ORDER BY published_at DESC
+                """,
+                {"a": list(NEWS_WIRE_AUTHORS), "w0": w0, "t1": t1},
+            )
+            wrows = cur.fetchall()
+    finally:
+        conn.close()
+
+    def _et_fields(ts: Any) -> Dict[str, str]:
+        dt = ts.astimezone(et) if ts else None
+        if not dt:
+            return {}
+        out = {"time_et": dt.strftime("%H:%M")}
+        if dt.date().isoformat() != report_date.isoformat():
+            out["date_et"] = dt.date().isoformat()
+        return out
+
+    # flash:同文去重(RT/转发),截断 + ticker 提取
+    flash: List[Dict[str, Any]] = []
+    seen_text: set = set()
+    for author, ts, text in frows:
+        body = re.sub(r"\s+", " ", (text or "")).strip()
+        if not body or body.startswith("RT @"):
+            continue
+        key = body[:160].upper()
+        if key in seen_text:
+            continue
+        seen_text.add(key)
+        flash.append({
+            "author": author,
+            **_et_fields(ts),
+            "text": body[:_FLASH_TEXT_CAP],
+            "tickers": sorted(set(_NEWS_TICKER_RE.findall(text or "")))[:8],
+        })
+    if len(flash) > _FLASH_MAX_ITEMS:
+        with_tkr = [f for f in flash if f["tickers"]]
+        without = [f for f in flash if not f["tickers"]]
+        keep, room = with_tkr[:_FLASH_MAX_ITEMS], _FLASH_MAX_ITEMS - min(
+            len(with_tkr), _FLASH_MAX_ITEMS)
+        keep += without[:max(room, 0)]
+        keep.sort(key=lambda f: (f.get("date_et") or "", f.get("time_et") or ""))
+        flash = keep
+
+    # wire:全文层过滤/截断;SA 的管理层长文(电话会纪要/指引)单列为 calls
+    ec_codes = set()
+    for bucket in ("today", "prior_after_close"):
+        for r in ((earnings_calendar or {}).get(bucket) or []):
+            if r.get("code"):
+                ec_codes.add(str(r["code"]).upper())
+    wire: List[Dict[str, Any]] = []
+    calls: List[Dict[str, Any]] = []
+    for author, title, ts, text in wrows:
+        body = re.sub(r"\s+", " ", (text or "")).strip()
+        if len(body) < _WIRE_MIN_CHARS:
+            continue
+        # SA 的电话会纪要长文:正文开头 "Earnings Call Insights: <Company> (TKR)
+        # ... MANAGEMENT VIEW",带逐字管理层引语;ticker 是 (XXX) 或 $XXX 格式
+        head3 = body[:300]
+        is_call = ("earnings call insights" in head3.lower()
+                   or "transcript" in (title or "").lower()
+                   or (author == "Seeking Alpha" and len(body) >= 8000))
+        if is_call:
+            tkrs = (set(_NEWS_TICKER_RE.findall(title or ""))
+                    | set(_NEWS_TICKER_RE.findall(head3))
+                    | {m for m in re.findall(r"\(([A-Z]{2,5})\)", head3)})
+            matched = sorted(tkrs & ec_codes) if ec_codes else sorted(tkrs)
+            if matched and len(calls) < _CALLS_MAX_ITEMS:
+                calls.append({
+                    "author": author, "title": (title or "")[:200],
+                    "tickers": matched[:4],
+                    **_et_fields(ts),
+                    "text": body[:_CALLS_TEXT_CAP],
+                })
+            continue
+        if len(wire) >= _WIRE_MAX_ITEMS:
+            continue
+        wire.append({
+            "author": author, "title": (title or "")[:200],
+            **_et_fields(ts),
+            "text": body[:_WIRE_TEXT_CAP],
+        })
+
+    out = {
+        "filter": (f"flash:twitter {len(NEWS_FLASH_AUTHORS)}账号 T日ET / "
+                   f"wire:{'+'.join(NEWS_WIRE_AUTHORS)} [T-1 20:00,T 24:00)ET "
+                   f"≥{_WIRE_MIN_CHARS}c"),
+        "flash": flash,
+        "wire": wire,
+        "calls": calls,
+    }
+    if not flash:
+        out["error_flash"] = "no flash items in window"
+    if not wire:
+        out["error_wire"] = "no wire articles in window"
+    return out
+
+
 def _economic_events(report_date: date) -> Dict[str, Any]:
     """经济日历 — 读同步好的 economic_events 表(事件名/预期值/重要性/类别齐全)。
 
@@ -560,6 +720,17 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
     except Exception as e:  # noqa: BLE001
         sources["earnings_calendar"] = None
         errors["earnings_calendar"] = str(e)
+
+    # 新闻事件层(v6):L2 快讯 + L3 通讯社全文 + L4 电话会(calls 需要财报日历)
+    try:
+        news = _news_snapshot(report_date, sources.get("earnings_calendar"))
+        sources["news"] = news or None
+        for k in ("flash", "wire"):
+            if news.get(f"error_{k}"):
+                errors[f"news.{k}"] = news[f"error_{k}"]
+    except Exception as e:  # noqa: BLE001
+        sources["news"] = None
+        errors["news"] = str(e)[:300]
 
     # cross_asset(market_data_eod,可回溯历史)与 finviz(整表刷新的"当前状态",
     # 历史日期无快照)必须独立容错 —— finviz 失败不能连带丢掉跨资产行情。

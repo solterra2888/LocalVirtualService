@@ -382,7 +382,9 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
     """
     names = agent_section_names(agent)
     if all(section_done(ws, n) for n in names):
-        return {n: {"status": "done"} for n in names}
+        # 返回形状须与正常路径一致(_apply 只认 "sections" 信封)
+        return {"sections": {n: {"status": "done"} for n in names},
+                "elapsed": 0.0, "names": names, "usage": None}
     print(f"[agent] {agent} ({', '.join(names)}) ...", flush=True)
     t0 = time.time()
     sections: Dict[str, Any] = {}
@@ -692,6 +694,18 @@ def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
         t = len(v.get("clean_transcript") or "")
         return f"{label}转录✓{s}({t // 1000}k)"
 
+    # 新闻事件层(v6):快讯/通讯社/电话会状态
+    news = src.get("news") or {}
+    n_flash = len(news.get("flash") or [])
+    n_wire = len(news.get("wire") or [])
+    n_calls = len(news.get("calls") or [])
+    if cn:
+        news_note = (f"新闻层✓快讯{n_flash}条/通讯社{n_wire}篇/电话会{n_calls}篇"
+                     if (n_flash or n_wire) else "新闻层✗不可得")
+    else:
+        news_note = (f"news✓{n_flash} flash/{n_wire} wire/{n_calls} calls"
+                     if (n_flash or n_wire) else "news✗unavailable")
+
     market = src.get("market") or {}
     cross = market.get("cross_asset") or []
     dates = sorted({a.get("date") for a in cross if a.get("date")})
@@ -726,6 +740,7 @@ def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
                  f"✓{len(market.get('sp500_sector_avg') or [])}板块"
                  f"/{len(market.get('top_movers') or [])}只异动" if market else "板块/个股✗不可得"),
                 (f"经济日历✓近{n_recent}/前瞻{n_upcoming}条{econ_note}" if econ else "经济日历✗不可得"),
+                news_note,
                 pillar_note,
             ])),
         ]
@@ -742,6 +757,7 @@ def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
                  f"✓{len(market.get('sp500_sector_avg') or [])} sectors"
                  f"/{len(market.get('top_movers') or [])} movers" if market else "sectors/stocks✗unavailable"),
                 (f"economic calendar✓{n_recent} recent/{n_upcoming} upcoming" if econ else "economic calendar✗unavailable"),
+                news_note,
                 pillar_note,
             ])),
         ]
@@ -811,21 +827,26 @@ def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
         clean = re.sub(r"\n{3,}", "\n\n", clean).rstrip()
         audit_parts.append("\n".join(found))
         parts += [clean, "", "---", ""]
-    # Optional charts (Phase 3) — insert markdown image links if present
+    # 图表嵌入(与 CNT 版式一致): US close 总览在正文首个 "## Overall Market"
+    # 标题下(顶部); finviz 热力图放 "## Equity Market" 段、紧贴 Sector Action
+    # 上方。其余图表暂不嵌入(逐张优化中)。
     charts_dir = ws / "final" / "charts"
-    if charts_dir.exists():
-        imgs = sorted(charts_dir.glob("*.png"))
-        if imgs:
-            chart_block = ["## Charts", ""]
-            for img in imgs:
-                chart_block.append(f"![{img.stem}](charts/{img.name})")
-                chart_block.append("")
-            # Insert charts after narrative/drivers area: after first ---
-            # Simpler: append before final empty — place after headline block
-            # Insert after date line (index of first section already in parts)
-            insert_at = 4  # after title blank date blank
-            for i, line in enumerate(chart_block):
-                parts.insert(insert_at + i, line)
+
+    def _chart_block(heading: str, fname: str) -> List[str]:
+        return [f"## {heading}", "",
+                f"![{fname.split('.')[0]}](charts/{fname})", ""]
+
+    if (charts_dir / "01_us_close.png").exists():
+        block = _chart_block("Overall Market", "01_us_close.png")
+        for i, line in enumerate(block):
+            parts.insert(4 + i, line)  # 标题/日期行之后、Today's Narrative 之前
+    if (charts_dir / "02_finviz_map.png").exists():
+        block = _chart_block("Equity Market", "02_finviz_map.png")
+        # 定位 Sector Action 标题行,插到它正上方(各 section 内容以标题行开头)
+        idx = next((i for i, p in enumerate(parts)
+                    if p.startswith("## Sector Action")), len(parts))
+        for i, line in enumerate(block):
+            parts.insert(idx + i, line)
     out = ws / "final" / "report.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(parts), encoding="utf-8")
