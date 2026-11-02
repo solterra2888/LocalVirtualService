@@ -34,8 +34,8 @@ T older than the snapshot the structure comes from that snapshot and the
 aborts if >20% of tickers are missing).
 
 Usage:
-    python tools/report-pipeline/finviz_map_chart.py --workspace backend/reports/pipeline/2026-10-30
-    python tools/report-pipeline/finviz_map_chart.py --date 2026-10-30 --out /tmp/map.png
+    python tools/US-market-report/finviz_map_chart.py --workspace backend/reports/pipeline/2026-10-30
+    python tools/US-market-report/finviz_map_chart.py --date 2026-10-30 --out /tmp/map.png
 """
 
 from __future__ import annotations

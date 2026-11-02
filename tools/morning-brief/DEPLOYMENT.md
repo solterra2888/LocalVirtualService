@@ -1,4 +1,4 @@
-# morning-brief 部署与使用说明(自 report-pipeline 复制;cron 未安装,时间待定)
+# morning-brief 部署与使用说明(自 US-market-report 复制;cron 未安装,时间待定)
 
 面向运维部署者的操作手册。架构与设计规则见 [README.md](README.md);本文只讲
 **怎么装、怎么跑、怎么监控、坏了怎么修**。
@@ -81,16 +81,16 @@ git clone git@github.com:solterra288/guanhetech.git /opt/guanhetech && cd /opt/g
 
 # 4) 冒烟测试:不调 LLM 的状态机自测(秒级,应发布占位报告)
 PY=/root/miniconda3/envs/guanhe/bin/python
-$PY tools/report-pipeline/build_snapshot.py
-$PY tools/report-pipeline/run_pipeline.py {刚解析出的日期} --fake-zcode
+$PY tools/US-market-report/build_snapshot.py
+$PY tools/US-market-report/run_pipeline.py {刚解析出的日期} --fake-zcode
 
 # 5) 装 crontab(见 §5),手动触发一次验证 cron 环境
 env -i HOME=/root PATH=/usr/bin:/bin SHELL=/bin/bash \
-  /bin/bash tools/report-pipeline/cron_daily.sh
-#    预期:几分钟后 cron.log 出现 "report-pipeline cron end (rc=0)"
+  /bin/bash tools/US-market-report/cron_daily.sh
+#    预期:几分钟后 cron.log 出现 "US-market-report cron end (rc=0)"
 
 # 6) 首次正式生成(全新交易日约 23 分钟)
-$PY tools/report-pipeline/run_pipeline.py {日期} --style en
+$PY tools/US-market-report/run_pipeline.py {日期} --style en
 ```
 
 ## 5. 定时运行(cron)
@@ -98,8 +98,8 @@ $PY tools/report-pipeline/run_pipeline.py {日期} --style en
 crontab 条目(已在本机配置):
 
 ```cron
-# report-pipeline: 北京时间 09:20 周二~周六(美股交易日次晨,排在 8:30/8:40 节目摘要任务之后)
-20 9 * * 2-6 /bin/bash /opt/guanhetech/tools/report-pipeline/cron_daily.sh >> /opt/guanhetech/backend/reports/pipeline/cron.log 2>&1
+# US-market-report: 北京时间 09:20 周二~周六(美股交易日次晨,排在 8:30/8:40 节目摘要任务之后)
+20 9 * * 2-6 /bin/bash /opt/guanhetech/tools/US-market-report/cron_daily.sh >> /opt/guanhetech/backend/reports/pipeline/cron.log 2>&1
 ```
 
 `cron_daily.sh` 逻辑:
@@ -109,7 +109,7 @@ crontab 条目(已在本机配置):
    重建 `snapshot.json`(数据层 + 新闻层 + 转录内联,约 2~3 分钟);
 3. `run_pipeline.py {T} --style en` —— 章节生成/核验/出图/组装;
 4. `flock` 防重叠:上一轮未结束时本次直接跳过;
-5. 日志行格式 `==== ... report-pipeline cron end (rc=N) ====` 写入 cron.log。
+5. 日志行格式 `==== ... US-market-report cron end (rc=N) ====` 写入 cron.log。
 
 改风格:编辑脚本顶部 `STYLE=en` → `cn`。改时间:改 crontab 第一字段。
 
@@ -124,7 +124,7 @@ crontab 条目(已在本机配置):
 ### 6.1 生成 / 重跑指定日期(标准入口)
 
 ```bash
-$PY tools/report-pipeline/run_pipeline.py 2026-10-30 --style en
+$PY tools/US-market-report/run_pipeline.py 2026-10-30 --style en
 ```
 
 语义 = 断点续跑:`snapshot.json` 必须已存在(没有则先跑 6.2);
@@ -133,9 +133,9 @@ $PY tools/report-pipeline/run_pipeline.py 2026-10-30 --style en
 ### 6.2 只重建快照(数据层刷新)
 
 ```bash
-$PY tools/report-pipeline/build_snapshot.py                # 最新 The Close 交易日
-$PY tools/report-pipeline/build_snapshot.py --date 2026-10-30
-$PY tools/report-pipeline/build_snapshot.py --no-backfill  # 调试用,跳过 EODHD 回填省配额
+$PY tools/US-market-report/build_snapshot.py                # 最新 The Close 交易日
+$PY tools/US-market-report/build_snapshot.py --date 2026-10-30
+$PY tools/US-market-report/build_snapshot.py --no-backfill  # 调试用,跳过 EODHD 回填省配额
 ```
 
 ### 6.3 强制全量重新生成(复用旧快照)
@@ -147,20 +147,20 @@ D=2026-10-30
 cd /opt/guanhetech/backend/reports/pipeline/$D
 rm -f state.json sections/*.md sections/*.claims.json verify/verdict.json
 cd /opt/guanhetech
-$PY tools/report-pipeline/run_pipeline.py $D --style en
+$PY tools/US-market-report/run_pipeline.py $D --style en
 ```
 
 ### 6.4 只重出图(不动正文)
 
 ```bash
-$PY tools/report-pipeline/render_charts.py backend/reports/pipeline/2026-10-30
+$PY tools/US-market-report/render_charts.py backend/reports/pipeline/2026-10-30
 # 之后重跑 6.1(秒级,复用路径)让 report.md 重新组装嵌入
 ```
 
 历史日期热力图(finviz_screener 无历史快照时自动 Yahoo 回填当日涨跌):
 
 ```bash
-$PY tools/report-pipeline/finviz_map_chart.py --workspace backend/reports/pipeline/2026-10-30 --date 2026-10-16
+$PY tools/US-market-report/finviz_map_chart.py --workspace backend/reports/pipeline/2026-10-30 --date 2026-10-16
 ```
 
 ### 6.5 核验强度
@@ -228,7 +228,7 @@ tail -5 /opt/guanhetech/backend/reports/pipeline/cron.log
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | cron.log: `无法定位 CLI ZCode Built-in Provider Config` | cron 极简环境缺 provider 变量 | 确认 `cron_daily.sh` 的 §3.2 导出段仍在;`~/.zcode/v2/` 存在 |
-| cron.log: `No such file or directory`(指 cron_daily.sh) | 脚本被误删 | `git checkout -- tools/report-pipeline/cron_daily.sh`(已在 git,commit fb11de4) |
+| cron.log: `No such file or directory`(指 cron_daily.sh) | 脚本被误删 | `git checkout -- tools/US-market-report/cron_daily.sh`(已在 git,commit fb11de4) |
 | `build_snapshot failed` | DB 不通 / `.env` 缺项 / 外网异常 | 看日志首个 traceback;按 §4.3 自检 |
 | 转录缺失(`errors` 记 the_close / cnbc_closing_bell) | 上游 ingest 滞后 | 等入晚些重跑 6.2 + 6.1;持续缺 → 查上游 ingest 任务 |
 | `rc=2` + `NEEDS_HUMAN_REVIEW.md` | 核验多轮仍有 high fail | 打开该文件看 issues 清单,人工修订章节后重跑 6.1 |

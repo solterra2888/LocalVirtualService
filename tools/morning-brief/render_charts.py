@@ -10,7 +10,7 @@ Outputs PNGs under {workspace}/final/charts/:
   05_{TICKER}.png          deep-dive close line from Yahoo (best-effort; not candlesticks)
 
 Usage:
-    python tools/report-pipeline/render_charts.py backend/reports/pipeline/2026-10-27
+    python tools/US-market-report/render_charts.py backend/reports/pipeline/2026-10-27
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 #!/bin/bash
-# report-pipeline 每日定时入口。crontab 条目(北京时间周二~周六 09:20,美股交易日次晨):
-#   20 9 * * 2-6 /bin/bash /opt/guanhetech/tools/report-pipeline/cron_daily.sh \
+# morning-brief 每日定时入口。crontab 条目(北京时间周二~周六 09:20,美股交易日次晨):
+#   20 9 * * 2-6 /bin/bash /opt/guanhetech/tools/US-market-report/cron_daily.sh \
 #       >> /opt/guanhetech/backend/reports/morning-brief/cron.log 2>&1
 #
 # 流程: build_snapshot(缺省自动解析最新 The Close 交易日,含数据层/新闻层/转录内联)
@@ -12,7 +12,7 @@
 set -uo pipefail
 
 REPO=/opt/guanhetech
-PIPE=$REPO/tools/report-pipeline
+PIPE=$REPO/tools/US-market-report
 PY_BIN_DIR=/root/miniconda3/envs/guanhe/bin
 PY=$PY_BIN_DIR/python
 STYLE=cn   # en=GuanHe 风格英文正文(调优基准); cn=中文正文
@@ -30,16 +30,16 @@ fi
 export ZCODE_BUILTIN_PROVIDER_CONFIG_FILE=$BUILTIN
 export PATH="$PY_BIN_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-echo "==== $(date '+%F %T %Z') report-pipeline cron start ===="
+echo "==== $(date '+%F %T %Z') morning-brief cron start ===="
 
 # 防重叠:上一轮未结束则放弃本次(正常 23 分钟 << 24 小时,仅防御)
-exec 9>/tmp/report_pipeline_cron.lock
+exec 9>/tmp/morning_brief_cron.lock
 flock -n 9 || { echo "[cron] previous run still active, skip"; exit 0; }
 
 cd "$PIPE" || exit 1
 
 if ! "$PY" build_snapshot.py; then
-    echo "==== $(date '+%F %T %Z') report-pipeline cron end (rc=1, build_snapshot failed) ===="
+    echo "==== $(date '+%F %T %Z') morning-brief cron end (rc=1, build_snapshot failed) ===="
     exit 1
 fi
 
@@ -51,5 +51,5 @@ echo "[cron] running pipeline for $DATE (style=$STYLE)"
 "$PY" run_pipeline.py "$DATE" --style "$STYLE"
 rc=$?
 
-echo "==== $(date '+%F %T %Z') report-pipeline cron end (rc=$rc) ===="
+echo "==== $(date '+%F %T %Z') morning-brief cron end (rc=$rc) ===="
 exit $rc

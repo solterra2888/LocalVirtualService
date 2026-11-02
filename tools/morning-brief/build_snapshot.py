@@ -39,7 +39,7 @@
 时间匹配,不存在摘要表的北京 T+1 戳问题)。
 
 用法:
-    python tools/report-pipeline/build_snapshot.py \
+    python tools/US-market-report/build_snapshot.py \
         [--date 2026-10-28] [--out PATH] [--no-backfill]
 
     不传 --date 时取美东最近一个已收盘的交易日(≥18:30 ET 视为当日已收盘)。

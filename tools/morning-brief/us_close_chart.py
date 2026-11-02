@@ -23,8 +23,8 @@ Methodology (reverse-engineered from GuanHe 2026-10-30 chart, verified numerical
   - CHINA / ASIA & EUROPE -> cash-index EODHD history (market_data_eod)
 
 Usage:
-    python tools/report-pipeline/us_close_chart.py --workspace backend/reports/pipeline/2026-10-30
-    python tools/report-pipeline/us_close_chart.py --date 2026-10-30 --out /tmp/us_close.png
+    python tools/US-market-report/us_close_chart.py --workspace backend/reports/pipeline/2026-10-30
+    python tools/US-market-report/us_close_chart.py --date 2026-10-30 --out /tmp/us_close.png
 """
 
 from __future__ import annotations
@@ -469,7 +469,7 @@ def render(sections: List[Dict[str, Any]], t: date, out: Path) -> Path:
         8, GRAY_LT, style="italic")
     txt(NAME_X, H - 32,
         f"MOVE index unavailable. Last updated {t:%A, %B %d, %Y} \u00b7 "
-        "guanhetech report-pipeline.",
+        "guanhetech morning-brief.",
         8, GRAY_LT, style="italic")
 
     out.parent.mkdir(parents=True, exist_ok=True)

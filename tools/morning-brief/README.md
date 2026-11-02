@@ -1,4 +1,4 @@
-# morning-brief — 盘前晨报项目(自 report-pipeline v7 复制分化;定时与数据源待配置)
+# morning-brief — 盘前晨报项目(自 US-market-report v7 复制分化;定时与数据源待配置)
 
 用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。对齐 GuanHe **现行版式**(2026-10-12 之后)。v5 起节目正文**只用清洗转录、不读摘要表**(The Close youtube 自识别 + Closing Bell 主段/Overtime 播客双行直查);v6 增**新闻事件层**(`sources.news`:twitter 快讯 flash + Yahoo/Seeking Alpha 全文 wire + SA 电话会纪要 calls),drivers 双引擎选题(节目块 + 新闻事件块)。
 
@@ -121,12 +121,12 @@ backend/reports/pipeline/{date}/
 PY=/root/miniconda3/envs/guanhe/bin/python
 ZCODE=/root/.zcode/server/bin/zcode
 
-$PY tools/report-pipeline/build_snapshot.py [--date 2026-10-28] [--no-backfill]
-$PY tools/report-pipeline/run_pipeline.py 2026-10-27 --style en
-$PY tools/report-pipeline/run_pipeline.py 2026-10-27 --llm-verify off   # 只用确定性核验
-$PY tools/report-pipeline/run_pipeline.py 2026-10-27 --fake-zcode   # 状态机自测
-$PY tools/report-pipeline/render_charts.py backend/reports/pipeline/2026-10-27   # 01_us_close 自动走 FT 版,失败回落旧简版
-$PY tools/report-pipeline/us_close_chart.py --workspace backend/reports/pipeline/2026-10-30   # 单独重出 final/charts/01_us_close.png
+$PY tools/US-market-report/build_snapshot.py [--date 2026-10-28] [--no-backfill]
+$PY tools/US-market-report/run_pipeline.py 2026-10-27 --style en
+$PY tools/US-market-report/run_pipeline.py 2026-10-27 --llm-verify off   # 只用确定性核验
+$PY tools/US-market-report/run_pipeline.py 2026-10-27 --fake-zcode   # 状态机自测
+$PY tools/US-market-report/render_charts.py backend/reports/pipeline/2026-10-27   # 01_us_close 自动走 FT 版,失败回落旧简版
+$PY tools/US-market-report/us_close_chart.py --workspace backend/reports/pipeline/2026-10-30   # 单独重出 final/charts/01_us_close.png
 ```
 
 `us_close_chart.py` 数据映射(逆向 GuanHe 10-30 图并逐格数值验证):Last/1D 与板块行

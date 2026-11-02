@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """GuanHe 风格 Daily Market Brief 生成管线编排器(v4)。
 
-流程(详见 tools/report-pipeline/README.md):
+流程(详见 tools/US-market-report/README.md):
     Stage 0   build_snapshot.py 产出的冻结快照(本脚本不重建,只校验存在)
     Stage 1-6 三组章节 Agent 并行(节目转录 + 新闻层为素材,无摘要):
               overall_market(The Close) / company_desk(Closing Bell 主段+OT)
@@ -17,8 +17,8 @@
 设计规则: 文件即契约、步级幂等、门控不经过 LLM、全审计落盘。
 
 用法:
-    python tools/report-pipeline/run_pipeline.py 2026-10-24 [--style en|cn]
-    python tools/report-pipeline/run_pipeline.py 2026-10-24 --fake-zcode
+    python tools/US-market-report/run_pipeline.py 2026-10-24 [--style en|cn]
+    python tools/US-market-report/run_pipeline.py 2026-10-24 --fake-zcode
 
 退出码: 0=已发布  1=运行错误  2=核验未通过,待人工
 """
