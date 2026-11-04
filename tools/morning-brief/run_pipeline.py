@@ -52,6 +52,7 @@ from prompts import (  # noqa: E402
     SECTION_ORDER,
     SECTION_SPECS,
     agent_section_names,
+    agent_snapshot_filter,
     build_agent_prompt,
     build_light_verifier_prompt,
     build_verifier_prompt,
@@ -666,6 +667,38 @@ def section_done(ws: Path, name: str) -> bool:
     return f.exists() and DONE_MARKER in f.read_text(encoding="utf-8")
 
 
+def _sliced_snapshot(ws: Path, snapshot: Path, agent: str) -> Path:
+    """按 agent 白名单物理切片快照(v8.3)。
+
+    SOURCE RESTRICTION 此前只是 prompt 约定 + 台账审计;现在写作/修订
+    agent 直接挂切片文件,白名单外素材(含其中的转录全文)根本不进入其
+    上下文 —— 输入面与合同一致。核验器仍用全量快照(需要跨节视野),
+    claims 台账也仍对全量快照校验路径(切片 ⊆ 全量,天然可解析)。
+    子键级过滤(news.flash 等)之外保留各块的短标量元数据(标题/时间戳)。
+    """
+    snap = json.loads(snapshot.read_text(encoding="utf-8"))
+    allow = agent_snapshot_filter(agent)
+    sliced: Dict[str, Any] = {}
+    for head, val in (snap.get("sources") or {}).items():
+        subs = allow.get(head)
+        if subs is None:
+            continue                     # 整块不在白名单 → 丢弃
+        if not subs or not isinstance(val, dict):
+            sliced[head] = val
+            continue
+        keep = {k: v for k, v in val.items()
+                if k in subs
+                or (not isinstance(v, (dict, list))
+                    and len(str(v)) < 300)}
+        sliced[head] = keep or val       # 子键全未命中(路径命名漂移)→ 保守整块保留
+    snap["sources"] = sliced
+    snap["sliced_for"] = agent
+    out = ws / f"snapshot.{agent}.json"
+    out.write_text(json.dumps(snap, ensure_ascii=False, default=str),
+                   encoding="utf-8")
+    return out
+
+
 def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
                    snapshot_data: Dict[str, Any], blocks: Dict[str, Any],
                    agent: str) -> Dict[str, Any]:
@@ -694,7 +727,7 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
             result = run_agent(
                 args.zcode_bin, ws,
                 build_agent_prompt(agent, style=args.style, blocks=blocks),
-                snapshot, args.timeout)
+                _sliced_snapshot(ws, snapshot, agent), args.timeout)
             usage = result.get("usage")
             for n in names:
                 sections[n] = {
@@ -955,7 +988,8 @@ def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
         )
         session_id = state["sections"].get(names[0], {}).get("session_id")
         try:
-            run_agent(args.zcode_bin, ws, prompt, snapshot, args.timeout,
+            run_agent(args.zcode_bin, ws, prompt,
+                      _sliced_snapshot(ws, snapshot, agent), args.timeout,
                       resume_session=session_id)
         except subprocess.TimeoutExpired:
             if not all(section_done(ws, n) for n in names):

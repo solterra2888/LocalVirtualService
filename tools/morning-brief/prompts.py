@@ -85,10 +85,13 @@ SECTION_SOURCE_MATRIX = {
                     "(news flash)", "(newswire)"},
     "sector_action": {"(Closing Bell)", "(sector averages)", "(Finviz)",
                       "(breadth)", "(earnings calendar)",
-                      "(news flash)", "(newswire)"},
+                      "(news flash)"},
     "movers": {"(Finviz)", "(earnings calendar)"},
-    "deep_dives": {"(Closing Bell)", "(The Close)", "(Finviz)",
-                   "(earnings calendar)", "(news flash)", "(newswire)"},
+    # v8.3 第二部分瘦身(2026-11-04,claims 实测:The Close/wire/calls 四节两天
+    # 仅贡献 ~8% 事实,却占 ~56% 文本素材):04/06 文本源收窄为 CB 双转录 +
+    # flash;结构化数字层(finviz/日历/跨资产)不动
+    "deep_dives": {"(Closing Bell)", "(Finviz)",
+                   "(earnings calendar)", "(news flash)"},
     # ── v8 Macros(08-11 为 LLM 节;07 确定性渲染,不写 audit 注释) ──
     "macro_dashboard": {"(macro dashboard)", "(economic calendar)",
                         "(cross-asset)", "(Fed calendar)"},
@@ -128,6 +131,26 @@ def allowed_source_paths(allowed_tags: Optional[set]) -> list:
             if p and p not in paths:
                 paths.append(p)
     return paths
+
+
+def agent_snapshot_filter(agent: str) -> Dict[str, set]:
+    """agent → 允许的快照源块(head → 子键集合;空集 = 整块保留)。
+
+    v8.3:SOURCE RESTRICTION 从"仅 prompt 约定"升级为"物理切片"——
+    run_pipeline 按此过滤 sources 后写 snapshot.{agent}.json 挂给该
+    agent,白名单外的素材(如第二部分的 The Close / wire / calls)不再
+    进入其上下文。核验器(verifier)始终用全量快照,不受此影响。
+    """
+    out: Dict[str, set] = {}
+    for n in agent_section_names(agent):
+        for p in allowed_source_paths(SECTION_SOURCE_MATRIX.get(n, set())):
+            parts = p.split(".")
+            head = parts[0]
+            if len(parts) > 1:
+                out.setdefault(head, set()).add(parts[1])
+            else:
+                out.setdefault(head, set())
+    return out
 
 
 def _common_rules(style: str, allowed_tags: Optional[set] = None) -> str:
@@ -391,9 +414,10 @@ table, no sector-average lines). Choose themes by MARKET IMPACT: the biggest
 same-day moves among large caps (market.sp500_constituents / top_movers) and
 the catalysts behind them. The Closing Bell transcripts (main hour
 clean_transcript + Overtime clean_transcript_ot) supply catalysts, color and
-named guest/analyst views; news.flash / news.wire supply catalysts the show
-missed (reports, downgrades, guidance, deals). A big mover the show skipped is
-folded into the theme it belongs to — never a separate "not covered" block.
+named guest/analyst views; news.flash supplies catalysts the show missed
+(reports, downgrades, guidance and deal headlines). A big mover the show
+skipped is folded into the theme it belongs to — never a separate "not
+covered" block.
 Each block:
 - A bold one-clause headline stating what happened to the group
   (e.g. **Memory sold off even with prices high.**).
@@ -419,10 +443,9 @@ How long the show talked about a name is only a tie-break. A deep dive may be a
 non-listed company when its news moved the market (e.g. a private company's
 IPO, rating or financing). Every subject must also appear in Sector Action.
 
-Sources: Closing Bell / The Close transcripts, earnings_calendar,
-market.sp500_constituents (price, change), news.flash (rating changes, target
-changes, guidance headlines, reports), news.wire and news.calls (results
-detail, verbatim management quotes).
+Sources: the Closing Bell transcripts (main hour + Overtime),
+earnings_calendar, market.sp500_constituents (price, change), news.flash
+(rating and target changes, guidance and results headlines, deal terms).
 
 Format per subject:
 
@@ -437,9 +460,9 @@ Format per subject:
   against about $17bn and $0.43 expected (CNBC)." Put guidance-vs-consensus
   first when it caused the move.
 - **Management said:** ONE short verbatim executive quote (name + title) from
-  a transcript, news.calls or news.wire. Omit the line if none exists.
+  the Closing Bell transcripts. Omit the line if none exists.
 - **Analyst reaction:** bullets in the form "Firm (Rating): target $X from
-  $Y; one-clause reason." taken from news items or named analysts in the
+  $Y; one-clause reason." taken from news.flash items or named analysts in the
   transcripts. Up to 5, most influential first. Omit if none exists.
 - **Bear case:** optional, only when named analysts/strategists argue the
   other side; same bullet form.
@@ -450,8 +473,11 @@ Never fabricate estimates, guidance, ratings, targets or quotes.
 COMPANY_DESK_TASK = """\
 ## Part 2 — Sector Action + Company Deep Dives (one pass, two files)
 
-Read the Closing Bell transcripts (main hour + Overtime), the large-cap moves
-and the trading-day news ONCE, then export TWO files. Deep Dives subjects MUST
+Read the Closing Bell transcripts (main hour + Overtime) ONCE — while
+reading, collect every executive quote (name + title + exact words) and
+analyst view you might use, because you may NOT re-read the transcripts
+afterwards. Then read the large-cap moves (finviz), the earnings calendar and
+news.flash, and export TWO files. Deep Dives subjects MUST
 also appear in Sector Action. (Today's Movers is rendered by the pipeline
 from market data — do not write it.)
 

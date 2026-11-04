@@ -59,6 +59,14 @@ v8 追加:Macros 各节**完全不读节目转录**;展望节判断句必须读�
             窗口合格条目可达千级,旧法会把发得早的重要报道挤掉)
     calls ← SA 电话会纪要(正文 "Earnings Call Insights" 特征 + ≥8k 字符),
             仅保留财报日历命中 ticker,截 8000,≤6 篇
+    **消费方(v8.3)**:flash 服务全部 LLM 节;wire/calls 服务 01-03 与
+    07-11,**04/06(第二部分)不再读 wire/calls/The Close** —— 两期 claims
+    实测三者仅贡献 ~8% 事实却占 ~56% 文本素材;第二部分文本源收窄为
+    CB 双转录 + flash,数字仍锚定 finviz/财报日历/跨资产结构化层。
+    SOURCE RESTRICTION 同步**物理化**:run_pipeline 按 `agent_snapshot_filter`
+    为每个写作/修订 agent 生成 `snapshot.{agent}.json` 切片挂载(白名单外
+    素材不进入其上下文;核验器仍用全量快照,claims 台账仍对全量校验)。
+    实测切片体积:company_desk 680K→351K,macro 类 250-312K
     条目携带 info_level/evidence_level(见 INFO_GRADING_STANDARD.md);
     E3(单一来源/未证实)素材的任务书规则要求以"据报道/未证实"口径书写
     已知边界:T 晚间盘后财报的 SA 纪要 T+1 白天才到,赶不上晨间构建 ——
