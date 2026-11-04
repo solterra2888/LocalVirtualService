@@ -1,0 +1,298 @@
+# morning-brief v8.4 优化记录与真机测试方案
+
+- **日期**:2026-11-05
+- **依据**:`2026-11-03-v83` 报告评估 + [TEST-2026-11-04.md](TEST-2026-11-04.md)
+- **范围**:P0、P1 已完成；P2 未做（见第五节）
+- **验证状态**:离线验证（用 v83 数据做单元验证 + `--fake-zcode` 全流程）已通过。**还没有用真实 ZCode 跑过**，第四节是真机测试步骤，跑完按第六节反馈。
+
+---
+
+## 一、评估结论（为什么要改）
+
+v83 的内容足够丰富，结构化数字也准确，作为可发布初稿是合格的。但有三类系统性问题，也解释了为什么核验加修订吃掉了约 46% 的输入 token：
+
+1. **编排**：各 agent 并行写作，没有人分配"哪个故事归哪一节"。同一件事在多节重复，数字也不一致，比如 Supermicro 盘后一节写 +6%、另一节写 +8%。Meta 7.50% 票息、$58bn 认购在 02/04/06/11 四节各出现一次。
+2. **核验**：文本来源（快讯、转录）的台账数字只检查"这串数字是否出现在整个文本池里"，查不到也只记 medium。实验中故意改错的数字有 68% 能通过。另外，任何核验意见（包括 medium/low）都会触发修订，08 节的占位内容因此被改写成正文（P18）。
+3. **数据层**：
+   - 快讯时间戳整体早 8 小时：DB 返回不带时区的 UTC 时间，被当成北京时间处理。
+   - 08 节抓不到 JOLTS：一是选题族里没有 JOLTS，二是日历 actual 晚到约 25 小时。
+   - DST 造成日历重复行。
+
+## 二、优化计划（优先级）
+
+| 优先级 | 事项 | 状态 |
+|---|---|---|
+| P0 | 修 `_et_fields` 时区 bug | ✅ |
+| P0 | 只让 high 触发修订；确定性节、占位节不进 LLM 修订；high 无处可修时直接转人工 | ✅ |
+| P0 | "复核备注"移入 `report.audit.md`；09 节选举主题与焦点事件去重 | ✅ |
+| P1 | 08 节：加 JOLTS/PCE 选题族；日历去重；用快讯打印值回填 actual；08/10 平静日改代码渲染 | ✅ |
+| P1 | 台账按条目核验 + 实体/指标跨节一致性；LLM 核验默认 annotate（只写备注） | ✅ |
+| P1 | 写作前编辑计划（故事归属 + 规范数值）；收紧 02/11 的建议分工 | ✅ |
+| P2 | Movers 原因列/盘后异动表/ticker 别名；统一标点与译名；07 单位与"本周"范围；The Close 降级评估；03 节结构化仓位数据；图表 T 日校验 | ⏳ 未做 |
+
+---
+
+## 三、代码改动明细
+
+### P0（v8.4 门控）
+
+**`build_snapshot.py`**
+- `_et_fields`：不带时区的时间先补 `tzinfo=utc` 再转美东。快讯、通讯社、电话会纪要三层的 `time_et`/`date_et` 都受影响。
+
+**`run_pipeline.py`**
+- **门控**：`verdict = fail` 当且仅当存在 high（`_high_issues`）。LLM 自报 fail 但没有 high，不拦发布。
+- **修订路由**（`revise_sections` / `_revisable`）：只修 high。确定性节（05/07）永不修。占位节只接受确定性核验（`source=deterministic`）的问题。同一 agent 的重复问题合并。日志会打出 `[revise] skip <节>: locked section`。
+- **转人工**：所有 high 都落在锁定节、没有可修的节时，直接写 `NEEDS_HUMAN_REVIEW.md`，不空转修订轮次。
+- **复核备注**：`_review_notes` 汇总 LLM 意见、quality_notes 和确定性核验的非 high 残留，只写进 `report.audit.md` 的 "Review notes"，正文不再出现。
+- **09 焦点事件**（`_geo_stats`）：焦点事件有一半以上条目已归入某个已开主题时，不再单开「焦点事件」，避免选举写两遍。
+- **fake 模式**：`review_releases` 为空时，08 节输出占位，和真实合同保持一致。
+
+### P1-a：08/10 节与宏观日历
+
+**`build_snapshot.py`**
+- **日历去重**：`_economic_events` 按 (日期, 国家, 事件, 比较口径, 期别) 去重。同一事件因 DST 或改时产生的重复行，保留有 actual、更新更晚的一行。
+- **快讯回填 actual**（`fill_actuals_from_flash`）：T 日缺 actual 的日历行，从最早一条匹配的快讯取"数值 (Est. …, Prior …)"格式的打印值，并记录 `actual_source="news.flash[id=f21]"`。
+  - 以下情况不回填：比较口径不符（MoM/YoY）、期别月份不符、国家不符、量级和预期/前值差太多（差值 >1 且比值不在 0.5–2 之间）。
+  - 回填结果记在 `snapshot.notes.actuals_from_flash`。
+- **条目 id**：快照末尾调用 `assign_item_ids`，规则为快讯 f#、通讯社 w#、纪要 c#、宏观日报 d#、研报 r#、地缘 g#。
+
+**`run_pipeline.py`**
+- `REVIEW_FAMILY_ORDER` 加入 `pce`、`jolts`。JOLTS 只匹配 `job openings`，避免误选 "JOLTs Job Quits"。
+- **平静日代码渲染**（`QUIET_RENDERERS`）：
+  - **10 美联储观察**：当 `fomc_deep=false`、快讯/通讯社里没有 Fed 官员讲话（`FED_SPEAK_RE`）、且有 `next_fomc_odds` 时，由代码渲染「利率与决议」和「市场定价路径」两块：决议/票数/异议理由（鹰鸽）、下一场概率（含前值）、远端合约路径、2y/10y。
+  - **08 回顾·宏观数据**：没有选中任何发布时，由代码写占位。
+  - 代码渲染的节在 `state.json` 记为 `mode: deterministic, note: quiet day`，并且会锁定（不修订、不核台账）。幂等重跑时保留原有的 state 记录。
+- 启动时检查快照有没有条目 id，旧快照会自动补编号并写回（只加 id，不改内容）。
+
+### P1-b：确定性核验（`verify_checks.py`）
+
+- **按条目核验**：新闻数字必须引用具体条目，比如 `news.flash[id=f12]`、`news_macro.geo[id=g3]`，也支持多条件选择器 `[author=Reuters,time_cn=11-03 16:24]`。
+  - 数字只在被引的那一条里找，支持 万/亿/万亿/K/M/B/T/million/bn 换算。
+  - 容差按台账写出的精度计算：原文写 91%，撑不起台账里的 91.37%。
+  - 被引条目里没有这个数字 → **high**，提示里会列出含这个数的条目 id。
+  - 整桶引用（`news.flash`）→ 每节汇总一条 medium。
+  - 文本池和快照里都找不到 → high。
+- **跨节一致性**：台账增加可选字段 `entity` + `metric`。同一实体、同一指标在不同节的数值不同时：
+  - 行情类（move/ah_move/close/level/yield/odds）判 high，财报类（revenue/eps/guide_*）判 medium。
+  - 参照值的优先级：编辑计划规范值 > 已按路径核实的值 > 多数节。
+  - 只路由给偏离的节，修改建议里直接给出参照值。找不到唯一参照时只记 medium。
+- `state.json` 里标为 deterministic 的节（平静日的 08/10）跳过台账检查。
+- `verified_canonicals`：计划里的规范值必须能在快照中核实，才会注入任务书、参与核验。任务书和核验共用同一份清单。
+
+**`prompts.py`**：规则 11 改为要求按条目 id 引用新闻、禁止整桶引用，并说明 `entity`/`metric` 的取值约定。
+
+### P1-c：LLM 核验 annotate 模式（`run_pipeline.py`）
+
+- `--llm-verify` 新增 `annotate` 并设为默认。它跑的是和 light 同一份只读正文的核验，但所有 LLM 意见都标为 `advisory`，`_high_issues` 不把它们算进门控，只写进复核备注，标记为 `[high, advisory]`。
+- `light` 保留旧行为（LLM 的 high 会触发修订）。fake 模式不打 advisory 标记，以便继续测试修订循环。
+
+### P1-d：编辑计划（`run_pipeline.py` + `prompts.py`）
+
+- 写作前调用一次 LLM（`run_plan`，超时 600s）。
+  - 输入：`plan_input.md`，约 28K 字符。包括跨资产、广度、板块、S&P 涨跌前 10、财报（按市值排序）、宏观块判定、美国日历、L1 快讯、通讯社/纪要标题、宏观素材标题，全部带条目 id，不含节目转录。
+  - 输出：`plan.json`。包含 4–8 个故事，每个故事有唯一归属节（`owner`）、可一句带过的节（`may_mention`）、angle、evidence，以及规范数值（`canonical`：entity/metric/value/path）。
+- **可认领故事的节**由 `_plan_owners` 判定：drivers、sector_action、deep_dives、outlook 恒在；macro_review 只在有选题时、geopolitics 只在有主题时、fomc 只在非平静日可认领。归属到不可认领节的故事改派给 drivers。
+- **任务书注入**（`plan_brief`）：每个 agent 会看到三部分，即自己负责的故事、可以一句带过的故事、其他节负责的故事（不得写），以及核实过的规范数值。
+- `plan.json` 已存在且有效就直接复用；失败不阻断；fake 模式跳过；`--no-plan` 可关闭。
+- **02/11 分工**：02 节的行动建议限定为针对该驱动的交易级建议；11 节「投资建议」限定为组合级（仓位、结构、超配/回避、改变判断的条件），禁止复述或改写 02 的行动建议。
+
+### 观测性（本次新增）
+
+- `state.json` 新增 `usage_by_phase`，分 plan/write/verify/revise 四项。修订的 token 之前完全没有记录，现在可以直接算出"核验 + 修订占比"。
+- 新增 `eval_run.py`：一期报告的指标汇总，只读、不调 LLM、不连库。输出 Markdown，内容包括发布状态、token 分阶段、计划、章节模式、台账写法、核验残留、跨节重复数字、快照抽查。
+
+### 文档
+
+- `README.md` 已同步：编辑计划、平静日渲染、台账条目引用、核验规则、annotate、产物目录、`--no-plan`、选题族与回填。
+
+---
+
+## 四、真机测试方案
+
+以下命令都在服务器仓库根目录 `/opt/guanhetech` 执行，`PY=/root/miniconda3/envs/guanhe/bin/python`。
+**不要把输出用管道接 `| tail`**（TEST-2026-11-04 的 P5 教训：会吞掉日志和退出码），一律落盘到文件。
+
+### 第 0 步：部署与静态检查（1 分钟）
+
+```bash
+cd /opt/guanhetech && git pull
+PY=/root/miniconda3/envs/guanhe/bin/python
+for f in run_pipeline verify_checks prompts build_snapshot eval_run; do
+  $PY -c "import ast; ast.parse(open('tools/morning-brief/$f.py').read()); print('$f ok')"
+done
+```
+
+### 第 1 步：离线回归（不调 LLM，约 1 分钟）
+
+**1a. 用新核验器重查 v83**，验证新规则在真实台账上没有误报：
+
+```bash
+rm -rf /tmp/v83chk && cp -R backend/reports/morning-brief/2026-11-03-v83 /tmp/v83chk
+$PY - <<'EOF'
+import json, sys; sys.path.insert(0, 'tools/morning-brief')
+from pathlib import Path
+from collections import Counter
+from prompts import assign_item_ids
+import verify_checks as vc
+ws = Path('/tmp/v83chk'); f = ws / 'snapshot.json'
+s = json.loads(f.read_text()); assign_item_ids(s['sources'])
+f.write_text(json.dumps(s, ensure_ascii=False, default=str))
+rows = vc.run_checks(ws, 'cn')
+print(Counter(r['severity'] for r in rows))
+for r in rows: print(r['severity'], r['section'], r['claim'][:100])
+EOF
+rm -rf /tmp/v83chk
+```
+
+**预期**：`medium×7`，没有 high。其中 6 条是"ledger entries cite a whole text pool"（v83 台账是旧写法），1 条是 narrative 的 whitelist。
+
+**1b. fake 全流程**，验证状态机、平静日渲染和门控：
+
+```bash
+D=2099-12-31; W=backend/reports/morning-brief/$D
+rm -rf $W && mkdir -p $W && cp backend/reports/morning-brief/2026-11-03-v83/snapshot.json $W/
+$PY tools/morning-brief/run_pipeline.py $D --fake-zcode > /tmp/fake.log 2>&1; echo rc=$?
+grep -E "^\[(agent|verify|revise)|published" /tmp/fake.log
+cat $W/sections/10_fomc.md
+rm -rf $W
+```
+
+**预期**：
+- `rc=0`。第 1 轮核验有 1 个 high（fake 故意写错的数字），修订 overall_market 后第 2 轮 0 high，然后发布。
+- `10_fomc.md` 是代码渲染的中文两块：3.75%–4.00%、10:2、Cook 与 Hammack 鹰派异议、12月8–9日 ~82%（前值 ~78%）。
+
+### 第 2 步：Stage 0 重建快照（约 3 分钟）
+
+用一个**全新交易日** T（建议用最近一个，比如 2026-11-04）。这一天有 ISM 服务业 PMI 等 10:00 ET 发布的数据，适合检验时间戳修复和回填。
+
+> 如果该日工作区已经用旧代码跑过，要先清掉旧产物，否则断点续跑会直接复用旧章节，测不到新逻辑：
+> `cd backend/reports/morning-brief/$T && rm -f state.json plan.json plan_input.md sections/*.md sections/*.claims.json verify/verdict.json && cd /opt/guanhetech`
+
+```bash
+T=2026-11-04
+$PY tools/morning-brief/build_snapshot.py --date $T > backend/reports/morning-brief/build_$T.log 2>&1; echo rc=$?
+$PY - <<EOF
+import json; s = json.load(open('backend/reports/morning-brief/$T/snapshot.json'))
+src = s['sources']; fl = src['news']['flash']
+print('ids:', sum(1 for x in fl if x.get('id')), '/', len(fl))
+print('actuals_from_flash:', s.get('notes', {}).get('actuals_from_flash'))
+for x in fl:
+    if any(k in x['text'] for k in ('ISM', 'JOLTS', 'PMI', 'Payrolls', 'CPI')):
+        print(x['id'], x.get('date_et', 'T'), x['time_et'], x['text'][:90])
+EOF
+```
+
+**检查点**：
+- 所有快讯条目都带 id。
+- 数据类快讯的 `time_et` 和官方发布时刻一致，比如 ISM 服务业约 10:00、初请约 08:30。这次不应再出现 02:00 这种早 8 小时的时间。
+- 如果日历 actual 缺失而快讯里有打印值，`actuals_from_flash` 会列出回填结果。核对一下数值和原快讯是否一致。
+
+### 第 3 步：真实全流程（约 30–40 分钟）
+
+```bash
+T=2026-11-04
+$PY tools/morning-brief/run_pipeline.py $T --timeout 3300 \
+  > backend/reports/morning-brief/run_$T.log 2>&1; echo rc=$?
+```
+
+默认就是 `--llm-verify annotate`，并且开启编辑计划。运行中可以另开终端看日志：
+
+```bash
+grep -E "^\[(plan|agent|section|verify|revise)\]|published|pipeline error" backend/reports/morning-brief/run_$T.log
+```
+
+**日志中应该看到**：
+- `[plan] editorial plan ...`，之后是 `[plan] {'status': 'done', 'stories': N, ...}`，N 在 4–8 之间。
+- 08、10 如果是平静日，会是秒级完成（代码渲染）。
+- 核验阶段如果修订，只会出现 high 对应的组；锁定节会打出 `[revise] skip`。
+
+### 第 4 步：收集指标（秒级）
+
+```bash
+$PY tools/morning-brief/eval_run.py $T > backend/reports/morning-brief/eval_$T.md
+cat backend/reports/morning-brief/eval_$T.md
+```
+
+**对照基线**：v83 的同一脚本输出见第七节附录。
+
+| 指标 | v83 基线 | 本次目标 |
+|---|---|---|
+| 退出码 / 转人工 | rc=2，NEEDS_HUMAN_REVIEW | rc=0，无转人工 |
+| 核验轮次 | 5 | ≤ 2 |
+| verify + revise 占输入 token | ~46% | < 25% |
+| 台账整桶引用 / 新闻类台账 | 218 / 236 | < 10% |
+| 带 entity+metric 的台账条目 | 0 | 行情类数字大部分带上 |
+| 出现在 ≥3 个 LLM 节的数字 | 11 个 | ≤ 4 个 |
+| plan | 无 | done，4–8 个故事 |
+| 08/10 平静日 | LLM 写 + 多轮修订 | mode=deterministic，秒级 |
+
+### 第 5 步：人工通读（10–15 分钟，读 `final/report.md`）
+
+逐项打勾：
+
+1. **故事归属**：对照 `plan.json` 的 owner。同一故事是否只在归属节展开，其他节最多一句带过？重点看 04 和 06 是否还在重复同一批财报数字。
+2. **数字一致**：同一只股票的涨幅、同一个收益率、同一个概率，全篇是否只有一个数？
+3. **02 vs 11**：11「投资建议」是否是组合级，没有复述 02 的行动建议？
+4. **08 节**：选中的发布（含回填值）写得对不对？如果是占位，是否确实当天没有一线数据？
+5. **10 节**：平静日的代码渲染读起来是否通顺？有官员讲话的日子是否走了 LLM？
+6. **复核备注**：正文里不应出现"复核备注""05 节""确定性核验"一类字样。打开 `final/report.audit.md` 的 Review notes，看 `[high, advisory]` 的 LLM 意见里有没有**真问题**被放过。这决定 annotate 是否适合继续作为默认。
+
+### 第 6 步（可选）：幂等与开关
+
+```bash
+# 幂等重跑：应秒级复用、不花 token，state 里 08/10 的 mode 保持 deterministic
+$PY tools/morning-brief/run_pipeline.py $T > /tmp/rerun.log 2>&1; echo rc=$?
+```
+
+### 第 7 步（可选，约 10M token）：同数据 A/B
+
+想严格比较 v83 和 v8.4 时，用你生成 v83 时的同样方式新建一个工作区（比如 `2026-11-03-v84`），只放 v83 的 `snapshot.json`，然后跑第 3、4 步。注意 v83 的快照是旧代码建的，快讯时间戳仍有 8 小时偏差，也没有回填，所以这个 A/B 只比较编排和核验部分。
+
+---
+
+## 五、风险、回滚与未做事项
+
+**首跑风险**：
+- agent 可能不遵守按条目 id 引用。整桶引用只记 medium，不拦发布；但引用了条目而数字对不上会判 high，首跑可能因此多一轮修订。
+- 跨节一致性的 high 依赖 agent 填写 `entity`/`metric`。不填时这项检查不生效，但也不会误报。
+- 编辑计划会让第一段开始前多 1–3 分钟墙钟。
+
+**回滚开关**（不用改代码）：
+- `--no-plan`：关闭编辑计划。
+- `--llm-verify light`：恢复 LLM high 触发修订。
+- `--llm-verify off`：只用确定性核验。
+
+**未做**（P2 和评估遗留）：
+- 图表与正文数据不一致（v83 的图用的是 11-04 盘中的 Finviz 数据），需要加 T 日校验。**建议优先做**。
+- 快讯按事件聚类，同一事件数字有更新时保留最新一条。
+- 修订改为新开短会话（只带该节文件、问题和证据条目），降低修订成本。
+- Movers 原因列 / 盘后异动表 / ticker 别名（FISV↔FIS）；统一标点与译名；07 节单位与"本周"范围；JOLTS `release_series` 标签（标成 level，实际存的是环比变动）；The Close 降级评估；03 节结构化仓位数据；标题日期标注北京时间。
+
+---
+
+## 六、测试完请反馈这些
+
+1. 第 1 步两个离线检查的输出（是否符合预期）。
+2. 第 2 步检查脚本的输出。
+3. 第 3 步的 `rc`，以及 `grep` 出来的关键日志行。出错时附上 `run_$T.log` 末尾 100 行。
+4. **第 4 步 `eval_$T.md` 全文**（最重要）。
+5. `plan.json`，以及 `final/report.audit.md` 的 Review notes 段。
+6. 第 5 步六项通读的结论，有问题的请附原文片段。
+7. 如果出现 `NEEDS_HUMAN_REVIEW.md`，附上全文。
+
+我会根据这些判断三件事：annotate 是否继续作为默认、编辑计划是否值回它的成本、条目引用和跨节一致性的规则要不要调。然后再进入 P2。
+
+---
+
+## 七、附录：v83 基线（`eval_run.py 2026-11-03-v83`）
+
+```
+- verify attempts: 5  final verdict: fail ; NEEDS_HUMAN_REVIEW: True
+- total: in 11,494,132 / cache 10,813,440 / out 299,458(state.json 口径;DB 核账口径约 20.6M)
+- 台账合计 405 条:条目引用 18、整桶引用 218、带 entity+metric 0
+- 出现在 ≥3 个 LLM 节的数字:11 个
+  15b / 7.50% / 58b → drivers, sector_action, deep_dives, outlook
+  13.4b / 97% / 17b / 16.2b / 80% → drivers, sector_action, deep_dives
+  82% / 78% → drivers, fomc, outlook
+- macro_review 44 字符(占位,却经历 4 轮修订共 1,056s)
+```

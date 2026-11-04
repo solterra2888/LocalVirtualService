@@ -107,6 +107,14 @@ def _flatten_numbers(obj: Any, out: Set[float]) -> None:
                 pass
 
 
+def _state_sections(ws: Path) -> Dict[str, Any]:
+    try:
+        secs = json.loads((ws / "state.json").read_text(encoding="utf-8")).get("sections")
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return secs if isinstance(secs, dict) else {}
+
+
 def _macro_blocks_from_state(ws: Path, snapshot: Dict[str, Any]) -> Dict[str, Any]:
     state_f = ws / "state.json"
     if state_f.exists():
@@ -126,9 +134,17 @@ def _macro_blocks_from_state(ws: Path, snapshot: Dict[str, Any]) -> Dict[str, An
 SHOW_KEYS = ("the_close", "cnbc_closing_bell")
 _MONTHS = ["January", "February", "March", "April", "May", "June", "July",
            "August", "September", "October", "November", "December"]
-_VALUE_RE = re.compile(r"([+\-−]?)\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(%|bp|K|M|B|T|万亿|亿)?",
+_VALUE_RE = re.compile(r"([+\-−]?)\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(%|bp|K|M|B|T|万亿|亿|万)?",
                        re.I)
-_UNIT_SCALE = {"k": 1e3, "m": 1e6, "b": 1e9, "t": 1e12, "亿": 1e8, "万亿": 1e12}
+_UNIT_SCALE = {"k": 1e3, "m": 1e6, "b": 1e9, "t": 1e12, "万": 1e4, "亿": 1e8,
+               "万亿": 1e12}
+_WORD_SCALE = {"thousand": 1e3, "million": 1e6, "billion": 1e9, "trillion": 1e12,
+               "mn": 1e6, "bn": 1e9}
+_WORD_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(thousand|million|billion|trillion|mn|bn)\b",
+                          re.I)
+# 文本素材层:台账按条目引用(news.flash[id=f12]),数字只在被引条目里找
+_TEXT_POOLS = {"news": ("flash", "wire", "calls"),
+               "news_macro": ("digest", "research", "geo")}
 # 正文里需要台账覆盖的数字:带 % 或 bp 的(价格、指数点位噪音太多,不在兜底范围)
 _PROSE_NUM_RE = re.compile(r"[+\-−]?\d+(?:\.\d+)?\s*(?:%|bp)")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
@@ -258,9 +274,11 @@ def _resolve_path(root: Any, path: str):
                 cur = cur[i]
                 continue
             if "=" in sel:
-                k, v = (x.strip() for x in sel.split("=", 1))
-                hits = [x for x in cur if isinstance(x, dict)
-                        and str(x.get(k, "")).strip().lower() == v.lower()]
+                # 多条件 [author=Reuters,time_cn=11-03 16:24]:逐条都要命中
+                conds = [tuple(x.strip() for x in part.split("=", 1))
+                         for part in re.split(r",\s*(?=[\w]+=)", sel)]
+                hits = [x for x in cur if isinstance(x, dict) and all(
+                    str(x.get(k, "")).strip().lower() == v.lower() for k, v in conds)]
             else:
                 hits = [x for x in cur if isinstance(x, dict) and any(
                     str(vv).strip().lower() == sel.strip().lower() for vv in x.values())]
@@ -280,9 +298,133 @@ def _matches(pv: Dict[str, Any], pool: Set[float]) -> bool:
     return any(_close(c, b, pv["decimals"]) for c in _candidates(pv) for b in pool)
 
 
-def _check_ledger(ws: Path, name: str, sources: Dict[str, Any],
-                  snap_nums: Set[float], show_texts: Dict[str, str], add) -> None:
-    """台账逐条对账 + 正文 %/bp 数字的覆盖兜底。"""
+def _with_tol(num_s: str, scale: float = 1.0) -> tuple:
+    dec = len(num_s.split(".")[1]) if "." in num_s else 0
+    return (float(num_s) * scale, 0.5 * 10 ** (-dec) * scale)
+
+
+def _text_numbers(text: str) -> List[tuple]:
+    """文本里的数字 [(值, 容差)],含单位换算(7.8M→7.8e6、752万→7.52e6、
+    25 billion→2.5e10);容差按原文写出的小数位。"""
+    t = str(text or "").replace(",", "").replace("−", "-")
+    out: List[tuple] = []
+    for m in _VALUE_RE.finditer(t):
+        num_s, unit = m.group(2), (m.group(3) or "").lower()
+        out.append(_with_tol(num_s))
+        if unit in _UNIT_SCALE:
+            out.append(_with_tol(num_s, _UNIT_SCALE[unit]))
+    for m in _WORD_NUM_RE.finditer(t):
+        out.append(_with_tol(m.group(1), _WORD_SCALE[m.group(2).lower()]))
+    return out
+
+
+def _item_blob(node: Any) -> str:
+    items = node if isinstance(node, list) else [node]
+    return "\n".join(f"{it.get('title') or ''} {it.get('text') or ''}"
+                     for it in items if isinstance(it, dict))
+
+
+def _pool_index(sources: Dict[str, Any]) -> Dict[str, List[tuple]]:
+    """{head: 按数值排序的 [(abs 值, 容差, 条目 id)]},给"这个数在哪几条里"做二分查找。"""
+    out: Dict[str, List[tuple]] = {}
+    for head, buckets in _TEXT_POOLS.items():
+        rows = []
+        for bucket in buckets:
+            for i, it in enumerate((sources.get(head) or {}).get(bucket) or []):
+                if not isinstance(it, dict):
+                    continue
+                iid = it.get("id") or f"{bucket}[{i}]"
+                rows.extend((v, tol, iid) for v, tol in _text_numbers(_item_blob(it)))
+        out[head] = sorted((abs(v), t, i) for v, t, i in rows)
+    return out
+
+
+def _text_candidates(pv: Dict[str, Any]) -> List[tuple]:
+    """台账数字在文本里的写法:原值或单位换算后的值(带各自容差)。不做
+    % ↔ 小数口径换算 —— 那是结构化字段的存法,放进文本池会让 91.37% 碰上
+    随便哪条里的 0.91。"""
+    num_s = pv["digits"]
+    out = [_with_tol(num_s)]
+    if pv["unit"] in _UNIT_SCALE:
+        out.append(_with_tol(num_s, _UNIT_SCALE[pv["unit"]]))
+    return out
+
+
+def _text_hit(c: tuple, b: tuple) -> bool:
+    # 只按台账写出的精度放宽:原文 91% 撑不起台账的 91.37%
+    return abs(c[0] - abs(b[0])) <= c[1] + 1e-9
+
+
+def _matches_text(pv: Dict[str, Any], nums: List[tuple]) -> bool:
+    return any(_text_hit(c, b) for c in _text_candidates(pv) for b in nums)
+
+
+def _found_in(pv: Dict[str, Any], index: List[tuple], limit: int = 4) -> List[str]:
+    from bisect import bisect_left, bisect_right
+    ids: List[str] = []
+    for c in _text_candidates(pv):
+        win = c[1] + 1e-9
+        lo = bisect_left(index, (c[0] - win,))
+        hi = bisect_right(index, (c[0] + win, float("inf")))
+        for v, tol, iid in index[lo:hi]:
+            if _text_hit(c, (v, tol)) and iid not in ids:
+                ids.append(iid)
+    return ids[:limit]
+
+
+def _check_value(ctx: Dict[str, Any], path: str, pv: Dict[str, Any]) -> tuple:
+    """单条数字对账。返回 (severity|None, 说明, 建议, verified)。
+    verified=True 表示数字在路径/被引条目里精确核到,可作跨节一致性的参照。"""
+    sources = ctx["sources"]
+    head = path.split(".")[0].split("[")[0]
+    if head in SHOW_KEYS:
+        blob = ctx["show_texts"].get(head, "")
+        if blob and pv["digits"] not in blob:
+            return ("medium", f"number not found in {head} text",
+                    "quote the number exactly as the source states it", False)
+        return (None, "", "", False)
+    if head in _TEXT_POOLS:
+        node, full = _resolve_path(sources, path)
+        where = _found_in(pv, ctx["pool_index"].get(head, []))
+        hint = f"; it appears in {', '.join(where)}" if where else ""
+        if "[" in path and full:
+            if _matches_text(pv, _text_numbers(_item_blob(node))):
+                return (None, "", "", True)
+            return ("high", f"cited item does not state this number{hint}",
+                    "cite the item that states the number, or fix the number", False)
+        if where:
+            if "[" in path:
+                return ("medium", f"item selector does not resolve{hint}",
+                        f"cite by item id, e.g. {head}.<bucket>[id={where[0]}]", False)
+            return ("bare", "", "", False)
+        if _matches(pv, ctx["snap_nums"]):
+            return ("medium", f"number not in {head} text; exists elsewhere in snapshot",
+                    "fix the ledger path", False)
+        return ("high", f"absent from {head} text and snapshot",
+                "use a number the cited item states, or remove it", False)
+    node, full = _resolve_path(sources, path)
+    if full:
+        at_path = _subtree_numbers(node)
+        if _matches(pv, at_path):
+            return (None, "", "", True)
+        # 路径精确指到了字段、值却对不上 —— 这是真错,不因"快照别处有同数"而放过
+        shown = ", ".join(f"{x:g}" for x in sorted(at_path)[:4]) or "no number"
+        return ("high", f"value at path: {shown}",
+                "state the number at this path, or fix the path", False)
+    if node is not sources and _matches(pv, _subtree_numbers(node)):
+        return ("low", "path partly unresolved; number found under its prefix", "", False)
+    if _matches(pv, ctx["snap_nums"]):
+        return ("medium", "path does not resolve; number exists elsewhere in snapshot",
+                "fix the ledger path", False)
+    return ("high", "absent from snapshot",
+            "use the snapshot value at this path, or remove the number", False)
+
+
+def _check_ledger(ws: Path, name: str, ctx: Dict[str, Any], add,
+                  collect: List[Dict[str, Any]]) -> None:
+    """台账逐条对账 + 正文 %/bp 数字的覆盖兜底;带 entity/metric 的条目收进
+    collect 供跨节一致性核验。"""
+    sources, snap_nums, show_texts = ctx["sources"], ctx["snap_nums"], ctx["show_texts"]
     text = _section_text(ws, name)
     if not text.strip():
         return
@@ -302,6 +444,7 @@ def _check_ledger(ws: Path, name: str, sources: Dict[str, Any],
             return
     prose = _strip_audit(text).replace(",", "")
     ledger_vals: List[Dict[str, Any]] = []
+    bare: List[str] = []
     for c in claims:
         if not isinstance(c, dict):
             continue
@@ -311,33 +454,19 @@ def _check_ledger(ws: Path, name: str, sources: Dict[str, Any],
         ledger_vals.append(pv)
         path = str(c.get("path") or "")
         label = f"{c.get('value')} @ {path}"
-        head = path.split(".")[0].split("[")[0]
-        if head in SHOW_KEYS or head in ("news", "news_macro"):
-            blob = show_texts.get(head, "")
-            if blob and pv["digits"] not in blob:
-                add(name, label, f"number not found in {head} text pool",
-                    False, "medium", "quote the number exactly as the source states it")
-            continue
-        node, full = _resolve_path(sources, path)
-        if full:
-            at_path = _subtree_numbers(node)
-            if _matches(pv, at_path):
-                continue
-            # 路径精确指到了字段、值却对不上 —— 这是真错,不因"快照别处有同数"而放过
-            shown = ", ".join(f"{x:g}" for x in sorted(at_path)[:4]) or "no number"
-            add(name, label, f"value at path: {shown}", False, "high",
-                "state the number at this path, or fix the path")
-            continue
-        if node is not sources and _matches(pv, _subtree_numbers(node)):
-            add(name, label, "path partly unresolved; number found under its prefix",
-                False, "low")
-            continue
-        if _matches(pv, snap_nums):
-            add(name, label, "path does not resolve; number exists elsewhere in "
-                "snapshot", False, "medium", "fix the ledger path")
-            continue
-        add(name, label, "absent from snapshot", False, "high",
-            "use the snapshot value at this path, or remove the number")
+        sev, detail, suggestion, verified = _check_value(ctx, path, pv)
+        if sev == "bare":
+            bare.append(str(c.get("value")))
+        elif sev:
+            add(name, label, detail, False, sev, suggestion or None)
+        if c.get("entity") and c.get("metric"):
+            collect.append({"section": name, "entity": c["entity"],
+                            "metric": c["metric"], "value": c.get("value"),
+                            "pv": pv, "verified": verified})
+    if bare:
+        add(name, f"{len(bare)} ledger entries cite a whole text pool instead of an "
+            f"item: " + ", ".join(bare[:6]), "item id", False, "medium",
+            "cite items by id, e.g. news.flash[id=f12] / news_macro.geo[id=g3]")
     # 兜底:正文里带 %/bp 的数字既不在台账、也不在快照或节目文本里 → 可疑。
     # 比对池按章节收窄:非个股章节不含 500 只成分股/财报数字(否则几乎任何数
     # 都能"碰上"),且只按小数位严格比对、不做 /100 等换算。
@@ -369,6 +498,143 @@ def _check_ledger(ws: Path, name: str, sources: Dict[str, Any],
             "or remove it")
 
 
+# ── 跨节一致性(台账 entity/metric)─────────────────────────────────────
+# 行情类口径必须全篇一致(high,路由到偏离的节);财报类允许口径差异(medium)
+_CONSIST_HIGH = {"move", "ah_move", "close", "level", "yield", "odds"}
+_CONSIST_MEDIUM_PREFIX = ("revenue", "eps", "guide_")
+_METRIC_ALIAS = {"pct_change": "move", "change_pct": "move", "pct_move": "move",
+                 "change_percent": "move", "after_hours_move": "ah_move",
+                 "ah_change": "ah_move", "price": "close", "odds_pct": "odds",
+                 "hike_odds": "odds"}
+
+
+def _norm_metric(m: Any) -> str:
+    m = re.sub(r"[\s\-]+", "_", str(m or "").strip().lower())
+    return _METRIC_ALIAS.get(m, m)
+
+
+def _metric_severity(m: str) -> Optional[str]:
+    if m in _CONSIST_HIGH:
+        return "high"
+    if m.startswith(_CONSIST_MEDIUM_PREFIX):
+        return "medium"
+    return None
+
+
+def _norm_entity(e: Any) -> str:
+    e = str(e or "").strip().lower().lstrip("$")
+    return re.sub(r"\s+", "", re.sub(r"\.us$", "", e))
+
+
+def _norm_num(pv: Dict[str, Any]) -> float:
+    v, unit = abs(pv["value"]), pv["unit"]
+    if unit in _UNIT_SCALE:
+        return v * _UNIT_SCALE[unit]
+    return v / 100 if unit == "bp" else v
+
+
+def _same_value(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    return _close(_norm_num(a), _norm_num(b), min(a["decimals"], b["decimals"]))
+
+
+def _make_ctx(ws: Optional[Path], sources: Dict[str, Any]) -> Dict[str, Any]:
+    snap_nums: Set[float] = set()
+    _flatten_numbers(sources, snap_nums)
+    return {"sources": sources, "snap_nums": snap_nums,
+            "show_texts": _show_texts(ws, sources) if ws else {},
+            "pool_index": _pool_index(sources)}
+
+
+def verified_canonicals(rows: Any, sources: Dict[str, Any],
+                        ctx: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """编辑计划里的规范数值,只留能在快照里按路径核到的(计划本身也是 LLM
+    产物);同一 entity/metric 只留第一条。任务书注入与核验共用这份清单。"""
+    ctx = ctx or _make_ctx(None, sources)
+    out, seen = [], set()
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        pv = _parse_value(r.get("value"))
+        metric = _norm_metric(r.get("metric"))
+        key = (_norm_entity(r.get("entity")), metric)
+        if pv is None or not key[0] or not _metric_severity(metric) or key in seen:
+            continue
+        if _check_value(ctx, str(r.get("path") or ""), pv)[3]:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
+def _plan_canonicals(ws: Path, ctx: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
+    f = ws / "plan.json"
+    if not f.exists():
+        return {}
+    try:
+        rows = json.loads(f.read_text(encoding="utf-8")).get("canonical") or []
+    except (json.JSONDecodeError, AttributeError):
+        return {}
+    return {(_norm_entity(r["entity"]), _norm_metric(r["metric"])):
+            {"value": r.get("value"), "pv": _parse_value(r.get("value"))}
+            for r in verified_canonicals(rows, ctx["sources"], ctx)}
+
+
+def _check_consistency(collect: List[Dict[str, Any]],
+                       canon: Dict[tuple, Dict[str, Any]], add) -> None:
+    """同一实体同一指标跨节数值必须一致。参照优先级:编辑计划规范值 >
+    台账里已按路径核实的值 > 多数节;找不到唯一参照只记 medium,不路由。"""
+    groups: Dict[tuple, List[Dict[str, Any]]] = {}
+    for r in collect:
+        metric = _norm_metric(r["metric"])
+        if _metric_severity(metric):
+            groups.setdefault((_norm_entity(r["entity"]), metric), []).append(r)
+    order = {n: i for i, n in enumerate(SECTION_ORDER)}
+    for key, rows in groups.items():
+        sev = _metric_severity(key[1])
+        label = f"{rows[0]['entity']} {key[1]}"
+        ref, ref_src = None, ""
+        if key in canon:
+            ref, ref_src = canon[key], "editorial plan"
+        else:
+            if len({r["section"] for r in rows}) < 2:
+                continue
+            verified = [r for r in rows if r["verified"]]
+            if verified and all(_same_value(v["pv"], verified[0]["pv"]) for v in verified):
+                ref, ref_src = verified[0], f"{verified[0]['section']}, verified at path"
+            elif not verified:
+                clusters: List[List[Dict[str, Any]]] = []
+                for r in rows:
+                    for cl in clusters:
+                        if _same_value(r["pv"], cl[0]["pv"]):
+                            cl.append(r)
+                            break
+                    else:
+                        clusters.append([r])
+                if len(clusters) == 1:
+                    continue
+                size = sorted((len({r["section"] for r in cl}) for cl in clusters),
+                              reverse=True)
+                if size[0] > size[1]:
+                    best = max(clusters, key=lambda cl: len({r["section"] for r in cl}))
+                    ref, ref_src = best[0], "majority of sections"
+        if ref is None:
+            vals = sorted({(r["section"], str(r["value"])) for r in rows},
+                          key=lambda x: order.get(x[0], 99))
+            if len({v for _, v in vals}) > 1:
+                add(vals[0][0], f"{label} differs across sections: "
+                    + "; ".join(f"{v} ({s})" for s, v in vals), "cross-section",
+                    False, "medium", "pick one source number and use it everywhere")
+            continue
+        flagged: Set[str] = set()
+        for r in rows:
+            if r["section"] in flagged or _same_value(r["pv"], ref["pv"]):
+                continue
+            flagged.add(r["section"])
+            add(r["section"], f"{label} {r['value']} disagrees with {ref['value']} "
+                f"({ref_src})", "cross-section", False, sev,
+                f"use {ref['value']} — the same fact must read identically "
+                "across the brief")
+
+
 def _check_headline_language(ws: Path, style: str, add) -> None:
     if style != "cn":
         return
@@ -388,8 +654,6 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
     sources = snapshot.get("sources") or {}
     missing_mark = STYLE_PROFILES.get(style, STYLE_PROFILES["en"])["missing_mark"]
     issues: List[Dict[str, Any]] = []
-    snap_nums: Set[float] = set()
-    _flatten_numbers(sources, snap_nums)
 
     def add(section: str, claim: str, snap_val: str, match: bool,
             severity: str, suggestion: Optional[str] = None) -> None:
@@ -404,11 +668,16 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
             row["suggestion"] = suggestion
         issues.append(row)
 
-    show_texts = _show_texts(ws, sources)
+    ctx = _make_ctx(ws, sources)
+    show_texts = ctx["show_texts"]
+    state_secs = _state_sections(ws)
+    collect: List[Dict[str, Any]] = []
     for name in SECTION_ORDER:
-        if SECTION_SPECS[name].get("mode") == "deterministic":
+        if (SECTION_SPECS[name].get("mode") == "deterministic"
+                or state_secs.get(name, {}).get("mode") == "deterministic"):
             continue
-        _check_ledger(ws, name, sources, snap_nums, show_texts, add)
+        _check_ledger(ws, name, ctx, add, collect)
+    _check_consistency(collect, _plan_canonicals(ws, ctx), add)
     _check_headline_language(ws, style, add)
 
     # Structure lint

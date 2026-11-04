@@ -51,14 +51,18 @@ from prompts import (  # noqa: E402
     AGENT_STAGES,
     SECTION_ORDER,
     SECTION_SPECS,
+    PLAN_OWNER_ROLES,
+    STYLE_PROFILES,
     agent_section_names,
+    assign_item_ids,
     agent_snapshot_filter,
     build_agent_prompt,
     build_light_verifier_prompt,
+    build_plan_prompt,
     build_verifier_prompt,
     fake_section_text,
 )
-from verify_checks import claims_path, run_checks  # noqa: E402
+from verify_checks import claims_path, run_checks, verified_canonicals  # noqa: E402
 
 DEFAULT_ZCODE_BIN = "/root/.zcode/server/bin/zcode"
 DEFAULT_TIMEOUT_SEC = 1800  # v7 任务书更重:company_desk 连续两次撞 1200s 线(1169/1200.1s),留余量
@@ -89,12 +93,17 @@ def save_state(ws: Path, state: Dict[str, Any]) -> None:
     )
 
 
-def _add_usage(state: Dict[str, Any], usage: Optional[Dict[str, Any]]) -> None:
+def _add_usage(state: Dict[str, Any], usage: Optional[Dict[str, Any]],
+               phase: Optional[str] = None) -> None:
+    """累计 token;phase(plan/write/verify/revise)另记分项,看核验+修订占比。"""
     if not usage:
         return
-    tot = state.setdefault("usage_total", {})
-    for k in ("inputTokens", "outputTokens", "cacheReadTokens"):
-        tot[k] = tot.get(k, 0) + (usage.get(k) or 0)
+    buckets = [state.setdefault("usage_total", {})]
+    if phase:
+        buckets.append(state.setdefault("usage_by_phase", {}).setdefault(phase, {}))
+    for tot in buckets:
+        for k in ("inputTokens", "outputTokens", "cacheReadTokens"):
+            tot[k] = tot.get(k, 0) + (usage.get(k) or 0)
 
 
 def _record_timing(state: Dict[str, Any], key: str, seconds: float) -> None:
@@ -158,6 +167,8 @@ def _fake_section(ws: Path, name: str, corrected: bool = False,
     f = ws / SECTION_SPECS[name]["output_file"]
     f.parent.mkdir(parents=True, exist_ok=True)
     text = fake_section_text(name, corrected=corrected)
+    if name == "macro_review" and not (blocks or {}).get("review_releases"):
+        text = f"## 回顾 · 宏观数据\n\n{STYLE_PROFILES[style]['missing_mark']}\n"
     if style == "cn":
         text = text.replace("Placeholder headline clause. Other clause.",
                             "占位标题一。占位标题二。")
@@ -176,7 +187,9 @@ REVIEW_FAMILY_ORDER = (
     ("rate", r"fed\s+interest\s+rate|deposit\s+facility|boj\s+interest|loan\s+prime"),
     ("jobs", r"non[\s\-]?farm\s+payroll|unemployment\s+rate"),
     ("cpi", r"inflation\s+rate|\bcpi\b|hicp|harmonised"),
+    ("pce", r"\bpce\b"),
     ("gdp", r"gdp\s+growth"),
+    ("jolts", r"job\s+openings"),
     ("pmi", r"\bpmi\b"),
     ("ppi", r"\bppi\b|producer\s+price"),
     ("retail", r"retail\s+sales"),
@@ -280,7 +293,7 @@ def _geo_stats(snapshot: Dict[str, Any]) -> tuple:
         return [f"{g.get('time_cn', '')} {str(g.get('title', ''))[:40]}".strip()
                 for g in rows[:n]]
 
-    themes: Dict[str, Any] = {}
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
     for g in geo:
         name = (g.get("theme") or "").strip()
         if not name:  # 正则回退路径:无主题标签 → 关键词归类
@@ -290,12 +303,19 @@ def _geo_stats(snapshot: Dict[str, Any]) -> tuple:
             else:
                 name = ""
         if name:
-            themes.setdefault(name, []).append(g)
+            grouped.setdefault(name, []).append(g)
+    opened = {name: rows for name, rows in grouped.items()
+              if len(rows) >= GEO_THEME_MIN_HITS}
     themes = {name: {"hits": len(rows), "top": _top(rows)}
-              for name, rows in themes.items() if len(rows) >= GEO_THEME_MIN_HITS}
+              for name, rows in opened.items()}
     focal = [g for g in geo if FOCAL_EVENT_RE.search(_blob(g))]
+    # 焦点事件的条目多数已归入某个已开主题(triage 常把选举直接开成主题)时,
+    # 再开「焦点事件」块只会把同一事件写两遍
+    covered = any(
+        sum(1 for g in focal if any(g is r for r in rows)) * 2 >= len(focal)
+        for rows in opened.values()) if focal else False
     focal_events: List[Dict[str, Any]] = []
-    if len(focal) >= FOCAL_MIN_HITS:
+    if len(focal) >= FOCAL_MIN_HITS and not covered:
         focal_events.append({"name": "选举与权力更替", "hits": len(focal),
                              "top": _top(focal)})
     return themes, focal_events
@@ -632,6 +652,149 @@ DETERMINISTIC_WRITERS = {
 }
 
 
+# ── 平静日渲染:08/10 在块矩阵为空时不启动 LLM ─────────────────────────
+# 11-03 实测:08 只写一行占位却跑了 203s 写作 + 4 次修订;10 在非议息日
+# 的内容全部来自 fomc.decisions / next_fomc_odds / 合约路径,LLM 无增量。
+
+FED_SPEAK_RE = re.compile(
+    r"\bFED(?:'S|’S)\s+[A-Z]{3,}"
+    r"|\bFed(?:'s|’s)\s+[A-Z][a-z]+(?:\s+says|\s+said|:)"
+    r"|\bFed\s+(?:Governor|Chair(?:man)?|Vice\s+Chair|President)\s+[A-Z][a-z]+")
+_MONTH_NUM = {m: i + 1 for i, m in enumerate(
+    ("january", "february", "march", "april", "may", "june", "july", "august",
+     "september", "october", "november", "december"))}
+
+
+def _cn_day(iso: str) -> str:
+    try:
+        d = _date_cls.fromisoformat(str(iso)[:10])
+    except ValueError:
+        return str(iso)
+    return f"{d.month}月{d.day}日"
+
+
+def _cn_meeting(meeting: str) -> str:
+    """"December 8-9, 2026" → "12月8–9日"。"""
+    m = re.match(r"([A-Za-z]+)\s+(\d{1,2})(?:\s*[-–]\s*(\d{1,2}))?", meeting or "")
+    if not m or m.group(1).lower() not in _MONTH_NUM:
+        return meeting
+    days = m.group(2) + (f"–{m.group(3)}" if m.group(3) else "")
+    return f"{_MONTH_NUM[m.group(1).lower()]}月{days}日"
+
+
+def _cn_contract(month: str) -> str:
+    y, _, mo = str(month).partition("-")
+    return f"{y}年{int(mo)}月" if mo.isdigit() else str(month)
+
+
+def _dissent_cn(reason: str, direction: str) -> str:
+    size = {"1/4": 25, "1/2": 50, "3/4": 75}
+    m = re.search(r"(1/4|1/2|3/4)\s+percentage\s+point|(\d+)\s+basis\s+points?",
+                  reason or "", re.I)
+    bp = (size[m.group(1)] if m and m.group(1) else int(m.group(2))) if m else None
+    if re.search(r"\b(raise|increase|hike)", reason or "", re.I):
+        act = f"加息{bp}bp" if bp else "加息"
+    elif re.search(r"\b(lower|reduce|cut)", reason or "", re.I):
+        act = f"降息{bp}bp" if bp else "降息"
+    elif re.search(r"\b(maintain|keep|unchanged|no\s+change)", reason or "", re.I):
+        act = "维持利率不变"
+    else:
+        act = ""
+    tag = {"hawkish": "鹰派", "dovish": "鸽派"}.get((direction or "").lower(), "")
+    out = f"主张{act}" if act else ""
+    return out + (f"（{tag}异议）" if tag else "")
+
+
+def _has_fed_speak(snapshot: Dict[str, Any]) -> bool:
+    news = (snapshot.get("sources") or {}).get("news") or {}
+    return any(FED_SPEAK_RE.search(f"{i.get('title') or ''} {i.get('text') or ''}")
+               for b in ("flash", "wire") for i in news.get(b) or [])
+
+
+def render_fomc_quiet(snapshot: Dict[str, Any], blocks: Dict[str, Any],
+                      style: str) -> Optional[str]:
+    """非议息日且无官员表态 → 确定性 10 节;否则 None(交给 LLM)。"""
+    if blocks.get("fomc_deep") or _has_fed_speak(snapshot):
+        return None
+    src = snapshot.get("sources") or {}
+    fomc = src.get("fomc") or {}
+    decisions = fomc.get("decisions") or []
+    pillars = src.get("macro_pillars") or {}
+    nxt = pillars.get("next_fomc_odds") or {}
+    if not decisions:
+        return f"## 美联储观察\n\n{STYLE_PROFILES[style]['missing_mark']}\n"
+    if nxt.get("odds_pct") is None:
+        return None
+
+    d = decisions[0]
+    rng = f"{d['rate_low_bp'] / 100:.2f}%–{d['rate_high_bp'] / 100:.2f}%"
+    chg = d.get("change_bp") or 0
+    act = (f"维持联邦基金利率目标区间在 {rng} 不变" if not chg else
+           f"{'加息' if chg > 0 else '降息'} {abs(chg):.0f}bp 至 {rng}")
+    line = f"- 美联储在{_cn_day(d.get('decision_date'))}会议上{act}"
+    if d.get("vote_for") is not None and d.get("vote_against") is not None:
+        line += f"，表决结果 {int(d['vote_for'])}:{int(d['vote_against'])}"
+    for x in d.get("dissenters") or []:
+        names = str(x.get("name") or "").replace(" and ", "与")
+        line += f"；{names}投下反对票" + (
+            f"，{_dissent_cn(x.get('reason'), x.get('direction'))}"
+            if _dissent_cn(x.get("reason"), x.get("direction")) else "")
+    lines = ["## 美联储观察", "", "### 利率与决议", "", line + "。", "",
+             "### 市场定价路径", ""]
+
+    cum = nxt.get("cum_bp_priced") or 0
+    verb = "加息" if cum >= 0 else "降息"
+    asof = (fomc.get("path") or {}).get("asof") or ""
+    odds = f"- {('截至' + _cn_day(asof) + '，') if asof else ''}期货对" \
+           f"{_cn_meeting(nxt.get('meeting'))}会议的定价为{verb}概率 " \
+           f"~{_fmt_num(nxt['odds_pct'])}%"
+    prior = src.get("prior_odds") or {}
+    if prior.get("odds_pct") is not None and prior.get("meeting") == nxt.get("meeting"):
+        odds += f"（前值 ~{_fmt_num(prior['odds_pct'])}%）"
+    lines.append(odds + "。")
+
+    later = [c for c in (pillars.get("fed_odds") or {}).get("contracts") or []
+             if str(c.get("month")) > str(nxt.get("contract_month") or "")
+             and c.get("cum_bp_priced") is not None]
+    if len(later) >= 2:
+        mid = later[min(1, len(later) - 1)]
+        peak = max(later, key=lambda c: abs(c["cum_bp_priced"]))
+        last = later[-1]
+        s = (f"- 更远端以合约定价计：{_cn_contract(mid['month'])}合约累计定价 "
+             f"~{_fmt_num(mid['cum_bp_priced'])}bp")
+        if peak is not mid:
+            s += (f"，峰值落在{_cn_contract(peak['month'])}合约（累计 "
+                  f"~{_fmt_num(peak['cum_bp_priced'])}bp）")
+        if last is not peak and last is not mid:
+            s += (f"，此后回落至{_cn_contract(last['month'])}合约的 "
+                  f"~{_fmt_num(last['cum_bp_priced'])}bp")
+        lines.append(s + "。")
+
+    curve = pillars.get("par_curve") or {}
+    lv, ch = curve.get("levels_pct") or {}, curve.get("change_bp") or {}
+    if lv.get("2y") is not None and ch.get("2y") is not None:
+        def _move(bp: float) -> str:
+            return "持平" if not bp else f"{'上行' if bp > 0 else '下行'} {_fmt_num(abs(bp))}bp"
+        s = f"- 2年期美债收益率收于 {_fmt_num(lv['2y'])}%，较前一交易日{_move(ch['2y'])}"
+        if lv.get("10y") is not None and ch.get("10y") is not None:
+            s += f"；10年期 {_fmt_num(lv['10y'])}%，{_move(ch['10y'])}"
+        lines.append(s + "。")
+    return "\n".join(lines) + "\n"
+
+
+def render_macro_review_quiet(snapshot: Dict[str, Any], blocks: Dict[str, Any],
+                              style: str) -> Optional[str]:
+    if blocks.get("review_releases"):
+        return None
+    return f"## 回顾 · 宏观数据\n\n{STYLE_PROFILES[style]['missing_mark']}\n"
+
+
+QUIET_RENDERERS = {
+    "macro_review": render_macro_review_quiet,
+    "fomc": render_fomc_quiet,
+}
+
+
 def _fake_verdict(ws: Path, attempt: int) -> None:
     """第 1 轮核验 fail(drivers 数字可疑),修订后第 2 轮 pass。"""
     vdir = ws / "verify"
@@ -701,21 +864,34 @@ def _sliced_snapshot(ws: Path, snapshot: Path, agent: str) -> Path:
 
 def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
                    snapshot_data: Dict[str, Any], blocks: Dict[str, Any],
-                   agent: str) -> Dict[str, Any]:
+                   agent: str,
+                   prior: Optional[Dict[str, Any]] = None,
+                   plan: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """跑一个写作 agent(或确定性 movers)。返回要合并进 state 的片段。
 
     不写 state.json:并行时由调用方持锁合并,避免交错写入。
     """
     names = agent_section_names(agent)
     if all(section_done(ws, n) for n in names):
-        # 返回形状须与正常路径一致(_apply 只认 "sections" 信封)
-        return {"sections": {n: {"status": "done"} for n in names},
+        # 返回形状须与正常路径一致(_apply 只认 "sections" 信封);保留原记录,
+        # 否则 session_id/usage/mode 被幂等重跑清空(P16)
+        return {"sections": {n: {**(prior or {}).get(n, {}), "status": "done"}
+                             for n in names},
                 "elapsed": 0.0, "names": names, "usage": None}
     print(f"[agent] {agent} ({', '.join(names)}) ...", flush=True)
     t0 = time.time()
     sections: Dict[str, Any] = {}
     usage = None
-    if all(SECTION_SPECS[n].get("mode") == "deterministic" for n in names):
+    quiet = QUIET_RENDERERS.get(agent)
+    quiet_text = quiet(snapshot_data, blocks, args.style) if quiet else None
+    if quiet_text is not None:
+        f = ws / SECTION_SPECS[names[0]]["output_file"]
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(quiet_text.rstrip() + f"\n{DONE_MARKER}\n", encoding="utf-8")
+        claims_path(ws, names[0]).write_text("[]\n", encoding="utf-8")
+        sections = {names[0]: {"status": "done", "mode": "deterministic",
+                               "note": "quiet day"}}
+    elif all(SECTION_SPECS[n].get("mode") == "deterministic" for n in names):
         DETERMINISTIC_WRITERS[names[0]](ws, snapshot_data)
         sections = {n: {"status": "done", "mode": "deterministic"} for n in names}
     elif args.fake_zcode:
@@ -726,7 +902,7 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
         try:
             result = run_agent(
                 args.zcode_bin, ws,
-                build_agent_prompt(agent, style=args.style, blocks=blocks),
+                build_agent_prompt(agent, style=args.style, blocks=blocks, plan=plan),
                 _sliced_snapshot(ws, snapshot, agent), args.timeout)
             usage = result.get("usage")
             for n in names:
@@ -754,6 +930,184 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
             "usage": usage}
 
 
+# ── 编辑计划(写作前一次规划) ──────────────────────────────────────────
+
+PLAN_TIMEOUT_SEC = 600
+
+
+def _clip(text: Any, n: int) -> str:
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    return t if len(t) <= n else t[:n - 1] + "…"
+
+
+def render_plan_input(snapshot: Dict[str, Any], blocks: Dict[str, Any]) -> str:
+    """规划用摘要:结构化数字 + 带条目 id 的新闻标题,不含节目转录(太长)。"""
+    src = snapshot.get("sources") or {}
+    m = src.get("market") or {}
+    out = [f"# Plan input — {snapshot.get('report_date') or ''}", "",
+           "## Cross-asset (market.cross_asset[code=..])"]
+    for r in m.get("cross_asset") or []:
+        out.append(f"- {r.get('code')} {r.get('name')}: close {_fmt_num(r.get('close'))}, "
+                   f"{r.get('pct_change_1d')}%")
+    b = m.get("breadth") or {}
+    if b:
+        out += ["", f"Breadth (market.breadth): advancers {b.get('advancers')}, "
+                f"decliners {b.get('decliners')}, median {b.get('median_change_pct')}%"]
+    sec = m.get("sp500_sector_avg") or []
+    if sec:
+        out += ["", "## S&P 500 sectors (market.sp500_sector_avg)"]
+        out += [f"- {r.get('sector')}: {r.get('avg_change_pct')}%" for r in sec]
+    cons = sorted((r for r in m.get("sp500_constituents") or []
+                   if isinstance(r.get("change_percent"), (int, float))),
+                  key=lambda r: r["change_percent"])
+    if cons:
+        out += ["", "## Largest S&P 500 moves "
+                "(market.sp500_constituents[ticker=..].change_percent)"]
+        for r in cons[-10:][::-1] + cons[:10]:
+            out.append(f"- {r['ticker']} {r.get('company')}: {r['change_percent']}% "
+                       f"({r.get('sector')})")
+    caps = {r.get("ticker"): r.get("market_cap") or 0 for r in cons}
+    cal = src.get("earnings_calendar") or {}
+    for key, label in (("prior_after_close", "Reported after the prior close"),
+                       ("today", "Reported today"), ("upcoming", "Upcoming")):
+        rows = [r for r in cal.get(key) or [] if isinstance(r, dict)]
+        rows.sort(key=lambda r: -(caps.get(r.get("code")) or 0))
+        if not rows:
+            continue
+        out += ["", f"## {label} (earnings_calendar.{key}[code=..])"]
+        for r in rows[:20]:
+            eps = (f"EPS {r.get('eps_actual')} vs est {r.get('eps_estimate')}"
+                   if r.get("eps_actual") is not None else f"est {r.get('eps_estimate')}")
+            out.append(f"- {r.get('code')} {r.get('name')} ({r.get('session')}, "
+                       f"{r.get('report_date')}): {eps}")
+    out += ["", "## Macro (decided by the orchestrator)"]
+    rel = blocks.get("review_releases") or {}
+    if rel:
+        for country, rows in rel.items():
+            for r in rows:
+                out.append(f"- Release for 08 ({country}): {r.get('event')} "
+                           f"({r.get('period')}): {r.get('actual')} vs est "
+                           f"{r.get('forecast')}, prior {r.get('previous')}")
+    else:
+        out.append("- No release selected for 08 today")
+    themes = blocks.get("geo_themes") or {}
+    out.append("- Geo themes opened for 09: " + (", ".join(
+        f"{k} ({v.get('hits')} hits)" for k, v in themes.items()) or "none"))
+    if blocks.get("focal_events"):
+        out.append("- 09 also opens a focal-events block: "
+                   + ", ".join(f.get("name", "") for f in blocks["focal_events"]))
+    mp = src.get("macro_pillars") or {}
+    odds = mp.get("next_fomc_odds") or {}
+    if odds.get("odds_pct") is not None:
+        out.append(f"- Fed odds (macro_pillars.next_fomc_odds): {odds.get('meeting')} "
+                   f"{odds.get('direction') or 'move'} {odds.get('odds_pct')}%")
+    curve = mp.get("par_curve") or {}
+    if curve.get("levels_pct"):
+        out.append("- Treasury curve (macro_pillars.par_curve): " + ", ".join(
+            f"{k} {v}% ({(curve.get('change_bp') or {}).get(k)}bp)"
+            for k, v in curve["levels_pct"].items() if k in ("2y", "10y", "30y")))
+    out.append(f"- FOMC decision within the last 3 sessions: "
+               f"{'yes' if blocks.get('fomc_deep') else 'no'}")
+    upcoming = list(dict.fromkeys(
+        f"{str(e.get('date'))[:10]} {e.get('event')}"
+        for e in (src.get("economic_events") or {}).get("upcoming") or []
+        if e.get("country") == "US"))
+    if upcoming:
+        out += ["", "## US calendar ahead (economic_events.upcoming)"]
+        out += [f"- {e}" for e in upcoming[:12]]
+    news = src.get("news") or {}
+    flash = [x for x in news.get("flash") or [] if x.get("info_level") == "L1"]
+    for title, rows, fmt in (
+            ("News flash — L1 (news.flash[id=..])", flash[:120],
+             lambda x: f"- {x.get('id')} {x.get('time_et')} {_clip(x.get('text'), 220)}"),
+            ("Newswire (news.wire[id=..])", news.get("wire") or [],
+             lambda x: f"- {x.get('id')} {x.get('time_et')} {_clip(x.get('title'), 140)}"),
+            ("Analyst calls (news.calls[id=..])", news.get("calls") or [],
+             lambda x: f"- {x.get('id')} {_clip(x.get('title'), 160)}")):
+        if rows:
+            out += ["", f"## {title}"] + [fmt(x) for x in rows]
+    nm = src.get("news_macro") or {}
+    for bucket in ("digest", "research", "geo"):
+        rows = nm.get(bucket) or []
+        if rows:
+            out += ["", f"## Macro {bucket} (news_macro.{bucket}[id=..])"]
+            out += [f"- {x.get('id')} {x.get('time_cn')} [{x.get('theme') or '-'}] "
+                    f"{_clip(x.get('title') or x.get('text'), 120)}" for x in rows]
+    return "\n".join(out) + "\n"
+
+
+def _plan_owners(snapshot: Dict[str, Any], blocks: Dict[str, Any],
+                 style: str) -> List[str]:
+    """今天能认领故事的节:平静日的 08/10、没开主题的 09 不接故事。"""
+    owners = []
+    for n in PLAN_OWNER_ROLES:
+        if n == "macro_review" and not blocks.get("review_releases"):
+            continue
+        if n == "geopolitics" and not blocks.get("geo_themes"):
+            continue
+        quiet = QUIET_RENDERERS.get(SECTION_SPECS[n].get("agent", n))
+        if quiet and quiet(snapshot, blocks, style) is not None:
+            continue
+        owners.append(n)
+    return owners
+
+
+def _load_plan(ws: Path, owners: List[str],
+               sources: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    f = ws / "plan.json"
+    if not f.exists():
+        return None
+    try:
+        plan = json.loads(f.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    stories = [s for s in (plan.get("stories") if isinstance(plan, dict) else None) or []
+               if isinstance(s, dict) and s.get("title")]
+    if not stories:
+        return None
+    for s in stories:
+        if s.get("owner") not in owners:
+            s["owner"] = "drivers"
+        s["may_mention"] = [n for n in s.get("may_mention") or []
+                            if n in SECTION_ORDER and n != s["owner"]]
+    return {"stories": stories,
+            "canonical": verified_canonicals(plan.get("canonical"), sources)}
+
+
+def run_plan(args: argparse.Namespace, ws: Path, snapshot_data: Dict[str, Any],
+             blocks: Dict[str, Any], state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """写作前一次 LLM 规划:故事归属 + 规范数值。已有有效 plan.json 就复用;
+    失败不阻断(各 agent 按原任务书写,跨节一致性退回"多数/已核实"参照)。"""
+    if args.fake_zcode or args.no_plan:
+        return None
+    owners = _plan_owners(snapshot_data, blocks, args.style)
+    sources = snapshot_data.get("sources") or {}
+    plan = _load_plan(ws, owners, sources)
+    if plan is not None:
+        return plan
+    if all(section_done(ws, n) for n in SECTION_ORDER):
+        return None
+    inp = ws / "plan_input.md"
+    inp.write_text(render_plan_input(snapshot_data, blocks), encoding="utf-8")
+    print("[plan] editorial plan ...", flush=True)
+    t0 = time.time()
+    try:
+        result = run_agent(args.zcode_bin, ws, build_plan_prompt(owners), None,
+                           min(args.timeout, PLAN_TIMEOUT_SEC), extra_attachments=[inp])
+        _add_usage(state, result.get("usage"), "plan")
+    except (subprocess.TimeoutExpired, RuntimeError) as e:
+        print(f"[plan] agent failed ({str(e)[:120]}); using plan.json if written",
+              flush=True)
+    _record_timing(state, "plan", time.time() - t0)
+    plan = _load_plan(ws, owners, sources)
+    state["plan"] = {"status": "done" if plan else "unavailable",
+                     "stories": len(plan["stories"]) if plan else 0,
+                     "canonical": len(plan["canonical"]) if plan else 0}
+    print(f"[plan] {state['plan']}", flush=True)
+    save_state(ws, state)
+    return plan
+
+
 def run_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
                  state: Dict[str, Any]) -> None:
     """两段编排(AGENT_STAGES):第一段按信源并行(overall_market /
@@ -770,19 +1124,22 @@ def run_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
         for n, rec in (result.get("sections") or {}).items():
             state["sections"][n] = rec
             _record_timing(state, f"section:{n}", result["elapsed"])
-        _add_usage(state, result.get("usage"))
+        _add_usage(state, result.get("usage"), "write")
         save_state(ws, state)
 
+    prior = json.loads(json.dumps(state.get("sections") or {}))
+    plan = run_plan(args, ws, snapshot_data, blocks, state)
     for stage in AGENT_STAGES:
         if args.fake_zcode:
             # fake:秒级,串行即可,避免线程里抢写同一份 fake 文件
             for agent in stage:
                 _apply(_run_one_agent(args, ws, snapshot, snapshot_data,
-                                      blocks, agent))
+                                      blocks, agent, prior, plan))
             continue
         with ThreadPoolExecutor(max_workers=len(stage)) as pool:
             futs = {pool.submit(_run_one_agent, args, ws, snapshot,
-                                snapshot_data, blocks, a): a for a in stage}
+                                snapshot_data, blocks, a, prior, plan): a
+                    for a in stage}
             first_err: Optional[BaseException] = None
             for fut in as_completed(futs):
                 try:
@@ -795,6 +1152,13 @@ def run_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
                if state["sections"].get(n, {}).get("status") != "done"]
     if missing:
         raise RuntimeError(f"sections incomplete: {missing}")
+
+
+def _high_issues(verdict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """门控用的 high:annotate 模式下 LLM 意见带 advisory 标记,只进复核备注。"""
+    return [i for i in verdict.get("issues") or []
+            if str(i.get("severity") or "").lower() == "high"
+            and not i.get("advisory")]
 
 
 def _read_verdict(path: Path) -> Dict[str, Any]:
@@ -825,6 +1189,7 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
             try:
                 verdict = _read_verdict(verdict_file)
                 if verdict.get("verdict") in ("pass", "fail"):
+                    verdict["verdict"] = "fail" if _high_issues(verdict) else "pass"
                     print("[verify] reusing existing verdict (newer than all "
                           "sections)", flush=True)
                     state["verify"]["status"] = verdict["verdict"]
@@ -854,7 +1219,7 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
           f"{len(high_fails)} high fails", flush=True)
 
     mtime_before = verdict_file.stat().st_mtime if verdict_file.exists() else 0
-    mode = getattr(args, "llm_verify", "light")
+    mode = getattr(args, "llm_verify", "annotate")
     verdict_file.parent.mkdir(parents=True, exist_ok=True)
     if high_fails:
         # 脚本已定位到具体数字/结构错误:直接按清单修订,不再花一轮 LLM 核验
@@ -871,14 +1236,14 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
             "issues": [], "quality_notes": [], "source": "deterministic",
         }, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
-        light = mode == "light"
+        light = mode in ("light", "annotate")
         try:
             result = run_agent(
                 args.zcode_bin, ws,
                 (build_light_verifier_prompt(style=args.style) if light
                  else build_verifier_prompt(style=args.style)),
                 None if light else snapshot, args.timeout)
-            _add_usage(state, result.get("usage"))
+            _add_usage(state, result.get("usage"), "verify")
             state["verify"]["session_id"] = result.get("sessionId")
             state["verify"][f"usage_attempt_{attempt}"] = result.get("usage")
         except subprocess.TimeoutExpired:
@@ -894,6 +1259,11 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
     if not verdict_file.exists():
         raise RuntimeError("verifier finished but verify/verdict.json missing")
     verdict = _read_verdict(verdict_file)
+    if mode == "annotate" and not high_fails and not args.fake_zcode:
+        # 轻量核验看不到快照,判不了数字对错;意见只作备注,门控交给确定性核验
+        for i in verdict.get("issues") or []:
+            if i.get("source") != "deterministic":
+                i["advisory"] = True
 
     # Merge deterministic high fails into verdict (orchestrator owns the gate)
     if high_fails:
@@ -910,11 +1280,15 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
                 "severity": "high",
                 "suggestion": row.get("suggestion")
                 or "align with snapshot / source matrix / block matrix",
+                "source": "deterministic",
             })
         verdict["issues"] = merged
-        verdict["verdict"] = "fail"
-        verdict_file.write_text(
-            json.dumps(verdict, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 门控只看 high:medium/low 是复核备注(进 audit sidecar),不驱动修订,
+    # 也不因 LLM 自报 "fail" 而拦下发布
+    verdict["verdict"] = "fail" if _high_issues(verdict) else "pass"
+    verdict_file.write_text(
+        json.dumps(verdict, ensure_ascii=False, indent=2), encoding="utf-8")
 
     state["verify"]["status"] = verdict.get("verdict", "fail")
     state["verify"]["deterministic_high_fails"] = len(high_fails)
@@ -944,28 +1318,56 @@ def _issue_section_keys(section_field: str) -> List[str]:
     return keys
 
 
-def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
-                    state: Dict[str, Any], issues: List[Dict[str, Any]]) -> None:
-    """按核验问题清单定向修订(--resume 续接原会话)。
+def _is_placeholder(ws: Path, name: str, style: str) -> bool:
+    """节正文只有标题 + missing_mark(块矩阵为空时的合同输出)。"""
+    f = ws / SECTION_SPECS[name]["output_file"]
+    if not f.exists():
+        return False
+    text = re.sub(r"<!--.*?-->", "", f.read_text(encoding="utf-8"), flags=re.S)
+    body = [ln.strip() for ln in text.splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")]
+    return body == [STYLE_PROFILES[style]["missing_mark"]]
 
-    问题按 agent 分组:overall_market 组(narrative+drivers)的问题合并为一次
-    修订调用 —— 两文件出自同一会话,拆开修会破坏"速览/深挖"分工。
+
+def _revisable(ws: Path, name: str, issue: Dict[str, Any], style: str,
+               state: Dict[str, Any]) -> bool:
+    """确定性节(含平静日渲染的 08/10)重渲染结果不变,不修;占位节只接受
+    确定性核验的问题 —— LLM 的「质量」意见曾把 08 占位改写成正文,违反
+    块矩阵合同(P18)。"""
+    if (SECTION_SPECS[name].get("mode") == "deterministic"
+            or (state.get("sections") or {}).get(name, {}).get("mode")
+            == "deterministic"):
+        return False
+    if issue.get("source") != "deterministic" and _is_placeholder(ws, name, style):
+        return False
+    return True
+
+
+def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
+                    state: Dict[str, Any], issues: List[Dict[str, Any]]) -> int:
+    """按核验问题清单定向修订(--resume 续接原会话)。返回实际修订的组数。
+
+    只修 high;medium/low 留作复核备注。问题按 agent 分组:overall_market
+    组(narrative+drivers)的问题合并为一次修订调用 —— 两文件出自同一会话,
+    拆开修会破坏"速览/深挖"分工。
     """
     by_agent: Dict[str, List[Dict[str, Any]]] = {}
     for issue in issues:
+        if str(issue.get("severity") or "").lower() != "high":
+            continue
         for name in _issue_section_keys(str(issue.get("section") or "")):
+            if not _revisable(ws, name, issue, args.style, state):
+                print(f"[revise] skip {name}: locked section "
+                      f"({issue.get('claim', '')[:60]})", flush=True)
+                continue
             agent = SECTION_SPECS[name].get("agent", name)
-            by_agent.setdefault(agent, []).append(issue)
+            if issue not in by_agent.setdefault(agent, []):
+                by_agent[agent].append(issue)
     for agent, agent_issues in by_agent.items():
         names = agent_section_names(agent)
         print(f"[revise] {agent} ({', '.join(names)}; "
               f"{len(agent_issues)} issue(s)) ...", flush=True)
         t0 = time.time()
-        if all(SECTION_SPECS[n].get("mode") == "deterministic" for n in names):
-            DETERMINISTIC_WRITERS[names[0]](
-                ws, json.loads(snapshot.read_text(encoding="utf-8")))
-            _record_timing(state, f"revise:{agent}", time.time() - t0)
-            continue
         if args.fake_zcode:
             for n in names:
                 _fake_section(ws, n, corrected=True, style=args.style,
@@ -988,9 +1390,10 @@ def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
         )
         session_id = state["sections"].get(names[0], {}).get("session_id")
         try:
-            run_agent(args.zcode_bin, ws, prompt,
-                      _sliced_snapshot(ws, snapshot, agent), args.timeout,
-                      resume_session=session_id)
+            result = run_agent(args.zcode_bin, ws, prompt,
+                               _sliced_snapshot(ws, snapshot, agent), args.timeout,
+                               resume_session=session_id)
+            _add_usage(state, result.get("usage"), "revise")
         except subprocess.TimeoutExpired:
             if not all(section_done(ws, n) for n in names):
                 raise
@@ -1000,6 +1403,7 @@ def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
         for n in names:
             if not section_done(ws, n):
                 raise RuntimeError(f"revision of {n} did not produce a valid file")
+    return len(by_agent)
 
 
 def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
@@ -1158,6 +1562,31 @@ AUDIT_SIDECAR_HEADER = (
     "time. The verifier ran against sections/*.md WITH these comments present.\n")
 
 
+def _review_notes(ws: Path, verdict: Dict[str, Any]) -> List[str]:
+    """复核备注:核验意见 + 确定性核验的非 high 残留。只进 sidecar,
+    正文出现「05 节」「确定性核验」这类生产过程用语违反审计分层。"""
+    lines: List[str] = []
+    for i in verdict.get("issues") or []:
+        tag = f"{i.get('severity')}, advisory" if i.get("advisory") else i.get("severity")
+        lines.append(f"- [{tag}] ({i.get('section')}) "
+                     f"{i.get('claim')} — {i.get('suggestion') or ''}".rstrip(" —"))
+    for note in verdict.get("quality_notes") or []:
+        lines.append(f"- [note] {note}")
+    check_file = ws / "verify" / "check_results.json"
+    if check_file.exists():
+        try:
+            rows = json.loads(check_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            rows = []
+        for r in rows:
+            if not r.get("match", True) and r.get("severity") != "high":
+                lines.append(f"- [check:{r.get('severity')}] ({r.get('section')}) "
+                             f"{r.get('claim')} | {r.get('snapshot_value')}")
+    if not lines:
+        return []
+    return ["## Review notes (not published in body)", "", *lines, ""]
+
+
 def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
              style: str) -> Path:
     """拼接成品:正文仅标题+七节(GuanHe 表面文体);口径块与审计注释进 sidecar。"""
@@ -1181,6 +1610,7 @@ def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
         f"> Verification: **{verdict.get('verdict')}** "
         f"({len(verdict.get('issues', []))} issue(s))",
         "",
+        *_review_notes(ws, verdict),
     ]
     # 审计注释剥离:只删注释本身、保留换行(吃掉换行会把相邻两行合并)
     audit_comment_re = re.compile(r"[ \t]*<!--\s*audit:.*?-->")
@@ -1234,10 +1664,14 @@ def main() -> int:
     parser.add_argument("--style", choices=("en", "cn"), default=DEFAULT_STYLE,
                         help="风格档案: en=与 GuanHe 一致的英文正文(默认); cn=中文正文")
     parser.add_argument(
-        "--llm-verify", choices=("off", "light", "full"), default="light",
-        help="确定性台账核验通过后的 LLM 叙事核验: off=不跑; light(默认)=只读七节"
-             "正文、不挂快照与转录,查跨节矛盾与文风; full=旧版全量核验(挂快照)。"
+        "--llm-verify", choices=("off", "annotate", "light", "full"),
+        default="annotate",
+        help="确定性台账核验通过后的 LLM 叙事核验: off=不跑; annotate(默认)="
+             "light 同款只读正文核验,意见一律作复核备注、不参与门控; light=同上但"
+             "high 意见触发修订; full=旧版全量核验(挂快照)。"
              "确定性核验有 high 失败时一律跳过 LLM、直接修订")
+    parser.add_argument("--no-plan", action="store_true",
+                        help="跳过写作前的编辑计划(故事归属 + 规范数值)")
     parser.add_argument("--fake-zcode", action="store_true",
                         help="不用 ZCode:写占位章节,核验先 fail 后 pass,验证门控逻辑")
     parser.add_argument("--publish-cmd",
@@ -1252,11 +1686,25 @@ def main() -> int:
               file=sys.stderr)
         return 1
     ws.mkdir(parents=True, exist_ok=True)
+    snap_data = json.loads(snapshot.read_text(encoding="utf-8"))
+    if assign_item_ids(snap_data.get("sources") or {}):
+        # v8.4 前构建的快照没有条目 id;只加编号、不动内容,台账才能按条目引用
+        snapshot.write_text(json.dumps(snap_data, ensure_ascii=False, default=str),
+                            encoding="utf-8")
+        print("[snapshot] assigned item ids (pre-v8.4 snapshot)", flush=True)
     state = load_state(ws)
     t_start = time.time()
 
     try:
         run_sections(args, ws, snapshot, state)
+
+        def _needs_human(verdict: Dict[str, Any], reason: str) -> int:
+            (ws / "NEEDS_HUMAN_REVIEW.md").write_text(
+                json.dumps(verdict, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(f"{reason} → {ws / 'NEEDS_HUMAN_REVIEW.md'}", file=sys.stderr)
+            return 2
 
         while True:
             verdict = run_verifier(args, ws, snapshot, state)
@@ -1264,14 +1712,12 @@ def main() -> int:
                 break
             attempts = state["verify"]["attempts"]
             if attempts > args.max_verify_retries:
-                (ws / "NEEDS_HUMAN_REVIEW.md").write_text(
-                    json.dumps(verdict, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-                print(f"verify failed after {attempts} attempts → "
-                      f"{ws / 'NEEDS_HUMAN_REVIEW.md'}", file=sys.stderr)
-                return 2
-            revise_sections(args, ws, snapshot, state, verdict.get("issues", []))
+                return _needs_human(
+                    verdict, f"verify failed after {attempts} attempts")
+            if not revise_sections(args, ws, snapshot, state,
+                                   _high_issues(verdict)):
+                return _needs_human(
+                    verdict, "high issues only touch locked sections")
 
         # Charts before assemble so report.md can link them
         try:

@@ -17,7 +17,7 @@ company_desk(sector_action/deep_dives)、movers 与 macro_dashboard(确定性)�
 macro_review、geopolitics、fomc 六组;第二段 outlook 读第一段成品做综合。
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 # ── 风格档案 ───────────────────────────────────────────────────────────
 
@@ -68,6 +68,29 @@ ATTRIBUTION_MAP = {
     "(macro daily)": "news_macro.digest / news_macro.research",
     "(macro geo)": "news_macro.geo",
 }
+
+# 文本素材条目的稳定 id:台账按条目引用(news.flash[id=f12]),核验只在该条目
+# 内找数字 —— 整池子串匹配下改错的数字有 2/3 照样能"通过"
+ITEM_ID_PREFIX = {
+    ("news", "flash"): "f", ("news", "wire"): "w", ("news", "calls"): "c",
+    ("news_macro", "digest"): "d", ("news_macro", "research"): "r",
+    ("news_macro", "geo"): "g",
+}
+
+
+def assign_item_ids(sources: Dict[str, Any]) -> int:
+    """给文本素材条目编号(已有 id 的不动,幂等)。返回新编号条数。"""
+    added = 0
+    for (head, sub), prefix in ITEM_ID_PREFIX.items():
+        items = (sources.get(head) or {}).get(sub)
+        if not isinstance(items, list):
+            continue
+        for i, item in enumerate(items):
+            if isinstance(item, dict) and not item.get("id"):
+                items[i] = {"id": f"{prefix}{i + 1}", **item}
+                added += 1
+    return added
+
 
 # 正文禁用的管线标签(读者看到的出处只能是原始发布方/机构)
 PIPELINE_TAGS = tuple(k for k in ATTRIBUTION_MAP if k != "(FRED)" and k != "(Finviz)")
@@ -295,7 +318,8 @@ HARD RULES (violating any of these fails pipeline verification):
    next to each section file write `<same name>.claims.json` (e.g.
    sections/02_drivers.md → sections/02_drivers.claims.json) — a JSON array with
    ONE entry per number you stated in that file:
-   {{"value": "62%", "path": "<snapshot path>", "text": "<≤12-word fragment>"}}
+   {{"value": "62%", "path": "<snapshot path>", "text": "<≤12-word fragment>",
+    "entity": "<optional>", "metric": "<optional>"}}
    - `path` is a dot path into snapshot.json `sources` (omit the `sources.`
      prefix). Select list items with [field=value], e.g.
      macro_pillars.fed_odds.contracts[month=2026-12].odds_of_25bp_hike_pct,
@@ -304,9 +328,22 @@ HARD RULES (violating any of these fails pipeline verification):
      economic_events.recent[event=Fed Interest Rate Decision].actual,
      macro_pillars.par_curve.change_bp.10y
    - Numbers from a show: path = the_close.clean_transcript,
-     cnbc_closing_bell.clean_transcript or cnbc_closing_bell.clean_transcript_ot;
-     from news: path = news.flash, news.wire or news.calls. The digits must
-     appear in that text ("$25bn" is fine when the text says "25 billion").
+     cnbc_closing_bell.clean_transcript or cnbc_closing_bell.clean_transcript_ot.
+     Numbers from a news item: cite THAT item by its id, e.g.
+     news.flash[id=f12], news.wire[id=w3], news.calls[id=c2],
+     news_macro.digest[id=d1], news_macro.geo[id=g7]. The number must appear
+     in that one item ("$25bn" is fine when it says "25 billion"; "752万" is
+     fine when it says "7.52M"); a number the item does not state fails the
+     section even if another item has it. Never cite a whole bucket
+     (news.flash) — the checker cannot tie it to a story.
+   - `entity` + `metric`: fill both for every market move, level, yield,
+     odds or reported figure, so the brief can be checked for one number
+     per fact across sections. entity = ticker for stocks/ETFs (NVDA),
+     cross_asset code for indices/assets (GSPC.INDX), US2Y/US10Y for
+     Treasury yields, the meeting month for Fed odds (2026-12). metric = one
+     of move (regular-session % change), ah_move (after-hours % change),
+     close, level, yield, odds, revenue, eps, guide_revenue, guide_eps.
+     Skip both for anything else.
    - `value` exactly as written in the prose. Rounding a data value to one
      decimal is fine (the checker tolerates it).
    A script checks every entry against the snapshot; an entry whose number is
@@ -392,6 +429,8 @@ events). Each block:
   concrete positioning move AND what would change it — an event, a date, a
   level (e.g. "Avoid PC and chip suppliers exposed to memory costs until Apple
   (Monday) and Qualcomm (Wednesday) show how far the squeeze reaches.").
+  Keep it trade-level and specific to this driver; the portfolio-level
+  stance and sector allocation belong to Section 11 (展望与策略).
 Do not restate the same stock move in two blocks.
 
 ### File C — sections/03_positioning.md
@@ -657,8 +696,12 @@ rotation, a de-grossing): where it stands, the bull/bear hinge. Never restate
 single-stock moves already written in Sector Action / Deep Dives.
 
 ### 投资建议
-Direct, actionable house advice, 3–5 bullets: stance (加仓/观望/减仓),
-structure (e.g. 哑铃:高股息防守 + 主线进攻), sectors to watch and to avoid.
+Direct, actionable house advice at PORTFOLIO level, 3–5 bullets: overall
+stance (加仓/观望/减仓), structure (e.g. 哑铃:高股息防守 + 主线进攻), sectors
+to overweight and to avoid, and the macro/Fed condition that would change
+the stance. The action bullets in sections/02_drivers.md are trade-level
+calls on single drivers — never restate or paraphrase them here; if you
+agree with one, fold it into a sector stance instead of repeating it.
 Judgment IS expected in this block — but every NUMBER still comes from the
 snapshot and enters the claims ledger; judgments must read as judgments
 (「建议」「预计」), never as reported facts. Close the block with exactly:
@@ -867,8 +910,103 @@ def agent_section_names(agent: str) -> list:
     return [n for n in SECTION_ORDER if SECTION_SPECS[n].get("agent", n) == agent]
 
 
+# ── 编辑计划(写作前一次规划:故事归属 + 规范数值) ─────────────────────
+
+PLAN_OWNER_ROLES = {
+    "drivers": "market-wide drivers: index moves, macro data as traded, "
+               "policy/government headlines, large M&A, credit events",
+    "sector_action": "sector and industry moves; single-stock moves grouped by theme",
+    "deep_dives": "1–3 companies with earnings, guidance or a corporate event "
+                  "worth a full read",
+    "macro_review": "the economic releases selected for today (see digest)",
+    "geopolitics": "the geopolitical themes opened for today (see digest)",
+    "fomc": "Fed decisions, Fed speakers, rate-path pricing",
+    "outlook": "events that have not happened yet (calendar, earnings ahead)",
+}
+
+
+def _sec_label(name: str) -> str:
+    return (f"{SECTION_ORDER.index(name) + 1:02d} {name}"
+            if name in SECTION_ORDER else name)
+
+
+def build_plan_prompt(owners: List[str]) -> str:
+    roles = "\n".join(f"- {n}: {PLAN_OWNER_ROLES[n]}" for n in owners
+                      if n in PLAN_OWNER_ROLES)
+    return f"""\
+You are the editor of a scheduled morning brief. Before the section writers
+start, decide what the day's stories are and which section owns each one, so
+the brief tells each story once and every number reads the same everywhere.
+
+Read plan_input.md (attached) — a digest of today's data and news with item
+ids. Do not open any other file.
+
+Sections that can own a story today:
+{roles}
+(Section 01 narrative summarises the lead stories' conclusions and owns none;
+03 positioning covers flows only.)
+
+Write plan.json:
+{{"stories": [{{"id": "s1", "title": "<one line>", "owner": "<section key>",
+   "may_mention": ["<section key>"], "angle": "<what the owner argues, ≤25 words>",
+   "evidence": ["f21", "w3", "market.sp500_constituents[ticker=NVDA]"]}}],
+ "canonical": [{{"entity": "NVDA", "metric": "move", "value": "2.1%",
+   "path": "market.sp500_constituents[ticker=NVDA].change_percent"}}]}}
+Rules:
+- 4–8 stories, ordered by market impact; exactly one owner each, chosen from
+  the list above.
+- may_mention: other sections that may reference the story in one clause
+  (e.g. outlook for what comes next); leave it empty when none should.
+- canonical: the key number of each story (stock moves, index closes/moves,
+  yields, Fed odds, reported revenue/EPS) exactly as the brief should state
+  it, with its source — a snapshot path for data, or the news item
+  (news.flash[id=f21]). Only numbers shown in the digest. entity = ticker /
+  cross_asset code / US2Y, US10Y / meeting month (2026-12); metric = move,
+  ah_move, close, level, yield, odds, revenue, eps, guide_revenue, guide_eps.
+- Facts and assignments only — no advice, no prose. Keep it short.
+
+Output file: plan.json
+"""
+
+
+def plan_brief(plan: Optional[Dict[str, Any]], names: List[str]) -> str:
+    """把编辑计划裁成某个 agent 能用的那一段:自己负责的、可一句带过的、别人的。"""
+    if not plan or not plan.get("stories"):
+        return ""
+    own, mention, other = [], [], []
+    for s in plan["stories"]:
+        tag = f'{s.get("id")} "{s.get("title")}"'
+        owner = s.get("owner")
+        if owner in names:
+            ev = ", ".join(str(e) for e in (s.get("evidence") or [])[:6])
+            own.append(f"- {tag} → {_sec_label(owner)}; angle: {s.get('angle') or '-'}"
+                       + (f" [evidence: {ev}]" if ev else ""))
+        elif "narrative" in names or set(s.get("may_mention") or []) & set(names):
+            mention.append(f"- {tag} (owned by {_sec_label(owner)})")
+        else:
+            other.append(f"{tag} ({_sec_label(owner)})")
+    lines = ["EDITORIAL PLAN (fixed before writing — follow it):"]
+    if own:
+        lines += ["Stories you OWN — cover them in full:", *own]
+    if mention:
+        lines += ["Stories you may reference in ONE clause (owned elsewhere — no "
+                  "repeated numbers or detail):", *mention]
+    if other:
+        lines.append("Owned by other sections — do not write them: " + "; ".join(other))
+    lines.append("A story outside the plan is fine only if it clearly belongs to "
+                 "your section.")
+    canon = [c for c in plan.get("canonical") or [] if isinstance(c, dict)]
+    if canon:
+        lines.append("Canonical numbers — when you state these facts, use exactly "
+                     "these values (the checker compares every section to them):")
+        lines += [f"- {c.get('entity')} {c.get('metric')}: {c.get('value')} "
+                  f"({c.get('path')})" for c in canon]
+    return "\n".join(lines) + "\n"
+
+
 def build_agent_prompt(agent: str, style: str = "en",
-                       blocks: Optional[Dict[str, Any]] = None) -> str:
+                       blocks: Optional[Dict[str, Any]] = None,
+                       plan: Optional[Dict[str, Any]] = None) -> str:
     """按信源组构建任务书。归因白名单 = 组内各文件矩阵的并集。不挂转录。
 
     outlook(第二段)例外:任务书指示先读第一段成品文件,快照仍是数字唯一来源。
@@ -891,8 +1029,10 @@ def build_agent_prompt(agent: str, style: str = "en",
         allowed |= SECTION_SOURCE_MATRIX.get(n, set())
     p = STYLE_PROFILES[style]
     task = task.replace("{missing_mark}", p["missing_mark"])
+    brief = plan_brief(plan, names)
     return (f"{_common_rules(style, allowed_tags=allowed or None)}\n{task}\n"
-            f"\n{out_line}\n")
+            + (f"\n{brief}" if brief else "")
+            + f"\n{out_line}\n")
 
 
 # ── 核验任务书(叙事质量;数字对账由编排器跑 verify_checks.py) ──────────

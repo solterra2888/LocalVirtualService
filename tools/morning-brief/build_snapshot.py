@@ -93,6 +93,7 @@ from backend.utils.logger import get_logger  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fetch_macro_pillars import build_macro_pillars  # noqa: E402
+from prompts import assign_item_ids  # noqa: E402
 
 logger = get_logger("report_pipeline_snapshot")
 
@@ -637,9 +638,13 @@ def _news_snapshot(report_date: date,
         conn.close()
 
     def _et_fields(ts: Any) -> Dict[str, str]:
-        dt = ts.astimezone(et) if ts else None
-        if not dt:
+        if not ts:
             return {}
+        # published_at 是无时区的 UTC;naive 直接 astimezone 会按服务器本地
+        # 时区(Asia/Shanghai)解释,time_et 整体早 8 小时
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        dt = ts.astimezone(et)
         out = {"time_et": dt.strftime("%H:%M")}
         if dt.date().isoformat() != report_date.isoformat():
             out["date_et"] = dt.date().isoformat()
@@ -771,11 +776,32 @@ def _economic_events(report_date: date) -> Dict[str, Any]:
     keep = ("date", "time", "country", "event", "period", "comparison", "actual",
             "forecast", "previous", "impact", "category")
 
+    def _event_key(e: Dict[str, Any]) -> tuple:
+        # 无 period 的事件(讲话/会议)同日可能多场,带上 time 区分
+        period = e.get("period") or ""
+        return (str(e.get("date"))[:10], e.get("country"), e.get("event"),
+                e.get("comparison") or "", period,
+                "" if period else str(e.get("time") or ""))
+
+    def _fresher(e: Dict[str, Any]) -> tuple:
+        return (e.get("actual") not in (None, ""), str(e.get("updated_at") or ""),
+                str(e.get("time") or ""))
+
     def _clean(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # 唯一约束含 time:DST 切换或 EODHD 改时刻后同一事件另插新行,旧行
+        # actual 永远为空、预期值也可能过期(11-02 ISM 14:00 空行 / 15:00 实值)。
+        # 同一事件只留一行:有 actual 优先,其次最近更新的行。
+        best: Dict[tuple, Dict[str, Any]] = {}
+        for e in events:
+            if not isinstance(e, dict):
+                continue
+            k = _event_key(e)
+            if k not in best or _fresher(e) > _fresher(best[k]):
+                best[k] = e
         cleaned: List[Dict[str, Any]] = []
         seen = set()
         for e in events:
-            if not isinstance(e, dict):
+            if not isinstance(e, dict) or best.get(_event_key(e)) is not e:
                 continue
             row = {k: e[k] for k in keep if e.get(k) not in (None, "")}
             if not row:
@@ -794,6 +820,99 @@ def _economic_events(report_date: date) -> Dict[str, Any]:
         "recent": _clean(recent),
         "upcoming": _clean(upcoming),
     }
+
+
+# EODHD 的 actual 回填可能晚到 T+1 下午(2026-11-03 JOLTS 发布后 ~25h 才写库),
+# 晨间构建时 T 日一线数据常缺 actual;快讯里的标准打印格式
+# ("Job Openings (Sep): 7.52M (Est. 7.10M, Prior 7.19M)")可以兜底。
+_PRINT_EST_RE = re.compile(r"\b(?:est|exp|expected|consensus|f'?cast)\b\.?", re.I)
+_PRINT_NUM_RE = re.compile(
+    r"(?<![\w.])([+\-−]?\d[\d,]*(?:\.\d+)?)\s*(%|k|m|b|million|billion|thousand)?(?![\w])",
+    re.I)
+_PRINT_CMP_RE = {"yoy": re.compile(r"y/y|\byoy\b|year", re.I),
+                 "mom": re.compile(r"m/m|\bmom\b|month", re.I)}
+_ANY_CMP_RE = re.compile(r"y/y|m/m|\byoy\b|\bmom\b", re.I)
+_PRINT_COUNTRY_RE = {
+    "US": re.compile(r"\bU\.?S\.?\b|🇺🇸|united states", re.I),
+    "EU": re.compile(r"euro\s*(?:zone|area)|\bEZ\b|🇪🇺", re.I),
+    "DE": re.compile(r"german|🇩🇪", re.I),
+    "CN": re.compile(r"china|chinese|🇨🇳", re.I),
+    "JP": re.compile(r"japan|🇯🇵", re.I),
+    "KR": re.compile(r"korea|🇰🇷", re.I),
+}
+_EVENT_GENERIC = {"rate", "index", "change", "final", "prel", "flash", "s&p",
+                  "global", "the", "and"}
+_MONTH_ABBR = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep",
+               "oct", "nov", "dec")
+
+
+def _num(s: str) -> Optional[float]:
+    try:
+        return float(s.replace(",", "").replace("−", "-"))
+    except ValueError:
+        return None
+
+
+def _parse_print(text: str, row: Dict[str, Any]) -> Optional[str]:
+    """从一条快讯里解析该日历行的实际值;任一守卫不过即返回 None。"""
+    compact = re.sub(r"[^a-z0-9]", "", text.lower())
+    tokens = [t for t in re.findall(r"[a-z0-9&]+", (row.get("event") or "").lower())
+              if len(t) >= 3 and t not in _EVENT_GENERIC]
+    if not tokens or not all(t in compact for t in tokens):
+        return None
+    cmp_ = (row.get("comparison") or "").lower()
+    if cmp_ in _PRINT_CMP_RE:
+        if not _PRINT_CMP_RE[cmp_].search(text):
+            return None
+    elif _ANY_CMP_RE.search(text):
+        return None
+    period = (row.get("period") or "").lower()
+    if period[:3] in _MONTH_ABBR and period[:3] not in text.lower():
+        return None
+    country = row.get("country")
+    if country != "US" and not _PRINT_COUNTRY_RE.get(country, re.compile("$^")).search(text):
+        return None
+    if country == "US" and any(rx.search(text) for c, rx in _PRINT_COUNTRY_RE.items()
+                               if c != "US"):
+        return None
+    est = _PRINT_EST_RE.search(text)
+    if not est:
+        return None
+    before = [m for m in _PRINT_NUM_RE.finditer(text[:est.start()])
+              if not re.fullmatch(r"20\d\d", m.group(1))]
+    if not before:
+        return None
+    actual = _num(before[-1].group(1))
+    if actual is None:
+        return None
+    # 量级守卫:与日历的预期/前值同一量级(单位换算不一致的打印直接放弃)
+    refs = [v for v in (_num(str(row.get("forecast") or "")),
+                        _num(str(row.get("previous") or ""))) if v is not None]
+    if refs and not any(abs(actual - r) <= 1.0
+                        or (r and 0.5 <= actual / r <= 2.0) for r in refs):
+        return None
+    return before[-1].group(1).replace(",", "").replace("−", "-")
+
+
+def fill_actuals_from_flash(sources: Dict[str, Any], report_date: date) -> int:
+    """T 日缺 actual 的日历行用最早一条匹配快讯的打印值补齐(标 actual_source)。"""
+    econ = sources.get("economic_events") or {}
+    flash = sorted(((sources.get("news") or {}).get("flash") or []),
+                   key=lambda f: (f.get("date_et") or report_date.isoformat(),
+                                  f.get("time_et") or ""))
+    filled = 0
+    for row in econ.get("recent") or []:
+        if (str(row.get("date"))[:10] != report_date.isoformat()
+                or row.get("actual") not in (None, "")):
+            continue
+        for f in flash:
+            val = _parse_print(f.get("text") or "", row)
+            if val is not None:
+                row["actual"] = val
+                row["actual_source"] = f"news.flash[id={f.get('id')}]"
+                filled += 1
+                break
+    return filled
 
 
 def _pick_macro_family(rows: List[Dict[str, Any]], patterns: List[str],
@@ -1628,6 +1747,14 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
                 sources["prior_odds"] = prior
     except Exception as e:  # noqa: BLE001
         notes["prior_odds"] = str(e)
+
+    assign_item_ids(sources)
+    try:
+        filled = fill_actuals_from_flash(sources, report_date)
+        if filled:
+            notes["actuals_from_flash"] = filled
+    except Exception as e:  # noqa: BLE001
+        notes["actuals_from_flash"] = str(e)[:300]
 
     snapshot = {
         "report_date": report_date.isoformat(),

@@ -109,6 +109,10 @@ v8 追加:Macros 各节**完全不读节目转录**;展望节判断句必须读�
  第三层 · 生成与核验  脚本: run_pipeline.py + prompts.py + verify_checks.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+  编辑计划(v8.4,写作前一次轻量 LLM):plan_input.md(结构化数字 + 带条目 id
+    的新闻标题,不含转录)→ plan.json:4–8 个故事、每个故事唯一归属节 +
+    可一句带过的节 + 规范数值(entity/metric/value/path);规范数值按快照核实
+    后才注入任务书与参与核验;已有 plan.json 复用;失败不阻断;--no-plan 关闭
   两段编排(第一段并行,墙钟 ≈ 最慢一组;第二段单跑综合):
     overall_market  → 01+02+03  The Close 转录: narrative / drivers / positioning
     company_desk    → 04+06     Closing Bell 主段+OT 转录 + 成分股 + 新闻层:
@@ -116,26 +120,38 @@ v8 追加:Macros 各节**完全不读节目转录**;展望节判断句必须读�
     movers          → 05        确定性渲染(S&P 500 ≥$100 亿,涨跌各 8 只 + EPS 对预期)
     macro_dashboard → 07        确定性渲染:四经济体表 + 商品行情 + 本周前瞻(零 LLM)
     macro_review    → 08        回顾·宏观数据:多国 [T] 日 actual 边际变化 +
-                                券商宏观解读(块注入 review_releases,每国 ≤2 族)
+                                券商宏观解读(块注入 review_releases,每国 ≤2 族);
+                                无选题 → 编排器直接写占位(平静日确定性渲染,锁定)
     geopolitics     → 09        回顾·地缘政治:主题块(geo 层命中 ≥3 开块)+
                                 焦点事件(选举类命中 ≥2)
     fed             → 10        美联储观察:利率与决议(fomc.decisions)+
                                 定价路径(next_fomc_odds/合约)+官员表态;
-                                决议在 [T-2,T] 开「决议深读」(声明对比+异议)
+                                决议在 [T-2,T] 开「决议深读」(声明对比+异议);
+                                无深读、无官员表态 → 代码渲染两块(平静日,锁定)
     ——— 第二段 ———
     outlook         → 11        展望与策略:读 01/02/04/07-10 成品 + 快照数字,
                                 大事预判 / 主线跟踪(可省) / 投资建议(直接建议)
   ▼
-  每节同会话写 sections/NN_*.claims.json(数字台账:value + snapshot 路径;
-  节目数字路径 = the_close.clean_transcript / cnbc_closing_bell.clean_transcript[_ot];
-  宏观地缘素材数字路径 = news_macro.digest / news_macro.research / news_macro.geo)
+  每节同会话写 sections/NN_*.claims.json(数字台账:value + snapshot 路径
+  + 可选 entity/metric;节目数字路径 = the_close.clean_transcript /
+  cnbc_closing_bell.clean_transcript[_ot];新闻数字按条目引用 news.flash[id=f12] /
+  news_macro.geo[id=g3],条目 id 由 build_snapshot 编号,旧快照由编排器补)
   verify_checks.py(确定性,秒级) → check_results.json
-    台账逐条按路径对数(节目/news/news_macro 文本按 digits-in-blob) · 正文 %/bp 数字
+    台账逐条按路径对数:结构化路径精确对值;新闻按被引条目对数(含 万/亿/M/B/
+    million 换算,精度以台账写法为准),条目里没有即 high;整桶引用记 medium ·
+    跨节一致性:同 entity+metric 跨节数值不同 → 行情类(move/ah_move/close/
+    level/yield/odds)high、财报类 medium,参照 = 计划规范值 > 已按路径核实值 >
+    多数节,只路由偏离的节 · 平静日代码渲染的 08/10 跳过台账 · 正文 %/bp 数字
     覆盖兜底 · 下一场 FOMC 概率 · 三元组/since/v8 块矩阵(国家边际变化/地缘主题/
     决议深读/展望必备块) · 正文管线标签/生产过程用语(含宏观素材层词汇)/动词后
     带符号 · audit 来源白名单 · 结构(07-11 中文标题) · cn 标题语言
   有 high fail → 不调 LLM,直接按清单 --resume 修订
-  全绿 → --llm-verify light(默认,只读全部节正文,不挂快照/转录)| off | full
+  全绿 → --llm-verify annotate(默认:只读全部节正文,不挂快照/转录,意见一律
+    标 advisory 进复核备注、不参与门控)| light(同款,high 触发修订)| off | full
+  Gate(v8.4)→ 只看 high:无 high 即发布,medium/low 与确定性残留写入
+    report.audit.md「Review notes」,不驱动修订、不进正文;high 只路由到
+    可修订节 —— 确定性节(05/07 及平静日的 08/10)不修,占位节(块矩阵为空的合同输出)只接受
+    确定性核验的问题;high 全落在锁定节 → 直接转人工,不空转修订轮次
   Gate → assemble(正文无口径块) + render_charts.py → final/
 ```
 
@@ -145,6 +161,7 @@ v8 追加:Macros 各节**完全不读节目转录**;展望节判断句必须读�
 backend/reports/morning-brief/{date}/
 ├── snapshot.json
 ├── state.json
+├── plan_input.md / plan.json   # 编辑计划(故事归属 + 规范数值)
 ├── sections/01..11_*.md
 ├── sections/*.claims.json   # 数字台账(movers/macro_dashboard 确定性渲染,无台账)
 ├── verify/check_results.json
@@ -177,6 +194,7 @@ ZCODE=/root/.zcode/server/bin/zcode
 $PY tools/morning-brief/build_snapshot.py [--date 2026-10-28] [--no-backfill]
 $PY tools/morning-brief/run_pipeline.py 2026-10-27            # 默认 --style cn
 $PY tools/morning-brief/run_pipeline.py 2026-10-27 --llm-verify off   # 只用确定性核验
+$PY tools/morning-brief/run_pipeline.py 2026-10-27 --no-plan          # 跳过编辑计划
 $PY tools/morning-brief/run_pipeline.py 2026-10-27 --fake-zcode   # 状态机自测
 $PY tools/morning-brief/render_charts.py backend/reports/morning-brief/2026-10-27   # 01_markets 自动走 FT 版,失败回落旧简版
 $PY tools/morning-brief/us_close_chart.py --workspace backend/reports/morning-brief/2026-10-30   # 单独重出 final/charts/01_markets.png
@@ -214,9 +232,11 @@ Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
    是月均合约,不得称作某场会议的概率。
 6. **Macros 块矩阵(v8)** — `run_pipeline.macro_blocks` 纯代码判定:
    review_releases = 四经济体 T 日有 actual 的一线事件,按族优先级(利率决议 >
-   就业 > CPI > GDP > PMI > PPI > 零售 > 工业 > 贸易)每国 ≤2,排除分项、
-   yoy 优先;geo_themes = 中文 geo 层关键词命中 ≥3 开主题块(美伊/俄乌/中东/
-   贸易制裁);focal_events = 选举类命中 ≥2 开「焦点事件」;fomc_deep = 决议在
+   就业 > CPI > PCE > GDP > JOLTS > PMI > PPI > 零售 > 工业 > 贸易)每国 ≤2,
+   排除分项、yoy 优先;日历 actual 滞后时,build_snapshot 用 T 日 flash 的
+   「数值 (Est. …, Prior …)」快讯回填(actual_source 记来源条目,量级/期别/
+   国家/比较口径不符不回填);同一事件因 DST/改时重复的日历行去重;geo_themes = 中文 geo 层关键词命中 ≥3 开主题块(美伊/俄乌/中东/
+   贸易制裁);focal_events = 选举类命中 ≥2 且过半条目未归入已开主题时开「焦点事件」;fomc_deep = 决议在
    [T-2, T] 开「决议深读」(声明对比 + 异议理由);展望(大事预判/投资建议)
    恒在。07 宏观速览 = macro_dashboard/fomc/cross_asset 确定性渲染,零 LLM。
 7. **审计分层** — 正文只有读者文体与原始出处;管线标签、口径块与
