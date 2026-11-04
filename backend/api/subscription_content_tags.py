@@ -73,6 +73,8 @@ def _row_to_tags_dict(row) -> Dict[str, Any]:
         "people": people,
         "countries": countries,
         "tag_schema_version": row[19] or "feeds_v1",
+        "info_level": row[20] if len(row) > 20 else None,
+        "evidence_level": row[21] if len(row) > 21 else None,
     }
 
 
@@ -82,7 +84,8 @@ _TAGS_SELECT = """
            additional_tags, confidence, reasoning, summary,
            channel_type, tagged_by, tagged_at,
            created_at, updated_at,
-           people, countries, tag_schema_version
+           people, countries, tag_schema_version,
+           info_level, evidence_level
     FROM subscription_content_tags
 """
 
@@ -318,6 +321,8 @@ def update_content_tags(
         "confidence",
         "reasoning",
         "summary",
+        "info_level",
+        "evidence_level",
         "additional_tags",
     ):
         val = getattr(updates, key)

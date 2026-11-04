@@ -10,7 +10,7 @@
         sources.the_close.clean_transcript 与 sources.cnbc_closing_bell.
         clean_transcript / clean_transcript_ot。不取 Surveillance,不读摘要。
         转录行自身 published_at 即美东场次日(同 UTC 晚),无 T+1 戳错位问题。
-  4. economic_events              — 近 3 天实际值 + 未来 7 天日历(读库,impact≥2,
+  4. economic_events              — 近 3 天实际值 + 未来 7 天日历(读库,impact=3,
                                      仅 US/CN/JP/DE/KR);保留 comparison(mom/yoy/水平);
                                      time 是 UTC,另写 time_et / date_et(美东,含夏令时)。
                                      构建前对 [T-2, T] 做一次 actual 回填:先
@@ -30,16 +30,31 @@
   7. macro_pillars                — MACROS 确定性底座(fetch_macro_pillars.py)
   8. prior_odds                   — 优先用前一交易日 ZQ 收盘自算的加息概率
                                      (next_fomc_odds.prior);没有时回退最近一期更早快照
+  9. macro_dashboard(v8)          — 四经济体(US/EU/CN/JP)× 指标族白名单的最新
+                                     actual(窗口 [T-75,T],绕过 impact=3 过滤:
+                                     ECB/BoJ/LPR 利率行 impact 只有 1-2)
+ 10. fomc(v8)                     — fomc_decisions 最近 4 场(投票/异议)+
+                                     fomc_probabilities 未来会议定价路径 +
+                                     最近两份 FOMC 声明全文(措辞对比用)
+ 11. news_macro(v8.1)              — 宏观地缘素材层(源池 = Admin
+                                     user_id=1 的 enabled 订阅,中英混合):
+                                     digest(标题模式晨报,北京 T+1 晨窗口)/
+                                     research(中英关键词宏观解读;推特源仅收
+                                     ≥250 字符长解读)/ geo(中英地缘关键词,
+                                     含 news 频道的 CCTV 联播快讯)。周五 T 的
+                                     digest 空窗属已知边界(README)
 
 设计约束: 快照一经生成本轮不可变 —— 后续章节 Agent 与核验 Agent 只看这一份
 冻结数据,数字对账才可能成立。任何一个数据源失败只记录 errors,不阻塞整体
 (章节 Agent 会在 prompt 约束下对缺失源降级处理)。
 
 同日锚定: 行情/日历/曲线/节目转录均锚定交易日 T(转录按节目当晚 UTC 发布
-时间匹配,不存在摘要表的北京 T+1 戳问题)。
+时间匹配,不存在摘要表的北京 T+1 戳问题)。宏观地缘素材层例外:digest 锚定
+北京 T+1 早晨(覆盖美股 T 夜盘的隔夜要闻),research/geo 锚定 [T, T+1 06:00)
+UTC,published_at 一律按 UTC 存储比较。
 
 用法:
-    python tools/US-market-report/build_snapshot.py \
+    python tools/morning-brief/build_snapshot.py \
         [--date 2026-10-28] [--out PATH] [--no-backfill]
 
     不传 --date 时取美东最近一个已收盘的交易日(≥18:30 ET 视为当日已收盘)。
@@ -52,11 +67,22 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# 2026-11-04:Python 3.13 subprocess 默认走 vfork;多线程/特定堆状态下
+# vfork 子进程偶发卡死在 exec 前(本机三次复现:子进程显示父进程的 exe/
+# cmdline、futex/poll 空等、py-spy 无法附着)。禁用 vfork 走传统
+# fork+exec,每次调用多 ~1ms,换来确定性。详见当天交付记录。
+try:
+    subprocess._USE_VFORK = False  # type: ignore[attr-defined]
+except AttributeError:  # 未来版本若移除该开关则忽略
+    pass
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -86,14 +112,104 @@ CROSS_ASSET_CODES = {
     "CL1.COMMODITY": "WTI Crude",
     "BZ1.COMMODITY": "Brent Crude",
     "HG1.COMMODITY": "Copper",
+    "SI1.COMMODITY": "Silver",
     "USDJPY.FOREX": "USD/JPY",
     "EURUSD.FOREX": "EUR/USD",
 }
 
 RECENT_EVENT_DAYS = 3
 UPCOMING_EVENT_DAYS = 7
-# 经济日历只收录五大经济体(用户口径):控制快照体积与 macro/核验耗时
-ECON_COUNTRIES = ("US", "CN", "JP", "DE", "KR")
+# 经济日历只收录主要经济体(用户口径):控制快照体积与 macro/核验耗时。
+# v8 加 EU 聚合(新 Macros 四经济体表需要欧元区 GDP/HICP/存款利率)。
+ECON_COUNTRIES = ("US", "CN", "JP", "DE", "KR", "EU")
+
+# ── 宏观速览底座(v8):四经济体 × 指标族白名单 ──────────────────────────
+# 新 Macros(07 宏观速览)的确定性数据口径。事件名以 EODHD 日历为准;每族
+# 取窗口 [T-75, T] 内最新有 actual 的行(按列表顺序优先,前 = 更重要)。
+# 不走 EconomicEventsService 的 impact=3 过滤 —— ECB/BoJ/LPR 等利率行
+# impact 只有 1-2,该口径会全部漏掉。
+MACRO_DASHBOARD_COUNTRIES = ("US", "EU", "CN", "JP")
+MACRO_DASHBOARD_WINDOW_DAYS = 75
+MACRO_DASHBOARD_FAMILIES: Dict[str, Dict[str, List[str]]] = {
+    "US": {
+        "policy_rate": [r"^Fed Interest Rate Decision$"],
+        "growth": [r"^GDP Growth Rate$", r"^GDP Growth Annualized$"],
+        "inflation": [r"^Inflation Rate$", r"^Core Inflation Rate$",
+                      r"^Core PCE Price Index$", r"^PPI$"],
+        "pmi": [r"^S&P Global (Manufacturing|Services|Composite) PMI$",
+                r"^ISM Manufacturing PMI$"],
+        "labor": [r"^Non Farm Payrolls$", r"^Unemployment Rate$",
+                  r"^Average Hourly Earnings$"],
+    },
+    "EU": {
+        "policy_rate": [r"^Deposit Facility Rate$", r"^Interest Rate Decision$"],
+        "growth": [r"^GDP Growth Rate$"],
+        "inflation": [r"^Harmonised Inflation Rate$", r"^Core Inflation Rate$",
+                      r"^Inflation Rate$"],
+        "pmi": [r"^S&P Global (Manufacturing|Services|Composite) PMI$"],
+        "labor": [r"^Unemployment Rate$"],
+    },
+    "CN": {
+        "policy_rate": [r"^Loan Prime Rate 1Y$", r"^Prime Rate$"],
+        "growth": [r"^GDP Growth Rate$"],
+        "inflation": [r"^Inflation Rate$", r"^Producer Price",
+                      r"^Producer Prices"],
+        "pmi": [r"^NBS Manufacturing PMI$", r"^NBS Non Manufacturing PMI$",
+                r"^S&P Global Composite PMI$"],
+        "labor": [r"^Unemployment Rate$"],
+    },
+    "JP": {
+        "policy_rate": [r"^BoJ Interest Rate Decision$"],
+        "growth": [r"^GDP Growth Rate$", r"^GDP Growth Annualized$"],
+        "inflation": [r"^Inflation Rate$", r"^Core Inflation Rate$",
+                      r"^Tokyo Core CPI$", r"^Tokyo CPI$"],
+        "pmi": [r"^S&P Global (Manufacturing|Services|Composite) PMI$"],
+        "labor": [r"^Unemployment Rate$"],
+    },
+}
+# 每族保留行数上限(policy_rate 单行;growth/inflation 留多口径供渲染端取舍
+# —— inflation 取 4 是为了让 Core 行排进 US 的 [CPI yoy, CPI level, CPI mom, Core])
+_MACRO_FAMILY_CAP = {"policy_rate": 1, "growth": 2, "inflation": 4,
+                     "pmi": 3, "labor": 2}
+# 同一事件多口径行时 yoy 优先(通胀/增长头条惯例),水平次之,mom 最后
+_MACRO_CMP_RANK = {"yoy": 0, None: 1, "": 1, "index": 1, "qoq": 1, "mom": 2}
+
+# ── 宏观地缘素材层(v8.1):Admin(user_id=1)订阅驱动,中英双语 ──────────
+# 订阅纪律:素材源一律取自 subscription_list 中 Admin(user_id=1)且 enabled
+# 的订阅(与筛选窗口一起在 SQL 里 JOIN),不再硬编码作者白名单 —— Admin
+# 补订/退订即自动生效。Admin 订阅本身中英混合:中文(深蓝Alpha/调研鹅纪要/
+# 社长说/Dots/CCTV)与英文(Bloomberg TV/Reuters 视频摘要、Geopolitical
+# Dispatch、Kobeissi/Steno/Anna Wong 等宏观号),筛选模式因此中英双语。
+# published_at 按 UTC 存储。digest 覆盖北京 T+1 早晨(隔夜要闻/利率早报
+# 08:51-09:22 发布);research/geo 从 T 00:00 UTC(北京 T 早 8 点)起收。
+# 周五 T 的隔夜要闻要下周一早晨才发 —— 周六构建时 digest 层常为空,属已知
+# 边界(README),由 geo/research + 英文 wire 兜底。
+ADMIN_USER_ID = 1
+MACRO_DIGEST_TITLE_RE = re.compile(r"隔夜全球要闻|利率早报|复盘笔记|盘前播报|每日要闻")
+# research 双通道:星球源按标题识别券商宏观日报(正文关键词在个股调研纪要
+# 里也常出现,误召回高);推特/youtube/substack 按正文关键词 + 长度门槛
+MACRO_RESEARCH_TITLE_RE = re.compile(
+    r"宏观|隔夜市场|隔夜全球|海外每日|流动性|经济数据|策略周报|利率策略")
+MACRO_RESEARCH_BODY_RE = re.compile(
+    r"宏观|美联储|Fed\b|FOMC|加息|降息|央行|利率|国债|收益率|CPI|PCE|PMI|GDP"
+    r"|非农|失业率|LPR|流动性|衰退|通胀|inflation|recession|rate hike|rate cut"
+    r"|central bank|treasury yield|payrolls?", re.I)
+MACRO_GEO_RE = re.compile(
+    r"伊朗|霍尔木兹|俄乌|乌克兰|俄罗斯|加沙|以色列|哈马斯|真主党|胡塞|也门"
+    r"|中东|停火|制裁|关税|选举|OPEC|原油库存|油田|输油管道"
+    r"|Iran|Hormuz|Persian Gulf|Ukraine|Russia|Putin|Zelensky|Gaza|Israel"
+    r"|Netanyahu|Hezbollah|Houthi|Yemen|Lebanon|ceasefire|sanction|tariff"
+    r"|missile|strait", re.I)
+# geo 需 ≥2 个不同关键词命中:Yahoo 财报文正文尾部常带单个地缘词(导航/
+# 广告/市场概况),单词命中不进层;CCTV 联播快讯等多主题电讯可过
+MACRO_GEO_MIN_TERMS = 2
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+# 推特层只收「解读形」内容(≥250 字符):*Walter/LiveSquawk 式短快讯属于
+# 事实层(news.flash 已服务 01-06 节);zsxq/news/youtube/substack ≥60 即可
+MACRO_TWITTER_MIN_CHARS = 250
+_CN_DIGEST_MAX, _CN_DIGEST_CAP = 4, 6000
+_CN_RESEARCH_MAX, _CN_RESEARCH_CAP = 8, 2500
+_CN_GEO_MAX, _CN_GEO_CAP = 40, 1200
 TOP_MOVERS_LIMIT = 30
 TOP_MOVERS_MIN_CAP_M = 2000  # finviz market_cap 单位:百万美元 → $20 亿
 
@@ -425,37 +541,37 @@ def _to_et(date_str: Optional[str], time_str: Optional[str]) -> Dict[str, str]:
     return out
 
 
-# ── 新闻事件层(v6):L2 快讯 + L3 通讯社全文 + L4 财报电话会 ─────────────
-
-# 快讯账号白名单(subscription_content.twitter 已订阅且活跃;与 GuanHe 的
-# squawk/独家层对应:@DeItaone 头条、LiveSquawk 财报三元组、独家并购线等)
-NEWS_FLASH_AUTHORS = (
-    "*Walter Bloomberg", "LiveSquawk", "Wall St Engine",
-    "The Kobeissi Letter", "The Information", "Nick Timiraos",
-    "RenMac: Renaissance Macro Research", "Earnings Whispers",
-    "(((The Daily Shot)))",
-)
-# 通讯社全文(news 频道,订阅活跃且为全文;CNBC/Globenewswire 抓取断流中,
-# Reuters/FT/WSJ 未订 —— 恢复/补订后加入本元组即可)
-NEWS_WIRE_AUTHORS = ("Yahoo Finance", "Seeking Alpha")
+# ── 新闻事件层(v7):Admin 订阅驱动 + L/E 分级,无白名单 ────────────────
+# 快讯/通讯社一律取 Admin(user_id=1)enabled 订阅的信息源(与 news_macro
+# 素材层同一 JOIN);素材质量由入库打标的 L/E 双轴分级控制 ——
+# L4(噪音)整层排除,溢出按 L1>L2>L3/未评级 排序。
+# 分级标准见 tools/morning-brief/INFO_GRADING_STANDARD.md。
 _NEWS_TICKER_RE = re.compile(r"\$([A-Z]{1,5})\b")
-_FLASH_MAX_ITEMS = 300      # 超出时优先保留带 $TICKER 的条目
+_FLASH_MAX_ITEMS = 300      # 超出时按 L1>L2>L3/未评级 + 带$TICKER优先 保留
 _FLASH_TEXT_CAP = 300
-_WIRE_MAX_ITEMS = 50
+_WIRE_MAX_ITEMS = 50        # 超出时按 L1>L2>L3/未评级 + 时序新者优先
 _WIRE_MIN_CHARS = 800       # 导语/标题级短条目不进 wire(全文层)
 _WIRE_TEXT_CAP = 1200
 _CALLS_MAX_ITEMS = 6        # SA 电话会节选(Deep Dives 的 Management said 素材)
 _CALLS_TEXT_CAP = 8000
+# L 轴排序权重:小者先保留;L4 已在 SQL 排除,未评级(NULL,存量/滞后)与 L3 同档
+_L_RANK = {"L1": 0, "L2": 1, "L3": 2, None: 2, "": 2}
 
 
 def _news_snapshot(report_date: date,
                    earnings_calendar: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """T 日新闻事件层,冻结为 sources.news(独立容错,不影响其余源)。
 
-    flash  twitter 白名单账号,窗口 = T 00:00–24:00 ET;RT/同文去重;
+    v7:信源一律取 Admin(user_id=1)enabled 订阅(无白名单);入库打标的
+    L/E 分级参与选材 —— L4(噪音)SQL 排除;flash/wire 溢出时按
+    L1>L2>L3/未评级 排序保留(INFO_GRADING_STANDARD.md),条目携带
+    info_level/evidence_level 供下游 E 级表述规则使用。
+
+    flash  Admin 订阅 twitter,窗口 = T 00:00–24:00 ET;RT/同文去重;
            提取 $TICKER;每条截 _FLASH_TEXT_CAP。
-    wire   news 频道全文源,窗口 [T-1 20:00 ET, T+1 00:00 ET) 覆盖隔夜报道;
-           ≥_WIRE_MIN_CHARS 的截 _WIRE_TEXT_CAP。
+    wire   Admin 订阅 news 全文源,窗口 [T-1 20:00 ET, T+1 00:00 ET) 覆盖
+           隔夜报道;≥_WIRE_MIN_CHARS 的截 _WIRE_TEXT_CAP;超出 _WIRE_MAX_ITEMS
+           按重要度+时序保留(替代旧版"先到先得"截断)。
     calls  wire 中的 earnings call transcript(标题特征),只保留财报日历
            (当日 + 前一交易日盘后)命中的 ticker,截 _CALLS_TEXT_CAP。
     """
@@ -469,28 +585,52 @@ def _news_snapshot(report_date: date,
     conn = _conn()
     try:
         with conn.cursor() as cur:
+            # Admin 订阅驱动(与 news_macro 素材层同一 JOIN 键);L4 排除,
+            # 未评级(NULL,存量/打标滞后)放行 —— 由溢出排序的末档兜住
             cur.execute(
                 """
-                SELECT author_name, published_at, coalesce(content, '')
-                FROM subscription_content
-                WHERE channel_type = 'twitter'
-                  AND author_name = ANY(%(a)s)
-                  AND published_at >= %(t0)s AND published_at < %(t1)s
-                ORDER BY published_at
+                SELECT c.author_name, c.published_at,
+                       coalesce(c.content, ''),
+                       t.info_level, t.evidence_level
+                FROM subscription_content c
+                JOIN subscription_list l
+                  ON l.user_id = %(uid)s AND l.enabled = true
+                 AND c.channel_type = l.channel_type
+                 AND (c.channel_id = l.channel_identifier::text
+                      OR c.author_identifier = l.channel_identifier::text
+                      OR c.feed_url = l.channel_url
+                      OR c.author_name = l.channel_name)
+                LEFT JOIN subscription_content_tags t
+                  ON t.subscription_content_id = c.id
+                WHERE c.channel_type = 'twitter'
+                  AND (t.info_level IS NULL OR t.info_level <> 'L4')
+                  AND c.published_at >= %(t0)s AND c.published_at < %(t1)s
+                ORDER BY c.published_at
                 """,
-                {"a": list(NEWS_FLASH_AUTHORS), "t0": t0, "t1": t1},
+                {"uid": ADMIN_USER_ID, "t0": t0, "t1": t1},
             )
             frows = cur.fetchall()
             cur.execute(
                 """
-                SELECT author_name, title, published_at, coalesce(content, '')
-                FROM subscription_content
-                WHERE channel_type = 'news'
-                  AND author_name = ANY(%(a)s)
-                  AND published_at >= %(w0)s AND published_at < %(t1)s
-                ORDER BY published_at DESC
+                SELECT c.author_name, c.title, c.published_at,
+                       coalesce(c.content, ''),
+                       t.info_level, t.evidence_level
+                FROM subscription_content c
+                JOIN subscription_list l
+                  ON l.user_id = %(uid)s AND l.enabled = true
+                 AND c.channel_type = l.channel_type
+                 AND (c.channel_id = l.channel_identifier::text
+                      OR c.author_identifier = l.channel_identifier::text
+                      OR c.feed_url = l.channel_url
+                      OR c.author_name = l.channel_name)
+                LEFT JOIN subscription_content_tags t
+                  ON t.subscription_content_id = c.id
+                WHERE c.channel_type = 'news'
+                  AND (t.info_level IS NULL OR t.info_level <> 'L4')
+                  AND c.published_at >= %(w0)s AND c.published_at < %(t1)s
+                ORDER BY c.published_at DESC
                 """,
-                {"a": list(NEWS_WIRE_AUTHORS), "w0": w0, "t1": t1},
+                {"uid": ADMIN_USER_ID, "w0": w0, "t1": t1},
             )
             wrows = cur.fetchall()
     finally:
@@ -505,10 +645,10 @@ def _news_snapshot(report_date: date,
             out["date_et"] = dt.date().isoformat()
         return out
 
-    # flash:同文去重(RT/转发),截断 + ticker 提取
+    # flash:同文去重(RT/转发),截断 + ticker 提取;L/E 随条目冻结
     flash: List[Dict[str, Any]] = []
     seen_text: set = set()
-    for author, ts, text in frows:
+    for author, ts, text, lv, ev in frows:
         body = re.sub(r"\s+", " ", (text or "")).strip()
         if not body or body.startswith("RT @"):
             continue
@@ -521,25 +661,28 @@ def _news_snapshot(report_date: date,
             **_et_fields(ts),
             "text": body[:_FLASH_TEXT_CAP],
             "tickers": sorted(set(_NEWS_TICKER_RE.findall(text or "")))[:8],
+            "info_level": lv,
+            "evidence_level": ev,
         })
     if len(flash) > _FLASH_MAX_ITEMS:
-        with_tkr = [f for f in flash if f["tickers"]]
-        without = [f for f in flash if not f["tickers"]]
-        keep, room = with_tkr[:_FLASH_MAX_ITEMS], _FLASH_MAX_ITEMS - min(
-            len(with_tkr), _FLASH_MAX_ITEMS)
-        keep += without[:max(room, 0)]
-        keep.sort(key=lambda f: (f.get("date_et") or "", f.get("time_et") or ""))
-        flash = keep
+        # 溢出按重要度保留:L1>L2>L3/未评级,同档带 $TICKER 优先,再按时间
+        flash.sort(key=lambda f: (_L_RANK.get(f.get("info_level"), 2),
+                                  0 if f["tickers"] else 1,
+                                  f.get("date_et") or "", f.get("time_et") or ""))
+        flash = flash[:_FLASH_MAX_ITEMS]
 
-    # wire:全文层过滤/截断;SA 的管理层长文(电话会纪要/指引)单列为 calls
+    # wire:全文层过滤/截断;SA 的管理层长文(电话会纪要/指引)单列为 calls。
+    # 合格条目先全量按 L 轴重要度稳定排序(组内保持时序倒序),再截
+    # _WIRE_MAX_ITEMS —— 替代旧版按时间"先到先得"(实测窗口合格条目可达
+    # 千级,旧法会把发得早的重要报道挤掉)
     ec_codes = set()
     for bucket in ("today", "prior_after_close"):
         for r in ((earnings_calendar or {}).get(bucket) or []):
             if r.get("code"):
                 ec_codes.add(str(r["code"]).upper())
-    wire: List[Dict[str, Any]] = []
+    qualified: List[tuple] = []
     calls: List[Dict[str, Any]] = []
-    for author, title, ts, text in wrows:
+    for author, title, ts, text, lv, ev in wrows:
         body = re.sub(r"\s+", " ", (text or "")).strip()
         if len(body) < _WIRE_MIN_CHARS:
             continue
@@ -562,18 +705,21 @@ def _news_snapshot(report_date: date,
                     "text": body[:_CALLS_TEXT_CAP],
                 })
             continue
-        if len(wire) >= _WIRE_MAX_ITEMS:
-            continue
-        wire.append({
-            "author": author, "title": (title or "")[:200],
-            **_et_fields(ts),
-            "text": body[:_WIRE_TEXT_CAP],
-        })
+        qualified.append((author, title, ts, body, lv, ev))
+    qualified.sort(key=lambda r: _L_RANK.get(r[4], 2))   # 稳定:同档时序不变
+    wire = [{
+        "author": author, "title": (title or "")[:200],
+        **_et_fields(ts),
+        "text": body[:_WIRE_TEXT_CAP],
+        "info_level": lv,
+        "evidence_level": ev,
+    } for author, title, ts, body, lv, ev in qualified[:_WIRE_MAX_ITEMS]]
 
     out = {
-        "filter": (f"flash:twitter {len(NEWS_FLASH_AUTHORS)}账号 T日ET / "
-                   f"wire:{'+'.join(NEWS_WIRE_AUTHORS)} [T-1 20:00,T 24:00)ET "
-                   f"≥{_WIRE_MIN_CHARS}c"),
+        "filter": (f"flash:Admin订阅twitter {len({a for a, *_ in frows})}源"
+                   f" T日ET(L4排除) / "
+                   f"wire:Admin订阅news [T-1 20:00,T 24:00)ET "
+                   f"≥{_WIRE_MIN_CHARS}c top{_WIRE_MAX_ITEMS}按L级"),
         "flash": flash,
         "wire": wire,
         "calls": calls,
@@ -598,7 +744,7 @@ def _economic_events(report_date: date) -> Dict[str, Any]:
          截成"日历空档"。
 
     收录口径(用户约定,控制快照体量与管线耗时):
-      recent   [report_date-2, report_date]    impact>=2,五国(US/CN/JP/DE/KR)
+      recent   [report_date-2, report_date]    impact=3,五国(US/CN/JP/DE/KR)
       upcoming [report_date+1, report_date+7]  同上
     """
     from backend.services.economic_events_service import EconomicEventsService
@@ -609,7 +755,7 @@ def _economic_events(report_date: date) -> Dict[str, Any]:
     def _fetch(lo: date, hi: date) -> List[Dict[str, Any]]:
         return svc.get_economic_events_from_db(
             from_date=lo.isoformat(), to_date=hi.isoformat(),
-            country=countries, impacts=[2, 3], order="asc", limit=1000,
+            country=countries, impacts=[3], order="asc", limit=1000,
         ) or []
 
     recent = _fetch(
@@ -643,11 +789,685 @@ def _economic_events(report_date: date) -> Dict[str, Any]:
         return cleaned
 
     return {
-        "filter": f"近3天+未来{UPCOMING_EVENT_DAYS}天 impact≥2 "
+        "filter": f"近3天+未来{UPCOMING_EVENT_DAYS}天 impact=3 "
                   f"({'/'.join(ECON_COUNTRIES)})",
         "recent": _clean(recent),
         "upcoming": _clean(upcoming),
     }
+
+
+def _pick_macro_family(rows: List[Dict[str, Any]], patterns: List[str],
+                       cap: int) -> List[Dict[str, Any]]:
+    """按白名单正则顺序从 actual 行(date 降序)选指标族行,同 (事件,口径) 取最新。"""
+    kept: List[Dict[str, Any]] = []
+    seen: set = set()
+    for idx, pat in enumerate(patterns):
+        rx = re.compile(pat)
+        for r in rows:
+            if not rx.match(r.get("event") or ""):
+                continue
+            key = (r.get("event"), r.get("comparison") or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            r = dict(r)
+            r["_pat"] = idx
+            kept.append(r)
+    kept.sort(key=lambda r: (r.pop("_pat"),
+                             _MACRO_CMP_RANK.get(r.get("comparison"), 1)))
+    return kept[:cap]
+
+
+def _macro_dashboard_snapshot(report_date: date) -> Dict[str, Any]:
+    """宏观速览底座 — 四大经济体 × 指标族的最新已发布值(07 节表格数据源)。
+
+    与 sources.economic_events(impact=3、近 3 天)口径互补:这里按国家 ×
+    指标族白名单直查 economic_events,窗口 [T-75, T],取每族最新有 actual
+    的行 —— 月度/季度指标(如日本 GDP、中国 CPI)常早于 3 天窗口,必须
+    拉宽;且 ECB/BoJ/LPR 利率行 impact 只有 1-2,不能走 impact=3 过滤。
+    """
+    lo = (report_date - timedelta(days=MACRO_DASHBOARD_WINDOW_DAYS)).isoformat()
+    hi = report_date.isoformat()
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT country, date, event, comparison, period,
+                       actual, forecast, previous
+                FROM economic_events
+                WHERE country = ANY(%(c)s) AND date >= %(lo)s AND date <= %(hi)s
+                  AND actual IS NOT NULL AND actual <> ''
+                ORDER BY date DESC
+                """,
+                {"c": list(MACRO_DASHBOARD_COUNTRIES), "lo": lo, "hi": hi},
+            )
+            cols = [d.name for d in cur.description]
+            by_country: Dict[str, List[Dict[str, Any]]] = {
+                c: [] for c in MACRO_DASHBOARD_COUNTRIES}
+            for row in cur.fetchall():
+                d = dict(zip(cols, row))
+                d["date"] = str(d["date"])[:10]
+                by_country.setdefault(d["country"], []).append(d)
+    finally:
+        conn.close()
+
+    countries: Dict[str, Any] = {}
+    missing: List[str] = []
+    for c, fam_pats in MACRO_DASHBOARD_FAMILIES.items():
+        rows = by_country.get(c) or []
+        block: Dict[str, Any] = {}
+        for fam, patterns in fam_pats.items():
+            picked = _pick_macro_family(rows, patterns, _MACRO_FAMILY_CAP[fam])
+            if picked:
+                block[fam] = picked
+            else:
+                missing.append(f"{c}.{fam}")
+        if block:
+            countries[c] = block
+    return {
+        "filter": (f"四经济体({'/'.join(MACRO_DASHBOARD_COUNTRIES)}) 指标族白名单 "
+                   f"[T-{MACRO_DASHBOARD_WINDOW_DAYS}, T] 最新 actual"),
+        "countries": countries,
+        "missing": missing,
+    }
+
+
+def _fomc_snapshot(report_date: date) -> Dict[str, Any]:
+    """FOMC 决议 / 市场定价路径 / 声明文本(10 节美联储观察的数据源)。
+
+    decisions  fomc_decisions 最近 4 场,含投票比与异议理由
+               (「10:2 维持、Cook/Hammack 主张加息」式陈述由此而来)
+    path       fomc_probabilities asof≤T 最新一日的全部未来会议。
+               口径注意:下一场会议的概率一律引 macro_pillars.next_fomc_odds
+               (会后整月合约);本表是会议月合约,其余会议按「合约定价」表述
+    statement / statement_prev  最近两份声明全文(截 5000 字符,供措辞对比)
+    """
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT decision_date, rate_low_bp, rate_high_bp, change_bp,
+                       vote_for, vote_against, dissenters
+                FROM fomc_decisions
+                WHERE central_bank = 'FED'
+                ORDER BY decision_date DESC LIMIT 4
+                """)
+            cols = [d.name for d in cur.description]
+            decisions = []
+            for row in cur.fetchall():
+                d = dict(zip(cols, row))
+                d["decision_date"] = str(d["decision_date"])[:10]
+                for k in ("rate_low_bp", "rate_high_bp", "change_bp",
+                          "vote_for", "vote_against"):
+                    if d.get(k) is not None:
+                        d[k] = float(d[k])
+                decisions.append(d)
+
+            cur.execute(
+                """
+                SELECT meeting_date, p_hike, p_hold, p_cut, implied_rate,
+                       futures_contract, asof_date
+                FROM fomc_probabilities
+                WHERE central_bank = 'FED' AND asof_date <= %(t)s
+                  AND meeting_date >= %(t)s
+                  AND asof_date = (
+                      SELECT max(asof_date) FROM fomc_probabilities
+                      WHERE central_bank = 'FED' AND asof_date <= %(t)s)
+                ORDER BY meeting_date
+                """, {"t": report_date})
+            cols = [d.name for d in cur.description]
+            meetings = []
+            for row in cur.fetchall():
+                m = dict(zip(cols, row))
+                m["meeting_date"] = str(m["meeting_date"])[:10]
+                m["asof_date"] = str(m["asof_date"])[:10]
+                for k in ("p_hike", "p_hold", "p_cut", "implied_rate"):
+                    if m.get(k) is not None:
+                        m[k] = round(float(m[k]), 4)
+                meetings.append(m)
+
+            cur.execute(
+                """
+                SELECT meeting_date, word_count, raw_content
+                FROM fomc_documents
+                WHERE central_bank = 'FED' AND doc_type = 'statement'
+                  AND meeting_date <= %(t)s AND raw_content IS NOT NULL
+                ORDER BY meeting_date DESC LIMIT 2
+                """, {"t": report_date})
+            stmts = [
+                {"meeting_date": str(md)[:10], "word_count": int(wc or 0),
+                 "text": (raw or "")[:5000]}
+                for md, wc, raw in cur.fetchall()
+            ]
+    finally:
+        conn.close()
+    return {
+        "decisions": decisions,
+        "path": {"asof": meetings[0]["asof_date"] if meetings else None,
+                 "meetings": meetings},
+        "statement": stmts[0] if stmts else None,
+        "statement_prev": stmts[1] if len(stmts) > 1 else None,
+    }
+
+
+# ── 素材 triage(v8.2):Admin 订阅轻扫 + 分块 LLM 分拣 ────────────────
+# 选材语义化:不再靠关键字正则圈素材,而是把候选条目的「AI 分析轻量字段」
+# (title + tags.summary + concepts + countries + L/E 分级)交给一次批量
+# LLM 调用分拣;只有被选中且标记需全文的条目才回库取全文(两级漏斗,
+# 每日新增输入 ≈ 0.3M tokens,详见 README §triage)。
+# 分类失败/关闭(--no-triage)→ 回退 v8.1 关键字正则路径,管线不中断。
+DEFAULT_ZCODE_BIN = "/root/.zcode/server/bin/zcode"
+TRIAGE_TYPES = ("zhishixingqiu", "substack", "youtube", "twitter", "news")
+_TRIAGE_CHUNK = 500          # 每次分类调用的条目数(控制单次上下文)
+_TRIAGE_WORKERS = 4          # 分块并行度
+_TRIAGE_TIMEOUT_SEC = 600
+# 低于此长度的条目不进 triage:twitter 短快讯归 news.flash 事实层,
+# news 短导语归 news.wire;长解读/联播快讯才值得语义分拣
+_TRIAGE_MIN_CHARS = {"twitter": 180, "news": 200}
+
+_TRIAGE_PROMPT = """你是财经晨报的素材分拣器。下面是 Admin 订阅源的候选清单(轻量字段,无全文)。
+对每条判断是否属于以下三层之一,只输出入选条目:
+
+- geo      地缘政治与国家间博弈:战争与冲突、制裁与关税、选举与权力更替、
+           能源供应与运输通道、大国博弈/外交谈判、国家支持的网络攻击等安全事件。
+           t = 中文主题标签(开放集):美伊局势/俄乌冲突/中东局势/贸易与制裁/
+           选举与权力更替/大国博弈 等既有主题沿用,新事件自拟简短名(如 朝鲜半岛/
+           台海/印巴)。同类合并:选举类统一归「选举与权力更替」,网络攻击类统一
+           归「网络攻击」,不要按国家/事件拆出平行主题。
+           注意:美联储/欧央行/中国央行等央行的政策、官员表态与利率内容
+           不是 geo(若是观点解读归 research,纯快讯不选)。
+- research 宏观解读:券商或经济学家对经济数据、央行政策与利率、流动性、
+           汇率、市场策略的观点/解读文章(含央行官员讲话的解读)
+- digest   每日晨报整篇:隔夜要闻汇总/利率早报/复盘笔记类多主题简报
+           (通常出自知识星球,发布于北京时间次日早晨,覆盖多条新闻)
+
+规则:
+1. 只输出入选条目,一行一条 JSON,未入选的不输出,不要任何其他文字:
+   {"i":<id>,"p":"geo|research|digest","t":"主题(仅geo必填,其余空串)","x":<1-3>,"d":<0或1>}
+2. 个股财报、个股观点、单一公司产品动态、社交闲聊 → 不输出
+3. x 重要度:3=事件级(可能改变市场逻辑) 2=有实质影响 1=情报价值
+4. d=1 表示摘要不足以支撑写作、需要读全文(数据密集的解读/多事件晨报);快讯类 d=0
+5. 一条内容可多层(既是地缘又有宏观解读)时选最主要的一层;多条同主题各自独立输出
+
+候选清单(格式 id|类型|作者|标题|AI摘要|概念|国家|分级|北京时间):
+"""
+
+
+def _admin_macro_scan(report_date: date) -> List[Dict[str, Any]]:
+    """Admin 订阅 × [T 00:00, T+1 06:00) UTC 轻扫(不取全文)。
+
+    返回行:{id, published_at, channel_type, author, title, clen,
+            summary, concepts, countries, info_level, evidence_level}
+    L4(噪音)在 SQL 排除;未评级(NULL)放行由分拣器判断。
+    """
+    w0 = datetime(report_date.year, report_date.month, report_date.day)
+    w1 = w0 + timedelta(hours=30)
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.id, c.published_at, c.channel_type, c.author_name,
+                       c.title, char_length(coalesce(c.content, '')) AS clen,
+                       t.summary, t.concepts, t.countries,
+                       t.info_level, t.evidence_level
+                FROM subscription_content c
+                JOIN subscription_list l
+                  ON l.user_id = %(uid)s AND l.enabled = true
+                 AND c.channel_type = l.channel_type
+                 AND (c.channel_id = l.channel_identifier::text
+                      OR c.author_identifier = l.channel_identifier::text
+                      OR c.feed_url = l.channel_url
+                      OR c.author_name = l.channel_name)
+                LEFT JOIN subscription_content_tags t
+                  ON t.subscription_content_id = c.id
+                WHERE c.channel_type = ANY(%(types)s)
+                  AND (t.info_level IS NULL OR t.info_level <> 'L4')
+                  AND c.published_at >= %(lo)s AND c.published_at < %(hi)s
+                ORDER BY c.published_at DESC
+                """,
+                {"uid": ADMIN_USER_ID, "types": list(TRIAGE_TYPES),
+                 "lo": w0, "hi": w1},
+            )
+            cols = [d.name for d in cur.description]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _triage_line(row: Dict[str, Any]) -> Optional[str]:
+    """候选行 → 分拣器输入行;低于门槛的渠道/长度返回 None(不进分拣)。"""
+    min_c = _TRIAGE_MIN_CHARS.get(row.get("channel_type"), 0)
+    if (row.get("clen") or 0) < min_c:
+        return None
+    ts = row.get("published_at")
+    try:
+        t_cn = (ts + timedelta(hours=8)).strftime("%m-%d %H:%M")
+    except TypeError:
+        t_cn = ""
+    concepts = ",".join(str(x) for x in (row.get("concepts") or [])[:5])
+    countries = ",".join(str(x) for x in (row.get("countries") or [])[:4])
+    lv = f"{row.get('info_level') or '?'}/{row.get('evidence_level') or '?'}"
+    return "|".join(str(x)[:80] for x in (
+        row["id"], row.get("channel_type"), row.get("author"),
+        (row.get("title") or "").strip(), (row.get("summary") or "").strip(),
+        concepts, countries, lv, t_cn))
+
+
+def _parse_zcode_json(stdout: str) -> Dict[str, Any]:
+    """zcode --json 输出单个 JSON 对象;容错截取首个 { 到末个 }。
+
+    与 run_pipeline._parse_zcode_json 同实现(Stage 0 不能反向 import
+    编排器,保持两份小函数各自独立)。
+    """
+    stdout = stdout.strip()
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError:
+        pass
+    start, end = stdout.find("{"), stdout.rfind("}")
+    if start >= 0 and end > start:
+        return json.loads(stdout[start:end + 1])
+    raise RuntimeError(f"cannot parse zcode output: {stdout[:300]!r}")
+
+
+def _triage_chunk(zcode_bin: str, lines: List[str]) -> List[Dict[str, Any]]:
+    """对一块候选行跑一次无头 zcode 分类,返回该块的入选条目列表。
+
+    单块失败重试 1 次(20s 退避):并行分块的间歇性 provider 错误
+    ("Turn execution failed")曾两次让整轮 triage 静默回退正则——
+    分块级重试把这类抖动消化掉,不再向上抛。
+    """
+    prompt = (_TRIAGE_PROMPT + "\n".join(lines)
+              + "\n\n只输出 JSONL,一行一条,不要包裹在其他文字里。")
+    cmd = [zcode_bin, "-p", prompt, "--json", "--mode", "yolo",
+           "--surface", "terminal"]
+    last_err: Optional[Exception] = None
+    for attempt in (1, 2):
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=_TRIAGE_TIMEOUT_SEC)
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"triage zcode exited {proc.returncode}: "
+                    f"{proc.stderr[-300:]}")
+            out = _parse_zcode_json(proc.stdout)
+            break
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            if attempt == 1:
+                print(f"[triage] chunk failed ({e}); retry in 20s",
+                      flush=True)
+                time.sleep(20)
+    else:
+        raise last_err  # type: ignore[misc]
+    text = (out.get("response") or "").strip()
+    verdicts: List[Dict[str, Any]] = []
+    for ln in text.splitlines():
+        ln = ln.strip().removeprefix("```json").removeprefix("```")
+        if not ln.startswith("{"):
+            continue
+        try:
+            v = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        if (isinstance(v.get("i"), int) and v.get("p") in
+                ("geo", "research", "digest")):
+            verdicts.append({
+                "id": v["i"], "pool": v["p"],
+                "theme": str(v.get("t") or "")[:24],
+                "importance": max(1, min(3, int(v.get("x") or 1))),
+                "drill": bool(v.get("d")),
+            })
+    return verdicts
+
+
+def run_triage(zcode_bin: str, report_date: date,
+               limit: Optional[int] = None) -> Dict[str, int]:
+    """轻扫 → 分块并行分拣。返回统计并写中间文件(由调用方读回)。
+
+    结果缓存到 REPO_ROOT/backend/reports/morning-brief/{date}/triage.json,
+    供 _news_macro_snapshot 组池与人工巡检;失败向上抛(调用方回退正则)。
+    """
+    t_start = time.time()
+    rows = _admin_macro_scan(report_date)
+    lines = [ln for ln in (_triage_line(r) for r in rows) if ln]
+    if limit:
+        lines = lines[:limit]
+    chunks = [lines[i:i + _TRIAGE_CHUNK]
+              for i in range(0, len(lines), _TRIAGE_CHUNK)]
+    verdicts: List[Dict[str, Any]] = []
+    # 2026-11-04:线程池并行分块在本机出现 fork 前死锁(子进程 futex_wait,
+    # 见 1473967 案例)。TRIAGE_WORKERS=1 时完全绕开 executor,主线程串行
+    # fork —— 慢(~2 分钟/块)但稳。默认仍并行,问题复现时环境变量降级。
+    workers = int(os.environ.get("TRIAGE_WORKERS", str(_TRIAGE_WORKERS)))
+    if workers <= 1 or len(chunks) <= 1:
+        for i, ch in enumerate(chunks):
+            t0 = time.time()
+            verdicts.extend(_triage_chunk(zcode_bin, ch))
+            print(f"[triage] chunk {i + 1}/{len(chunks)} done in "
+                  f"{time.time() - t0:.0f}s", flush=True)
+    else:
+        with ThreadPoolExecutor(max_workers=min(workers, len(chunks))) as pool:
+            futs = {pool.submit(_triage_chunk, zcode_bin, ch): i
+                    for i, ch in enumerate(chunks)}
+            for fut in as_completed(futs):
+                verdicts.extend(fut.result())
+    seen: set = set()
+    dedup: List[Dict[str, Any]] = []
+    for v in verdicts:            # 同 id 多块/多层输出以先到为准
+        if v["id"] not in seen:
+            seen.add(v["id"])
+            dedup.append(v)
+    out_dir = REPO_ROOT / "backend" / "reports" / "morning-brief" / report_date.isoformat()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "report_date": report_date.isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "candidates": len(lines),
+        "selected": len(dedup),
+        "chunks": len(chunks),
+        "elapsed_sec": round(time.time() - t_start, 1),
+        "verdicts": dedup,
+    }
+    (out_dir / "triage.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+    stats = {
+        "candidates": len(lines),
+        "selected": len(dedup),
+        "geo": sum(1 for v in dedup if v["pool"] == "geo"),
+        "research": sum(1 for v in dedup if v["pool"] == "research"),
+        "digest": sum(1 for v in dedup if v["pool"] == "digest"),
+        "elapsed_sec": payload["elapsed_sec"],
+    }
+    print(f"[triage] {stats}", flush=True)
+    return stats
+
+
+def load_triage(report_date: date) -> Optional[Dict[str, Any]]:
+    """读取本日 triage.json(快照重跑时复用,不重复花 tokens)。"""
+    p = (REPO_ROOT / "backend" / "reports" / "morning-brief"
+         / report_date.isoformat() / "triage.json")
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _news_macro_snapshot(report_date: date) -> Dict[str, Any]:
+    """宏观地缘素材层(v8.2):优先走 triage(LLM 语义分拣)组池。
+
+    triage.json 存在且有判定 → _news_macro_triage_pools(开放集主题);
+    否则(未跑分拣/结果为空/组池异常)→ _news_macro_regex(v8.1 关键字
+    正则路径,行为与既往一致),保证快照永远可建。
+    """
+    triage = load_triage(report_date)
+    if triage and triage.get("verdicts"):
+        try:
+            return _news_macro_triage_pools(report_date, triage)
+        except Exception as e:  # noqa: BLE001
+            print(f"[news_macro] triage pools failed ({e}); "
+                  f"fallback to regex path", flush=True)
+    return _news_macro_regex(report_date)
+
+
+def _news_macro_triage_pools(report_date: date,
+                             triage: Dict[str, Any]) -> Dict[str, Any]:
+    """按 triage 判定组三层池:选定条目回库取全文(d 系数不再二次过滤,
+    分拣器已按'摘要是否够写'判定;此处仅执行窗口/长度/容量规则)。"""
+    w0 = datetime(report_date.year, report_date.month, report_date.day)
+    digest_lo, digest_hi = (w0 + timedelta(days=1),
+                            w0 + timedelta(hours=30))
+    ids = [v["id"] for v in triage["verdicts"]]
+    verdicts = {v["id"]: v for v in triage["verdicts"]}
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.id, c.published_at, c.channel_type, c.author_name,
+                       c.title, c.content,
+                       t.info_level, t.evidence_level
+                FROM subscription_content c
+                LEFT JOIN subscription_content_tags t
+                  ON t.subscription_content_id = c.id
+                WHERE c.id = ANY(%(ids)s)
+                """,
+                {"ids": ids},
+            )
+            cols = [d.name for d in cur.description]
+            rows = {r[0]: dict(zip(cols, r)) for r in cur.fetchall()}
+    finally:
+        conn.close()
+
+    def _item(rid: int, cap: int) -> Optional[Dict[str, Any]]:
+        row, v = rows.get(rid), verdicts[rid]
+        if not row:
+            return None
+        text = _HTML_TAG_RE.sub(" ", (row.get("content") or "")).strip()
+        ts = row.get("published_at")
+        try:
+            time_cn = (ts + timedelta(hours=8)).strftime("%m-%d %H:%M")
+        except TypeError:
+            time_cn = None
+        return {
+            "published_utc": str(ts)[:16] if ts else None,
+            "time_cn": time_cn,
+            "channel_type": row.get("channel_type"),
+            "author": row.get("author_name"),
+            "title": (row.get("title") or "").strip()[:120],
+            "text": text[:cap],
+            "theme": v.get("theme") or "",
+            "importance": v.get("importance"),
+            "evidence_level": row.get("evidence_level"),
+        }
+
+    def _fill(pool: str, cap: int, max_items: int,
+              pred=None) -> List[Dict[str, Any]]:
+        picked = [v for v in triage["verdicts"] if v["pool"] == pool]
+        picked.sort(key=lambda v: (-v["importance"],
+                                   str(rows.get(v["id"], {}).get("published_at"))))
+        out, seen = [], set()
+        for v in picked:
+            it = _item(v["id"], cap)
+            if not it or (pred and not pred(it, rows.get(v["id"]))):
+                continue
+            key = re.sub(r"\s+", "", it["text"])[:80]
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(it)
+            if len(out) >= max_items:
+                break
+        return out
+
+    digest = _fill("digest", _CN_DIGEST_CAP, _CN_DIGEST_MAX,
+                   pred=lambda it, row: (row["published_at"] >= digest_lo
+                                         and row["published_at"] < digest_hi))
+    research = _fill("research", _CN_RESEARCH_CAP, _CN_RESEARCH_MAX,
+                     pred=lambda it, row: (
+                         row["channel_type"] != "news"
+                         and (row["channel_type"] != "twitter"
+                              or len(row["content"] or "")
+                              >= MACRO_TWITTER_MIN_CHARS)))
+    geo = _fill("geo", _CN_GEO_CAP, _CN_GEO_MAX)
+
+    n_sources = len({r.get("author") for r in digest + research + geo})
+    out: Dict[str, Any] = {
+        "filter": (f"Admin(user_id={ADMIN_USER_ID})订阅 × triage(LLM分拣 "
+                   f"{triage.get('candidates')}候选→选中{triage.get('selected')}) "
+                   f"/ 命中源{n_sources}个;主题开放集,条目带 theme/evidence_level"),
+        "digest": digest,
+        "research": research,
+        "geo": geo,
+        "triage": {k: triage.get(k) for k in
+                   ("candidates", "selected", "chunks", "elapsed_sec",
+                    "generated_at")},
+    }
+    if not digest:
+        out["error_digest"] = "no digest items selected"
+        if report_date.weekday() == 4:
+            out["note"] = ("Friday T: 隔夜全球要闻下周一晨才发,digest 层空属"
+                           "已知边界,由 geo/research + 英文 wire 兜底")
+    if not research:
+        out["error_research"] = "no research items selected"
+    if not geo:
+        out["error_geo"] = "no geo items selected"
+    return out
+
+
+def _news_macro_regex(report_date: date) -> Dict[str, Any]:
+    """宏观地缘素材层 — Admin 订阅驱动,digest / research / geo 三子层。
+
+    源池 = subscription_list 中 Admin(user_id=ADMIN_USER_ID)且 enabled 的全部
+    订阅(zsxq/twitter/news/substack/youtube 的文本内容;podcast 排除 —— 节目
+    转录属 01-06 节的素材边界),中英混合:
+    digest   订阅源的每日晨报整篇(标题模式:隔夜要闻/利率早报/复盘笔记/
+             盘前播报),窗口 = 北京 T+1 早 8-14 点
+    research 宏观解读(中英关键词:Fed/FOMC/CPI/PMI/GDP/加息/宏观/inflation/
+             rate hike…),窗口 [T 00:00, T+1 06:00) UTC;推特源要求
+             ≥250 字符的解读形内容,短快讯留给 news.flash 事实层
+    geo      地缘关键词快讯(中英:伊朗/霍尔木兹/俄乌/加沙/Iran/Hormuz/
+             Ukraine/Gaza/tariff…),同窗,跨源同文去重封顶
+    """
+    w0 = datetime(report_date.year, report_date.month, report_date.day)
+    w_research = (w0, w0 + timedelta(hours=30))            # [T 00:00, T+1 06:00) UTC
+    w_digest = (w0 + timedelta(days=1), w0 + timedelta(hours=30))
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            def _fetch(window: tuple, types: tuple) -> List[Dict[str, Any]]:
+                # Admin 订阅驱动:JOIN subscription_list(user_id=1, enabled),
+                # 键覆盖 channel_id / author_identifier / feed_url / channel_url /
+                # author_name(channel_identifier 与 author_name 任一命中即可)
+                cur.execute(
+                    """
+                    SELECT c.published_at, c.channel_type, c.author_name,
+                           c.title, c.content
+                    FROM subscription_content c
+                    JOIN subscription_list l
+                      ON l.user_id = %(uid)s AND l.enabled = true
+                     AND c.channel_type = l.channel_type
+                     AND (c.channel_id = l.channel_identifier::text
+                          OR c.author_identifier = l.channel_identifier::text
+                          OR c.feed_url = l.channel_url
+                          OR c.author_name = l.channel_name)
+                    WHERE c.channel_type = ANY(%(types)s)
+                      AND c.published_at >= %(lo)s AND c.published_at < %(hi)s
+                    ORDER BY c.published_at DESC
+                    """,
+                    {"uid": ADMIN_USER_ID, "types": list(types),
+                     "lo": window[0], "hi": window[1]},
+                )
+                cols = [d.name for d in cur.description]
+                return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+            # digest:任意文本源(标题模式,实际命中=星球晨报)
+            digest_rows = _fetch(w_digest, ("zhishixingqiu", "twitter", "news",
+                                            "substack", "youtube"))
+            # research:解读形内容 —— 星球/substack/youtube 全收,推特只要
+            # ≥250 字符的长解读;news 全文类型不进(与 news.wire 层重复)
+            research_rows = _fetch(w_research, ("zhishixingqiu", "substack",
+                                                "youtube", "twitter"))
+            # geo:全部文本源(含 news —— CCTV 国际联播快讯只在此层可得)
+            geo_rows = _fetch(w_research, ("zhishixingqiu", "twitter", "news",
+                                           "substack", "youtube"))
+    finally:
+        conn.close()
+
+    def _norm(row: Dict[str, Any]) -> Dict[str, Any]:
+        ts = row.get("published_at")
+        try:
+            time_cn = (ts + timedelta(hours=8)).strftime("%m-%d %H:%M")
+        except TypeError:
+            time_cn = None
+        text = _HTML_TAG_RE.sub(" ", (row.get("content") or "")).strip()
+        return {
+            "published_utc": str(ts)[:16] if ts else None,
+            "time_cn": time_cn,
+            "channel_type": row.get("channel_type"),
+            "author": row.get("author_name"),
+            "title": (row.get("title") or "").strip()[:120],
+            "text": text,
+        }
+
+    def _select(rows: List[Dict[str, Any]], title_re, cap: int,
+                max_items: int, content_re=None,
+                geo_min_terms: int = 0) -> List[Dict[str, Any]]:
+        out, seen = [], set()
+        for r in rows:
+            min_chars = (MACRO_TWITTER_MIN_CHARS
+                         if r.get("channel_type") == "twitter" else 60)
+            if len(r["text"]) < min_chars:
+                continue
+            if title_re is not None and not title_re.search(r["title"]):
+                continue
+            if content_re is not None:
+                blob = f"{r['title']} {r['text']}"
+                if geo_min_terms:
+                    # 不同关键词命中数门槛(同词多次出现算 1)
+                    if len(set(m.group(0).lower()
+                               for m in content_re.finditer(blob))) < geo_min_terms:
+                        continue
+                elif not content_re.search(blob):
+                    continue
+            key = re.sub(r"\s+", "", r["text"])[:80]
+            if key in seen:
+                continue
+            seen.add(key)
+            r["text"] = r["text"][:cap]
+            out.append(r)
+            if len(out) >= max_items:
+                break
+        return out
+
+    digest = _select([_norm(r) for r in digest_rows], MACRO_DIGEST_TITLE_RE,
+                     _CN_DIGEST_CAP, _CN_DIGEST_MAX)
+    # research 三遍:星球源按标题(券商宏观日报)优先,推特/youtube/substack
+    # 按正文关键词(推特另设 ≥250 字符门槛),其余名额由后者补位
+    norm_research = [_norm(r) for r in research_rows]
+    research_core = _select(
+        norm_research, MACRO_RESEARCH_TITLE_RE, _CN_RESEARCH_CAP,
+        _CN_RESEARCH_MAX)
+    research_kw = _select(
+        [r for r in norm_research
+         if r.get("channel_type") != "zhishixingqiu"],
+        None, _CN_RESEARCH_CAP, _CN_RESEARCH_MAX,
+        content_re=MACRO_RESEARCH_BODY_RE)
+    seen_r = {re.sub(r"\s+", "", r["text"])[:80] for r in research_core}
+    research = research_core + [
+        r for r in research_kw
+        if re.sub(r"\s+", "", r["text"])[:80] not in seen_r
+    ][:_CN_RESEARCH_MAX - len(research_core)]
+    geo_all = [_norm(x) for x in geo_rows]
+    # 标题命中的地缘条目优先占名额(真地缘新闻标题必含主题词;财报文/
+    # 个股文的 incidental 正文命中排后);sort 稳定,组内保持时间倒序
+    geo_all.sort(key=lambda r: 0 if MACRO_GEO_RE.search(r["title"]) else 1)
+    geo = _select(geo_all, None, _CN_GEO_CAP, _CN_GEO_MAX,
+                  content_re=MACRO_GEO_RE, geo_min_terms=MACRO_GEO_MIN_TERMS)
+
+    n_sources = len({r.get("author") for r in digest + research + geo})
+    out: Dict[str, Any] = {
+        "filter": (f"Admin(user_id={ADMIN_USER_ID})订阅 中英素材 / "
+                   f"digest:标题模式 北京T+1晨 / research:标题+关键词 "
+                   f"[T,T+1 06:00)UTC / geo:≥{MACRO_GEO_MIN_TERMS}个不同关键词"
+                   f"(命中源{n_sources}个)"),
+        "digest": digest,
+        "research": research,
+        "geo": geo,
+    }
+    if not digest:
+        out["error_digest"] = "no digest items in window"
+        if report_date.weekday() == 4:
+            out["note"] = ("Friday T: 隔夜全球要闻下周一晨才发,digest 层空属"
+                           "已知边界,由 geo/research + 英文 wire 兜底")
+    if not research:
+        out["error_research"] = "no research items in window"
+    if not geo:
+        out["error_geo"] = "no geo items in window"
+    return out
 
 
 def resolve_report_date(conn_date: Optional[str]) -> date:
@@ -732,6 +1552,31 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
         sources["news"] = None
         errors["news"] = str(e)[:300]
 
+    # 宏观速览底座 + FOMC 表(v8,新 Macros):四经济体指标表 / 决议·定价·声明
+    try:
+        sources["macro_dashboard"] = _macro_dashboard_snapshot(report_date)
+    except Exception as e:  # noqa: BLE001
+        sources["macro_dashboard"] = None
+        errors["macro_dashboard"] = str(e)[:300]
+    try:
+        sources["fomc"] = _fomc_snapshot(report_date)
+    except Exception as e:  # noqa: BLE001
+        sources["fomc"] = None
+        errors["fomc"] = str(e)[:300]
+
+    # 宏观地缘素材层(v8.1,新 Macros):Admin 订阅驱动,digest/research/geo
+    try:
+        news_macro = _news_macro_snapshot(report_date)
+        sources["news_macro"] = news_macro or None
+        for k in ("digest", "research", "geo"):
+            if news_macro.get(f"error_{k}"):
+                errors[f"news_macro.{k}"] = news_macro[f"error_{k}"]
+        if isinstance(news_macro.get("note"), str):
+            notes["news_macro.digest"] = news_macro["note"]
+    except Exception as e:  # noqa: BLE001
+        sources["news_macro"] = None
+        errors["news_macro"] = str(e)[:300]
+
     # cross_asset(market_data_eod,可回溯历史)与 finviz(整表刷新的"当前状态",
     # 历史日期无快照)必须独立容错 —— finviz 失败不能连带丢掉跨资产行情。
     market: Dict[str, Any] = {}
@@ -801,6 +1646,14 @@ def main() -> int:
     parser.add_argument("--out", help="输出路径;缺省 backend/reports/morning-brief/{date}/snapshot.json")
     parser.add_argument("--no-backfill", action="store_true",
                         help="跳过 EODHD actual 回填(调试用;省 API 配额)")
+    parser.add_argument("--no-triage", action="store_true",
+                        help="跳过 LLM 素材分拣,news_macro 走 v8.1 关键字正则路径")
+    parser.add_argument("--force-triage", action="store_true",
+                        help="忽略已存在的 triage.json,强制重跑分拣(默认复用,不重复花 tokens)")
+    parser.add_argument("--triage-limit", type=int, default=None,
+                        help="只分拣前 N 条候选(冒烟测试用)")
+    parser.add_argument("--zcode-bin", default=os.environ.get(
+        "ZCODE_BIN", DEFAULT_ZCODE_BIN))
     args = parser.parse_args()
 
     report_date = resolve_report_date(args.date)
@@ -808,6 +1661,20 @@ def main() -> int:
         REPO_ROOT / "backend" / "reports" / "morning-brief" / report_date.isoformat() / "snapshot.json"
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 素材 triage(v8.2):先分拣写 triage.json,再建快照(组池时读取)。
+    # 失败不阻塞 —— _news_macro_snapshot 自动回退正则路径。
+    if not args.no_triage:
+        if not args.force_triage and load_triage(report_date):
+            print(f"[triage] reuse existing triage.json for "
+                  f"{report_date} (--force-triage 重跑)", flush=True)
+        else:
+            try:
+                run_triage(args.zcode_bin, report_date,
+                           limit=args.triage_limit)
+            except Exception as e:  # noqa: BLE001
+                print(f"[triage] FAILED ({e}); news_macro falls back to "
+                      f"regex", flush=True)
 
     snapshot = build_snapshot(
         report_date, do_backfill=not args.no_backfill, out_dir=out_path.parent)

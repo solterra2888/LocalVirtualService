@@ -12,6 +12,10 @@ Twitter 智能路由:
   - News (白名单来源, 如 CCTV) → content_tag_feeds_v1 (LLM 打标)
   - News (EODHD 等有 API tags 来源) → 轻量映射 map_api_tags() (零 LLM)
 
+信息分级 (2026-11): 两个 LLM 模板额外输出 L/E 双轴
+(info_level L1-L4 候选重要度 × evidence_level E1-E3 证据等级),
+标准见 tools/morning-brief/INFO_GRADING_STANDARD.md; EODHD 映射按来源规则补 E2.
+
 设计文档: docs/instructions/FEEDS_AUTO_TAGGING_PLAN.md
 """
 import json
@@ -35,6 +39,13 @@ TWEET_SIGNAL_TEMPLATE_CODE = "tweet_signal_v1"
 TAG_SCHEMA_FEEDS_V1 = "feeds_v1"
 TAG_SCHEMA_TWEET_SIGNAL_V1 = "tweet_signal_v1"
 TAG_SCHEMA_NEWS_EODHD_V1 = "news_eodhd_v1"
+
+# 信息分级 L/E 双轴 (tools/morning-brief/INFO_GRADING_STANDARD.md):
+#   L (候选重要度, 对内容所聚焦标的/行业的投资判断冲击潜力) × E (证据等级, 来源属性)
+_INFO_LEVELS = {"L1", "L2", "L3", "L4"}
+_EVIDENCE_LEVELS = {"E1", "E2", "E3"}
+# EODHD 等聚合 API tags 来源: 官方/权威新闻聚合, 无一手核验 → 保守 E2
+NEWS_API_TAG_EVIDENCE_LEVEL = "E2"
 
 _CASHTAG_RE = re.compile(r"\$[A-Z]{1,5}\b")
 
@@ -275,6 +286,19 @@ class FeedContentTaggingService:
             return TAG_SCHEMA_TWEET_SIGNAL_V1
         return TAG_SCHEMA_FEEDS_V1
 
+    @staticmethod
+    def _normalize_grade(value, allowed: set, axis: str):
+        """归一并校验 L/E 分级值; 非法或缺失返回 None (fail soft, 不阻断打标主链路)."""
+        if value is None:
+            return None
+        normalized = str(value).strip().upper()
+        # 容错: LLM 偶发只给数字 ("2" → "L2" / "E2")
+        if len(normalized) == 1 and normalized.isdigit():
+            normalized = f"{axis}{normalized}"
+        if normalized not in allowed:
+            return None
+        return normalized
+
     def _normalize_tag_data(
         self, tag_data: Dict[str, Any], schema_version: str
     ) -> Dict[str, Any]:
@@ -311,6 +335,25 @@ class FeedContentTaggingService:
         tag_data.setdefault("stance", None)
         tag_data.setdefault("signal_type", None)
         tag_data.setdefault("importance", None)
+
+        # 信息分级 L/E 双轴 (非法值/缺失容错为 None, 不阻断主链路)
+        raw_info = tag_data.get("info_level")
+        raw_evidence = tag_data.get("evidence_level")
+        tag_data["info_level"] = self._normalize_grade(
+            raw_info, _INFO_LEVELS, "L"
+        )
+        tag_data["evidence_level"] = self._normalize_grade(
+            raw_evidence, _EVIDENCE_LEVELS, "E"
+        )
+        if raw_info and not tag_data["info_level"]:
+            logger.warning(
+                "Feeds 打标 info_level 非法已置空: %r (期望 L1-L4)", raw_info
+            )
+        if raw_evidence and not tag_data["evidence_level"]:
+            logger.warning(
+                "Feeds 打标 evidence_level 非法已置空: %r (期望 E1-E3)",
+                raw_evidence,
+            )
 
         if schema_version == TAG_SCHEMA_TWEET_SIGNAL_V1:
             for key in ("sector", "industry", "sector_en", "industry_en"):
@@ -349,7 +392,8 @@ class FeedContentTaggingService:
                        additional_tags, confidence, reasoning, summary,
                        channel_type, tagged_by, tagged_at,
                        created_at, updated_at,
-                       people, countries, tag_schema_version
+                       people, countries, tag_schema_version,
+                       info_level, evidence_level
                 FROM subscription_content_tags
                 WHERE subscription_content_id = %s
                 """,
@@ -384,6 +428,8 @@ class FeedContentTaggingService:
                 "people": people,
                 "countries": countries,
                 "tag_schema_version": row[19] or TAG_SCHEMA_FEEDS_V1,
+                "info_level": row[20],
+                "evidence_level": row[21],
             }
         finally:
             conn.close()
@@ -450,6 +496,9 @@ class FeedContentTaggingService:
             "concepts": [str(c) for c in categories if c],
             "people": [],
             "countries": [],
+            # 信息分级: API tags 是聚合来源 (非一手核验) → 保守 E2; L 轴无文本依据留空
+            "info_level": None,
+            "evidence_level": NEWS_API_TAG_EVIDENCE_LEVEL,
             "summary": None,
             "confidence": None,
             "reasoning": None,
@@ -568,11 +617,20 @@ class FeedContentTaggingService:
             if override:
                 llm_model = override
 
+        # 作者标识 → E 级 (证据等级) 判断线索; 官方机构账号 vs 个人 KOL
+        author_parts = []
+        if (row.get("author_name") or "").strip():
+            author_parts.append(row["author_name"].strip())
+        if (row.get("author_identifier") or "").strip():
+            author_parts.append(f"@{row['author_identifier'].strip()}")
+        author_context = " / ".join(author_parts)
+
         analysis_result = await self.llm_service.analyze_file_content(
             file_content=text,
             file_name=f"feed:{resolved_channel}:{content_id}",
             custom_variables={
                 "channel_type": resolved_channel,
+                "author_context": author_context,
                 "additional_context": additional_context or "",
             },
             user_id=tagged_by,
@@ -598,6 +656,24 @@ class FeedContentTaggingService:
 
         tag_data = self._normalize_tag_data(tag_data, schema_version)
 
+        # L/E 强制门: 模板已要求 info_level/evidence_level 必填, 缺失说明模型未遵循
+        # (实测 qwen-plus 对示例形状遵循弱于 prose, 曾出现 ~80% 缺失)。
+        # 这里 raise 而非静默置 NULL, 让 Celery autoretry 重试 (4 次尝试), 避免大批
+        # "打标成功但无分级"的隐性劣化; 持续失败则显式暴露而非无声通过。
+        if not tag_data.get("info_level") or not tag_data.get("evidence_level"):
+            missing = [
+                k for k in ("info_level", "evidence_level") if not tag_data.get(k)
+            ]
+            self.log(
+                f"LLM 输出缺少信息分级字段 {missing}, 触发重试: "
+                f"content_id={content_id} template={picked_template}",
+                level="warning",
+            )
+            raise ValueError(
+                f"Feeds 打标 LLM 输出缺少信息分级字段: {missing} "
+                f"(content_id={content_id})"
+            )
+
         save_result = self.save_tags(
             content_id=content_id,
             channel_type=resolved_channel,
@@ -621,6 +697,7 @@ class FeedContentTaggingService:
             f"tickers={len(tag_data.get('tickers') or [])} "
             f"people={len(tag_data.get('people') or [])} "
             f"countries={len(tag_data.get('countries') or [])} "
+            f"grade={tag_data.get('info_level')}/{tag_data.get('evidence_level')} "
             f"summary_len={len(tag_data.get('summary') or '')} "
             f"耗时={processing_time:.2f}s"
         )
@@ -679,6 +756,9 @@ class FeedContentTaggingService:
             confidence = tag_data.get("confidence")
             reasoning = tag_data.get("reasoning")
             summary = tag_data.get("summary")
+            # 信息分级 L/E (未升级模板/LLM 缺失时为 NULL = 未评级)
+            info_level = tag_data.get("info_level")
+            evidence_level = tag_data.get("evidence_level")
 
             ticker_jsonb = Json(tickers) if tickers else None
             concepts_jsonb = Json(concepts)
@@ -710,6 +790,7 @@ class FeedContentTaggingService:
                     additional_tags,
                     confidence, reasoning, summary,
                     channel_type, tag_schema_version,
+                    info_level, evidence_level,
                     tagged_by, tagged_at
                 ) VALUES (
                     %s,
@@ -717,6 +798,7 @@ class FeedContentTaggingService:
                     %s, %s, %s, %s,
                     %s,
                     %s, %s, %s,
+                    %s, %s,
                     %s, %s,
                     %s, CURRENT_TIMESTAMP
                 )
@@ -735,6 +817,8 @@ class FeedContentTaggingService:
                     summary = EXCLUDED.summary,
                     channel_type = EXCLUDED.channel_type,
                     tag_schema_version = EXCLUDED.tag_schema_version,
+                    info_level = EXCLUDED.info_level,
+                    evidence_level = EXCLUDED.evidence_level,
                     tagged_by = EXCLUDED.tagged_by,
                     tagged_at = EXCLUDED.tagged_at,
                     updated_at = CURRENT_TIMESTAMP
@@ -747,6 +831,7 @@ class FeedContentTaggingService:
                     Json(additional_tags),
                     confidence, reasoning, summary,
                     channel_type, tag_schema_version,
+                    info_level, evidence_level,
                     tagged_by,
                 ),
             )
@@ -802,6 +887,21 @@ class FeedContentTaggingService:
                 if key in updates:
                     update_fields.append(f"{col} = %s")
                     params.append(updates[key])
+
+            # 信息分级 L/E: 归一化 + 枚举校验 (None = 清除评级)
+            grade_fields = {
+                "info_level": ("info_level", _INFO_LEVELS, "L"),
+                "evidence_level": ("evidence_level", _EVIDENCE_LEVELS, "E"),
+            }
+            for key, (col, allowed, axis) in grade_fields.items():
+                if key in updates:
+                    grade = self._normalize_grade(updates.get(key), allowed, axis)
+                    if updates.get(key) is not None and grade is None:
+                        raise ValueError(
+                            f"非法 {key}: {updates[key]!r} (期望 {sorted(allowed)})"
+                        )
+                    update_fields.append(f"{col} = %s")
+                    params.append(grade)
 
             if "tickers" in updates:
                 tickers = updates["tickers"] or []

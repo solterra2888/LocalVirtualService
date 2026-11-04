@@ -1,22 +1,20 @@
 # -*- coding: utf-8 -*-
-"""章节任务书与核验任务书(GuanHe 风格 Daily Market Brief,v7)。
+"""章节任务书与核验任务书(xiao 式晨报,v8 Macros)。
 
-v7 对齐 CNT 参考稿的文风(2026-11 评估):
-  - 正文只给原始出处(Reuters/FT/CNBC/券商…),管线标签不进正文;
-    可追溯性全部落在 audit 注释 + claims 台账
-  - 正文不得暴露生产过程(snapshot/transcript/on air/节目名/不可得)
-  - 数字: 一位小数、动词后不带符号、$25bn 写法、同一事实一个数
-  - Narrative = 2–3 句纯论点; Drivers 每块 ≤3 条 + 一句行动建议
-  - Sector Action / Deep Dives 按市场重要性选题,节目只是素材之一
-  - Deep Dives = What happened / 标签式要点 / Management said /
-    Analyst reaction(券商·评级·目标价) / 可选 Bear case
-  - Macros: Releases 仅美国一线白名单; Rate Expectations/跨资产仅极端行情;
-    Forward Catalysts 恒在、只收未发生事件
-  - 数字对账由 verify_checks.py 执行; ZCode 核验只做叙事质量审查
+v8 对齐 report_from_xiao 参考稿,Macros 推倒重来为「回顾/当下/展望」五文件:
+  07 宏观速览   确定性渲染(编排器,零 LLM):四经济体指标表 + 商品行情 + 前瞻日历
+  08 回顾·宏观数据  边际变化:多国数据意外(美欧中日),券商宏观解读挂名
+  09 回顾·地缘政治 + 焦点事件  主题块按快照命中量开块(美伊/俄乌/中东/贸易)
+  10 美联储观察 利率与决议(投票/异议)+ 声明措辞对比 + 市场定价路径 + 官员表态
+  11 展望与策略 第二段综合:大事预判 / 主线跟踪 / 投资建议(直接建议)
+v8 新信源: macro_dashboard(指标表底座)/ fomc(决议·定价·声明)/
+news_macro(宏观地缘素材层:digest 晨间日报 · research 宏观解读 · geo 地缘快讯;
+源池 = Admin user_id=1 的订阅,中英混合)。
+新 Macros 完全不读节目转录;节目素材只属于 01-06。
 
-写作按信源分三组并行:overall_market(narrative/drivers/positioning)、
-company_desk(sector_action/deep_dives)、macro(日历 + macro_pillars)。
-Today's Movers 由编排器从 S&P 500 成分股快照确定性渲染,不经 LLM。
+写作按信源分组两段并行:第一段 overall_market(narrative/drivers/positioning)、
+company_desk(sector_action/deep_dives)、movers 与 macro_dashboard(确定性)、
+macro_review、geopolitics、fomc 六组;第二段 outlook 读第一段成品做综合。
 """
 
 from typing import Any, Dict, Optional
@@ -64,13 +62,18 @@ ATTRIBUTION_MAP = {
     "(nowcasts)": "macro_pillars.nowcasts",
     "(news flash)": "news.flash",
     "(newswire)": "news.wire / news.calls",
+    # v8 Macros 新信源(内部标签,同其余标签一样禁入正文)
+    "(macro dashboard)": "macro_dashboard",
+    "(FOMC decisions)": "fomc.decisions / fomc.statement / fomc.path",
+    "(macro daily)": "news_macro.digest / news_macro.research",
+    "(macro geo)": "news_macro.geo",
 }
 
 # 正文禁用的管线标签(读者看到的出处只能是原始发布方/机构)
 PIPELINE_TAGS = tuple(k for k in ATTRIBUTION_MAP if k != "(FRED)" and k != "(Finviz)")
 
-# 章节 × 信源矩阵(v7: 节目转录为叙事素材; news flash/wire 补事件选题与
-# 分析师评级; drivers 双引擎 = 节目块 + 新闻事件块; deep_dives 按市场重要性选题)
+# 章节 × 信源矩阵(v8: 节目转录为 01-06 素材; Macros 五节用
+# macro_dashboard/fomc/news_macro + 结构化层,完全不读节目转录)
 SECTION_SOURCE_MATRIX = {
     "narrative": {"(The Close)", "(cross-asset)", "(breadth)",
                   "(news flash)"},
@@ -86,10 +89,19 @@ SECTION_SOURCE_MATRIX = {
     "movers": {"(Finviz)", "(earnings calendar)"},
     "deep_dives": {"(Closing Bell)", "(The Close)", "(Finviz)",
                    "(earnings calendar)", "(news flash)", "(newswire)"},
-    "macro": {"(economic calendar)", "(Treasury curve)", "(FRED)", "(cross-asset)",
-              "(fed funds futures)", "(Fed calendar)", "(auction calendar)",
-              "(nowcasts)", "(The Close)",
-              "(earnings calendar)", "(news flash)", "(newswire)"},
+    # ── v8 Macros(08-11 为 LLM 节;07 确定性渲染,不写 audit 注释) ──
+    "macro_dashboard": {"(macro dashboard)", "(economic calendar)",
+                        "(cross-asset)", "(Fed calendar)"},
+    "macro_review": {"(economic calendar)", "(FRED)", "(cross-asset)",
+                     "(fed funds futures)", "(macro daily)",
+                     "(news flash)", "(newswire)"},
+    "geopolitics": {"(macro geo)", "(macro daily)", "(news flash)", "(newswire)",
+                    "(cross-asset)"},
+    "fomc": {"(FOMC decisions)", "(fed funds futures)", "(economic calendar)",
+             "(FRED)", "(news flash)", "(newswire)"},
+    "outlook": {"(fed funds futures)", "(FOMC decisions)",
+                "(economic calendar)", "(cross-asset)", "(macro daily)",
+                "(macro geo)", "(news flash)", "(newswire)"},
 }
 
 
@@ -99,9 +111,11 @@ def _style_rules(style: str) -> str:
     voice = ("\n   中文正文同样不得出现:快照、转录、节目、主持人、不可得、口径、数据层。"
              if style == "cn" else "")
     return f"""\
-4. Output language: {p['body_language']}. Keep section headings in English exactly
-   as specified (house style). Keep tickers ($MU, CCI), company/person names
-   and all numbers in their original form.{headline}{voice}
+4. Output language: {p['body_language']}. Keep section headings exactly as each
+   task specifies (house style: Sections 01–06 keep their English headings;
+   the Macros sections 07–11 use the Chinese headings given in their tasks).
+   Keep tickers ($MU, CCI), company/person names and all numbers in their
+   original form.{headline}{voice}
 """
 
 
@@ -154,12 +168,36 @@ HARD RULES (violating any of these fails pipeline verification):
    absent from the snapshot, that show's material is unavailable — do not
    paraphrase from memory.
    NEWS LAYER: sources.news.flash[] are same-day squawk/headline tweets
-   ({{time_et, author, text, tickers}}); sources.news.wire[] are full-text
-   articles (Yahoo Finance / Seeking Alpha); sources.news.calls[] are
+   ({{time_et, author, text, tickers, info_level, evidence_level}}) and
+   sources.news.wire[] are full-text articles, both drawn from Admin's
+   subscribed sources and graded L1–L4 (importance) / E1–E3 (evidence);
+   sources.news.calls[] are
    earnings-call insight excerpts carrying VERBATIM management quotes.
    When the same number exists in the structured data layer (market,
    earnings_calendar, economic_events, macro_pillars), use that value
    instead of the show/news text.
+   MACROS LAYER (Sections 07–11 only; those sections never read show
+   transcripts): sources.macro_dashboard.countries is a curated per-economy
+   table of the latest PUBLISHED values (policy_rate / growth / inflation /
+   pmi / labor, each row {{event, comparison, period, date, actual,
+   forecast, previous}}); sources.fomc carries decisions[] (rate range bp,
+   vote split, dissenters with their stated reasons), path.meetings[]
+   (futures pricing for future meetings) and statement / statement_prev
+   (full statement texts for language comparison); sources.news_macro has
+   digest[] (human-curated daily briefs), research[] (macro interpretation
+   — broker notes name the ORIGINATING broker in the body; English macro
+   voices included) and geo[] (geopolitical items in Chinese OR English),
+   each item {{time_cn (Beijing), author, title, text, theme, importance,
+   evidence_level}} (theme/importance come from semantic triage). The material is
+   bilingual: quote/paraphrase Chinese items in Chinese prose, English
+   items in Chinese prose with the original English term kept where it is
+   the house term (FOMC, CPI, Hormuz).
+   EVIDENCE LEVELS: news and macro material items may carry evidence_level.
+   E3 = single-source / unverified (KOL views, rumors): any fact drawn from
+   an E3 item MUST read as unverified (「据…报道」「未经证实」style) and may
+   never be stated as established fact. E1 = primary official disclosure;
+   E2 = reliable professional coverage — state directly with the outlet
+   credited.
 2. Every number you state must exist in snapshot.json. If absent, leave the
    number (or the sentence) out.
 3. Write the section to the exact output file specified below, as Markdown,
@@ -194,7 +232,8 @@ HARD RULES (violating any of these fails pipeline verification):
    - Never use pipeline labels as credits: (The Close), (Closing Bell),
      (cross-asset), (sector averages), (breadth), (earnings calendar),
      (economic calendar), (Treasury curve), (fed funds futures), (Fed
-     calendar), (auction calendar), (nowcasts), (news flash), (newswire).
+     calendar), (auction calendar), (nowcasts), (news flash), (newswire),
+     (macro dashboard), (FOMC decisions), (macro daily), (macro geo).
    - Judgment is welcome in the analyst's voice (the action bullet of a
      block, a "so what" clause), but never dress an inference up as a
      reported fact.
@@ -427,125 +466,181 @@ Each file also gets its own claims ledger (rule 11).
 """
 
 
-def _macro_task(blocks: Dict[str, Any]) -> str:
-    """MACROS 任务书按块矩阵动态拼装(GuanHe 现行版式 2026-10-12+)。
-
-    blocks 由编排器从快照确定性判定:
-      releases            T 日美国一线白名单事件(最多 2 个)
-      rate_expectations   周五或极端行情
-      cross_asset_review  同 rate_expectations
-      forward             恒 True
-      selected_releases   选中的事件列表(供任务书点名)
-    """
-    parts = ["""\
-## Section 7 — Macros
-
-Write "## Macros" with the blocks below, in the order given. A block listed as
-OFF must NOT appear in your output at all (its absence is correct house style:
-the Macros section flexes with the calendar).
-
-Numbers and calendar facts come from economic_events + macro_pillars +
-earnings_calendar. Calendar `time`/`date` are UTC — ALWAYS quote times from the
-`time_et` field (US Eastern; use `date_et` when present), never the raw `time`.
-Rows with the same event name but a different `comparison` (mom / yoy / level)
-are different measures — do not mix their actual/est/prior. Sell-side / guest
-reaction quotes for Releases and Rate Expectations may come from The Close
-transcript only. Central-bank / government / policy headlines may come from
-news.flash / news.wire. Rates, curve moves and odds already discussed in Top
-Market Drivers are not repeated here."""]
-
-    selected = blocks.get("selected_releases") or []
-    if blocks.get("releases") and selected:
+def _macro_review_task(blocks: Dict[str, Any]) -> str:
+    """08 回顾·宏观数据任务书(块注入:review_releases = 各国选中事件)。"""
+    sel = blocks.get("review_releases") or {}
+    lines = []
+    for c, rows in sel.items():
         def _fmt(e: Dict[str, Any]) -> str:
             cmp_ = f" [{e['comparison']}]" if e.get("comparison") else ""
-            when = f" @ {e['time_et']} ET" if e.get("time_et") else ""
-            s = (f"{e.get('event', '?')}{cmp_}{when} (actual={e.get('actual')}, "
-                 f"est={e.get('forecast')}, prior={e.get('previous')})")
-            rel = e.get("related") or []
-            if rel:
-                s += " + related rows: " + ", ".join(
-                    f"{r.get('event')}[{r.get('comparison') or 'level'}]"
-                    f"={r.get('actual')}" for r in rel)
-            return s
-        names = "; ".join(_fmt(e) for e in selected)
-        parts.append(f"""\
+            return (f"{e.get('event', '?')}{cmp_} {e.get('period') or ''} "
+                    f"(actual={e.get('actual')}, est={e.get('forecast')}, "
+                    f"prior={e.get('previous')}, {e.get('date')})")
+        lines.append(f"  - {c}: " + "; ".join(_fmt(e) for e in rows))
+    selected = "\n".join(lines) if lines else "  (none)"
 
-### Releases (ON)
-Write "#### Releases" then one "#### <Event Name>" subsection for EACH of these
-selected events ONLY (max 2; do not invent others): {names}
+    return f"""\
+## Section 8 — 回顾 · 宏观数据
 
-For each event:
-- **Headline line:** house style `**+29K** (est: +90K, prior: +162K → +133K rev)`
-  using economic_events fields (and prior revision only if present in snapshot).
-- 3–5 detail bullets: subreads / components / revisions / "highest since" ONLY
-  when backed by macro_pillars.fred_ranks.*.claim or release_series.
-- 1–3 **Sell-Side Reaction** bullets: named economist + firm + view, ONLY if
-  present in The Close transcript. If no quote exists, omit them.""")
+Write "## 回顾 · 宏观数据", then "### 边际变化" with 3–6 bullets (≤45 words
+each), Chinese prose, ranked by market impact — not by country. ONLY the
+releases selected below; a country not listed must NOT get its own bullet
+(its levels already sit in the Macro Dashboard table).
+
+Selected releases (published with actual in [T-2, T]):
+{selected}
+
+Content rules:
+- Each bullet: what printed, vs estimate/prior when both exist — house style
+  「9月CPI同比 3.7%(预期 3.6%,前值 3.4%)」— then ONE clause of why it
+  matters (direction of surprise, trend break, revision). Same event name with
+  different comparison (mom/yoy/水平) is a different measure; never mix them.
+- Do NOT restate a number that is already a cell of the Macro Dashboard table
+  (Section 07 prints levels; this section is the CHANGE story).
+- Interpretation from macro research material (sources.news_macro.research)
+  may follow a fact, credited to the ORIGINATING institution named in the
+  item (华创宏观/华泰宏观/申万宏源… for broker notes; Kobeissi/Anna Wong/
+  Steno 等 for English macro voices — use name as posted). At most one
+  credit per bullet. The posting community is a relay, not a source.
+- PMI/景气 lines may bundle two economies in one bullet when they tell one
+  story (e.g. 欧元区 10 月 PMI 全面回落而美国加速).
+- EIA 原油库存、现货金银等无结构化口径的数字:只在新闻/研报素材里有原文
+  时引用(出处+数字入台账),没有就整句不写 —— 禁止用替代指标拼数。
+- If nothing was selected: heading + missing_mark line, then stop."""
+
+
+def _geopolitics_task(blocks: Dict[str, Any]) -> str:
+    """09 回顾·地缘政治 + 焦点事件任务书(块注入:geo_themes / focal_events)。"""
+    themes = blocks.get("geo_themes") or {}
+    theme_lines = []
+    for name, info in themes.items():
+        tops = " | ".join(str(t) for t in (info.get("top") or [])[:3])
+        theme_lines.append(f"  - {name} (hits={info.get('hits')}): {tops}")
+    themes_txt = "\n".join(theme_lines) if theme_lines else "  (none)"
+    focal = blocks.get("focal_events") or []
+    focal_txt = "\n".join(
+        f"  - {f.get('name')} (hits={f.get('hits')})" for f in focal
+    ) or "  (none)"
+
+    return f"""\
+## Section 9 — 回顾 · 地缘政治 + 焦点事件
+
+Write "## 回顾 · 地缘政治". For EACH theme listed as open below, write an H3
+subsection with EXACTLY that theme name (e.g. "### 美伊局势"), 2–4 bullets.
+A theme NOT listed must NOT appear as a subsection.
+
+Open themes today (from the macro geo layer + newswire; hits = snapshot
+matches):
+{themes_txt}
+
+Then write "### 焦点事件" ONLY IF focal events are listed below — one-off
+political events of the current moment (elections, summits, cabinet changes,
+market-moving political shocks), 1–3 bullets each with what happened and the
+immediate market read. Omit the whole block when none is listed.
+
+Focal events today:
+{focal_txt}
+
+Content rules:
+- Every bullet states facts with dates and numbers taken from the material
+  (news_macro.geo / news_macro.digest / news.flash / news.wire). Material is
+  bilingual: English items are written into Chinese prose, keeping the house
+  English terms (FOMC, CPI, Hormuz) as-is. A bullet may close with ONE clause
+  of implication (oil, rates, risk appetite) — speculation must read as
+  speculation (「若…则…」), never as reported fact.
+- Credit the ORIGINATING outlet or broker the item itself names ((财通证券)
+  for a 利率早报 item, (CCTV) for a 联播快讯 item, (Geopolitical Dispatch),
+  (Reuters) inside a wire item). Relaying accounts/communities are NOT sources.
+- Cross-check against the structured layer when both exist (oil/gold moves
+  from market.cross_asset) — the structured value wins; the material's number
+  is dropped.
+- Evergreen background (rules, seat counts, history) at most ONE short clause,
+  and only when that event is active today.
+- If no theme AND no focal event is open: heading + missing_mark line, stop."""
+
+
+def _fomc_task(blocks: Dict[str, Any]) -> str:
+    """10 美联储观察任务书(块注入:fomc_deep = 决议在近 3 个交易日内)。"""
+    if blocks.get("fomc_deep"):
+        deep_txt = """\
+### 决议深读 (ON — decision within the last 3 sessions)
+Write "### 决议深读" FIRST, before 利率与决议: the decision, the vote split and
+each dissenter by name with their stated reason in one quoted clause
+(sources.fomc.decisions[0].dissenters); then the statement language changes
+that ACTUALLY differ between fomc.statement and fomc.statement_prev — quote
+both sides briefly (e.g. "solid"→"strong"); list only real differences, never
+invent one, and skip this half when the texts are materially identical."""
     else:
-        parts.append("""\
+        deep_txt = """\
+### 决议深读 (OFF)
+No FOMC decision in the last 3 sessions — do NOT write a 决议深读 block."""
 
-### Releases (OFF)
-No T-day US tier-1 release with an actual is in the snapshot — do NOT write a
-Releases block at all today.""")
+    return f"""\
+## Section 10 — 美联储观察
 
-    if blocks.get("rate_expectations"):
-        parts.append("""\
+Write "## 美联储观察" with these H3 blocks, in this order:
+{deep_txt}
 
-### Rate Expectations (ON — extreme odds/yield move today)
-Write "#### Rate Expectations · <next FOMC>" with:
-- Headline from macro_pillars.next_fomc_odds: odds of a hike at the next
-  meeting, with the prior comparison ONLY if sources.prior_odds exists —
-  house style `Hike Odds ~20% (prior: ~24%)`.
-- 1–3 supporting bullets from fed_odds.contracts (cum bp) and par_curve
-  change_bp.
-- Optional guest reaction bullet from The Close transcript only.
-Do NOT invent a prior if sources.prior_odds is absent.""")
-    else:
-        parts.append("""\
+### 利率与决议
+Current target range and the LATEST decision in 1–2 sentences: rate range,
+change, vote split, dissenters by name — from sources.fomc.decisions[0] ONLY
+(never economic_events for the Fed). One clause on the move since the previous
+decision when change_bp ≠ 0. Keep it tight; the narrative lives in 决议深读.
 
-### Rate Expectations (OFF)
-No extreme odds/yield move — do NOT write a Rate Expectations block. Put the
-next-meeting hike odds in half a sentence on the Forward Catalysts line of the
-next key data print or FOMC date (e.g. "December is ~74% priced for a hike").""")
+### 市场定价路径
+Futures-implied pricing as of fomc.path.asof, 2–4 bullets:
+- The NEXT meeting's odds from macro_pillars.next_fomc_odds (odds_pct), house
+  style 「12月会议加息概率 ~74%」(with 「(前值 ~xx%)」 only when
+  sources.prior_odds exists; never invent a prior).
+- Meetings BEYOND the next: phrase as contract pricing from fomc.path /
+  fed_odds.contracts (「3月合约定价累计 ~2 次加息」style, cum bp ÷ 25) — a
+  monthly-average contract is NEVER "某场会议的概率".
+- Curve/rate anchors (par_curve change_bp) may back a bullet in half a
+  sentence.
 
-    if blocks.get("cross_asset_review"):
-        parts.append("""\
+### 官员表态
+1–3 bullets of Fed-speak from news.flash / news.wire (name + stance + the
+occasion). Omit the whole block when nothing real exists today.
 
-### Treasuries / Cross-Asset review (ON — extreme move day)
-Write one short subsection (e.g. "#### Treasuries and oil") covering curve
-moves, oil if in cross_asset, and HY/IG OAS from fred_extras — only what Top
-Market Drivers did not already say. Guest quotes optional from The Close
-transcript only.""")
-    else:
-        parts.append("""\
+If sources.fomc is absent from the snapshot: heading + missing_mark, stop."""
 
-### Treasuries / Cross-Asset review (OFF)
-Do NOT write a Treasuries or Cross-Asset review subsection today.""")
 
-    parts.append("""\
+OUTLOOK_TASK = """\
+## Section 11 — 展望与策略 (second stage — synthesis over finished sections)
 
-### Forward Catalysts (ON — always present)
-Write "#### Forward Catalysts", then one bold date line per day
-("**Mon Nov 2**", weekend days grouped as "**Sat Oct 31 – Sun Nov 1**"), each
-followed by bullets. Cover the next ~7 days. Format and content:
-- Data: "ISM manufacturing (Oct), 10:00 ET — 54.7 est vs 54.5." Give est vs
-  previous when both exist; add key sub-components (prices paid, new orders)
-  only when listed in economic_events. US impact-3 first, then US impact-2.
-- Only events that have NOT happened yet: skip any row that already carries an
-  actual. Non-US data is skipped except central-bank decisions.
-- Fed: scheduled speakers and FOMC dates (macro_pillars.fomc_calendar), with
-  the hike odds in half a sentence where relevant.
-- Treasury: auctions/refunding from macro_pillars.auction_events (size, prior
-  stop, today's close of that tenor from par_curve). If there is none, write
-  nothing about auctions.
-- Policy / geopolitics / company events scheduled in the coming days that
-  news.flash / news.wire name explicitly (elections, OPEC+ meetings, deadlines,
-  hearings, promised disclosures) — one line each.
-- Earnings: one line per session — "$MAR before the open; $AAPL, $PLTR and
-  $VRTX after the close." Large caps only. When the company (or a direct
-  peer) moved ≥5% today, add today's move: "$AMD (−10.9% Friday)".
-- Nowcasts ONLY from macro_pillars.nowcasts.""")
-    return "\n".join(parts)
+FIRST read these section files in your workspace (already written and
+verified; treat their facts as established — reuse as-is, do not re-derive):
+sections/01_narrative.md, sections/02_drivers.md, sections/04_sector_action.md,
+sections/07_macro_dashboard.md, sections/08_macro_review.md,
+sections/09_geopolitics.md, sections/10_fomc.md.
+The snapshot remains your ONLY source for any NUMBER you state. Do not read
+transcripts/ or any other file.
+
+Write "## 展望与策略" with:
+
+### 大事预判
+Up to 4 forward items. Each: a bold date or horizon, the event, the base case,
+and what would flip it. ONLY events that have NOT happened yet — dates from
+economic_events.upcoming, macro_pillars.fomc_calendar, or events the news
+layers name with a date. FOMC path judgment lives here. 2–4 bullets,
+≤60 words each.
+
+### 主线跟踪 (omit when no live cross-market theme deserves it)
+ONE ongoing market theme drawn from the market sections (an AI-capex cycle, a
+rotation, a de-grossing): where it stands, the bull/bear hinge. Never restate
+single-stock moves already written in Sector Action / Deep Dives.
+
+### 投资建议
+Direct, actionable house advice, 3–5 bullets: stance (加仓/观望/减仓),
+structure (e.g. 哑铃:高股息防守 + 主线进攻), sectors to watch and to avoid.
+Judgment IS expected in this block — but every NUMBER still comes from the
+snapshot and enters the claims ledger; judgments must read as judgments
+(「建议」「预计」), never as reported facts. Close the block with exactly:
+(以上为本报观点,不构成投资建议。)
+
+Cross-section consistency: a fact already stated in Sections 01–10 must read
+IDENTICALLY here — same value, same framing, no new framing of old facts.
+"""
 
 
 SECTION_SPECS: Dict[str, Dict[str, Any]] = {
@@ -580,16 +675,58 @@ SECTION_SPECS: Dict[str, Dict[str, Any]] = {
         "agent": "company_desk",
         "task": DEEP_DIVES_TASK,
     },
-    "macro": {
-        "output_file": "sections/07_macro.md",
+    # ── v8 Macros:回顾/当下/展望五文件(替代旧 07_macro 单文件) ──
+    "macro_dashboard": {
+        "output_file": "sections/07_macro_dashboard.md",
+        "agent": "macro_dashboard",
+        "mode": "deterministic",
+        "task": None,
+    },
+    "macro_review": {
+        "output_file": "sections/08_macro_review.md",
+        "agent": "macro_review",
+        "task": None,
+    },
+    "geopolitics": {
+        "output_file": "sections/09_geopolitics.md",
+        "agent": "geopolitics",
+        "task": None,
+    },
+    "fomc": {
+        "output_file": "sections/10_fomc.md",
+        "agent": "fomc",
+        "task": None,
+    },
+    "outlook": {
+        "output_file": "sections/11_outlook.md",
+        "agent": "outlook",
         "task": None,
     },
 }
 
 SECTION_ORDER = ["narrative", "drivers", "positioning", "sector_action",
-                 "movers", "deep_dives", "macro"]
+                 "movers", "deep_dives", "macro_dashboard", "macro_review",
+                 "geopolitics", "fomc", "outlook"]
 
-AGENT_ORDER = ["overall_market", "company_desk", "movers", "macro"]
+# 两段编排:第一段互不依赖、并行;第二段(outlook)读第一段成品做综合。
+AGENT_STAGES = [
+    ["overall_market", "company_desk", "movers", "macro_dashboard",
+     "macro_review", "geopolitics", "fomc"],
+    ["outlook"],
+]
+# 扁平清单(兼容单层遍历的旧调用方;顺序 = 第一段全部 + 第二段)
+AGENT_ORDER = [a for stage in AGENT_STAGES for a in stage]
+
+# 各 LLM agent 的任务书构造器(blocks 由编排器确定性判定后注入);
+# deterministic 节(movers/macro_dashboard)无任务书,由编排器渲染。
+AGENT_TASK_BUILDERS = {
+    "overall_market": lambda style, blocks: OVERALL_MARKET_TASK,
+    "company_desk": lambda style, blocks: COMPANY_DESK_TASK,
+    "macro_review": lambda style, blocks: _macro_review_task(blocks or {}),
+    "geopolitics": lambda style, blocks: _geopolitics_task(blocks or {}),
+    "fomc": lambda style, blocks: _fomc_task(blocks or {}),
+    "outlook": lambda style, blocks: OUTLOOK_TASK,
+}
 
 _FAKE_SECTIONS = {
     "narrative": (
@@ -625,11 +762,45 @@ _FAKE_SECTIONS = {
         "- **What happened:** placeholder (fake mode). "
         "<!-- audit: [show cnbc_closing_bell] -->\n"
     ),
-    "macro": (
-        "## Macros\n"
-        "### Forward Catalysts\n"
-        "- Placeholder catalyst (fake mode). "
+    # v8 Macros 五节(fake 模式占位;中文标题与真实任务书一致)
+    "macro_dashboard": (
+        "## 宏观速览\n"
+        "### 四大经济体\n"
+        "| 经济体 | 增长 | 通胀 | 政策利率 |\n"
+        "|---|---|---|---|\n"
+        "| 美国 | fake | fake | fake |\n"
+        "### 商品与贵金属\n"
+        "| 品种 | 收盘 | 1D |\n"
+        "|---|---|---|\n"
+        "| Brent | 0 | 0% |\n"
+        "### 本周前瞻\n"
+        "- Fake catalyst (fake mode).\n"
+    ),
+    "macro_review": (
+        "## 回顾 · 宏观数据\n"
+        "### 边际变化\n"
+        "- Placeholder macro change (fake mode). "
+        "<!-- audit: [data economic_events.recent] -->\n"
+    ),
+    "geopolitics": (
+        "## 回顾 · 地缘政治\n"
+        "### 美伊局势\n"
+        "- Placeholder geo fact (fake mode). "
+        "<!-- audit: [news flash] -->\n"
+    ),
+    "fomc": (
+        "## 美联储观察\n"
+        "### 利率与决议\n"
+        "- Placeholder fomc fact (fake mode). "
+        "<!-- audit: [data fomc.decisions] -->\n"
+    ),
+    "outlook": (
+        "## 展望与策略\n"
+        "### 大事预判\n"
+        "- Placeholder outlook (fake mode). "
         "<!-- audit: [data economic_events.upcoming] -->\n"
+        "### 投资建议\n"
+        "- Placeholder advice (fake mode).\n"
     ),
 }
 
@@ -653,11 +824,11 @@ def build_section_prompt(spec: dict, style: str = "en",
     if spec.get("mode") == "deterministic":
         raise ValueError("deterministic sections have no prompt")
     task = spec["task"]
-    if task is None:
-        raise ValueError("section has no standalone task — use build_agent_prompt")
-    if spec is SECTION_SPECS["macro"]:
-        task = _macro_task(blocks or {})
     name = next(n for n, s in SECTION_SPECS.items() if s is spec)
+    if task is None:
+        if name not in AGENT_TASK_BUILDERS:
+            raise ValueError("section has no standalone task — use build_agent_prompt")
+        task = AGENT_TASK_BUILDERS[name](style, blocks)
     allowed = SECTION_SOURCE_MATRIX.get(name)
     p = STYLE_PROFILES[style]
     task = task.replace("{missing_mark}", p["missing_mark"])
@@ -672,19 +843,20 @@ def agent_section_names(agent: str) -> list:
 
 def build_agent_prompt(agent: str, style: str = "en",
                        blocks: Optional[Dict[str, Any]] = None) -> str:
-    """按信源组构建任务书。归因白名单 = 组内各文件矩阵的并集。不挂转录。"""
+    """按信源组构建任务书。归因白名单 = 组内各文件矩阵的并集。不挂转录。
+
+    outlook(第二段)例外:任务书指示先读第一段成品文件,快照仍是数字唯一来源。
+    """
     names = agent_section_names(agent)
-    if agent == "overall_market":
-        task = OVERALL_MARKET_TASK
-    elif agent == "company_desk":
-        task = COMPANY_DESK_TASK
+    if agent in AGENT_TASK_BUILDERS:
+        task = AGENT_TASK_BUILDERS[agent](style, blocks)
     else:
         spec = SECTION_SPECS[names[0]]
         if spec.get("mode") == "deterministic":
             raise ValueError("deterministic sections have no prompt")
         task = spec["task"]
-        if spec is SECTION_SPECS["macro"]:
-            task = _macro_task(blocks or {})
+        if task is None:
+            raise ValueError(f"agent {agent} has no task builder")
     files = " and ".join(SECTION_SPECS[n]["output_file"] for n in names)
     out_line = (f"Output files: exactly {files} — write each listed file in "
                 "this one run (and its .claims.json ledger).")
@@ -732,7 +904,7 @@ reads; your chat reply is ignored):
   "verdict": "pass" | "fail",
   "summary": "one-paragraph audit summary",
   "issues": [
-    {{"section": "narrative|drivers|positioning|sector_action|movers|deep_dives|macro",
+    {{"section": "narrative|drivers|positioning|sector_action|movers|deep_dives|macro_dashboard|macro_review|geopolitics|fomc|outlook",
      "claim": "what the section says",
      "snapshot_value": "what the snapshot says (or 'absent')",
      "severity": "high|medium|low",

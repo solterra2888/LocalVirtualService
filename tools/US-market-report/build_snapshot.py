@@ -10,7 +10,7 @@
         sources.the_close.clean_transcript 与 sources.cnbc_closing_bell.
         clean_transcript / clean_transcript_ot。不取 Surveillance,不读摘要。
         转录行自身 published_at 即美东场次日(同 UTC 晚),无 T+1 戳错位问题。
-  4. economic_events              — 近 3 天实际值 + 未来 7 天日历(读库,impact≥2,
+  4. economic_events              — 近 3 天实际值 + 未来 7 天日历(读库,impact=3,
                                      仅 US/CN/JP/DE/KR);保留 comparison(mom/yoy/水平);
                                      time 是 UTC,另写 time_et / date_et(美东,含夏令时)。
                                      构建前对 [T-2, T] 做一次 actual 回填:先
@@ -598,7 +598,7 @@ def _economic_events(report_date: date) -> Dict[str, Any]:
          截成"日历空档"。
 
     收录口径(用户约定,控制快照体量与管线耗时):
-      recent   [report_date-2, report_date]    impact>=2,五国(US/CN/JP/DE/KR)
+      recent   [report_date-2, report_date]    impact=3,五国(US/CN/JP/DE/KR)
       upcoming [report_date+1, report_date+7]  同上
     """
     from backend.services.economic_events_service import EconomicEventsService
@@ -609,7 +609,7 @@ def _economic_events(report_date: date) -> Dict[str, Any]:
     def _fetch(lo: date, hi: date) -> List[Dict[str, Any]]:
         return svc.get_economic_events_from_db(
             from_date=lo.isoformat(), to_date=hi.isoformat(),
-            country=countries, impacts=[2, 3], order="asc", limit=1000,
+            country=countries, impacts=[3], order="asc", limit=1000,
         ) or []
 
     recent = _fetch(
@@ -643,7 +643,7 @@ def _economic_events(report_date: date) -> Dict[str, Any]:
         return cleaned
 
     return {
-        "filter": f"近3天+未来{UPCOMING_EVENT_DAYS}天 impact≥2 "
+        "filter": f"近3天+未来{UPCOMING_EVENT_DAYS}天 impact=3 "
                   f"({'/'.join(ECON_COUNTRIES)})",
         "recent": _clean(recent),
         "upcoming": _clean(upcoming),

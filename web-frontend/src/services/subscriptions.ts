@@ -110,6 +110,10 @@ export interface SubscriptionContentTagsLite {
   countries?: string[] | null;
   tag_schema_version?: string | null;
   additional_tags?: Record<string, any> | null;
+  /** 信息分级 (INFO_GRADING_STANDARD.md): 候选重要度 L1-L4; null = 未评级 (存量/旧模板产物) */
+  info_level?: string | null;
+  /** 信息分级: 证据等级 E1-E3 (来源属性与可独立核验性); null = 未评级 */
+  evidence_level?: string | null;
 }
 
 export interface SubscriptionContentTagsFull extends SubscriptionContentTagsLite {

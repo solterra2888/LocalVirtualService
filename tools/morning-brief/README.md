@@ -1,16 +1,18 @@
-# morning-brief — 盘前晨报项目(自 US-market-report v7 复制分化;定时与数据源待配置)
+# morning-brief — 盘前晨报项目(xiao 式宏观地缘晨报;cron 未装,手动跑通中)
 
-用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。对齐 GuanHe **现行版式**(2026-10-12 之后)。v5 起节目正文**只用清洗转录、不读摘要表**(The Close youtube 自识别 + Closing Bell 主段/Overtime 播客双行直查);v6 增**新闻事件层**(`sources.news`:twitter 快讯 flash + Yahoo/Seeking Alpha 全文 wire + SA 电话会纪要 calls),drivers 双引擎选题(节目块 + 新闻事件块)。
+用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。01-06 节对齐 GuanHe **现行版式**(2026-10-12 之后);v8 起 **Macros 推倒重来**,按 `report_from_xiao.md` 参考稿改为「回顾/当下/展望」五文件结构(中文标题、直接给投资建议)。v5 起节目正文**只用清洗转录、不读摘要表**(The Close youtube 自识别 + Closing Bell 主段/Overtime 播客双行直查);v6 增**新闻事件层**(`sources.news`:twitter 快讯 flash + Yahoo/Seeking Alpha 全文 wire + SA 电话会纪要 calls);v8 增**宏观地缘素材层**(`sources.news_macro`:digest 晨间日报 + research 宏观解读 + geo 地缘快讯(Admin 订阅,中英))、**FOMC 表**(`sources.fomc`:决议/定价路径/声明)与**四经济体指标表底座**(`sources.macro_dashboard`)。
 
 | 报告部分 | 章节 | 叙事 / 数据源 |
 |---|---|---|
 | OVERALL MARKET | narrative / drivers / positioning | **The Close 转录**(叙事) + 跨资产/曲线/fed_odds/广度(数字锚) |
 | EQUITY MARKET | sector_action / movers / deep_dives | 按市场重要性选题:Finviz 全成分涨跌 + **Closing Bell 主段+Overtime 转录** + 新闻层(催化剂、评级/目标价); movers 由成分股快照确定性渲染 |
-| MACROS | macro | **经济日历 + macro_pillars**; Releases 反应可引 **The Close 转录**; Rate Expectations / 跨资产复盘仅极端行情 |
+| MACROS(v8) | 宏观速览(确定性) / 回顾·宏观数据 / 回顾·地缘政治 / 美联储观察 / 展望与策略 | 速览=macro_dashboard+fomc+cross_asset 纯代码渲染(四经济体表+商品+前瞻日历);宏观数据=多国日历+券商宏观日报(边际变化);地缘=中文 geo 层主题块(命中量开块)+焦点事件;FOMC=决议表(投票/异议)+声明措辞对比+定价路径;展望=第二段综合读前节成品,大事预判/主线跟踪/投资建议 |
 
 v7(2026-11,对照 CNT 参考稿评估后)文风契约:正文只给原始出处(Reuters/FT/CNBC/券商),
 管线标签与生产过程用语(snapshot/transcript/on air/节目名/不可得)不进正文,由
 `verify_checks.py` 以 high 拦截;可追溯性全部落在 audit 注释 + claims 台账。
+v8 追加:Macros 各节**完全不读节目转录**;展望节判断句必须读作判断(「建议」「预计」),
+数字仍逐条入台账,投资建议以「(以上为本报观点,不构成投资建议。)」收尾。
 
 ## 全流程图
 
@@ -47,53 +49,96 @@ v7(2026-11,对照 CNT 参考稿评估后)文风契约:正文只给原始出处(R
     构建前回填 [T-2,T] 的 actual(写生产库;--no-backfill 跳过)
   财报日历:美股普通股、去重;前一交易日盘后+当日 ≥$100 亿,
     未来 5 天 ≥$500 亿
-  news(新闻事件层,v6):
-    flash ← twitter 白名单 9 账号(DeItaone/LiveSquawk/Wall St Engine/
-            Kobeissi/The Information/Timiraos/RenMac/Earnings Whispers/
-            Daily Shot),窗口 T 00:00-24:00 ET,RT 去重 + $TICKER 提取
-    wire  ← news 频道全文(Yahoo Finance + Seeking Alpha),窗口
-            [T-1 20:00 ET, T 24:00 ET),≥800 字符截 1200
+  news(新闻事件层,v7 — **无白名单**,Admin 订阅 + L/E 分级驱动):
+    flash ← Admin(user_id=1)订阅的全部 twitter(~35 账号,含中文宏观源),
+            窗口 T 00:00-24:00 ET,RT 去重 + $TICKER 提取;L4(噪音)排除,
+            溢出按 L1>L2>L3/未评级 + 带$TICKER 保留(≤300)
+    wire  ← Admin 订阅 news 全文源(Yahoo/SA/CNBC/CCTV/Globenewswire),
+            窗口 [T-1 20:00 ET, T 24:00 ET),≥800 字符截 1200;top50 按
+            L1>L2>L3/未评级 + 时序保留(替代旧版时序"先到先得"——实测
+            窗口合格条目可达千级,旧法会把发得早的重要报道挤掉)
     calls ← SA 电话会纪要(正文 "Earnings Call Insights" 特征 + ≥8k 字符),
             仅保留财报日历命中 ticker,截 8000,≤6 篇
+    条目携带 info_level/evidence_level(见 INFO_GRADING_STANDARD.md);
+    E3(单一来源/未证实)素材的任务书规则要求以"据报道/未证实"口径书写
     已知边界:T 晚间盘后财报的 SA 纪要 T+1 白天才到,赶不上晨间构建 ——
     此类 Management said 仍由 CB Overtime 转录覆盖
   macro_pillars: 曲线 / FRED ranks+extras / fed_odds(+前一交易日 prior) /
                  FOMC / auction(FiscalData,仅 Note/Bond) /
                  release_series(环比百分比) / nowcasts(失败回退日历 GDPNow)
   prior_odds ← next_fomc_odds.prior,没有时回退上一期快照
+  macro_dashboard(v8):四经济体(US/EU/CN/JP)× 指标族白名单(政策利率/增长/
+                 通胀/PMI/就业),[T-75,T] 最新 actual,绕过 impact=3 过滤
+                 (ECB/BoJ/LPR 利率行 impact 只有 1-2)
+  fomc(v8):    fomc_decisions 最近 4 场(利率区间/投票比/异议理由)+
+                 fomc_probabilities 未来会议定价路径(asof≤T 最新一日)+
+                 最近两份声明全文(措辞对比用,截 5000 字符)
+  news_macro(宏观地缘素材层,v8.2;**源池 = Admin(user_id=1)且 enabled
+    的全部订阅,SQL JOIN 动态派生**;选材 = 两级漏斗,不再靠关键字正则):
+    ① 轻扫(零 LLM):Admin 订阅 × [T,T+1 06:00) UTC × 5 种文本类型,
+      LEFT JOIN subscription_content_tags 取「AI 分析轻量字段」——
+      title + summary + concepts + countries + L/E 分级(不取原文;
+      L4 排除;twitter<180/news<200 字符不进分拣,归 flash/wire 层)
+    ② triage(一次分块并行 LLM 调用,~500 条/块×4 并发):逐条判定
+      pool ∈ {geo, research, digest} + 开放集中文主题 + 重要度 1-3 +
+      是否需读全文;判定写 triage.json(可审计、可复用、断点不重花)
+    ③ 组池:入选条目才回库取全文(digest ≤4×6000 / research ≤8×2500
+      (news 排除、推特 ≥250 字符) / geo ≤40×1200,重要度优先);
+      条目带 theme/importance/evidence_level
+    - _geo_stats 按 theme 开块(开放集,新事件天然可开块;≥3 条门槛保留),
+      正则 GEO_THEME_DEFS 仅兜底无 theme 条目(回退路径产物)
+    - geo 层明确排除央行内容(归 research)——央行素材属 08/10 节
+    - 回退:--no-triage 或 triage 失败 → v8.1 关键字正则路径,管线不断
+    - 成本:实测 10-30 全量 1910 候选→147 入选,4 块并行 ~8-10 分钟,
+      输入 ≈ 0.2-0.3M tokens(占整期 ~3%),输出仅入选条目 ~10k tokens
+    已知边界:周五 T 的隔夜要闻下周一晨才发,digest 层可能仍偏少,
+    由 geo/research + 英文 wire 兜底(triage 版已能捞到无固定标题模式
+    的晨报,10-30 实测 digest 0→2)
   ▼
-  backend/reports/pipeline/{date}/snapshot.json
+  backend/reports/morning-brief/{date}/snapshot.json
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  第三层 · 生成与核验  脚本: run_pipeline.py + prompts.py + verify_checks.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  三组并行(墙钟 ≈ 最慢一组):
-    overall_market → 01+02+03  The Close 转录: narrative / drivers / positioning
-    company_desk   → 04+06     Closing Bell 主段+OT 转录 + 成分股 + 新闻层:
-                               sector_action / deep_dives
-    movers         → 05        确定性渲染(S&P 500 ≥$100 亿,涨跌各 8 只 + EPS 对预期)
-    macro          → 07        经济日历 + macro_pillars + The Close 反应引语
+  两段编排(第一段并行,墙钟 ≈ 最慢一组;第二段单跑综合):
+    overall_market  → 01+02+03  The Close 转录: narrative / drivers / positioning
+    company_desk    → 04+06     Closing Bell 主段+OT 转录 + 成分股 + 新闻层:
+                                sector_action / deep_dives
+    movers          → 05        确定性渲染(S&P 500 ≥$100 亿,涨跌各 8 只 + EPS 对预期)
+    macro_dashboard → 07        确定性渲染:四经济体表 + 商品行情 + 本周前瞻(零 LLM)
+    macro_review    → 08        回顾·宏观数据:多国 [T] 日 actual 边际变化 +
+                                券商宏观解读(块注入 review_releases,每国 ≤2 族)
+    geopolitics     → 09        回顾·地缘政治:主题块(geo 层命中 ≥3 开块)+
+                                焦点事件(选举类命中 ≥2)
+    fed             → 10        美联储观察:利率与决议(fomc.decisions)+
+                                定价路径(next_fomc_odds/合约)+官员表态;
+                                决议在 [T-2,T] 开「决议深读」(声明对比+异议)
+    ——— 第二段 ———
+    outlook         → 11        展望与策略:读 01/02/04/07-10 成品 + 快照数字,
+                                大事预判 / 主线跟踪(可省) / 投资建议(直接建议)
   ▼
   每节同会话写 sections/NN_*.claims.json(数字台账:value + snapshot 路径;
-  节目数字路径 = the_close.clean_transcript / cnbc_closing_bell.clean_transcript[_ot])
+  节目数字路径 = the_close.clean_transcript / cnbc_closing_bell.clean_transcript[_ot];
+  宏观地缘素材数字路径 = news_macro.digest / news_macro.research / news_macro.geo)
   verify_checks.py(确定性,秒级) → check_results.json
-    台账逐条按路径对数(节目/news 文本按 digits-in-blob) · 正文 %/bp 数字
-    覆盖兜底 · 下一场 FOMC 概率 · 三元组/since/块矩阵 · 正文管线标签/
-    生产过程用语/动词后带符号 · audit 来源白名单 · 结构 · cn 标题语言
+    台账逐条按路径对数(节目/news/news_macro 文本按 digits-in-blob) · 正文 %/bp 数字
+    覆盖兜底 · 下一场 FOMC 概率 · 三元组/since/v8 块矩阵(国家边际变化/地缘主题/
+    决议深读/展望必备块) · 正文管线标签/生产过程用语(含宏观素材层词汇)/动词后
+    带符号 · audit 来源白名单 · 结构(07-11 中文标题) · cn 标题语言
   有 high fail → 不调 LLM,直接按清单 --resume 修订
-  全绿 → --llm-verify light(默认,只读七节正文,不挂快照/转录)| off | full
+  全绿 → --llm-verify light(默认,只读全部节正文,不挂快照/转录)| off | full
   Gate → assemble(正文无口径块) + render_charts.py → final/
 ```
 
 ## 产物目录
 
 ```
-backend/reports/pipeline/{date}/
+backend/reports/morning-brief/{date}/
 ├── snapshot.json
 ├── state.json
-├── sections/01..07_*.md
-├── sections/*.claims.json   # 数字台账(movers 确定性渲染,无台账)
+├── sections/01..11_*.md
+├── sections/*.claims.json   # 数字台账(movers/macro_dashboard 确定性渲染,无台账)
 ├── verify/check_results.json
 ├── verify/verdict.json
 └── final/
@@ -121,12 +166,12 @@ backend/reports/pipeline/{date}/
 PY=/root/miniconda3/envs/guanhe/bin/python
 ZCODE=/root/.zcode/server/bin/zcode
 
-$PY tools/US-market-report/build_snapshot.py [--date 2026-10-28] [--no-backfill]
-$PY tools/US-market-report/run_pipeline.py 2026-10-27 --style en
-$PY tools/US-market-report/run_pipeline.py 2026-10-27 --llm-verify off   # 只用确定性核验
-$PY tools/US-market-report/run_pipeline.py 2026-10-27 --fake-zcode   # 状态机自测
-$PY tools/US-market-report/render_charts.py backend/reports/pipeline/2026-10-27   # 01_us_close 自动走 FT 版,失败回落旧简版
-$PY tools/US-market-report/us_close_chart.py --workspace backend/reports/pipeline/2026-10-30   # 单独重出 final/charts/01_us_close.png
+$PY tools/morning-brief/build_snapshot.py [--date 2026-10-28] [--no-backfill]
+$PY tools/morning-brief/run_pipeline.py 2026-10-27            # 默认 --style cn
+$PY tools/morning-brief/run_pipeline.py 2026-10-27 --llm-verify off   # 只用确定性核验
+$PY tools/morning-brief/run_pipeline.py 2026-10-27 --fake-zcode   # 状态机自测
+$PY tools/morning-brief/render_charts.py backend/reports/morning-brief/2026-10-27   # 01_markets 自动走 FT 版,失败回落旧简版
+$PY tools/morning-brief/us_close_chart.py --workspace backend/reports/morning-brief/2026-10-30   # 单独重出 final/charts/01_markets.png
 ```
 
 `us_close_chart.py` 数据映射(逆向 GuanHe 10-30 图并逐格数值验证):Last/1D 与板块行
@@ -159,24 +204,39 @@ Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
    数值不符即 high。「不可得」禁止替代指标。加息概率:会议概率只用
    `next_fomc_odds`(会后整月合约;决议日当天跳到下一场),`fed_odds.contracts`
    是月均合约,不得称作某场会议的概率。
-6. **Macros 块矩阵** — Releases = T 日美国一线、按事件族优先级取 ≤2
-   (FOMC > 非农 > CPI > PCE > GDP > … > 耐用品 > 房屋;排除 Ex-*/Non-Defense
-   分项;同族其他口径放 related);Rate Expectations / 跨资产复盘 = 概率≥10pt /
-   10Y≥8bp 变动(v7 去掉周五触发,参考稿周五也只写 Forward Catalysts);
-   Forward Catalysts 恒在、只收未发生事件;拍卖并入 Forward Catalysts。
+6. **Macros 块矩阵(v8)** — `run_pipeline.macro_blocks` 纯代码判定:
+   review_releases = 四经济体 T 日有 actual 的一线事件,按族优先级(利率决议 >
+   就业 > CPI > GDP > PMI > PPI > 零售 > 工业 > 贸易)每国 ≤2,排除分项、
+   yoy 优先;geo_themes = 中文 geo 层关键词命中 ≥3 开主题块(美伊/俄乌/中东/
+   贸易制裁);focal_events = 选举类命中 ≥2 开「焦点事件」;fomc_deep = 决议在
+   [T-2, T] 开「决议深读」(声明对比 + 异议理由);展望(大事预判/投资建议)
+   恒在。07 宏观速览 = macro_dashboard/fomc/cross_asset 确定性渲染,零 LLM。
 7. **审计分层** — 正文只有读者文体与原始出处;管线标签、口径块与
-   `<!-- audit: -->` 全部进 sidecar,正文出现管线标签或生产过程用语即 high。
+   `<!-- audit: -->` 全部进 sidecar,正文出现管线标签或生产过程用语即 high
+   (v8 中文禁词追加了素材/管线/入库/白名单/订阅源/抓取/星球/早报)。
 8. **转录为素材、不用 Surveillance、不读摘要表** — 节目只读 The Close /
    Closing Bell(主段+OT)清洗转录,与新闻层、成分股数据一起作为素材;
-   选题按市场重要性,不按节目时长。Macros 反应引语只引 The Close 转录。
-   三组写作 agent 并行,墙钟 ≈ 最慢一组。
+   选题按市场重要性,不按节目时长。**v8 起 Macros(07-11)完全不读节目转录**。
+   两段写作:第一段六组并行(墙钟 ≈ 最慢一组),第二段 outlook 读成品综合。
 9. **时间口径** — 经济日历的 `time` 是 UTC,正文只引用 `time_et`(美东)。
    同一事件名、不同 `comparison`(mom / yoy / 水平)是不同口径,不得混用。
+   宏观地缘素材层 `published_at` 一律按 UTC 存储比较;digest 锚定北京 T+1 晨。
 10. **回填写库** — `build_snapshot.py` 默认对生产 `economic_events` 做
     [T-2, T] 的 COALESCE upsert;调试用 `--no-backfill`。
 11. **节目转录按当晚 UTC 锚定** — 转录行自身 `published_at` 即美东场次当晚,
     直查匹配无摘要表 T+1 北京戳问题;缺行(上游 ingest 滞后/断更)记入
     `errors`,该节目章节按缺源降级,不回退摘要。
+12. **观点红线(v8)** — 展望节判断句必须读作判断(「建议」「预计」),不得
+    伪装成报道事实;每个数字仍进台账;无结构化口径的数据(EIA 库存、伦敦现货
+    金银、BOJ/ECB 概率、民调席位)只在素材有原文时引用,无则整句省略,
+    **禁止替代指标**。
+13. **订阅纪律(v8.1)** — 素材层只消费 **Admin(user_id=1)且 enabled 的订阅**,
+    由 `build_snapshot._news_macro_snapshot` 对 `subscription_list` 做 SQL JOIN
+    动态派生,不硬编码作者白名单;订阅含中英文源(星球/推特/news 频道/
+    substack/youtube),筛选模式中英双语。Admin 补订/退订即自动生效,
+    新增素材源无需改代码。v7 起 news 层(flash/wire)同样由 Admin 订阅
+    派生,全管线无任何硬编码信源白名单;信源质量由入库打标的 L/E 分级
+    控制(L4 排除、溢出按 L 级排序,见 INFO_GRADING_STANDARD.md)。
 
 ## 已知边界
 
@@ -194,3 +254,14 @@ Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
 - 盘中时间戳 / CDS / 10-Q 承诺等一手材料不在本管线范围内。
 - Management said / Analyst / 卖方反应只在转录里有原话时才写,否则省略。
   Macros 不引用 Surveillance。
+- **周五 T 的中文 digest 空窗(v8)**:隔夜全球要闻/利率早报仅工作日晨发布,
+  周六构建时 digest 层常空(notes 记录),由 geo/research + 英文 wire 兜底。
+- **贵金属/油价口径(v8)**:商品行情条用 COMEX/NYMEX 期货连续(GC1/SI1/
+  BZ1/CL1),非伦敦现货;xiao 参考稿的现货金银与期货收盘有细微价差,正文
+  引用时明确期货口径,不得写成现货价。
+- **无结构化源的数据(v8)**:EIA 原油库存、伦敦现货金银、BOJ/ECB 加息概率、
+  民调/席位数字 —— 只在新闻/研报素材有原文时引用(出处+入台账),无则整句
+  省略,禁止替代指标。
+- 宏观地缘素材层完全由 Admin(user_id=1)的 enabled 订阅决定:某订阅停更
+  (如微博财经7X24、洪灝的宏观策略等历史死源)只影响该源自身命中量,
+  层内其余订阅自动补位;Admin 补订新源(如专职地缘刊)无需改代码。

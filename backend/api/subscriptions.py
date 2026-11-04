@@ -1743,6 +1743,7 @@ async def get_subscription_contents(
                 sct.sector, sct.sector_en, sct.industry, sct.industry_en,
                 sct.ticker, sct.concepts, sct.summary, sct.confidence,
                 sct.tagged_at, sct.people, sct.countries, sct.tag_schema_version,
+                sct.info_level, sct.evidence_level,
                 scus.summary    AS personalized_summary,
                 scus.reasoning  AS personalized_reasoning,
                 CASE WHEN scus.id IS NOT NULL THEN 'personalized' ELSE 'global' END AS summary_source,
@@ -1803,8 +1804,9 @@ async def get_subscription_contents(
             # 列序: [30]sector [31]sector_en [32]industry [33]industry_en
             #       [34]ticker [35]concepts [36]summary [37]confidence [38]tagged_at
             #       [39]people [40]countries [41]tag_schema_version
-            #       [42]personalized_summary [43]personalized_reasoning [44]summary_source
-            #       [45]categories [46]matched_themes_raw
+            #       [42]info_level [43]evidence_level
+            #       [44]personalized_summary [45]personalized_reasoning [46]summary_source
+            #       [47]categories [48]matched_themes_raw
             tags_payload = None
             if row[30] is not None or row[41] == 'tweet_signal_v1':
                 tickers_raw = row[34]
@@ -1827,6 +1829,9 @@ async def get_subscription_contents(
                     'people': people,
                     'countries': countries,
                     'tag_schema_version': row[41] or 'feeds_v1',
+                    # 信息分级 L/E (NULL = 未评级, 存量/旧模板产物)
+                    'info_level': row[42],
+                    'evidence_level': row[43],
                     'summary': row[36],
                     'confidence': row[37],
                     'tagged_at': ensure_utc(row[38]).isoformat() if row[38] else None,
@@ -1875,13 +1880,13 @@ async def get_subscription_contents(
                 # Phase 3 新增: Feeds 自动打标 + 摘要 (LEFT JOIN 结果, 未打标为 null)
                 'tags': tags_payload,
                 # PR-7: per-user 个性化摘要 (LEFT JOIN subscription_content_user_summaries)
-                'personalized_summary': row[42] or None,
-                'personalized_reasoning': row[43] or None,
-                'summary_source': row[44],
+                'personalized_summary': row[44] or None,
+                'personalized_reasoning': row[45] or None,
+                'summary_source': row[46],
                 # News: EODHD 原始分类标签 (TEXT[])，供前端 NewsOriginalView 展示
-                'categories': list(row[45]) if row[45] else [],
+                'categories': list(row[47]) if row[47] else [],
                 # Investment Themes 语义匹配结果
-                'matched_themes': row[46] if row[46] else [],
+                'matched_themes': row[48] if row[48] else [],
             })
         
         cursor.close()

@@ -1,10 +1,11 @@
 #!/bin/bash
-# morning-brief 每日定时入口。crontab 条目(北京时间周二~周六 09:20,美股交易日次晨):
-#   20 9 * * 2-6 /bin/bash /opt/guanhetech/tools/US-market-report/cron_daily.sh \
+# morning-brief 每日定时入口。crontab 条目(建议北京时间周二~周六 10:00,美股交易日次晨;
+# 10:00 而非 09:20:中文晨报素材约 08:51-09:22 发布、节目转录 10 点后才稳定):
+#   0 10 * * 2-6 /bin/bash /opt/guanhetech/tools/morning-brief/cron_daily.sh \
 #       >> /opt/guanhetech/backend/reports/morning-brief/cron.log 2>&1
 #
-# 流程: build_snapshot(缺省自动解析最新 The Close 交易日,含数据层/新闻层/转录内联)
-#   → run_pipeline(章节 done 即秒级复用;全新交易日则完整生成 ~23 分钟)。
+# 流程: build_snapshot(缺省自动解析最新 The Close 交易日,含数据层/新闻层/中文层/转录内联)
+#   → run_pipeline(章节 done 即秒级复用;全新交易日则完整生成)。
 #
 # cron 的极简 env 没有 zcode provider 配置 —— 交互 shell 由 harness 注入以下变量,
 # cron 里缺了会报 "无法定位 CLI ZCode Built-in Provider Config"(2026-10-29 09:20
@@ -12,7 +13,7 @@
 set -uo pipefail
 
 REPO=/opt/guanhetech
-PIPE=$REPO/tools/US-market-report
+PIPE=$REPO/tools/morning-brief
 PY_BIN_DIR=/root/miniconda3/envs/guanhe/bin
 PY=$PY_BIN_DIR/python
 STYLE=cn   # en=GuanHe 风格英文正文(调优基准); cn=中文正文

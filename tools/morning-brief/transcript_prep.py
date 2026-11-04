@@ -89,26 +89,30 @@ def fetch_the_close(conn: Any, session_date: date) -> Optional[Dict[str, Any]]:
     """Bloomberg Television 频道当晚的 The Close 整期转录(自识别校验)。"""
     day0 = datetime(session_date.year, session_date.month, session_date.day,
                     tzinfo=timezone.utc)
+    # 逐窗口取行→行内自识别;全部不中才放宽下一档。2026-11-03 实跑踩坑:
+    # 主窗口(21-23 时)先命中中期选举特辑(56k)就 break,自识别失败直接
+    # 放弃,当晚真正的 The Close 落在 23:00:27 UTC,兜底窗口从未被执行。
     with conn.cursor() as cur:
-        # 主窗口 21:00-23:00 UTC(实测 21:52-22:29);无命中再放宽到 20:30-23:59
-        rows: List[Dict[str, Any]] = []
-        for t0h, t1h in ((21, 23), (20.5, 24.0)):
+        for t0h, t1h in ((21, 23), (20.5, 24.0), (20.5, 25.0)):
             rows = _row(cur, "youtube", day0 + timedelta(hours=t0h),
                         day0 + timedelta(hours=t1h), min_len=50000)
-            if rows:
-                break
-    for r in rows:
-        if TC_SELF_ID_RE.search(r["transcript"][:2500]):
-            return r
+            for r in rows:
+                if TC_SELF_ID_RE.search(r["transcript"][:2500]):
+                    return r
     return None
 
 
 def _cb_title_has_date(title: str, session_date: date) -> bool:
-    """标题带 T 的 MM/DD/YY(或 4 位年)后缀 —— 主段与 Overtime 行都满足,
-    日间节目行(无日期后缀)天然被排除。"""
-    dd = session_date.strftime("%m/%d/%y")
-    dy = session_date.strftime("%m/%d/%Y")
-    return dd in title or dy in title
+    """标题带 T 的 M(M)/D(D)/YY(或 4 位年)后缀 —— 主段与 Overtime 行都
+    满足,日间节目行(无日期后缀)天然被排除。
+
+    CNBC 标题的月/日不补零("11/2/26"),strftime 的 %m/%d 会补零
+    ("11/02/26")—— 个位日/月必须两种形式都匹配(2026-11-02 实跑踩坑)。
+    """
+    pat = re.compile(
+        rf"0?{session_date.month}/0?{session_date.day}/"
+        rf"(?:{session_date.strftime('%y')}|{session_date.year})")
+    return bool(pat.search(title))
 
 
 def fetch_closing_bell(conn: Any,

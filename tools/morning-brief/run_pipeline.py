@@ -31,6 +31,13 @@ import os
 import re
 import shlex
 import subprocess
+
+# 2026-11-04:禁用 vfork(同 build_snapshot.py 注释;run_agent 的 zcode 调用
+# 依赖 subprocess,同一风险面)
+try:
+    subprocess._USE_VFORK = False  # type: ignore[attr-defined]
+except AttributeError:
+    pass
 import sys
 import time
 from pathlib import Path
@@ -41,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from prompts import (  # noqa: E402
     AGENT_ORDER,
+    AGENT_STAGES,
     SECTION_ORDER,
     SECTION_SPECS,
     agent_section_names,
@@ -152,81 +160,37 @@ def _fake_section(ws: Path, name: str, corrected: bool = False,
     if style == "cn":
         text = text.replace("Placeholder headline clause. Other clause.",
                             "占位标题一。占位标题二。")
-    if name == "macro" and blocks:
-        parts = ["## Macros\n"]
-        if blocks.get("releases"):
-            parts.append(
-                "### Releases\n"
-                "#### Durable Goods Orders\n"
-                "- **+1.8%** (est: +1.7%, prior: +0.1%) "
-                "<!-- audit: [data economic_events.recent] -->\n"
-            )
-        if blocks.get("rate_expectations"):
-            parts.append(
-                "### Rate Expectations\n"
-                "- Hike Odds ~8% (prior: ~16%) "
-                "<!-- audit: [data macro_pillars.fed_odds] -->\n"
-            )
-        if blocks.get("cross_asset_review"):
-            parts.append(
-                "### Treasuries and oil\n"
-                "- Placeholder cross-asset review (fake mode). "
-                "<!-- audit: [data market.cross_asset] -->\n"
-            )
-        parts.append(
-            "### Forward Catalysts\n"
-            "- Placeholder catalyst (fake mode). "
-            "<!-- audit: [data economic_events.upcoming] -->\n"
-        )
-        text = "\n".join(parts)
     f.write_text(text + f"\n{DONE_MARKER}\n", encoding="utf-8")
     claims_path(ws, name).write_text("[]\n", encoding="utf-8")
 
 
-# ── Releases 事件族 + movers 确定性渲染 + Macros 块矩阵 ─────────────────
+# ── v8 Macros 块矩阵 + movers/dashboard 确定性渲染 ─────────────────────
 
-# GuanHe 美国一线 Releases 事件族(按优先级从高到低);每天最多 2 个族。
-# main: 命中则该行可作为本族主行;also: 同日同族的辅助行(挂在 related 里,不单独占名额)。
-# 事件名以 EODHD 日历为准(如 "Non Farm Payrolls" / "Fed Interest Rate Decision")。
-US_TIER1_FAMILIES = (
-    ("fomc", r"fed\s+interest\s+rate|fomc\s+(rate|decision)|federal\s+funds\s+rate",
-     r"fomc\s+(statement|economic\s+projections|press)"),
-    ("jobs", r"non[\s\-]?farm\s+payroll|employment\s+situation",
-     r"unemployment\s+rate|average\s+hourly|participation"),
-    ("cpi", r"\bcpi\b|consumer\s+price|^inflation\s+rate",
-     r"core\s+(cpi|inflation)"),
-    ("pce", r"core\s+pce\s+price|\bpce\s+price|\bpce\b",
-     r"personal\s+(income|spending|outlay)"),
-    ("gdp", r"\bgdp\s+growth|^gdp\b|gross\s+domestic", r"gdp\s+price|core\s+pce"),
-    ("ppi", r"\bppi\b|producer\s+price", r"core\s+ppi"),
-    ("retail", r"retail\s+sales", r"control\s+group"),
-    ("ism", r"ism\s+(manufacturing|services)|ism\s+pmi", r"ism\s+.*(prices|employment|new\s+orders)"),
-    ("jolts", r"jolts|job\s+openings", None),
-    ("durable", r"durable\s+goods\s+orders", r"durable\s+goods|core\s+capital|capital\s+goods"),
-    ("michigan", r"michigan\s+consumer\s+sentiment|u\.?\s*of\s*m\s+sentiment|consumer\s+sentiment",
-     r"michigan"),
-    ("housing", r"housing\s+starts|building\s+permits", r"building\s+permits|housing\s+starts"),
-    ("existing", r"existing\s+home\s+sales", None),
-    ("auction10", r"10[\-\s]?year\s+.*auction|auction.*10[\-\s]?year", None),
+from datetime import date as _date_cls, timedelta as _timedelta_cls
+
+# 边际变化选题(v8):四经济体 T 日有 actual 的一线事件,按族优先级每国 ≤2。
+# 事件名以 EODHD 日历为准;分项(Ex-*/Non-Defense)不作主行;yoy 优先于水平。
+REVIEW_COUNTRIES = ("US", "EU", "CN", "JP")
+REVIEW_FAMILY_ORDER = (
+    ("rate", r"fed\s+interest\s+rate|deposit\s+facility|boj\s+interest|loan\s+prime"),
+    ("jobs", r"non[\s\-]?farm\s+payroll|unemployment\s+rate"),
+    ("cpi", r"inflation\s+rate|\bcpi\b|hicp|harmonised"),
+    ("gdp", r"gdp\s+growth"),
+    ("pmi", r"\bpmi\b"),
+    ("ppi", r"\bppi\b|producer\s+price"),
+    ("retail", r"retail\s+sales"),
+    ("ip", r"industrial\s+production"),
+    ("trade", r"balance\s+of\s+trade"),
 )
-# 分项/子口径不作主行(Durable Goods Ex Transp / Ex Defense / Non Defense Goods Orders Ex Air 等)
+_REVIEW_FAMS = [(k, re.compile(m, re.I)) for k, m in REVIEW_FAMILY_ORDER]
+# 分项/子口径不作主行(Durable Goods Ex Transp / Ex Defense 等)
 _SUBCOMPONENT_RE = re.compile(r"\bex\b|excluding|non[\s\-]?defense|\bnsa\b", re.I)
-_FAMILIES = [(k, re.compile(m, re.I), re.compile(a, re.I) if a else None)
-             for k, m, a in US_TIER1_FAMILIES]
-# 同一事件多口径行时的取舍:m/m 优先(GuanHe 以环比为题),其次指数/水平,最后 y/y
-_COMPARISON_RANK = {"mom": 0, "": 1, None: 1, "index": 1, "yoy": 2}
-
-# 极端行情阈值:加息概率变动(百分点)或 10Y 变动(bp)
-EXTREME_ODDS_PT = 10.0
-EXTREME_10Y_BP = 8.0
+# 同一事件多口径行时的取舍:yoy 优先(通胀/增长头条惯例),水平次之,mom 最后
+_COMPARISON_RANK = {"yoy": 0, "": 1, None: 1, "index": 1, "qoq": 1, "mom": 2}
 
 
 def _event_date(e: Dict[str, Any]) -> str:
     return str(e.get("date") or "")[:10]
-
-
-def _is_us(e: Dict[str, Any]) -> bool:
-    return (e.get("country") or "").upper() in ("US", "USA", "UNITED STATES")
 
 
 def _has_actual(e: Dict[str, Any]) -> bool:
@@ -237,45 +201,133 @@ def _cmp_rank(e: Dict[str, Any]) -> int:
     return _COMPARISON_RANK.get((e.get("comparison") or "").lower() or None, 1)
 
 
-def _brief(e: Dict[str, Any]) -> Dict[str, Any]:
-    keys = ("event", "comparison", "period", "time_et", "actual", "forecast", "previous")
-    return {k: e[k] for k in keys if e.get(k) not in (None, "")}
+def select_country_releases(snapshot: Dict[str, Any],
+                            per_country: int = 2) -> Dict[str, List[Dict[str, Any]]]:
+    """边际变化选题:四经济体 T 日一线、含 actual 的发布,每国 ≤2 个事件族。
 
-
-def select_tier1_releases(snapshot: Dict[str, Any],
-                          limit: int = 2) -> List[Dict[str, Any]]:
-    """T 日美国一线、含 actual 的发布,最多 limit 个**事件族**。
-
-    - 按 US_TIER1_FAMILIES 的优先级取族(FOMC > 非农 > CPI > PCE > GDP > ... > 耐用品 > 房屋);
-    - 每族只取一行主行(排除 Ex-*/Non-Defense 分项;m/m 优先,其次水平,最后 y/y);
-    - 同族其余行(其他口径、辅助事件)放进主行副本的 related,不占名额。
+    按族优先级取(利率决议 > 就业 > CPI > GDP > PMI > PPI > 零售 > 工业 >
+    贸易);每族只取一行主行(排除分项;yoy 优先)。返回 {country: [row…]},
+    供 08 任务书点名注入。
     """
     report_date = snapshot.get("report_date") or ""
     recent = ((snapshot.get("sources") or {}).get("economic_events") or {}).get(
         "recent") or []
-    tday = [e for e in recent if _is_us(e) and _event_date(e) == report_date]
-    picked: List[Dict[str, Any]] = []
-    for key, main_rx, also_rx in _FAMILIES:
-        cands = [e for e in tday
-                 if main_rx.search(e.get("event") or "")
-                 and not _SUBCOMPONENT_RE.search(e.get("event") or "")]
-        mains = [e for e in cands if _has_actual(e)]
-        if not mains:
-            continue
-        mains.sort(key=lambda e: (_cmp_rank(e), len(e.get("event") or "")))
-        main = dict(mains[0])
-        main["family"] = key
-        related = [_brief(e) for e in cands if e is not mains[0]]
-        if also_rx:
-            related += [_brief(e) for e in tday
-                        if e not in cands and also_rx.search(e.get("event") or "")
-                        and not _SUBCOMPONENT_RE.search(e.get("event") or "")]
-        if related:
-            main["related"] = related[:6]
-        picked.append(main)
-        if len(picked) >= limit:
-            break
-    return picked
+    tday = [e for e in recent
+            if e.get("country") in REVIEW_COUNTRIES
+            and _event_date(e) == report_date]
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for country in REVIEW_COUNTRIES:
+        picked: List[Dict[str, Any]] = []
+        for key, rx in _REVIEW_FAMS:
+            cands = [e for e in tday
+                     if e.get("country") == country
+                     and rx.search(e.get("event") or "")
+                     and not _SUBCOMPONENT_RE.search(e.get("event") or "")]
+            mains = [e for e in cands if _has_actual(e)]
+            if not mains:
+                continue
+            mains.sort(key=lambda e: (_cmp_rank(e), len(e.get("event") or "")))
+            best = mains[0]
+            row = {k: best[k] for k in
+                   ("event", "comparison", "period", "date", "actual",
+                    "forecast", "previous", "time_et")
+                   if best.get(k) not in (None, "")}
+            row["family"] = key
+            picked.append(row)
+            if len(picked) >= per_country:
+                break
+        if picked:
+            out[country] = picked
+    return out
+
+
+# 地缘主题与焦点事件判定(素材 = 快照宏观地缘素材层 geo,中英关键词统计)
+GEO_THEME_DEFS = (
+    ("美伊局势", re.compile(
+        r"伊朗|霍尔木兹|波斯湾|胡塞|也门|德黑兰"
+        r"|Iran|Hormuz|Persian Gulf|Houthi|Yemen|Tehran", re.I)),
+    ("俄乌冲突", re.compile(
+        r"俄乌|乌克兰|普京|泽连斯基|克里姆林宫|停火谈判"
+        r"|Ukraine|Putin|Zelensky|Kremlin", re.I)),
+    ("中东局势", re.compile(
+        r"加沙|以色列|内塔尼亚胡|黎巴嫩|真主党|哈马斯"
+        r"|Gaza|Israel|Netanyahu|Lebanon|Hezbollah|Hamas", re.I)),
+    ("贸易与制裁", re.compile(
+        r"关税|制裁|出口管制|贸易战|tariff|sanction|export control", re.I)),
+)
+GEO_THEME_MIN_HITS = 3
+FOCAL_EVENT_RE = re.compile(
+    r"选举|大选|投票|公投|弹劾|组阁|就职|中期选举"
+    r"|election|referendum|ballot|impeach", re.I)
+FOCAL_MIN_HITS = 2
+
+
+def _geo_stats(snapshot: Dict[str, Any]) -> tuple:
+    """统计地缘主题与焦点事件命中(附 top 条目摘要供任务书选题参考)。
+
+    v8.2:条目带 theme(triage 语义分拣)时按 theme 分组 —— 主题开放集,
+    新事件天然可开块;无 theme 的条目(正则回退路径产物)才走 GEO_THEME_DEFS
+    正则归类。focal(选举等一次性事件)仍按关键词在已选条目上做二次识别。
+    """
+    geo = (((snapshot.get("sources") or {}).get("news_macro") or {})
+           .get("geo") or [])
+
+    def _blob(g: Dict[str, Any]) -> str:
+        return f"{g.get('title', '')} {g.get('text', '')}"
+
+    def _top(rows: List[Dict[str, Any]], n: int = 3) -> List[str]:
+        return [f"{g.get('time_cn', '')} {str(g.get('title', ''))[:40]}".strip()
+                for g in rows[:n]]
+
+    themes: Dict[str, Any] = {}
+    for g in geo:
+        name = (g.get("theme") or "").strip()
+        if not name:  # 正则回退路径:无主题标签 → 关键词归类
+            for name, rx in GEO_THEME_DEFS:
+                if rx.search(_blob(g)):
+                    break
+            else:
+                name = ""
+        if name:
+            themes.setdefault(name, []).append(g)
+    themes = {name: {"hits": len(rows), "top": _top(rows)}
+              for name, rows in themes.items() if len(rows) >= GEO_THEME_MIN_HITS}
+    focal = [g for g in geo if FOCAL_EVENT_RE.search(_blob(g))]
+    focal_events: List[Dict[str, Any]] = []
+    if len(focal) >= FOCAL_MIN_HITS:
+        focal_events.append({"name": "选举与权力更替", "hits": len(focal),
+                             "top": _top(focal)})
+    return themes, focal_events
+
+
+def macro_blocks(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """v8 Macros 块矩阵 —— 纯代码判定,对齐 report_from_xiao 的回顾/当下/展望。
+
+    review_releases  四经济体 T 日边际变化选题(每国 ≤2 族)
+    geo_themes       地缘主题(快照 geo 层命中 ≥3 开块,附 top 条目)
+    focal_events     焦点事件(选举等一次性政治事件,命中 ≥2 开块)
+    fomc_deep        决议日在 [T-2, T] → 10 节开「决议深读」
+    outlook          恒 True(11 节第二段综合)
+    """
+    review = select_country_releases(snapshot)
+    themes, focal = _geo_stats(snapshot)
+    fomc_deep = False
+    decisions = (((snapshot.get("sources") or {}).get("fomc") or {})
+                 .get("decisions") or [])
+    if decisions:
+        try:
+            dd = _date_cls.fromisoformat(str(decisions[0].get("decision_date"))[:10])
+            t = _date_cls.fromisoformat(snapshot.get("report_date") or "")
+            fomc_deep = _timedelta_cls(0) <= (t - dd) <= _timedelta_cls(days=2)
+        except ValueError:
+            fomc_deep = False
+    return {
+        "review_releases": review,
+        "geo_themes": themes,
+        "focal_events": focal,
+        "fomc_deep": fomc_deep,
+        "outlook": True,
+    }
 
 
 # Today's Movers(v7):S&P 500 成分股按当日涨跌幅确定性渲染,催化剂只取
@@ -313,6 +365,10 @@ def render_movers(snapshot: Dict[str, Any]) -> str:
             continue
         if cap >= MOVERS_MIN_CAP_MN:
             universe.append((chg, r))
+    if not rows:
+        # 成分股快照整体缺失(finviz 是当前状态表,历史日期无当日数据)——
+        # 如实说明数据缺失,不写「今日无显著行情」误导读者(勿用「快照」等禁词)
+        return "## Today's Movers\n\nFinviz 当日无成分股数据,本表从略。\n"
     if not universe:
         return f"## Today's Movers\n\n{STYLE_NOTHING}\n"
 
@@ -357,60 +413,222 @@ def write_movers(ws: Path, snapshot: Dict[str, Any]) -> None:
     claims_path(ws, "movers").write_text("[]\n", encoding="utf-8")
 
 
-def macro_blocks(snapshot: Dict[str, Any]) -> Dict[str, Any]:
-    """纯代码判定 Macros 当日块矩阵 —— 对齐 GuanHe 2026-10-12 后现行版式。
+# ── 07 宏观速览:确定性渲染(零 LLM,同 movers 模式;无台账) ────────────
 
-    releases              T 日美国一线白名单 + actual,最多 2 个
-    rate_expectations     加息概率/10Y 相对 prior 超阈值(参考稿周五也不开)
-    cross_asset_review    同 rate_expectations
-    forward               恒 True
-    selected_releases     供任务书点名的事件列表
-    """
-    from datetime import date as _date
+DASH_COUNTRY_CN = {"US": "美国", "EU": "欧元区", "CN": "中国", "JP": "日本"}
+DASH_COMMODITIES = (
+    ("BZ1.COMMODITY", "Brent 原油(期货)"),
+    ("CL1.COMMODITY", "WTI 原油(期货)"),
+    ("GC1.COMMODITY", "COMEX 黄金(期货)"),
+    ("SI1.COMMODITY", "COMEX 白银(期货)"),
+    ("HG1.COMMODITY", "COMEX 铜(期货)"),
+)
+_CN_EVENT_SHORT = {
+    "Inflation Rate": "CPI", "Harmonised Inflation Rate": "HICP",
+    "Core Inflation Rate": "核心CPI", "Core PCE Price Index": "核心PCE",
+    "Producer Price Index": "PPI", "Tokyo CPI": "东京CPI",
+    "Tokyo Core CPI": "东京核心CPI", "CPI": "CPI",
+}
+_CN_WEEKDAY = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+_CN_COUNTRY = {"US": "美", "EU": "欧", "CN": "中", "JP": "日", "DE": "德", "KR": "韩"}
+FWD_KEY_RE = re.compile(
+    r"interest\s+rate|fomc|payroll|cpi|inflation|hicp|gdp|pmi|unemployment"
+    r"|pce|ppi|retail\s+sales|loan\s+prime|lpr", re.I)
+FWD_PER_DAY = 6
 
-    sources = snapshot.get("sources") or {}
-    pillars = sources.get("macro_pillars") or {}
-    selected = select_tier1_releases(snapshot, limit=2)
 
-    report_date_s = snapshot.get("report_date") or ""
+def _fmt_num(v: Any) -> str:
     try:
-        rd = _date.fromisoformat(report_date_s)
-        is_friday = rd.weekday() == 4
-    except ValueError:
-        is_friday = False
+        f = float(str(v).replace(",", ""))
+        return f"{f:.2f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return str(v)
 
-    extreme = False
-    prior = sources.get("prior_odds") or {}
-    odds = pillars.get("next_fomc_odds") or {}
-    if prior.get("odds_pct") is not None and odds.get("odds_pct") is not None:
-        try:
-            if abs(float(odds["odds_pct"]) - float(prior["odds_pct"])) >= EXTREME_ODDS_PT:
-                extreme = True
-        except (TypeError, ValueError):
-            pass
-    curve = pillars.get("par_curve") or {}
-    chg = (curve.get("change_bp") or {}).get("10y")
-    if chg is not None:
-        try:
-            if abs(float(chg)) >= EXTREME_10Y_BP:
-                extreme = True
-        except (TypeError, ValueError):
-            pass
 
-    open_review = extreme
-    return {
-        "releases": bool(selected),
-        "selected_releases": selected,
-        "rate_expectations": open_review and bool(pillars.get("fed_odds")
-                                                   or pillars.get("next_fomc_odds")),
-        "cross_asset_review": open_review,
-        "forward": True,
-        "is_friday": is_friday,
-        "extreme_move": extreme,
-        # legacy keys kept so old state files / docs don't break readers
-        "auction": False,
-        "fomc": False,
-    }
+def _dash_growth(rows: Optional[List[Dict[str, Any]]]) -> str:
+    """增长格:同比与环比并列(口径不同都是头条惯例);无行则 – 。"""
+    if not rows:
+        return "–"
+    parts = []
+    for cmp_, lbl in (("yoy", "同比"), ("qoq", "环比")):
+        r = next((x for x in rows if (x.get("comparison") or "") == cmp_), None)
+        if r:
+            parts.append(f"{lbl} {_fmt_num(r.get('actual'))}%")
+    if not parts:
+        r = rows[0]
+        parts.append(f"{_fmt_num(r.get('actual'))}%")
+    period = next((x.get("period") for x in rows if x.get("period")), "")
+    return " / ".join(parts) + (f"({period})" if period else "")
+
+
+def _dash_inflation(rows: Optional[List[Dict[str, Any]]]) -> str:
+    """通胀格:两行 —— 首行 yoy 头条;次行优先不同事件(PPI/核心),否则环比。
+
+    跳过无 comparison 的行(CPI s.a 指数水平,如 336.94,不是百分比)。
+    """
+    if not rows:
+        return "–"
+    usable = [r for r in rows if r.get("comparison") in ("yoy", "mom")]
+    if not usable:
+        return "–"
+
+    def _cell(r: Dict[str, Any]) -> str:
+        nm = _CN_EVENT_SHORT.get(r.get("event") or "", r.get("event") or "")
+        cmp_ = "同比" if (r.get("comparison") or "") == "yoy" else "环比"
+        return f"{nm} {cmp_} {_fmt_num(r.get('actual'))}%"
+
+    first = usable[0]
+    second = next((r for r in usable[1:]
+                   if r.get("event") != first.get("event")), None)
+    parts = [_cell(first)] + ([_cell(second)] if second else [])
+    period = next((x.get("period") for x in usable if x.get("period")), "")
+    return " / ".join(parts) + (f"({period})" if period else "")
+
+
+def _rate_action(actual: Any, previous: Any) -> str:
+    """利率动作:与 previous 相比为维持/加息Nbp/降息Nbp(数值单位是百分比)。"""
+    try:
+        a, p = float(actual), float(previous)
+    except (TypeError, ValueError):
+        return ""
+    if abs(a - p) < 1e-9:
+        return "维持"
+    d = (a - p) * 100
+    return f"{'加息' if d > 0 else '降息'}{abs(d):.0f}bp"
+
+
+def _dash_policy(country: str, rows: Optional[List[Dict[str, Any]]],
+                 fomc: Dict[str, Any]) -> str:
+    """政策利率格:美国用 fomc.decisions(含投票比);欧中日用日历决议行。"""
+    if country == "US":
+        d = ((fomc.get("decisions") or [{}])[0])
+        low, high = d.get("rate_low_bp"), d.get("rate_high_bp")
+        if low is None or high is None:
+            return "–"
+        chg = d.get("change_bp") or 0
+        act = "维持" if not chg else (
+            f"{'加息' if chg > 0 else '降息'}{abs(chg):.0f}bp")
+        vote = ""
+        if d.get("vote_for") is not None and d.get("vote_against") is not None:
+            vote = f",{int(d['vote_for'])}:{int(d['vote_against'])}"
+        when = str(d.get("decision_date") or "")[5:].replace("-", "/")
+        return f"{low / 100:.2f}%~{high / 100:.2f}%({when}{act}{vote})"
+    if not rows:
+        return "–"
+    r = rows[0]
+    act = _rate_action(r.get("actual"), r.get("previous"))
+    when = str(r.get("date") or "")[5:].replace("-", "/")
+    cell = f"{_fmt_num(r.get('actual'))}%"
+    if act:
+        cell += f"({when}{act})"
+    return cell
+
+
+def _render_forward_calendar(snapshot: Dict[str, Any]) -> List[str]:
+    """本周前瞻:按日聚合 economic_events.upcoming(关键事件优先,每日≤6)。
+
+    同一 (国家,事件,周期) 的多口径/多时间戳行合并为一条(取首行);
+    OPEC/峰会等跨国会议不挂国家标签。
+    """
+    econ = ((snapshot.get("sources") or {}).get("economic_events") or {})
+    by_date: Dict[str, List[Dict[str, Any]]] = {}
+    for e in econ.get("upcoming") or []:
+        d = str(e.get("date") or "")[:10]
+        if d:
+            by_date.setdefault(d, []).append(e)
+    out: List[str] = []
+    for d in sorted(by_date):
+        rows = by_date[d]
+        dedup: List[Dict[str, Any]] = []
+        seen_keys: set = set()
+        for e in sorted(rows, key=lambda e: (0 if FWD_KEY_RE.search(
+                e.get("event") or "") else 1, e.get("event") or "")):
+            key = (e.get("country"), e.get("event"), e.get("period"))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            dedup.append(e)
+        shown = dedup[:FWD_PER_DAY]
+        try:
+            wd = _CN_WEEKDAY[_date_cls.fromisoformat(d).weekday()]
+        except ValueError:
+            wd = ""
+        parts = []
+        for e in shown:
+            ev_name = str(e.get("event") or "")
+            if not re.search(r"opec|summit|meeting", ev_name, re.I):
+                tag = _CN_COUNTRY.get(e.get("country"))
+            else:
+                tag = None
+            item = (f"[{tag}]" if tag else "") + ev_name
+            if e.get("period"):
+                item += f"({e['period']})"
+            if e.get("forecast"):
+                item += f" 预期 {e['forecast']}"
+            if e.get("time_et"):
+                item += f" {str(e['time_et'])[:5]} ET"
+            parts.append(item)
+        extra = len(dedup) - len(shown)
+        if extra > 0:
+            parts.append(f"另有 {extra} 项")
+        out.append(f"**{d[5:].replace('-', '/')} {wd}** " + ";".join(parts))
+    cal = (((snapshot.get("sources") or {}).get("macro_pillars") or {})
+           .get("fomc_calendar") or [])
+    if cal and (cal[0].get("text") or ""):
+        out.append(f"**FOMC** {cal[0]['text']}")
+    return out
+
+
+def render_macro_dashboard(snapshot: Dict[str, Any]) -> str:
+    sources = snapshot.get("sources") or {}
+    md = (sources.get("macro_dashboard") or {}).get("countries") or {}
+    fomc = sources.get("fomc") or {}
+    cross = {r.get("code"): r
+             for r in (sources.get("market") or {}).get("cross_asset") or []}
+
+    lines = ["## 宏观速览", "", "### 四大经济体", "",
+             "| 经济体 | 增长 | 通胀 | 政策利率 |",
+             "|---|---|---|---|"]
+    for c in ("US", "EU", "CN", "JP"):
+        block = md.get(c) or {}
+        lines.append(
+            f"| {DASH_COUNTRY_CN[c]} | {_dash_growth(block.get('growth'))} | "
+            f"{_dash_inflation(block.get('inflation'))} | "
+            f"{_dash_policy(c, block.get('policy_rate'), fomc)} |")
+    lines.append("")
+
+    comm_rows = ["| 品种 | 收盘 | 1日涨跌 |", "|---|---|---|"]
+    have_comm = False
+    for code, name in DASH_COMMODITIES:
+        r = cross.get(code)
+        if not r or r.get("close") is None:
+            continue
+        have_comm = True
+        chg = r.get("pct_change_1d")
+        chg_s = f"{chg:+.1f}%" if isinstance(chg, (int, float)) else "–"
+        comm_rows.append(f"| {name} | {float(r['close']):,.2f} | {chg_s} |")
+    if have_comm:
+        lines += ["### 商品与贵金属", "", *comm_rows, ""]
+
+    fwd = _render_forward_calendar(snapshot)
+    if fwd:
+        lines += ["### 本周前瞻", "", *fwd, ""]
+    return "\n".join(lines)
+
+
+def write_macro_dashboard(ws: Path, snapshot: Dict[str, Any]) -> None:
+    f = ws / SECTION_SPECS["macro_dashboard"]["output_file"]
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(render_macro_dashboard(snapshot).rstrip()
+                 + f"\n{DONE_MARKER}\n", encoding="utf-8")
+    claims_path(ws, "macro_dashboard").write_text("[]\n", encoding="utf-8")
+
+
+# 确定性节的渲染器分派(生成与修订共用)
+DETERMINISTIC_WRITERS = {
+    "movers": write_movers,
+    "macro_dashboard": write_macro_dashboard,
+}
 
 
 def _fake_verdict(ws: Path, attempt: int) -> None:
@@ -465,7 +683,7 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
     sections: Dict[str, Any] = {}
     usage = None
     if all(SECTION_SPECS[n].get("mode") == "deterministic" for n in names):
-        write_movers(ws, snapshot_data)
+        DETERMINISTIC_WRITERS[names[0]](ws, snapshot_data)
         sections = {n: {"status": "done", "mode": "deterministic"} for n in names}
     elif args.fake_zcode:
         for n in names:
@@ -505,8 +723,9 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
 
 def run_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
                  state: Dict[str, Any]) -> None:
-    """按信源三组并行:overall_market(The Close) / company_desk(Closing Bell) /
-    macro;movers 确定性、立刻跑。互不依赖,墙钟 ≈ 最慢那一组。"""
+    """两段编排(AGENT_STAGES):第一段按信源并行(overall_market /
+    company_desk / movers / macro_dashboard / macro_review / geopolitics /
+    fomc,墙钟 ≈ 最慢一组);第二段 outlook 读第一段成品做综合。"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     snapshot_data = json.loads(snapshot.read_text(encoding="utf-8"))
@@ -521,17 +740,16 @@ def run_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
         _add_usage(state, result.get("usage"))
         save_state(ws, state)
 
-    pending = []
-    for agent in AGENT_ORDER:
+    for stage in AGENT_STAGES:
         if args.fake_zcode:
             # fake:秒级,串行即可,避免线程里抢写同一份 fake 文件
-            _apply(_run_one_agent(args, ws, snapshot, snapshot_data, blocks, agent))
-        else:
-            pending.append(agent)
-    if pending:
-        with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+            for agent in stage:
+                _apply(_run_one_agent(args, ws, snapshot, snapshot_data,
+                                      blocks, agent))
+            continue
+        with ThreadPoolExecutor(max_workers=len(stage)) as pool:
             futs = {pool.submit(_run_one_agent, args, ws, snapshot,
-                                snapshot_data, blocks, a): a for a in pending}
+                                snapshot_data, blocks, a): a for a in stage}
             first_err: Optional[BaseException] = None
             for fut in as_completed(futs):
                 try:
@@ -711,7 +929,8 @@ def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
               f"{len(agent_issues)} issue(s)) ...", flush=True)
         t0 = time.time()
         if all(SECTION_SPECS[n].get("mode") == "deterministic" for n in names):
-            write_movers(ws, json.loads(snapshot.read_text(encoding="utf-8")))
+            DETERMINISTIC_WRITERS[names[0]](
+                ws, json.loads(snapshot.read_text(encoding="utf-8")))
             _record_timing(state, f"revise:{agent}", time.time() - t0)
             continue
         if args.fake_zcode:
@@ -802,6 +1021,35 @@ def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
     pillars = src.get("macro_pillars") or {}
     pillar_ok = [k for k in ("par_curve", "fred_ranks", "fred_extras",
                              "fed_odds", "fomc_calendar") if pillars.get(k)]
+
+    # v8 Macros 新源:宏观地缘素材层(Admin 订阅,中英)/ FOMC 表 / 四经济体指标表
+    news_macro = src.get("news_macro") or {}
+    n_dig = len(news_macro.get("digest") or [])
+    n_res = len(news_macro.get("research") or [])
+    n_geo = len(news_macro.get("geo") or [])
+    tri = news_macro.get("triage") or {}
+    tri_note = (f"·triage{tri.get('selected')}/{tri.get('candidates')}"
+                if tri else "·正则回退")
+    fomc = src.get("fomc") or {}
+    n_dec = len(fomc.get("decisions") or [])
+    n_path = len((fomc.get("path") or {}).get("meetings") or [])
+    has_stmt = bool(fomc.get("statement"))
+    n_dash = len((src.get("macro_dashboard") or {}).get("countries") or {})
+    if cn:
+        cn_note = (f"宏观素材层✓日报{n_dig}/解读{n_res}/地缘{n_geo}{tri_note}"
+                   if (n_dig or n_res or n_geo) else "宏观素材层✗不可得")
+        fomc_note = (f"FOMC✓决议{n_dec}场/路径{n_path}场/声明{'✓' if has_stmt else '✗'}"
+                     if fomc else "FOMC✗不可得")
+        dash_note = (f"四经济体表✓{n_dash}/4" if n_dash else "四经济体表✗不可得")
+    else:
+        cn_note = (f"macro feed✓{n_dig} digest/{n_res} research/{n_geo} geo"
+                   f"{tri_note}"
+                   if (n_dig or n_res or n_geo) else "macro feed✗unavailable")
+        fomc_note = (f"FOMC✓{n_dec} decisions/{n_path} path/"
+                     f"stmt{'✓' if has_stmt else '✗'}"
+                     if fomc else "FOMC✗unavailable")
+        dash_note = (f"macro dashboard✓{n_dash}/4 economies"
+                     if n_dash else "macro dashboard✗unavailable")
     if cn:
         pillar_note = (f"宏观底座✓{len(pillar_ok)}/5({','.join(pillar_ok)})"
                        if pillar_ok else "宏观底座✗不可得")
@@ -824,6 +1072,9 @@ def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
                 (f"经济日历✓近{n_recent}/前瞻{n_upcoming}条{econ_note}" if econ else "经济日历✗不可得"),
                 news_note,
                 pillar_note,
+                cn_note,
+                fomc_note,
+                dash_note,
             ])),
         ]
     else:
@@ -841,6 +1092,9 @@ def _caliber_header(snapshot: Dict[str, Any], style: str) -> List[str]:
                 (f"economic calendar✓{n_recent} recent/{n_upcoming} upcoming" if econ else "economic calendar✗unavailable"),
                 news_note,
                 pillar_note,
+                cn_note,
+                fomc_note,
+                dash_note,
             ])),
         ]
     if errors:

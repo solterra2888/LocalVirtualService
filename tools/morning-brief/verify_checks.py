@@ -38,15 +38,24 @@ HEADINGS = {
     "sector_action": "## Sector Action",
     "movers": "## Today's Movers",
     "deep_dives": "## Company Deep Dives",
-    "macro": "## Macros",
+    # v8 Macros(中文标题;07-11 替代旧 07_macro)
+    "macro_dashboard": "## 宏观速览",
+    "macro_review": "## 回顾 · 宏观数据",
+    "geopolitics": "## 回顾 · 地缘政治",
+    "fomc": "## 美联储观察",
+    "outlook": "## 展望与策略",
 }
 # 正文(剥掉 HTML 注释后)不得出现的生产过程用语
+# v8 增补宏观素材层相关词:素材/管线/入库/白名单/订阅源/抓取/星球/早报
+# (复盘 是正常金融词汇,不禁)
 PROCESS_LEAK_RES = [
     re.compile(p, re.I) for p in (
         r"\bsnapshot\b", r"\btranscripts?\b", r"\bdegraded\b",
         r"\bdisclosure:", r"\bon[\s-]air\b", r"\bthe desk\b",
         r"\bthe shows?\b", r"\bas relayed\b", r"\bdata layer\b",
         r"快照", r"转录", r"节目", r"主持人", r"不可得", r"口径", r"数据层",
+        r"素材", r"管线", r"入库", r"白名单", r"订阅源", r"抓取", r"星球",
+        r"早报",
     )
 ] + [re.compile(p) for p in (r"\bThe Close\b", r"\bClosing Bell\b",
                              r"\bOvertime\b")]
@@ -144,7 +153,7 @@ def _meeting_month_words(meeting: str) -> List[str]:
 
 
 def _show_texts(ws: Path, sources: Dict[str, Any]) -> Dict[str, str]:
-    """节目转录 + 新闻事件层的文本池(供台账数字按 digits-in-blob 对账)。"""
+    """节目转录 + 新闻/宏观地缘素材层的文本池(供台账数字按 digits-in-blob 对账)。"""
     out: Dict[str, str] = {}
     for k in SHOW_KEYS:
         parts = []
@@ -162,6 +171,14 @@ def _show_texts(ws: Path, sources: Dict[str, Any]) -> Dict[str, str]:
             if isinstance(item, dict) and item.get("text"):
                 nparts.append(str(item["text"]))
     out["news"] = "\n".join(nparts).replace(",", "")
+    # 宏观地缘素材层(v8.1,Admin 订阅,中英):digest/research/geo 进 "news_macro" 池
+    news_macro = sources.get("news_macro") or {}
+    cparts = []
+    for bucket in ("digest", "research", "geo"):
+        for item in news_macro.get(bucket) or []:
+            if isinstance(item, dict) and item.get("text"):
+                cparts.append(str(item["text"]))
+    out["news_macro"] = "\n".join(cparts).replace(",", "")
     return out
 
 
@@ -295,11 +312,11 @@ def _check_ledger(ws: Path, name: str, sources: Dict[str, Any],
         path = str(c.get("path") or "")
         label = f"{c.get('value')} @ {path}"
         head = path.split(".")[0].split("[")[0]
-        if head in SHOW_KEYS or head == "news":
+        if head in SHOW_KEYS or head in ("news", "news_macro"):
             blob = show_texts.get(head, "")
             if blob and pv["digits"] not in blob:
-                add(name, label, f"number not found in {head} transcript",
-                    False, "medium", "quote the number exactly as the show states it")
+                add(name, label, f"number not found in {head} text pool",
+                    False, "medium", "quote the number exactly as the source states it")
             continue
         node, full = _resolve_path(sources, path)
         if full:
@@ -471,7 +488,8 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
         # Odds
         odds = ((sources.get("macro_pillars") or {}).get("next_fomc_odds") or {})
         prior = sources.get("prior_odds") or {}
-        if "prior:" in text.lower() and name in ("drivers", "macro", "positioning"):
+        odds_secs = ("drivers", "macro_review", "fomc", "outlook", "positioning")
+        if "prior:" in text.lower() and name in odds_secs:
             if not prior:
                 add(name, "(prior: ...) present but sources.prior_odds absent",
                     "absent", False, "high")
@@ -483,8 +501,7 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
         # 只核对明确指向"下一场会议"的加息概率行;其他月份的概率走台账按合约月对账。
         # 旧做法把全文任何 "hike … N%" 都和下一场比,FOMC 日会把 "12 月 62%"
         # 判成与 2% 不符,白白多跑一轮修订和核验。
-        if (odds.get("odds_pct") is not None
-                and name in ("drivers", "macro", "positioning")):
+        if odds.get("odds_pct") is not None and name in odds_secs:
             target = float(odds["odds_pct"])
             month_words = _meeting_month_words(odds.get("meeting") or "")
             for line in _strip_audit(text).splitlines():
@@ -499,7 +516,7 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
                         "high", f"use next_fomc_odds.odds_pct={target} for "
                         f"{odds.get('meeting')}")
 
-        # Triple shapes vs economic_events
+        # Triple shapes vs economic_events(边际变化/美联储节最常出现)
         events = (sources.get("economic_events") or {})
         event_blob = json.dumps(events, ensure_ascii=False)
         for m in TRIPLE_RE.finditer(text):
@@ -513,7 +530,7 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
                     in str(e.get("actual", ""))
                     for e in recent
                 )
-                if not matched and name == "macro":
+                if not matched and name in ("macro_review", "fomc"):
                     add(name, m.group(0), "economic_events.recent", False, "high")
 
         # Fake 不可得: if missing_mark present, at least one assigned source empty
@@ -530,28 +547,90 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
                 add(name, f"audit show key odd: {body}", "known show keys",
                     False, "medium")
 
-    # Macro block matrix consistency
+    # v8 Macros 块矩阵一致性(替代旧 07_macro 单文件的 Releases/Rate/Forward 矩阵)
     blocks = _macro_blocks_from_state(ws, snapshot)
-    macro_text = _section_text(ws, "macro")
-    if macro_text:
-        has_releases = bool(re.search(r"^####?\s+Releases\b", macro_text, re.M)
-                            or re.search(r"^###\s+Releases\b", macro_text, re.M))
-        has_rate = bool(re.search(r"Rate Expectations", macro_text, re.I))
-        has_forward = bool(re.search(r"Forward Catalysts", macro_text, re.I))
-        has_xasset = bool(re.search(
-            r"Treasuries and oil|Equities and credit|Cross-Asset", macro_text, re.I))
-        if blocks.get("releases") and not has_releases:
-            add("macro", "Releases block expected but missing", "ON", False, "medium")
-        if not blocks.get("releases") and has_releases:
-            add("macro", "Releases block present but matrix OFF", "OFF", False, "high")
-        if blocks.get("rate_expectations") and not has_rate:
-            add("macro", "Rate Expectations expected but missing", "ON", False, "medium")
-        if not blocks.get("rate_expectations") and has_rate:
-            add("macro", "Rate Expectations present but matrix OFF", "OFF", False, "high")
-        if not blocks.get("cross_asset_review") and has_xasset:
-            add("macro", "Cross-asset review present but matrix OFF", "OFF", False, "high")
-        if not has_forward:
-            add("macro", "Forward Catalysts always required", "required", False, "high")
+
+    def _prose_body(name: str) -> str:
+        """剥掉标题行/audit/missing_mark 后的正文(判定"是否真的没内容")。"""
+        t = _strip_audit(_section_text(ws, name))
+        t = re.sub(r"^#{2,4}.*$", "", t, flags=re.M)
+        t = t.replace(missing_mark, "")
+        return t.strip()
+
+    # 07 宏观速览(确定性节):四经济体表与前瞻日历必须齐
+    dash_text = _section_text(ws, "macro_dashboard")
+    if dash_text.strip():
+        for needed in ("### 四大经济体", "| 经济体 |", "### 本周前瞻"):
+            if needed not in dash_text:
+                add("macro_dashboard", f"dashboard missing required part: {needed}",
+                    "required", False, "high",
+                    "re-render 07_macro_dashboard from the snapshot")
+
+    # 08 回顾·宏观数据:只写注入国家的边际变化;没选题就整节缺省
+    review_text = _section_text(ws, "macro_review")
+    if review_text.strip():
+        sel = blocks.get("review_releases") or {}
+        body = _prose_body("macro_review")
+        if not sel and body:
+            add("macro_review",
+                "no releases selected but section has content",
+                "matrix OFF", False, "high",
+                "write only releases selected in the injected list")
+        if sel and not body and missing_mark not in review_text:
+            add("macro_review", "releases selected but section is empty",
+                "matrix ON", False, "medium")
+
+    # 09 回顾·地缘政治:主题块只允许命中主题;焦点事件受 focal 门控
+    geo_text = _section_text(ws, "geopolitics")
+    if geo_text.strip():
+        themes = set(blocks.get("geo_themes") or {})
+        focal = bool(blocks.get("focal_events"))
+        written = set(re.findall(r"^###\s+(.+?)\s*$", geo_text, re.M))
+        written -= {"焦点事件"}
+        invented = {w for w in written if w not in themes}
+        if invented:
+            add("geopolitics",
+                "theme block present but not in matrix: " + ", ".join(sorted(invented)),
+                "OFF", False, "high",
+                "write only themes opened by the block matrix")
+        missing_themes = themes - written
+        if missing_themes and missing_mark not in geo_text:
+            add("geopolitics",
+                "theme opened but block missing: " + ", ".join(sorted(missing_themes)),
+                "ON", False, "medium")
+        has_focal = "### 焦点事件" in geo_text
+        if has_focal and not focal:
+            add("geopolitics", "焦点事件 block present but matrix OFF", "OFF",
+                False, "high")
+        if focal and not has_focal and missing_mark not in geo_text:
+            add("geopolitics", "focal events opened but block missing", "ON",
+                False, "medium")
+
+    # 10 美联储观察:决议深读受 fomc_deep 门控;恒开块结构齐
+    fomc_text = _section_text(ws, "fomc")
+    if fomc_text.strip() and missing_mark not in fomc_text:
+        has_deep = "### 决议深读" in fomc_text
+        if has_deep and not blocks.get("fomc_deep"):
+            add("fomc", "决议深读 block present but matrix OFF", "OFF", False,
+                "high")
+        if blocks.get("fomc_deep") and not has_deep:
+            add("fomc", "decision within last 3 sessions but 决议深读 missing",
+                "ON", False, "medium")
+        for needed in ("### 利率与决议", "### 市场定价路径"):
+            if needed not in fomc_text:
+                add("fomc", f"missing required block: {needed}", "required",
+                    False, "medium")
+
+    # 11 展望与策略:大事预判/投资建议恒在;免责行收尾
+    outlook_text = _section_text(ws, "outlook")
+    if outlook_text.strip():
+        for needed in ("### 大事预判", "### 投资建议"):
+            if needed not in outlook_text:
+                add("outlook", f"missing required block: {needed}", "required",
+                    False, "high")
+        if "不构成投资建议" not in outlook_text:
+            add("outlook", "missing disclaimer line (不构成投资建议)", "required",
+                False, "medium")
 
     # Today's Movers(v7:编排器按成分股快照确定性渲染)
     has_constituents = bool((sources.get("market") or {}).get("sp500_constituents"))

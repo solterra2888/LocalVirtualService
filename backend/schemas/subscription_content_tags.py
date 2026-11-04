@@ -31,6 +31,16 @@ class SubscriptionContentTagsUpdate(BaseModel):
     confidence: Optional[float] = Field(None, ge=0, le=1, description="置信度 (0-1)")
     reasoning: Optional[str] = Field(None, description="推理说明")
     summary: Optional[str] = Field(None, description="50-200 字短摘要")
+    info_level: Optional[str] = Field(
+        None,
+        pattern=r"^(L1|L2|L3|L4)$",
+        description="候选重要度 L1-L4 (对内容所聚焦标的/行业的投资判断冲击潜力)",
+    )
+    evidence_level: Optional[str] = Field(
+        None,
+        pattern=r"^(E1|E2|E3)$",
+        description="证据等级 E1-E3 (来源属性与可独立核验性)",
+    )
     additional_tags: Optional[Dict[str, Any]] = Field(None, description="扩展标签 (merge 写入)")
 
 
@@ -54,6 +64,12 @@ class SubscriptionContentTagsResponse(BaseModel):
     confidence: Optional[float] = None
     reasoning: Optional[str] = None
     summary: Optional[str] = None
+    info_level: Optional[str] = Field(
+        default=None, description="候选重要度 L1-L4; NULL = 未评级 (存量/旧模板产物)"
+    )
+    evidence_level: Optional[str] = Field(
+        default=None, description="证据等级 E1-E3; NULL = 未评级 (存量/旧模板产物)"
+    )
     channel_type: str
     tagged_by: Optional[int] = None
     tagged_at: Optional[UtcDateTime] = None

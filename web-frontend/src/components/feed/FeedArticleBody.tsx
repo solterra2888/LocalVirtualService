@@ -42,7 +42,11 @@ import type {
 import { subscriptionsAPI, getTweetById } from '../../services/subscriptions';
 import ZsxqFileList from '../shared/ZsxqFileList';
 import ReportTickerTags from '../ReportTickerTags';
-import { aiTagChipStyle, AI_TAG_CHIP_FONT_SIZE } from '../shared/aiTagChipStyles';
+import {
+  aiTagChipStyle,
+  AI_TAG_CHIP_FONT_SIZE,
+  type AiTagChipVariant,
+} from '../shared/aiTagChipStyles';
 // PR-7: 个性化 summary picker
 import UploadAnalysisTemplatePicker, {
   UploadAnalysisTemplatePickerValue,
@@ -71,6 +75,48 @@ import { getModalStyles } from '../../utils/modalStyles';
 export type { FeedArticleViewMode } from './feedArticleViewMode';
 
 const { Text } = Typography;
+
+// ── 信息分级 L/E 徽章 (tools/morning-brief/INFO_GRADING_STANDARD.md) ──
+// L = 候选重要度 (对内容所聚焦标的/行业的投资判断冲击潜力, 消费端按标的浮动重定)
+// E = 证据等级 (来源属性与可独立核验性); 两轴正交, 详见各等级 Tooltip。
+const GRADE_MEANINGS: Record<'L' | 'E', Record<string, string>> = {
+  L: {
+    L1: '重要度 L1 — 可能改变投资逻辑 / 盈利模型 / 核心风险判断',
+    L2: '重要度 L2 — 有实质影响, 暂不足以改变模型判断',
+    L3: '重要度 L3 — 同行交流 / 市场情报价值, 不驱动结论',
+    L4: '重要度 L4 — 例行记录 / 低价值噪音',
+  },
+  E: {
+    E1: '证据 E1 — 一手、可直接核验的公司或官方证据 (可作事实锚点)',
+    E2: '证据 E2 — 可靠专业来源或多源互证 (参与判断, 不冒充披露)',
+    E3: '证据 E3 — 单一来源 / 社媒 / 传闻: 未验证, 不可单独驱动结论',
+  },
+};
+
+function InfoGradeBadges({
+  infoLevel,
+  evidenceLevel,
+  themeMode,
+}: {
+  infoLevel?: string | null;
+  evidenceLevel?: string | null;
+  themeMode: 'light' | 'dark';
+}) {
+  const chip = (axis: 'L' | 'E', value: string) => (
+    <Tooltip key={value} title={GRADE_MEANINGS[axis][value]} mouseEnterDelay={0.2}>
+      <Tag
+        bordered={false}
+        style={aiTagChipStyle(`grade-${value.toLowerCase()}` as AiTagChipVariant, themeMode)}
+      >
+        {value}
+      </Tag>
+    </Tooltip>
+  );
+  const parts: React.ReactNode[] = [];
+  if (infoLevel) parts.push(chip('L', infoLevel));
+  if (evidenceLevel) parts.push(chip('E', evidenceLevel));
+  return parts.length > 0 ? <>{parts}</> : null;
+}
 
 export interface FeedArticleBodyProps {
   selectedContent: SubscriptionContent | null;
@@ -420,6 +466,8 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
                 countries: tagsRes.data.countries ?? null,
                 tag_schema_version: tagsRes.data.tag_schema_version ?? null,
                 additional_tags: tagsRes.data.additional_tags ?? null,
+                info_level: tagsRes.data.info_level ?? null,
+                evidence_level: tagsRes.data.evidence_level ?? null,
               };
               setLocalTags(lite);
               onTagsUpdated?.(contentId, lite);
@@ -658,21 +706,28 @@ const FeedArticleBody: React.FC<FeedArticleBodyProps> = ({
             accent: themeColors.selectedBorder,
           }}
           headerMeta={
-            isLowConfidence ? (
-              <Tooltip title={`Low confidence (${(confidence! * 100).toFixed(0)}%) — AI 不太确定, 建议人工复核`}>
-                <Tag
-                  color="warning"
-                  style={{
-                    fontSize: AI_TAG_CHIP_FONT_SIZE,
-                    lineHeight: '12px',
-                    padding: '0 4px',
-                    margin: 0,
-                  }}
-                >
-                  low conf.
-                </Tag>
-              </Tooltip>
-            ) : undefined
+            <>
+              <InfoGradeBadges
+                infoLevel={displayTags?.info_level}
+                evidenceLevel={displayTags?.evidence_level}
+                themeMode={themeMode}
+              />
+              {isLowConfidence ? (
+                <Tooltip title={`Low confidence (${(confidence! * 100).toFixed(0)}%) — AI 不太确定, 建议人工复核`}>
+                  <Tag
+                    color="warning"
+                    style={{
+                      fontSize: AI_TAG_CHIP_FONT_SIZE,
+                      lineHeight: '12px',
+                      padding: '0 4px',
+                      margin: 0,
+                    }}
+                  >
+                    low conf.
+                  </Tag>
+                </Tooltip>
+              ) : undefined}
+            </>
           }
           headerActions={
             <Tooltip

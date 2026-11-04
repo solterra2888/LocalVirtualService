@@ -530,7 +530,7 @@ Write "#### Forward Catalysts", then one bold date line per day
 followed by bullets. Cover the next ~7 days. Format and content:
 - Data: "ISM manufacturing (Oct), 10:00 ET — 54.7 est vs 54.5." Give est vs
   previous when both exist; add key sub-components (prices paid, new orders)
-  only when listed in economic_events. US impact-3 first, then US impact-2.
+  only when listed in economic_events (snapshot carries impact-3 events only).
 - Only events that have NOT happened yet: skip any row that already carries an
   actual. Non-US data is skipped except central-bank decisions.
 - Fed: scheduled speakers and FOMC dates (macro_pillars.fomc_calendar), with

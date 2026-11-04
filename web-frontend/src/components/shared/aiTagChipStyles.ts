@@ -18,7 +18,15 @@ export type AiTagChipVariant =
   | 'signal-bullish'
   | 'signal-bearish'
   | 'signal-neutral'
-  | 'signal-meta';
+  | 'signal-meta'
+  // 信息分级 L/E 双轴 (INFO_GRADING_STANDARD.md): L=重要度(红→灰递减), E=证据(绿=可核验→灰=未验证)
+  | 'grade-l1'
+  | 'grade-l2'
+  | 'grade-l3'
+  | 'grade-l4'
+  | 'grade-e1'
+  | 'grade-e2'
+  | 'grade-e3';
 
 const PALETTE = {
   light: {
@@ -33,6 +41,13 @@ const PALETTE = {
     'signal-bearish': { bg: '#fce4ec', fg: '#c62828' },
     'signal-neutral': { bg: '#f5f5f5', fg: '#616161' },
     'signal-meta':    { bg: '#fafafa', fg: '#757575' },
+    'grade-l1':       { bg: '#ffebee', fg: '#c62828' },
+    'grade-l2':       { bg: '#fff3e0', fg: '#e65100' },
+    'grade-l3':       { bg: '#e3f2fd', fg: '#1565c0' },
+    'grade-l4':       { bg: '#f5f5f5', fg: '#9e9e9e' },
+    'grade-e1':       { bg: '#e8f5e9', fg: '#2e7d32' },
+    'grade-e2':       { bg: '#e0f7fa', fg: '#00838f' },
+    'grade-e3':       { bg: 'rgba(0, 0, 0, 0.06)', fg: 'rgba(0, 0, 0, 0.60)' },
   },
   dark: {
     ticker:           { bg: 'rgba(33, 150, 243, 0.22)',  fg: '#90caf9' },
@@ -46,6 +61,13 @@ const PALETTE = {
     'signal-bearish': { bg: 'rgba(244, 67, 54, 0.28)',   fg: '#ef9a9a' },
     'signal-neutral': { bg: 'rgba(255, 255, 255, 0.08)', fg: '#9e9e9e' },
     'signal-meta':    { bg: 'rgba(255, 255, 255, 0.06)', fg: '#757575' },
+    'grade-l1':       { bg: 'rgba(244, 67, 54, 0.28)',   fg: '#ef9a9a' },
+    'grade-l2':       { bg: 'rgba(255, 152, 0, 0.22)',   fg: '#ffcc80' },
+    'grade-l3':       { bg: 'rgba(33, 150, 243, 0.22)',  fg: '#90caf9' },
+    'grade-l4':       { bg: 'rgba(255, 255, 255, 0.08)', fg: '#9e9e9e' },
+    'grade-e1':       { bg: 'rgba(76, 175, 80, 0.28)',   fg: '#a5d6a7' },
+    'grade-e2':       { bg: 'rgba(0, 150, 136, 0.22)',   fg: '#80cbc4' },
+    'grade-e3':       { bg: 'rgba(255, 255, 255, 0.08)', fg: '#9e9e9e' },
   },
 } as const;
 
