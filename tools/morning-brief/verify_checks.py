@@ -505,7 +505,8 @@ _CONSIST_MEDIUM_PREFIX = ("revenue", "eps", "guide_")
 _METRIC_ALIAS = {"pct_change": "move", "change_pct": "move", "pct_move": "move",
                  "change_percent": "move", "after_hours_move": "ah_move",
                  "ah_change": "ah_move", "price": "close", "odds_pct": "odds",
-                 "hike_odds": "odds"}
+                 "hike_odds": "odds", "premarket_move": "pm_move",
+                 "pre_market_move": "pm_move", "intraday_move": "pm_move"}
 
 
 def _norm_metric(m: Any) -> str:
@@ -578,10 +579,87 @@ def _plan_canonicals(ws: Path, ctx: Dict[str, Any]) -> Dict[tuple, Dict[str, Any
             for r in verified_canonicals(rows, ctx["sources"], ctx)}
 
 
+# 指数/商品的常见写法 → cross_asset 代码前缀
+_ENTITY_ALIAS = {"spx": "gspc", "s&p500": "gspc", "sp500": "gspc", "s&p": "gspc",
+                 "djia": "dji", "dow": "dji", "dowjones": "dji", "nasdaq": "ixic",
+                 "comp": "ixic", "nasdaq100": "ndx", "r2k": "rut", "russell2000": "rut",
+                 "wti": "cl1", "brent": "bz1", "gold": "gc1", "silver": "si1",
+                 "copper": "hg1"}
+_UST_ENTITY_RE = re.compile(r"^(?:us)?(\d+)y(?:\.indx)?$")
+_UST_CODE_RE = re.compile(r"^us\d+y\.indx$")
+
+
+def _anchor_entity(e: str) -> str:
+    """规范化后的 entity → 锚点键(美债统一成 2y/10y/30y,指数别名转代码前缀)。"""
+    m = _UST_ENTITY_RE.match(e)
+    if m:
+        return f"{m.group(1)}y"
+    return _ENTITY_ALIAS.get(e, e)
+
+
+def _anchor(value: str, src: str, strict: bool = False) -> Optional[Dict[str, Any]]:
+    pv = _parse_value(value)
+    return {"value": value, "pv": pv, "src": src, "strict": strict} if pv else None
+
+
+def data_anchors(sources: Dict[str, Any]) -> Dict[tuple, Dict[str, Any]]:
+    """当日收盘口径的数据锚点:(锚点键, metric) → 参照值。
+
+    move = 常规交易时段收盘对收盘;快讯里的盘前/盘中报价不是 move(Tesla
+    盘前 5.6% 写成 move 时收盘实为 -3.34%)。美债只认财政部 par curve。
+    """
+    out: Dict[tuple, Dict[str, Any]] = {}
+    mkt = sources.get("market") or {}
+    for r in mkt.get("sp500_constituents") or []:
+        t = _norm_entity(r.get("ticker"))
+        if not t:
+            continue
+        src = f"market.sp500_constituents[ticker={r.get('ticker')}]"
+        if isinstance(r.get("change_percent"), (int, float)):
+            out[(t, "move")] = _anchor(f"{r['change_percent']}%", src + ".change_percent")
+        if isinstance(r.get("price"), (int, float)):
+            out[(t, "close")] = _anchor(str(r["price"]), src + ".price")
+    for r in mkt.get("cross_asset") or []:
+        code = _norm_entity(r.get("code"))
+        if not code or _UST_CODE_RE.match(code):
+            continue
+        src = f"market.cross_asset[code={r.get('code')}]"
+        for key in {code, code.split(".")[0]}:
+            if isinstance(r.get("pct_change_1d"), (int, float)):
+                out[(key, "move")] = _anchor(f"{r['pct_change_1d']}%",
+                                             src + ".pct_change_1d")
+            if isinstance(r.get("close"), (int, float)):
+                for metric in ("close", "level"):
+                    out[(key, metric)] = _anchor(str(r["close"]), src + ".close")
+    curve = (sources.get("macro_pillars") or {}).get("par_curve") or {}
+    for tenor, lv in (curve.get("levels_pct") or {}).items():
+        if isinstance(lv, (int, float)):
+            src = f"macro_pillars.par_curve.levels_pct.{tenor}"
+            for metric in ("yield", "level", "close"):
+                out[(tenor, metric)] = _anchor(f"{lv:.2f}%", src, strict=True)
+        bp = (curve.get("change_bp") or {}).get(tenor)
+        if isinstance(bp, (int, float)):
+            out[(tenor, "move")] = _anchor(f"{bp:g}bp",
+                                           f"macro_pillars.par_curve.change_bp.{tenor}",
+                                           strict=True)
+    return {k: v for k, v in out.items() if v}
+
+
+def _matches_ref(pv: Dict[str, Any], ref: Dict[str, Any]) -> bool:
+    if ref.get("strict"):
+        dec = min(pv["decimals"], ref["pv"]["decimals"])
+        return abs(_norm_num(pv) - _norm_num(ref["pv"])) <= (
+            0.5 * 10 ** (-dec) / (100 if pv["unit"] == "bp" else 1)) + 1e-9
+    return _same_value(pv, ref["pv"])
+
+
 def _check_consistency(collect: List[Dict[str, Any]],
-                       canon: Dict[tuple, Dict[str, Any]], add) -> None:
-    """同一实体同一指标跨节数值必须一致。参照优先级:编辑计划规范值 >
-    台账里已按路径核实的值 > 多数节;找不到唯一参照只记 medium,不路由。"""
+                       canon: Dict[tuple, Dict[str, Any]], add,
+                       anchors: Optional[Dict[tuple, Dict[str, Any]]] = None) -> None:
+    """同一实体同一指标跨节数值必须一致。参照优先级:当日收盘数据锚点 >
+    编辑计划规范值 > 台账里已按路径核实的值 > 多数节;有锚点或规范值时单节
+    也核;找不到唯一参照只记 medium,不路由。"""
+    anchors = anchors or {}
     groups: Dict[tuple, List[Dict[str, Any]]] = {}
     for r in collect:
         metric = _norm_metric(r["metric"])
@@ -592,7 +670,10 @@ def _check_consistency(collect: List[Dict[str, Any]],
         sev = _metric_severity(key[1])
         label = f"{rows[0]['entity']} {key[1]}"
         ref, ref_src = None, ""
-        if key in canon:
+        anchor = anchors.get((_anchor_entity(key[0]), key[1]))
+        if anchor:
+            ref, ref_src = anchor, f"session data, {anchor['src']}"
+        elif key in canon:
             ref, ref_src = canon[key], "editorial plan"
         else:
             if len({r["section"] for r in rows}) < 2:
@@ -626,13 +707,17 @@ def _check_consistency(collect: List[Dict[str, Any]],
             continue
         flagged: Set[str] = set()
         for r in rows:
-            if r["section"] in flagged or _same_value(r["pv"], ref["pv"]):
+            if r["section"] in flagged or _matches_ref(r["pv"], ref):
                 continue
             flagged.add(r["section"])
+            fix = (f"use {ref['value']} — the same fact must read identically "
+                   "across the brief")
+            if anchor and key[1] == "move":
+                fix = (f"use {ref['value']} (close-to-close), or if this is a "
+                       "premarket/intraday quote say so (盘前/盘中) and tag the "
+                       "ledger entry metric pm_move")
             add(r["section"], f"{label} {r['value']} disagrees with {ref['value']} "
-                f"({ref_src})", "cross-section", False, sev,
-                f"use {ref['value']} — the same fact must read identically "
-                "across the brief")
+                f"({ref_src})", "cross-section", False, sev, fix)
 
 
 def _check_headline_language(ws: Path, style: str, add) -> None:
@@ -677,7 +762,8 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
                 or state_secs.get(name, {}).get("mode") == "deterministic"):
             continue
         _check_ledger(ws, name, ctx, add, collect)
-    _check_consistency(collect, _plan_canonicals(ws, ctx), add)
+    _check_consistency(collect, _plan_canonicals(ws, ctx), add,
+                       data_anchors(ctx["sources"]))
     _check_headline_language(ws, style, add)
 
     # Structure lint

@@ -17,6 +17,7 @@ company_desk(sector_action/deep_dives)、movers 与 macro_dashboard(确定性)�
 macro_review、geopolitics、fomc 六组;第二段 outlook 读第一段成品做综合。
 """
 
+import re
 from typing import Any, Dict, List, Optional
 
 # ── 风格档案 ───────────────────────────────────────────────────────────
@@ -92,6 +93,81 @@ def assign_item_ids(sources: Dict[str, Any]) -> int:
     return added
 
 
+# 日历数值的单位(EODHD 只给裸数:"预期 65" 是 6.5 万还是 65%?);先按口径再按事件名
+_UNIT_RULES = (
+    (re.compile(r"payroll|jobless claims|claimant|employment change|\badp\b", re.I), "K"),
+    (re.compile(r"job openings|jolts|crude oil .*change|gasoline .*change", re.I), "M"),
+    (re.compile(r"balance of trade|current account|exports|imports|budget", re.I), "B"),
+    (re.compile(r"rate|yield|auction|gdp growth|earnings", re.I), "%"),
+)
+_INDEX_LEVEL_RE = re.compile(r"inflation|cpi|pce|ppi|price index", re.I)
+
+
+def event_unit(row: Dict[str, Any]) -> str:
+    if (row.get("comparison") or "").lower() in ("yoy", "mom", "qoq"):
+        return "%"
+    ev = row.get("event") or ""
+    if re.search(r"foreign exchange reserves|fx reserves", ev, re.I):
+        try:
+            return "T" if abs(float(row.get("previous") or row.get("forecast"))) < 100 else "B"
+        except (TypeError, ValueError):
+            return ""
+    if re.search(r"pmi|sentiment|confidence|index|rig count|\bism\b", ev, re.I):
+        return ""
+    if _INDEX_LEVEL_RE.search(ev):
+        # 无口径的通胀行是指数水平(CPI s.a 336.94),小数值才是百分比
+        try:
+            return "%" if abs(float(row.get("previous") or row.get("forecast"))) < 30 else ""
+        except (TypeError, ValueError):
+            return ""
+    for rx, unit in _UNIT_RULES:
+        if rx.search(ev):
+            return unit
+    return ""
+
+
+def annotate_event_units(sources: Dict[str, Any]) -> int:
+    """给 economic_events 各行补 unit 字段(已有的不动,幂等)。返回新标注行数。"""
+    econ = sources.get("economic_events") or {}
+    n = 0
+    for bucket in ("recent", "upcoming"):
+        for row in econ.get(bucket) or []:
+            if isinstance(row, dict) and "unit" not in row:
+                row["unit"] = event_unit(row)
+                n += 1
+    return n
+
+
+# 匿名信源/传闻措辞:上游 evidence_level 常把这类条目标成 E2(2026-11-04 的
+# "US Diplomatic Sources: Trump May Decide…" 即是),按措辞另打 reported 标记
+_REPORTED_RE = re.compile(
+    r"\bsources?\b(?!\s+of\b)|reportedly|people (?:familiar|close|briefed)|"
+    r"according to (?:a |the )?(?:report|people|person|officials? who)|"
+    r"\bsaid to be\b|\bmulls?\b|rumou?rs?|unconfirmed|"
+    r"据报道|据悉|知情人士|消息人士|消息称|传闻|传言|未经证实|据传", re.I)
+_REPORTED_POOLS = (("news", "flash"), ("news", "wire"), ("news_macro", "geo"),
+                   ("news_macro", "digest"), ("news_macro", "research"))
+
+
+def flag_reported_items(sources: Dict[str, Any]) -> int:
+    """给文本条目加 reported 布尔标记(已有该键的不动,幂等)。返回新标注条数。"""
+    n = 0
+    for head, sub in _REPORTED_POOLS:
+        for item in (sources.get(head) or {}).get(sub) or []:
+            if not isinstance(item, dict) or "reported" in item:
+                continue
+            blob = " ".join(str(item.get(k) or "") for k in ("title", "text"))
+            item["reported"] = bool(_REPORTED_RE.search(blob))
+            n += 1
+    return n
+
+
+def fmt_event_value(v: Any, unit: str) -> str:
+    if v in (None, ""):
+        return "–"
+    return f"{v}{unit}" if unit else str(v)
+
+
 # 正文禁用的管线标签(读者看到的出处只能是原始发布方/机构)
 PIPELINE_TAGS = tuple(k for k in ATTRIBUTION_MAP if k != "(FRED)" and k != "(Finviz)")
 
@@ -119,14 +195,14 @@ SECTION_SOURCE_MATRIX = {
     "macro_dashboard": {"(macro dashboard)", "(economic calendar)",
                         "(cross-asset)", "(Fed calendar)"},
     "macro_review": {"(economic calendar)", "(FRED)", "(cross-asset)",
-                     "(fed funds futures)", "(macro daily)",
+                     "(Treasury curve)", "(fed funds futures)", "(macro daily)",
                      "(news flash)", "(newswire)"},
     "geopolitics": {"(macro geo)", "(macro daily)", "(news flash)", "(newswire)",
                     "(cross-asset)"},
     "fomc": {"(FOMC decisions)", "(fed funds futures)", "(economic calendar)",
-             "(FRED)", "(news flash)", "(newswire)"},
+             "(Treasury curve)", "(FRED)", "(news flash)", "(newswire)"},
     "outlook": {"(fed funds futures)", "(FOMC decisions)",
-                "(economic calendar)", "(cross-asset)", "(macro daily)",
+                "(economic calendar)", "(cross-asset)", "(Treasury curve)", "(macro daily)",
                 "(macro geo)", "(news flash)", "(newswire)"},
 }
 
@@ -214,7 +290,7 @@ HARD RULES (violating any of these fails pipeline verification):
    absent from the snapshot, that show's material is unavailable — do not
    paraphrase from memory.
    NEWS LAYER: sources.news.flash[] are same-day squawk/headline tweets
-   ({{time_et, author, text, tickers, info_level, evidence_level}}) and
+   ({{id, time_et, author, text, tickers, info_level, evidence_level, reported}}) and
    sources.news.wire[] are full-text articles, both drawn from Admin's
    subscribed sources and graded L1–L4 (importance) / E1–E3 (evidence);
    sources.news.calls[] are
@@ -233,8 +309,8 @@ HARD RULES (violating any of these fails pipeline verification):
    digest[] (human-curated daily briefs), research[] (macro interpretation
    — broker notes name the ORIGINATING broker in the body; English macro
    voices included) and geo[] (geopolitical items in Chinese OR English),
-   each item {{time_cn (Beijing), author, title, text, theme, importance,
-   evidence_level}} (theme/importance come from semantic triage). The material is
+   each item {{id, time_cn (Beijing), author, title, text, theme, importance,
+   evidence_level, reported}} (theme/importance come from semantic triage). The material is
    bilingual: quote/paraphrase Chinese items in Chinese prose, English
    items in Chinese prose with the original English term kept where it is
    the house term (FOMC, CPI, Hormuz).
@@ -244,6 +320,12 @@ HARD RULES (violating any of these fails pipeline verification):
    never be stated as established fact. E1 = primary official disclosure;
    E2 = reliable professional coverage — state directly with the outlet
    credited.
+   REPORTED CLAIMS: an item flagged `reported: true` (anonymous sources,
+   "reportedly", 消息人士, 传闻 — whatever its evidence_level) is a claim,
+   not a fact: write it as 「据…报道」「…消息人士称」, never as established
+   fact. A headline, an inference (推断), a base case or advice must rest on
+   an observed market move or a confirmed event; a reported claim may only
+   appear as the risk / flip condition ("若…属实/落地").
 2. Every number you state must exist in snapshot.json. If absent, leave the
    number (or the sentence) out.
 3. Write the section to the exact output file specified below, as Markdown,
@@ -341,9 +423,16 @@ HARD RULES (violating any of these fails pipeline verification):
      per fact across sections. entity = ticker for stocks/ETFs (NVDA),
      cross_asset code for indices/assets (GSPC.INDX), US2Y/US10Y for
      Treasury yields, the meeting month for Fed odds (2026-12). metric = one
-     of move (regular-session % change), ah_move (after-hours % change),
+     of move (THIS session's regular-session % change, close vs prior close),
+     ah_move (after-hours % change), pm_move (premarket or intraday % change —
+     a news.flash quote timestamped before the close is pm_move, never move),
      close, level, yield, odds, revenue, eps, guide_revenue, guide_eps.
-     Skip both for anything else.
+     The checker compares every move against the session's close-to-close
+     data; a multi-day or year-to-date change gets no metric. Skip both for
+     anything else.
+   - US Treasury yields come ONLY from macro_pillars.par_curve (levels_pct /
+     change_bp, the official Treasury curve), written with two decimals
+     (4.90%); the curve is the single yield source for the whole brief.
    - `value` exactly as written in the prose. Rounding a data value to one
      decimal is fine (the checker tolerates it).
    A script checks every entry against the snapshot; an entry whose number is
@@ -425,12 +514,19 @@ events). Each block:
   (e.g. **The build-out is moving onto borrowed money.**).
 - 1–3 fact bullets. Pack related facts into one sentence; each bullet ≤ 45
   words; numbers per rule 9; at most one credit per bullet.
-- A final action bullet (no label): one sentence, ≤ 30 words, naming a
-  concrete positioning move AND what would change it — an event, a date, a
-  level (e.g. "Avoid PC and chip suppliers exposed to memory costs until Apple
-  (Monday) and Qualcomm (Wednesday) show how far the squeeze reaches.").
-  Keep it trade-level and specific to this driver; the portfolio-level
-  stance and sector allocation belong to Section 11 (展望与策略).
+- Fact bullets carry facts only (what happened, who said what). The causal
+  read and the call go in the closing bullet — never mix judgment into a
+  fact bullet.
+- A closing bullet that starts with **推断：** (en style: **Read:**), one
+  sentence of ≤ 70 Chinese characters / 35 words, in three parts: what the
+  facts imply (the mechanism, as a judgment); a concrete trade-level
+  positioning move; and the scenario that would change it — 「若<event /
+  date / level>，则<how the call changes>」. E.g. 「**推断：**存储成本挤压正
+  从 PC 蔓延到手机；回避存储成本敞口大的整机与芯片供应商，若 Apple(周一)
+  与 Qualcomm(周三)毛利率守住，则挤压有限、可回补。」 The inference must
+  follow from the block's facts — a reported claim may only be the 若
+  condition. Keep it specific to this driver; the portfolio-level stance and
+  sector allocation belong to Section 11 (展望与策略).
 Do not restate the same stock move in two blocks.
 
 ### File C — sections/03_positioning.md
@@ -538,9 +634,11 @@ def _macro_review_task(blocks: Dict[str, Any]) -> str:
     for c, rows in sel.items():
         def _fmt(e: Dict[str, Any]) -> str:
             cmp_ = f" [{e['comparison']}]" if e.get("comparison") else ""
+            u = e["unit"] if "unit" in e else event_unit(e)
             return (f"{e.get('event', '?')}{cmp_} {e.get('period') or ''} "
-                    f"(actual={e.get('actual')}, est={e.get('forecast')}, "
-                    f"prior={e.get('previous')}, {e.get('date')})")
+                    f"(actual={fmt_event_value(e.get('actual'), u)}, "
+                    f"est={fmt_event_value(e.get('forecast'), u)}, "
+                    f"prior={fmt_event_value(e.get('previous'), u)}, {e.get('date')})")
         lines.append(f"  - {c}: " + "; ".join(_fmt(e) for e in rows))
     selected = "\n".join(lines) if lines else "  (none)"
 
@@ -685,7 +783,9 @@ Write "## 展望与策略" with:
 
 ### 大事预判
 Up to 4 forward items. Each: a bold date or horizon, the event, the base case,
-and what would flip it. ONLY events that have NOT happened yet — dates from
+and what would flip it. The base case rests on confirmed facts and pricing;
+a reported claim (`reported: true` items, 消息人士/据报道) may only be a flip
+condition, written as such. ONLY events that have NOT happened yet — dates from
 economic_events.upcoming, macro_pillars.fomc_calendar, or events the news
 layers name with a date. FOMC path judgment lives here. 2–4 bullets,
 ≤60 words each.
@@ -938,8 +1038,10 @@ You are the editor of a scheduled morning brief. Before the section writers
 start, decide what the day's stories are and which section owns each one, so
 the brief tells each story once and every number reads the same everywhere.
 
-Read plan_input.md (attached) — a digest of today's data and news with item
-ids. Do not open any other file.
+plan_input.md (attached) is a complete digest of today's data and news with
+item ids — everything you need. Do NOT open, list or search any other file,
+do not re-read the digest in pieces, and do not run tools beyond writing
+plan.json ONCE. This is a quick editorial call, not research.
 
 Sections that can own a story today:
 {roles}
@@ -948,22 +1050,27 @@ Sections that can own a story today:
 
 Write plan.json:
 {{"stories": [{{"id": "s1", "title": "<one line>", "owner": "<section key>",
-   "may_mention": ["<section key>"], "angle": "<what the owner argues, ≤25 words>",
-   "evidence": ["f21", "w3", "market.sp500_constituents[ticker=NVDA]"]}}],
+   "may_mention": ["<section key>"], "angle": "<what the owner argues, ≤20 words>"}}],
  "canonical": [{{"entity": "NVDA", "metric": "move", "value": "2.1%",
    "path": "market.sp500_constituents[ticker=NVDA].change_percent"}}]}}
 Rules:
-- 4–8 stories, ordered by market impact; exactly one owner each, chosen from
+- 4–7 stories, ordered by market impact; exactly one owner each, chosen from
   the list above.
+- Items marked [reported] are anonymous-source claims or rumours: one may be
+  part of a story, but never the story's sole basis or its canonical number.
 - may_mention: other sections that may reference the story in one clause
   (e.g. outlook for what comes next); leave it empty when none should.
-- canonical: the key number of each story (stock moves, index closes/moves,
-  yields, Fed odds, reported revenue/EPS) exactly as the brief should state
-  it, with its source — a snapshot path for data, or the news item
-  (news.flash[id=f21]). Only numbers shown in the digest. entity = ticker /
-  cross_asset code / US2Y, US10Y / meeting month (2026-12); metric = move,
-  ah_move, close, level, yield, odds, revenue, eps, guide_revenue, guide_eps.
-- Facts and assignments only — no advice, no prose. Keep it short.
+- canonical: at most 12 entries — the key number of the lead stories (stock
+  moves, index closes/moves, yields, Fed odds, reported revenue/EPS), ONE
+  number per entry exactly as the brief should state it ("2.1%", not
+  "53356.12 (+3.03%)"; a close and its move are two entries), with its
+  source — a snapshot path for data, or the news item (news.flash[id=f21]).
+  Only numbers shown in the digest. Treasury yields: path
+  macro_pillars.par_curve.levels_pct.<tenor>, two decimals (4.90%).
+  entity = ticker / cross_asset code / US2Y, US10Y / meeting month
+  (2026-12); metric = move, ah_move, pm_move, close, level, yield, odds,
+  revenue, eps, guide_revenue, guide_eps.
+- Facts and assignments only — no evidence lists, no advice, no prose.
 
 Output file: plan.json
 """
@@ -1108,7 +1215,12 @@ Read sections/*.md only ({p['quality_review_language']}) and flag ONLY:
 - The same fact stated differently in different places: a superlative
   ("worst day ever" vs "since 1974" vs "in four decades"), a market-cap or
   dollar figure, or a % move quoted with two different values.
-- Speculation stated as reported fact.
+- Speculation stated as reported fact, or an anonymous-source / reported
+  claim (消息人士、据报道、传闻) written as confirmed fact — high when the
+  claim is stated as fact; medium when a 推断, base case or piece of advice
+  rests on such a claim alone.
+- In 02_drivers.md: a block whose fact bullets carry the judgment, or whose
+  closing 推断 bullet lacks the 「若…则…」 condition (medium).
 - Quotes without a named speaker and affiliation.
 - Vague quantifiers ("sharply", "大幅") with no number attached.
 - Bloat: the same stock move restated in several blocks of one section.

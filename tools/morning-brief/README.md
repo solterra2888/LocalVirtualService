@@ -112,13 +112,15 @@ v8 追加:Macros 各节**完全不读节目转录**;展望节判断句必须读�
   编辑计划(v8.4,写作前一次轻量 LLM):plan_input.md(结构化数字 + 带条目 id
     的新闻标题,不含转录)→ plan.json:4–8 个故事、每个故事唯一归属节 +
     可一句带过的节 + 规范数值(entity/metric/value/path);规范数值按快照核实
-    后才注入任务书与参与核验;已有 plan.json 复用;失败不阻断;--no-plan 关闭
+    后才注入任务书与参与核验(≤12 条,超时 300s);已有 plan.json 复用;失败不阻断;
+    --no-plan 关闭
   两段编排(第一段并行,墙钟 ≈ 最慢一组;第二段单跑综合):
     overall_market  → 01+02+03  The Close 转录: narrative / drivers / positioning
     company_desk    → 04+06     Closing Bell 主段+OT 转录 + 成分股 + 新闻层:
                                 sector_action / deep_dives
     movers          → 05        确定性渲染(S&P 500 ≥$100 亿,涨跌各 8 只 + EPS 对预期)
-    macro_dashboard → 07        确定性渲染:四经济体表 + 商品行情 + 本周前瞻(零 LLM)
+    macro_dashboard → 07        确定性渲染:四经济体表 + 商品行情 + 利率与汇率(par curve/2s10s/FX)
+                                + 本周前瞻表(含看点列与下周大市值财报)(零 LLM)
     macro_review    → 08        回顾·宏观数据:多国 [T] 日 actual 边际变化 +
                                 券商宏观解读(块注入 review_releases,每国 ≤2 族);
                                 无选题 → 编排器直接写占位(平静日确定性渲染,锁定)
@@ -140,14 +142,16 @@ v8 追加:Macros 各节**完全不读节目转录**;展望节判断句必须读�
     台账逐条按路径对数:结构化路径精确对值;新闻按被引条目对数(含 万/亿/M/B/
     million 换算,精度以台账写法为准),条目里没有即 high;整桶引用记 medium ·
     跨节一致性:同 entity+metric 跨节数值不同 → 行情类(move/ah_move/close/
-    level/yield/odds)high、财报类 medium,参照 = 计划规范值 > 已按路径核实值 >
-    多数节,只路由偏离的节 · 平静日代码渲染的 08/10 跳过台账 · 正文 %/bp 数字
+    level/yield/odds)high、财报类 medium,参照 = 当日收盘数据锚点(成分股/跨资产/
+    财政部曲线,有锚点时单节也核;盘前盘中报价须标 pm_move)> 计划规范值 >
+    已按路径核实值 > 多数节,只路由偏离的节 · 美债全篇只用 macro_pillars.par_curve · 平静日代码渲染的 08/10 跳过台账 · 正文 %/bp 数字
     覆盖兜底 · 下一场 FOMC 概率 · 三元组/since/v8 块矩阵(国家边际变化/地缘主题/
     决议深读/展望必备块) · 正文管线标签/生产过程用语(含宏观素材层词汇)/动词后
     带符号 · audit 来源白名单 · 结构(07-11 中文标题) · cn 标题语言
   有 high fail → 不调 LLM,直接按清单 --resume 修订
-  全绿 → --llm-verify annotate(默认:只读全部节正文,不挂快照/转录,意见一律
-    标 advisory 进复核备注、不参与门控)| light(同款,high 触发修订)| off | full
+  全绿 → --llm-verify annotate(默认:只读全部节正文,不挂快照/转录;能路由到
+    可修订节的 high 驱动且只驱动一轮修订,此后只跑确定性核验;其余意见标
+    advisory 进复核备注)| light(同款,high 触发修订)| off | full
   Gate(v8.4)→ 只看 high:无 high 即发布,medium/low 与确定性残留写入
     report.audit.md「Review notes」,不驱动修订、不进正文;high 只路由到
     可修订节 —— 确定性节(05/07 及平静日的 08/10)不修,占位节(块矩阵为空的合同输出)只接受

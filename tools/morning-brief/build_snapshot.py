@@ -93,7 +93,7 @@ from backend.utils.logger import get_logger  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fetch_macro_pillars import build_macro_pillars  # noqa: E402
-from prompts import assign_item_ids  # noqa: E402
+from prompts import annotate_event_units, assign_item_ids, flag_reported_items  # noqa: E402
 
 logger = get_logger("report_pipeline_snapshot")
 
@@ -832,14 +832,25 @@ _PRINT_NUM_RE = re.compile(
 _PRINT_CMP_RE = {"yoy": re.compile(r"y/y|\byoy\b|year", re.I),
                  "mom": re.compile(r"m/m|\bmom\b|month", re.I)}
 _ANY_CMP_RE = re.compile(r"y/y|m/m|\byoy\b|\bmom\b", re.I)
+# 只认带本国标识的快讯;美国用大小写敏感的 US/U.S.(避免 "for us" 误中)
 _PRINT_COUNTRY_RE = {
-    "US": re.compile(r"\bU\.?S\.?\b|🇺🇸|united states", re.I),
+    "US": re.compile(r"\bU\.S\.|\bUS\b|🇺🇸|[Uu]nited [Ss]tates"),
     "EU": re.compile(r"euro\s*(?:zone|area)|\bEZ\b|🇪🇺", re.I),
     "DE": re.compile(r"german|🇩🇪", re.I),
     "CN": re.compile(r"china|chinese|🇨🇳", re.I),
     "JP": re.compile(r"japan|🇯🇵", re.I),
     "KR": re.compile(r"korea|🇰🇷", re.I),
 }
+_PRINT_FOREIGN_RE = re.compile(
+    r"\b(?:spain|spanish|france|french|ital(?:y|ian)|u\.?k\.?|britain|british|"
+    r"canad(?:a|ian)|australia|swed(?:en|ish)|swiss|switzerland|india|brazil|"
+    r"mexic(?:o|an)|norw(?:ay|egian)|ireland|irish|netherlands|dutch)\b"
+    r"|🇪🇸|🇫🇷|🇮🇹|🇬🇧|🇨🇦|🇦🇺|🇸🇪|🇨🇭|🇮🇳|🇧🇷|🇲🇽", re.I)
+# 一条快讯常并列多个指标("Services PMI: 56.1 (est …) - Composite PMI: 55.9 (est …)"),
+# 按分隔符切段,只在命中事件名的那一段里取数
+_PRINT_SEGMENT_RE = re.compile(r"\s[-–—|•]\s|\n")
+# 快讯须在日历发布时刻之后的这个窗口内(分钟)
+_PRINT_WINDOW_MIN = (-5, 90)
 _EVENT_GENERIC = {"rate", "index", "change", "final", "prel", "flash", "s&p",
                   "global", "the", "and"}
 _MONTH_ABBR = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep",
@@ -853,32 +864,22 @@ def _num(s: str) -> Optional[float]:
         return None
 
 
-def _parse_print(text: str, row: Dict[str, Any]) -> Optional[str]:
-    """从一条快讯里解析该日历行的实际值;任一守卫不过即返回 None。"""
-    compact = re.sub(r"[^a-z0-9]", "", text.lower())
-    tokens = [t for t in re.findall(r"[a-z0-9&]+", (row.get("event") or "").lower())
-              if len(t) >= 3 and t not in _EVENT_GENERIC]
-    if not tokens or not all(t in compact for t in tokens):
+def _country_ok(text: str, country: Optional[str]) -> bool:
+    own = _PRINT_COUNTRY_RE.get(country or "")
+    if own is None or not own.search(text):
+        return False
+    others = [rx for c, rx in _PRINT_COUNTRY_RE.items() if c != country]
+    return not (_PRINT_FOREIGN_RE.search(text) or any(rx.search(text) for rx in others))
+
+
+def _parse_segment(seg: str, row: Dict[str, Any], tokens: List[str]) -> Optional[float]:
+    compact = re.sub(r"[^a-z0-9]", "", seg.lower())
+    if not all(t in compact for t in tokens):
         return None
-    cmp_ = (row.get("comparison") or "").lower()
-    if cmp_ in _PRINT_CMP_RE:
-        if not _PRINT_CMP_RE[cmp_].search(text):
-            return None
-    elif _ANY_CMP_RE.search(text):
-        return None
-    period = (row.get("period") or "").lower()
-    if period[:3] in _MONTH_ABBR and period[:3] not in text.lower():
-        return None
-    country = row.get("country")
-    if country != "US" and not _PRINT_COUNTRY_RE.get(country, re.compile("$^")).search(text):
-        return None
-    if country == "US" and any(rx.search(text) for c, rx in _PRINT_COUNTRY_RE.items()
-                               if c != "US"):
-        return None
-    est = _PRINT_EST_RE.search(text)
+    est = _PRINT_EST_RE.search(seg)
     if not est:
         return None
-    before = [m for m in _PRINT_NUM_RE.finditer(text[:est.start()])
+    before = [m for m in _PRINT_NUM_RE.finditer(seg[:est.start()])
               if not re.fullmatch(r"20\d\d", m.group(1))]
     if not before:
         return None
@@ -891,11 +892,52 @@ def _parse_print(text: str, row: Dict[str, Any]) -> Optional[str]:
     if refs and not any(abs(actual - r) <= 1.0
                         or (r and 0.5 <= actual / r <= 2.0) for r in refs):
         return None
-    return before[-1].group(1).replace(",", "").replace("−", "-")
+    return actual
+
+
+def _parse_print(text: str, row: Dict[str, Any]) -> Optional[float]:
+    """从一条快讯里解析该日历行的实际值;任一守卫不过即返回 None。"""
+    tokens = [t for t in re.findall(r"[a-z0-9&]+", (row.get("event") or "").lower())
+              if len(t) >= 3 and t not in _EVENT_GENERIC]
+    if not tokens:
+        return None
+    cmp_ = (row.get("comparison") or "").lower()
+    if cmp_ in _PRINT_CMP_RE:
+        if not _PRINT_CMP_RE[cmp_].search(text):
+            return None
+    elif _ANY_CMP_RE.search(text):
+        return None
+    period = (row.get("period") or "").lower()
+    if period[:3] in _MONTH_ABBR and period[:3] not in text.lower():
+        return None
+    if not _country_ok(text, row.get("country")):
+        return None
+    for seg in _PRINT_SEGMENT_RE.split(text):
+        val = _parse_segment(seg, row, tokens)
+        if val is not None:
+            return val
+    return None
+
+
+def _in_release_window(f: Dict[str, Any], row: Dict[str, Any],
+                       report_date: date) -> bool:
+    """快讯美东时刻须落在日历发布时刻之后的窗口内;日历无具体时点时不设限。"""
+    rel = _to_et(row.get("date"), row.get("time"))
+    if not rel.get("time_et") or not f.get("time_et"):
+        return True
+    rel_day = rel.get("date_et") or str(row.get("date"))[:10]
+    f_day = f.get("date_et") or report_date.isoformat()
+    try:
+        r_dt = datetime.fromisoformat(f"{rel_day} {rel['time_et']}")
+        f_dt = datetime.fromisoformat(f"{f_day} {f['time_et']}")
+    except ValueError:
+        return True
+    minutes = (f_dt - r_dt).total_seconds() / 60
+    return _PRINT_WINDOW_MIN[0] <= minutes <= _PRINT_WINDOW_MIN[1]
 
 
 def fill_actuals_from_flash(sources: Dict[str, Any], report_date: date) -> int:
-    """T 日缺 actual 的日历行用最早一条匹配快讯的打印值补齐(标 actual_source)。"""
+    """T 日缺 actual 的日历行用发布窗口内最早一条匹配快讯的打印值补齐(标 actual_source)。"""
     econ = sources.get("economic_events") or {}
     flash = sorted(((sources.get("news") or {}).get("flash") or []),
                    key=lambda f: (f.get("date_et") or report_date.isoformat(),
@@ -906,6 +948,8 @@ def fill_actuals_from_flash(sources: Dict[str, Any], report_date: date) -> int:
                 or row.get("actual") not in (None, "")):
             continue
         for f in flash:
+            if not _in_release_window(f, row, report_date):
+                continue
             val = _parse_print(f.get("text") or "", row)
             if val is not None:
                 row["actual"] = val
@@ -1755,6 +1799,8 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
             notes["actuals_from_flash"] = filled
     except Exception as e:  # noqa: BLE001
         notes["actuals_from_flash"] = str(e)[:300]
+    annotate_event_units(sources)
+    flag_reported_items(sources)
 
     snapshot = {
         "report_date": report_date.isoformat(),

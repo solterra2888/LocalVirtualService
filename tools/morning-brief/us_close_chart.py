@@ -179,9 +179,9 @@ def _finviz_rows(conn: Any, t: date) -> Tuple[Dict[str, Dict[str, Any]], date]:
 def _fred_yields(t: date) -> Optional[Dict[str, List[Tuple[date, float]]]]:
     """Treasury par yields (DGS2/10/30) from FRED public CSV; None on failure.
 
-    Fetched per-series with cosd=t-400d (fast). Must cover T itself
-    (publication lags a few hours after the ET close) — else the caller
-    falls back to EODHD yields.
+    Fetched per-series with cosd=t-400d (fast). May end before T
+    (publication lags a few hours after the ET close) — the caller splices
+    T from the Treasury par curve or falls back to EODHD.
     """
     out: Dict[str, List[Tuple[date, float]]] = {}
     cosd = (t - timedelta(days=400)).isoformat()
@@ -207,8 +207,6 @@ def _fred_yields(t: date) -> Optional[Dict[str, List[Tuple[date, float]]]]:
         if not s:
             return None
         s.sort(key=lambda x: x[0], reverse=True)
-        if s[0][0] != t:
-            return None
         out[sid] = s
     return out
 
@@ -244,7 +242,28 @@ def _row(name: str, ticker: str, last_str: str, unit: str,
             "unit": unit, **ch}
 
 
-def build_sections(conn: Any, t: date) -> List[Dict[str, Any]]:
+_PAR_TENOR = {"DGS2": "2y", "DGS10": "10y", "DGS30": "30y"}
+
+
+def _splice_par(fred: Optional[Dict[str, List[Tuple[date, float]]]], t: date,
+                par_curve: Optional[Dict[str, Any]]) -> Optional[str]:
+    """FRED 缺 T 时用快照的财政部 par curve 补 T 日值(与正文同源),历史仍走 FRED。
+
+    原地修改 fred;返回脚注来源说明,无法拼接时返回 None。
+    """
+    if not fred or not par_curve or par_curve.get("as_of") != t.isoformat():
+        return None
+    levels = par_curve.get("levels_pct") or {}
+    if any(levels.get(_PAR_TENOR[sid]) is None for sid in fred):
+        return None
+    for sid, s in fred.items():
+        if s[0][0] != t:
+            s.insert(0, (t, float(levels[_PAR_TENOR[sid]])))
+    return "美债收益率当日值来自美国财政部收益率曲线,历史来自 FRED"
+
+
+def build_sections(conn: Any, t: date,
+                   par_curve: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     FOOTER_NOTES.clear()
     fv, snap = _finviz_rows(conn, t)
     print(f"[us_close] finviz snapshot {snap} (frozen at/after {t} close)")
@@ -304,19 +323,25 @@ def build_sections(conn: Any, t: date) -> List[Dict[str, Any]]:
             idx_row("富时100", "", "FTSE.INDX"),
             idx_row("德国DAX", "", "GDAXI.INDX")]
 
-    # ---- RATES (Treasury par yields via FRED when T is published; EODHD fallback)
+    # ---- RATES (Treasury par yields: FRED, T spliced from the snapshot's
+    # Treasury curve when FRED lags; EODHD only when neither covers T)
     fred = _fred_yields(t)
+    note = "美债收益率来自 FRED"
+    if fred and any(s[0][0] != t for s in fred.values()):
+        note = _splice_par(fred, t, par_curve)
+        if note is None:
+            fred = None
     if fred:
-        print("[us_close] rates: FRED Treasury par yields (DGS2/10/30)")
-        FOOTER_NOTES.append("美债收益率来自 FRED")
+        print(f"[us_close] rates: {note}")
+        FOOTER_NOTES.append(note)
         rates = []
         series = {"美债2年": fred["DGS2"], "美债10年": fred["DGS10"], "美债30年": fred["DGS30"]}
         for nm, s in series.items():
             rates.append(_row(nm, "", _minus(f"{s[0][1]:.2f}%"), "bp",
                               _changes(s, pct=False), s[0][1]))
     else:
-        print("[us_close] rates: FRED lacks T — falling back to EODHD yields")
-        FOOTER_NOTES.append("美债收益率来自 EODHD(FRED 尚未发布当日数据)")
+        print("[us_close] rates: FRED and Treasury curve lack T — falling back to EODHD yields")
+        FOOTER_NOTES.append("美债收益率来自 EODHD(FRED 与财政部曲线均未覆盖当日)")
 
         def rate_row(name: str, code: str) -> Dict[str, Any]:
             s = _series(conn, code, t)
@@ -484,14 +509,15 @@ def render_for_workspace(ws: Path, conn: Any = None) -> Optional[Path]:
     Owns its own DB connection when none is passed. Raises on failure —
     the caller (render_charts.render_all) decides the fallback.
     """
-    t = date.fromisoformat(
-        json.loads((ws / "snapshot.json").read_text(encoding="utf-8"))["report_date"])
+    snap = json.loads((ws / "snapshot.json").read_text(encoding="utf-8"))
+    t = date.fromisoformat(snap["report_date"])
+    par = ((snap.get("sources") or {}).get("macro_pillars") or {}).get("par_curve")
     out = ws / "final" / "charts" / "01_markets.png"
     own = conn is None
     if own:
         conn = DatabaseManager(get_database_config()).get_connection()
     try:
-        sections = build_sections(conn, t)
+        sections = build_sections(conn, t, par)
     finally:
         if own:
             conn.close()
@@ -509,11 +535,13 @@ def main() -> int:
     args = ap.parse_args()
 
     t: Optional[date] = None
+    par = None
+    if args.workspace:
+        snap = json.loads((Path(args.workspace) / "snapshot.json").read_text())
+        t = date.fromisoformat(snap["report_date"])
+        par = ((snap.get("sources") or {}).get("macro_pillars") or {}).get("par_curve")
     if args.date:
         t = date.fromisoformat(args.date)
-    elif args.workspace:
-        t = date.fromisoformat(json.loads(
-            (Path(args.workspace) / "snapshot.json").read_text())["report_date"])
     if t is None:
         print("need --date or --workspace", file=sys.stderr)
         return 1
@@ -524,7 +552,7 @@ def main() -> int:
 
     conn = DatabaseManager(get_database_config()).get_connection()
     try:
-        sections = build_sections(conn, t)
+        sections = build_sections(conn, t, par)
     finally:
         conn.close()
     n = sum(len(s["rows"]) for s in sections)

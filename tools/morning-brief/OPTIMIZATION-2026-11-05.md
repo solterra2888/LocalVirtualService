@@ -296,3 +296,102 @@ $PY tools/morning-brief/run_pipeline.py $T > /tmp/rerun.log 2>&1; echo rc=$?
   82% / 78% → drivers, fomc, outlook
 - macro_review 44 字符(占位,却经历 4 轮修订共 1,056s)
 ```
+
+---
+
+## 八、v8.5：2026-11-04 真机评估后的四项修正
+
+依据 `backend/reports/morning-brief/2026-11-04` 真机结果。离线回归（用该日真实数据）与 `--fake-zcode` 全流程均已通过，尚未真机跑。
+
+### 1. 数据锚点裁断 + LLM high 有限修订（问题 1：Tesla 盘前 5.6% 当成收盘涨跌发布）
+
+- `verify_checks.data_anchors()`：用当日收盘口径数据做参照。
+  - 成分股 `change_percent`/`price`。
+  - `cross_asset` 的 `pct_change_1d`/`close`（代码与前缀都认，SPX/WTI 等常见写法有别名）。
+  - 美债只认 `par_curve`（`levels_pct`/`change_bp`），且按小数位严格比对：0.5% 的相对容差会让 4.89 混过 4.90。
+- 跨节一致性的参照顺序：数据锚点 > 计划规范值 > 已核实值 > 多数节。有锚点时只有一节写也核。
+  - `move` 偏离给出的建议是：改用收盘值，或注明盘前/盘中并把 metric 标成 `pm_move`。
+  - `pm_move` 不参与一致性核验。
+- 规则 11：`move` 限定为当日收盘对收盘。新增 `pm_move`；多日、年初至今的涨跌不标 metric。
+- annotate 模式下 LLM 意见的处理（`_gate_llm_issues`）：
+  - **能路由到可修订节的 high** 驱动**一轮**修订，并在 state 里记 `verify.llm_fix_used`。
+  - 之后的核验只跑确定性检查，不再调 LLM；上一轮的 LLM 意见标 `revised once; not re-reviewed`，写进复核备注。
+  - medium/low，以及落在锁定节或占位节的 high，仍只作备注。
+- 回放 11-04 的结果：Tesla 5.6%（02 节）、AMD 盘前 7% 标成 move（06 节）、08 节 US10Y 4.89% 三条都判 high，没有新增误报。
+
+### 2. 美债口径统一 + 07 前瞻口径与单位（问题 2、3）
+
+- **全报告美债只用 `macro_pillars.par_curve`**：
+  - 写作切片快照、plan_input 都剔除 `US2Y/US10Y/US30Y.INDX`。
+  - 08、10、11 的白名单加入 Treasury curve。
+  - 规则要求两位小数（4.90%）；10 节平静日渲染改为 `.2f`。
+- 图表：FRED 缺 T 日时，用快照 `par_curve` 补 T 日值，历史仍取 FRED，脚注写明来源；两者都没有才回退 EODHD。
+- 07 本周前瞻：
+  - 同一事件多行时，按同比 > 环比 > 无口径挑选，同口径内有预期的优先。这样 CPI 不再取到指数行（337），显示为"同比 预期 3.7%"。
+  - 输出标注同比/环比。
+  - 版式改为表格（日期 | 时间(美东) | 地区 | 事件 | 预期 | 前值）：事件用中文名，数值换成中文量级（19.6万、156亿、1.5万亿），按美东日期分日，同一天内按时间排序。
+  - 既无预期也无前值的讲话、会议、报告不列；同一发布跨日的重复行（EODHD 双时间戳）只保留一行；FOMC 行改为"下次 FOMC 议息：12月8–9日"。
+- 单位：新增共享的 `prompts.annotate_event_units()`，build_snapshot 构建时调用，编排器也会给旧快照补上。
+  - 结果：非农、初请写成 K；JOLTS、EIA 写成 M；贸易、经常账写成 B；外储按量级写 T 或 B；利率、通胀、口径行写成 %；PMI、指数不带单位。
+  - 08 任务书和 plan_input 里的数字也带上单位，展望节看到的是同一套单位。
+
+### 3. P21 快讯回填守卫（问题 4：西班牙 PMI 57.2 被回填成美国 Composite PMI）
+
+- 必须有本国的正面标识。美国用大小写敏感的 `US`/`U.S.`/🇺🇸，并排除其他国家的名称和旗帜。
+- 按 ` - `/`|`/换行切段，只在包含事件名和 est 标记的那一段里取数，避免取到同条快讯里 Services 的数。
+- 快讯时间须在日历发布时刻的 [-5, +90] 分钟窗口内。
+- actual 存为数值。
+- 回放结果：午盘快照原来取 f178 → 57.2，现在取 f37 → 55.9；ISM 仍是 f39 → 54.5。
+
+### 4. 编辑计划瘦身
+
+- `PLAN_TIMEOUT_SEC` 从 600 降到 300。
+- prompt 改动：明确只用附件、只写一次 plan.json、不读其他文件；去掉 evidence；故事 4–7 个；规范值不超过 12 条，每条只写一个数（不写"53356.12 (+3.03%)"）。
+- `_load_plan` 截断：故事不超过 8 个，规范值不超过 12 条。
+
+### 真机测试（在第四节流程上补充）
+
+```bash
+T=2026-11-05
+# 新数据日跑全流程后：
+grep -E "\[plan\]|LLM high issue|skipped: LLM fix round|rates:" run_$T.log
+python3 tools/morning-brief/eval_run.py $T > eval_$T.md
+grep -n "预期" backend/reports/morning-brief/$T/final/report.md | head    # 07 单位/口径
+grep -rn "10年期\|10Y\|10 年" backend/reports/morning-brief/$T/sections/*.md # 美债应全篇一致
+```
+
+### 请反馈
+
+1. plan 阶段墙钟和 token（`eval` 的 tokens by phase）。目标墙钟 < 300s，输入 < 150K。
+2. 日志里是否出现 `LLM high issue(s) get one revision round`，以及修订后 audit 备注里的 `revised once` 条目是否确实已修好。
+3. 各节的美债数字是否一致，图表脚注写的是哪个来源。
+4. 07 前瞻的单位和口径，以及 `actuals_from_flash` 回填了哪些行（看 snapshot 的 `actual_source`）。
+5. 有没有因 `move` 锚点产生的误报 high，例如把多日涨跌标成了 move。
+
+---
+
+## 九、借鉴参考报告（`reference: AI_report_from_8.md`）的四项改动
+
+参考报告是持仓周报，持仓监控、Model Action 不适用；以下四项可用于晨报，均已实现，离线与 `--fake-zcode` 通过。
+
+1. **传闻标记**
+   - 上游 `evidence_level` 太粗，11-04 的 f59（"US Diplomatic Sources… - Al Jadeed"）被标成 E2。
+   - 新增 `prompts.flag_reported_items()`：按措辞（sources / reportedly / people familiar / 消息人士 / 据报道 / 传闻 等）给 flash、wire、geo、digest、research 条目打 `reported` 标记。build_snapshot 构建时调用，编排器也会给旧快照补上。
+   - 11-04 回放：flash 命中 f15、f59、f73、f184，geo 命中 g30、g33、g36；wire 无误报。
+   - 规则：reported 条目只能写成「据…报道 / 消息人士称」；标题、推断、基准情景和建议不能只依赖它，它只能作为「若…属实」的翻转条件。plan_input 中这类条目标 `[reported]`，也不能作规范值。
+   - LLM 轻量核验：传闻写成事实判 high；建议只依赖传闻判 medium。
+2. **02 节事实与推断分离**
+   - 事实 bullet 只写事实。
+   - 每个故事的收尾 bullet 改为「**推断：**<机制判断>；<交易级动作>，若<事件 / 日期 / 价位>，则<如何调整>」，不超过 70 字。
+   - 轻量核验：判断写进了事实 bullet，或收尾缺少「若…则…」，判 medium。
+3. **07 本周前瞻加「看点」列，并合并财报**
+   - 看点按事件族映射，确定性生成，例如「就业 → 美联储路径、美元」「外需 → 人民币」「国债供给 → 长端利率」。
+   - 财报：取市值不低于 500 亿美元的 S&P 500 成分股，每天最多 2 家、合计最多 6 家，时间显示盘前或盘后；同一家公司出现暂定和确认两个日期时，取带时段的那条。
+4. **07 新增「利率与汇率」小表**
+   - 内容：美债 2 年 / 10 年 / 30 年（par curve 口径）、2s10s 利差及其 1 日变动、欧元/美元、美元/日元。
+   - DXY 不在快照里，所以不列。
+
+**真机请反馈**：
+- 02 节每个故事的「推断」读起来是否有信息量，有没有变成套话。
+- 09、11 节对 reported 条目的措辞。
+- 07 表格长度是否合适（目前宏观事件每天最多 6 行，另加最多 2 家财报）。

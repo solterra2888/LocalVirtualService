@@ -54,9 +54,13 @@ from prompts import (  # noqa: E402
     PLAN_OWNER_ROLES,
     STYLE_PROFILES,
     agent_section_names,
+    annotate_event_units,
     assign_item_ids,
     agent_snapshot_filter,
     build_agent_prompt,
+    event_unit,
+    flag_reported_items,
+    fmt_event_value,
     build_light_verifier_prompt,
     build_plan_prompt,
     build_verifier_prompt,
@@ -456,6 +460,8 @@ FWD_KEY_RE = re.compile(
     r"interest\s+rate|fomc|payroll|cpi|inflation|hicp|gdp|pmi|unemployment"
     r"|pce|ppi|retail\s+sales|loan\s+prime|lpr", re.I)
 FWD_PER_DAY = 6
+_FWD_CMP_RANK = {"yoy": 0, "mom": 1, "qoq": 1}
+_FWD_CMP_CN = {"yoy": "同比", "mom": "环比", "qoq": "环比"}
 
 
 def _fmt_num(v: Any) -> str:
@@ -545,59 +551,268 @@ def _dash_policy(country: str, rows: Optional[List[Dict[str, Any]]],
     return cell
 
 
-def _render_forward_calendar(snapshot: Dict[str, Any]) -> List[str]:
-    """本周前瞻:按日聚合 economic_events.upcoming(关键事件优先,每日≤6)。
+_FWD_EVENT_CN = {
+    "Initial Jobless Claims": "初请失业金人数", "Continuing Jobless Claims": "续请失业金人数",
+    "Non Farm Payrolls": "非农就业", "ADP Employment Change": "ADP就业",
+    "Unemployment Rate": "失业率", "Average Hourly Earnings": "平均时薪",
+    "JOLTs Job Openings": "JOLTS职位空缺", "Inflation Rate": "CPI",
+    "Core Inflation Rate": "核心CPI", "Harmonised Inflation Rate": "HICP",
+    "Core Harmonised Inflation Rate": "核心HICP", "PCE Price Index": "PCE物价",
+    "Core PCE Price Index": "核心PCE", "PPI": "PPI", "Producer Price Index": "PPI",
+    "Core PPI": "核心PPI", "Retail Sales": "零售销售", "Retail Sales Ex Autos": "核心零售",
+    "GDP Growth Rate": "GDP", "GDP Growth Rate Annualized": "GDP(年化)",
+    "Industrial Production": "工业产出", "Balance of Trade": "贸易差额",
+    "Exports": "出口", "Imports": "进口", "Current Account": "经常账户",
+    "Foreign Exchange Reserves": "外汇储备", "Interest Rate Decision": "利率决议",
+    "Fed Interest Rate Decision": "美联储利率决议", "ECB Interest Rate Decision": "欧央行利率决议",
+    "BoJ Interest Rate Decision": "日央行利率决议", "Loan Prime Rate 1Y": "1年期LPR",
+    "Loan Prime Rate 5Y": "5年期LPR", "Michigan Consumer Sentiment": "密歇根消费者信心",
+    "CB Consumer Confidence": "谘商会消费者信心",
+    "ISM Manufacturing PMI": "ISM制造业PMI", "ISM Services PMI": "ISM服务业PMI",
+    "S&P Global Manufacturing PMI": "标普制造业PMI", "S&P Global Services PMI": "标普服务业PMI",
+    "S&P Global Composite PMI": "标普综合PMI", "NBS Manufacturing PMI": "统计局制造业PMI",
+    "NBS Non Manufacturing PMI": "统计局非制造业PMI", "HCOB Manufacturing PMI": "HCOB制造业PMI",
+    "HCOB Services PMI": "HCOB服务业PMI", "Ifo Business Climate": "Ifo商业景气",
+    "ZEW Economic Sentiment Index": "ZEW经济景气", "Tokyo CPI": "东京CPI",
+    "Tokyo Core CPI": "东京核心CPI", "EIA Crude Oil Stocks Change": "EIA原油库存",
+    "Baker Hughes Oil Rig Count": "贝克休斯石油钻井数",
+    "2-Year Note Auction": "2年期美债拍卖", "5-Year Note Auction": "5年期美债拍卖",
+    "10-Year Note Auction": "10年期美债拍卖", "30-Year Bond Auction": "30年期美债拍卖",
+    "30-Year Bund Auction": "30年期德债拍卖", "FOMC Minutes": "FOMC会议纪要",
+}
+_FWD_REGION_CN = {"US": "美国", "EU": "欧元区", "CN": "中国", "JP": "日本",
+                  "DE": "德国", "KR": "韩国"}
+_MONTH_CN = {m: i + 1 for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"))}
+_MONTH_EN_FULL = {m: i + 1 for i, m in enumerate(
+    ("january", "february", "march", "april", "may", "june", "july", "august",
+     "september", "october", "november", "december"))}
+# 无预期/前值的讲话、会议、报告对读者没有可比数字,不进前瞻表
+_FWD_NOISE_RE = re.compile(r"speech|speaks|testimony|meeting|summit|report|hearing", re.I)
 
-    同一 (国家,事件,周期) 的多口径/多时间戳行合并为一条(取首行);
-    OPEC/峰会等跨国会议不挂国家标签。
+
+def _fwd_period(period: Any) -> str:
+    """Oct → 10月;Oct/31 → 10/31当周;Q3 原样。"""
+    p = str(period or "").strip()
+    m = re.fullmatch(r"([A-Za-z]{3})(?:/(\d{1,2}))?", p)
+    if not m or m.group(1).lower() not in _MONTH_CN:
+        return p
+    mon = _MONTH_CN[m.group(1).lower()]
+    return f"{mon}/{int(m.group(2))}当周" if m.group(2) else f"{mon}月"
+
+
+def _fwd_amount(v: Any, unit: str) -> str:
+    """日历数值转中文量级:K→万、M→万、B→亿、T→万亿;% 与无单位原样。"""
+    if v in (None, ""):
+        return "–"
+    try:
+        f = float(str(v).replace(",", ""))
+    except ValueError:
+        return str(v)
+    if unit == "K":
+        return f"{_fmt_num(f / 10)}万"
+    if unit == "M":
+        return f"{_fmt_num(f * 100)}万"
+    if unit == "B":
+        return f"{_fmt_num(f / 1000)}万亿" if abs(f) >= 1000 else f"{_fmt_num(f * 10)}亿"
+    if unit == "T":
+        return f"{_fmt_num(f)}万亿"
+    return f"{_fmt_num(f)}{unit}"
+
+
+def _fwd_event_name(e: Dict[str, Any]) -> str:
+    ev = str(e.get("event") or "")
+    name = _FWD_EVENT_CN.get(ev, ev) + _FWD_CMP_CN.get((e.get("comparison") or "").lower(), "")
+    period = _fwd_period(e.get("period"))
+    return f"{name}({period})" if period else name
+
+
+def _fwd_fomc_line(text: str) -> str:
+    m = re.match(r"([A-Za-z]+)\s+(\d{1,2})(?:\s*[-–]\s*(\d{1,2}))?,?\s*(\d{4})?", text.strip())
+    if not m or m.group(1).lower() not in _MONTH_EN_FULL:
+        return f"**下次 FOMC 议息**:{text}"
+    mon = _MONTH_EN_FULL[m.group(1).lower()]
+    days = f"{m.group(2)}–{m.group(3)}日" if m.group(3) else f"{m.group(2)}日"
+    return f"**下次 FOMC 议息**:{mon}月{days}"
+
+
+_FWD_BANK = {"US": "美联储", "EU": "欧央行", "DE": "欧央行", "JP": "日央行",
+             "CN": "人民银行", "KR": "韩国央行"}
+_FWD_FX = {"US": "美元", "EU": "欧元", "DE": "欧元", "JP": "日元", "CN": "人民币",
+           "KR": "韩元"}
+# 事件族 → 看点模板({bank}/{fx} 按国家填);先匹配先用
+_FWD_WATCH = (
+    (re.compile(r"payroll|unemployment|jobless|claims|adp|jolts|job openings|"
+                r"hourly earnings|employment", re.I), "就业 → {bank}路径、{fx}"),
+    (re.compile(r"inflation|cpi|hicp|pce|ppi|price index", re.I), "通胀 → {bank}路径、利率"),
+    (re.compile(r"interest rate|rate decision|fomc|loan prime", re.I), "政策利率 → {fx}、利率"),
+    (re.compile(r"auction", re.I), "国债供给 → 长端利率"),
+    (re.compile(r"balance of trade|exports|imports|current account", re.I), "外需 → {fx}"),
+    (re.compile(r"foreign exchange reserves", re.I), "外汇储备 → {fx}汇率"),
+    (re.compile(r"crude|rig count|opec", re.I), "原油供需 → 油价"),
+    (re.compile(r"sentiment|confidence|retail sales", re.I), "消费需求"),
+    (re.compile(r"pmi|gdp|industrial production|ifo|zew", re.I), "增长动能"),
+)
+_SECTOR_CN = {"Technology": "科技", "Healthcare": "医疗", "Financial": "金融",
+              "Consumer Cyclical": "可选消费", "Consumer Defensive": "必需消费",
+              "Industrials": "工业", "Energy": "能源", "Basic Materials": "材料",
+              "Communication Services": "通信服务", "Utilities": "公用事业",
+              "Real Estate": "房地产"}
+FWD_EARNINGS_MAX = 6
+FWD_EARNINGS_PER_DAY = 2
+FWD_EARNINGS_MIN_CAP_MN = 50_000   # 市值 ≥ $500 亿(finviz market_cap 以百万美元计)
+
+
+def _fwd_watch(e: Dict[str, Any]) -> str:
+    ev, c = e.get("event") or "", e.get("country") or ""
+    for rx, tpl in _FWD_WATCH:
+        if rx.search(ev):
+            return tpl.format(bank=_FWD_BANK.get(c, "央行"), fx=_FWD_FX.get(c, "汇率"))
+    return "–"
+
+
+_COMPANY_SUFFIX_RE = re.compile(
+    r"[,.]?\s+(?:(?:and|&)\s+Co(?:mpany)?|Inc|Corp(?:oration)?|Co|Company|Ltd|plc|"
+    r"Holdings?|Group|N\.?V|S\.?A|Class\s+[A-C])\.?$", re.I)
+
+
+def _short_company(name: str) -> str:
+    out, prev = (name or "").strip(), None
+    while out and out != prev:           # "KKR & Co. Inc" 要剥两层
+        prev, out = out, _COMPANY_SUFFIX_RE.sub("", out)
+    return out or name
+
+
+def _fwd_earnings(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """下周大市值财报(S&P 500 成分股,市值降序,每日≤2、合计≤6),转成前瞻表行。"""
+    src = snapshot.get("sources") or {}
+    cons = {r.get("ticker"): r for r in (src.get("market") or {}).get(
+        "sp500_constituents") or [] if r.get("ticker")}
+    rows = []
+    for r in (src.get("earnings_calendar") or {}).get("upcoming") or []:
+        c = cons.get(r.get("code"))
+        cap = (c or {}).get("market_cap") or 0
+        if not isinstance(r, dict) or not r.get("report_date") or cap < FWD_EARNINGS_MIN_CAP_MN:
+            continue
+        rows.append((cap, r, c))
+    # 同一公司常有暂定/确认两个日期:有盘前/盘后时段的那条才是确认日
+    rows.sort(key=lambda x: (-x[0], 0 if x[1].get("session") in ("before", "after") else 1))
+    per_day: Dict[str, int] = {}
+    seen: set = set()
+    out = []
+    for _, r, c in rows:
+        if r.get("code") in seen:
+            continue
+        seen.add(r.get("code"))
+        d = str(r["report_date"])[:10]
+        if len(out) >= FWD_EARNINGS_MAX or per_day.get(d, 0) >= FWD_EARNINGS_PER_DAY:
+            continue
+        per_day[d] = per_day.get(d, 0) + 1
+        sess = (r.get("session") or "").lower()
+        est = r.get("eps_estimate")
+        out.append({
+            "date": d, "sort_time": {"before": "00:00", "after": "16:30"}.get(sess, "12:00"),
+            "time": {"before": "盘前", "after": "盘后"}.get(sess, "–"),
+            "region": "美国",
+            "event": f"{_short_company(r.get('name') or r.get('code'))}({r.get('code')})财报",
+            "forecast": f"EPS {_fmt_num(est)}" if isinstance(est, (int, float)) else "–",
+            "previous": "–",
+            "watch": f"{_SECTOR_CN.get(c.get('sector'), c.get('sector') or '')}板块风向",
+        })
+    return out
+
+
+def _render_forward_calendar(snapshot: Dict[str, Any]) -> List[str]:
+    """本周前瞻:economic_events.upcoming 渲染成表(按美东日期分日,关键事件优先,每日≤6)。
+
+    同一 (国家,事件,周期) 的多口径/多时间戳行合并为一条:同比 > 环比 > 无口径
+    (无口径的通胀行是指数水平),同口径内有预期的优先;既无预期也无前值的讲话/
+    会议/报告不列;数值换成中文量级(19.6万、156亿)。
     """
     econ = ((snapshot.get("sources") or {}).get("economic_events") or {})
     by_date: Dict[str, List[Dict[str, Any]]] = {}
     for e in econ.get("upcoming") or []:
-        d = str(e.get("date") or "")[:10]
+        no_numbers = (e.get("forecast") in (None, "") and e.get("previous") in (None, ""))
+        if no_numbers and _FWD_NOISE_RE.search(e.get("event") or ""):
+            continue
+        d = str(e.get("date_et") or e.get("date") or "")[:10]
         if d:
             by_date.setdefault(d, []).append(e)
-    out: List[str] = []
+    table: Dict[str, List[Dict[str, Any]]] = {}
+    seen_keys: set = set()          # 跨日去重:EODHD 同一发布常有两个时间戳的重复行
     for d in sorted(by_date):
-        rows = by_date[d]
         dedup: List[Dict[str, Any]] = []
-        seen_keys: set = set()
-        for e in sorted(rows, key=lambda e: (0 if FWD_KEY_RE.search(
-                e.get("event") or "") else 1, e.get("event") or "")):
+        for e in sorted(by_date[d], key=lambda e: (
+                0 if FWD_KEY_RE.search(e.get("event") or "") else 1,
+                e.get("event") or "", _FWD_CMP_RANK.get(
+                    (e.get("comparison") or "").lower(), 2),
+                0 if e.get("forecast") not in (None, "") else 1)):
             key = (e.get("country"), e.get("event"), e.get("period"))
             if key in seen_keys:
                 continue
             seen_keys.add(key)
             dedup.append(e)
-        shown = dedup[:FWD_PER_DAY]
+        for e in dedup[:FWD_PER_DAY]:
+            unit = e["unit"] if "unit" in e else event_unit(e)
+            t = str(e.get("time_et") or "")[:5]
+            table.setdefault(d, []).append({
+                "sort_time": t or "99", "time": t or "–",
+                "region": _FWD_REGION_CN.get(e.get("country"), e.get("country") or "–"),
+                "event": _fwd_event_name(e),
+                "forecast": _fwd_amount(e.get("forecast"), unit),
+                "previous": _fwd_amount(e.get("previous"), unit),
+                "watch": _fwd_watch(e)})
+    for r in _fwd_earnings(snapshot):
+        table.setdefault(r["date"], []).append(r)
+    rows_md: List[str] = []
+    for d in sorted(table):
         try:
             wd = _CN_WEEKDAY[_date_cls.fromisoformat(d).weekday()]
         except ValueError:
             wd = ""
-        parts = []
-        for e in shown:
-            ev_name = str(e.get("event") or "")
-            if not re.search(r"opec|summit|meeting", ev_name, re.I):
-                tag = _CN_COUNTRY.get(e.get("country"))
-            else:
-                tag = None
-            item = (f"[{tag}]" if tag else "") + ev_name
-            if e.get("period"):
-                item += f"({e['period']})"
-            if e.get("forecast"):
-                item += f" 预期 {e['forecast']}"
-            if e.get("time_et"):
-                item += f" {str(e['time_et'])[:5]} ET"
-            parts.append(item)
-        extra = len(dedup) - len(shown)
-        if extra > 0:
-            parts.append(f"另有 {extra} 项")
-        out.append(f"**{d[5:].replace('-', '/')} {wd}** " + ";".join(parts))
+        for i, r in enumerate(sorted(table[d], key=lambda r: r["sort_time"])):
+            day = f"{int(d[5:7])}/{int(d[8:10])} {wd}" if i == 0 else ""
+            rows_md.append(f"| {day} | {r['time']} | {r['region']} | {r['event']} | "
+                           f"{r['forecast']} | {r['previous']} | {r['watch']} |")
+    out: List[str] = []
+    if rows_md:
+        out += ["| 日期 | 时间(美东) | 地区 | 事件 | 预期 | 前值 | 看点 |",
+                "|---|---|---|---|---|---|---|", *rows_md]
     cal = (((snapshot.get("sources") or {}).get("macro_pillars") or {})
            .get("fomc_calendar") or [])
     if cal and (cal[0].get("text") or ""):
-        out.append(f"**FOMC** {cal[0]['text']}")
+        out += ["", _fwd_fomc_line(cal[0]["text"])]
     return out
+
+
+DASH_FX = (("EURUSD.FOREX", "欧元/美元", 4), ("USDJPY.FOREX", "美元/日元", 2))
+
+
+def _render_rates_fx(sources: Dict[str, Any], cross: Dict[str, Any]) -> List[str]:
+    """美债(财政部 par curve,全报告唯一收益率口径)+ 2s10s 利差 + 主要汇率。"""
+    curve = (sources.get("macro_pillars") or {}).get("par_curve") or {}
+    lv, ch = curve.get("levels_pct") or {}, curve.get("change_bp") or {}
+    rows = []
+
+    def _bp(x: Any) -> str:
+        return f"{x:+.0f}bp" if isinstance(x, (int, float)) else "–"
+
+    for tenor, name in (("2y", "美债2年"), ("10y", "美债10年"), ("30y", "美债30年")):
+        if isinstance(lv.get(tenor), (int, float)):
+            rows.append(f"| {name} | {lv[tenor]:.2f}% | {_bp(ch.get(tenor))} |")
+    if all(isinstance(lv.get(k), (int, float)) for k in ("2y", "10y")):
+        d = (ch["10y"] - ch["2y"]) if all(
+            isinstance(ch.get(k), (int, float)) for k in ("2y", "10y")) else None
+        rows.append(f"| 2s10s 利差 | {(lv['10y'] - lv['2y']) * 100:+.0f}bp | {_bp(d)} |")
+    for code, name, dec in DASH_FX:
+        r = cross.get(code)
+        if r and isinstance(r.get("close"), (int, float)):
+            chg = r.get("pct_change_1d")
+            chg_s = f"{chg:+.2f}%" if isinstance(chg, (int, float)) else "–"
+            rows.append(f"| {name} | {r['close']:.{dec}f} | {chg_s} |")
+    if not rows:
+        return []
+    return ["| 品种 | 收盘 | 1日变动 |", "|---|---|---|", *rows]
 
 
 def render_macro_dashboard(snapshot: Dict[str, Any]) -> str:
@@ -630,6 +845,10 @@ def render_macro_dashboard(snapshot: Dict[str, Any]) -> str:
         comm_rows.append(f"| {name} | {float(r['close']):,.2f} | {chg_s} |")
     if have_comm:
         lines += ["### 商品与贵金属", "", *comm_rows, ""]
+
+    rates = _render_rates_fx(sources, cross)
+    if rates:
+        lines += ["### 利率与汇率", "", *rates, ""]
 
     fwd = _render_forward_calendar(snapshot)
     if fwd:
@@ -775,9 +994,9 @@ def render_fomc_quiet(snapshot: Dict[str, Any], blocks: Dict[str, Any],
     if lv.get("2y") is not None and ch.get("2y") is not None:
         def _move(bp: float) -> str:
             return "持平" if not bp else f"{'上行' if bp > 0 else '下行'} {_fmt_num(abs(bp))}bp"
-        s = f"- 2年期美债收益率收于 {_fmt_num(lv['2y'])}%，较前一交易日{_move(ch['2y'])}"
+        s = f"- 2年期美债收益率收于 {float(lv['2y']):.2f}%，较前一交易日{_move(ch['2y'])}"
         if lv.get("10y") is not None and ch.get("10y") is not None:
-            s += f"；10年期 {_fmt_num(lv['10y'])}%，{_move(ch['10y'])}"
+            s += f"；10年期 {float(lv['10y']):.2f}%，{_move(ch['10y'])}"
         lines.append(s + "。")
     return "\n".join(lines) + "\n"
 
@@ -854,6 +1073,11 @@ def _sliced_snapshot(ws: Path, snapshot: Path, agent: str) -> Path:
                 or (not isinstance(v, (dict, list))
                     and len(str(v)) < 300)}
         sliced[head] = keep or val       # 子键全未命中(路径命名漂移)→ 保守整块保留
+    mkt = sliced.get("market")
+    if isinstance(mkt, dict) and isinstance(mkt.get("cross_asset"), list):
+        sliced["market"] = {**mkt, "cross_asset": [
+            r for r in mkt["cross_asset"]
+            if not UST_CODE_RE.match(str((r or {}).get("code") or ""))]}
     snap["sources"] = sliced
     snap["sliced_for"] = agent
     out = ws / f"snapshot.{agent}.json"
@@ -932,7 +1156,17 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
 
 # ── 编辑计划(写作前一次规划) ──────────────────────────────────────────
 
-PLAN_TIMEOUT_SEC = 600
+PLAN_TIMEOUT_SEC = 300
+PLAN_MAX_STORIES = 8
+PLAN_MAX_CANONICALS = 12
+
+
+# EODHD 的美债收益率(US10Y.INDX 等)与财政部 par curve 差 1bp 级,全报告只用后者
+UST_CODE_RE = re.compile(r"US\d+Y\.INDX$", re.I)
+
+
+def _rep(item: Dict[str, Any]) -> str:
+    return " [reported]" if item.get("reported") else ""
 
 
 def _clip(text: Any, n: int) -> str:
@@ -947,6 +1181,8 @@ def render_plan_input(snapshot: Dict[str, Any], blocks: Dict[str, Any]) -> str:
     out = [f"# Plan input — {snapshot.get('report_date') or ''}", "",
            "## Cross-asset (market.cross_asset[code=..])"]
     for r in m.get("cross_asset") or []:
+        if UST_CODE_RE.match(str(r.get("code") or "")):
+            continue
         out.append(f"- {r.get('code')} {r.get('name')}: close {_fmt_num(r.get('close'))}, "
                    f"{r.get('pct_change_1d')}%")
     b = m.get("breadth") or {}
@@ -985,9 +1221,11 @@ def render_plan_input(snapshot: Dict[str, Any], blocks: Dict[str, Any]) -> str:
     if rel:
         for country, rows in rel.items():
             for r in rows:
+                u = r["unit"] if "unit" in r else event_unit(r)
                 out.append(f"- Release for 08 ({country}): {r.get('event')} "
-                           f"({r.get('period')}): {r.get('actual')} vs est "
-                           f"{r.get('forecast')}, prior {r.get('previous')}")
+                           f"({r.get('period')}): {fmt_event_value(r.get('actual'), u)} "
+                           f"vs est {fmt_event_value(r.get('forecast'), u)}, "
+                           f"prior {fmt_event_value(r.get('previous'), u)}")
     else:
         out.append("- No release selected for 08 today")
     themes = blocks.get("geo_themes") or {}
@@ -1003,8 +1241,10 @@ def render_plan_input(snapshot: Dict[str, Any], blocks: Dict[str, Any]) -> str:
                    f"{odds.get('direction') or 'move'} {odds.get('odds_pct')}%")
     curve = mp.get("par_curve") or {}
     if curve.get("levels_pct"):
-        out.append("- Treasury curve (macro_pillars.par_curve): " + ", ".join(
-            f"{k} {v}% ({(curve.get('change_bp') or {}).get(k)}bp)"
+        out.append("- Treasury curve — the ONLY source for US yields "
+                   "(macro_pillars.par_curve.levels_pct.<tenor> / .change_bp.<tenor>): "
+                   + ", ".join(
+            f"{k} {float(v):.2f}% ({(curve.get('change_bp') or {}).get(k)}bp)"
             for k, v in curve["levels_pct"].items() if k in ("2y", "10y", "30y")))
     out.append(f"- FOMC decision within the last 3 sessions: "
                f"{'yes' if blocks.get('fomc_deep') else 'no'}")
@@ -1019,9 +1259,9 @@ def render_plan_input(snapshot: Dict[str, Any], blocks: Dict[str, Any]) -> str:
     flash = [x for x in news.get("flash") or [] if x.get("info_level") == "L1"]
     for title, rows, fmt in (
             ("News flash — L1 (news.flash[id=..])", flash[:120],
-             lambda x: f"- {x.get('id')} {x.get('time_et')} {_clip(x.get('text'), 220)}"),
+             lambda x: f"- {x.get('id')}{_rep(x)} {x.get('time_et')} {_clip(x.get('text'), 220)}"),
             ("Newswire (news.wire[id=..])", news.get("wire") or [],
-             lambda x: f"- {x.get('id')} {x.get('time_et')} {_clip(x.get('title'), 140)}"),
+             lambda x: f"- {x.get('id')}{_rep(x)} {x.get('time_et')} {_clip(x.get('title'), 140)}"),
             ("Analyst calls (news.calls[id=..])", news.get("calls") or [],
              lambda x: f"- {x.get('id')} {_clip(x.get('title'), 160)}")):
         if rows:
@@ -1031,7 +1271,7 @@ def render_plan_input(snapshot: Dict[str, Any], blocks: Dict[str, Any]) -> str:
         rows = nm.get(bucket) or []
         if rows:
             out += ["", f"## Macro {bucket} (news_macro.{bucket}[id=..])"]
-            out += [f"- {x.get('id')} {x.get('time_cn')} [{x.get('theme') or '-'}] "
+            out += [f"- {x.get('id')}{_rep(x)} {x.get('time_cn')} [{x.get('theme') or '-'}] "
                     f"{_clip(x.get('title') or x.get('text'), 120)}" for x in rows]
     return "\n".join(out) + "\n"
 
@@ -1070,8 +1310,9 @@ def _load_plan(ws: Path, owners: List[str],
             s["owner"] = "drivers"
         s["may_mention"] = [n for n in s.get("may_mention") or []
                             if n in SECTION_ORDER and n != s["owner"]]
-    return {"stories": stories,
-            "canonical": verified_canonicals(plan.get("canonical"), sources)}
+    return {"stories": stories[:PLAN_MAX_STORIES],
+            "canonical": verified_canonicals(plan.get("canonical"),
+                                             sources)[:PLAN_MAX_CANONICALS]}
 
 
 def run_plan(args: argparse.Namespace, ws: Path, snapshot_data: Dict[str, Any],
@@ -1161,6 +1402,27 @@ def _high_issues(verdict: Dict[str, Any]) -> List[Dict[str, Any]]:
             and not i.get("advisory")]
 
 
+def _gate_llm_issues(ws: Path, verdict: Dict[str, Any], style: str,
+                     state: Dict[str, Any]) -> None:
+    """annotate 模式的 LLM 意见:能路由到可修订节的 high 驱动且只驱动一轮修订,
+    其余(medium/low、路由不到的 high)只作复核备注。轻量核验看不到快照,但
+    实测其 high 命中率高(2026-11-04 6/6),值得修一次;不值得反复复核。"""
+    llm = [i for i in verdict.get("issues") or []
+           if i.get("source") != "deterministic"]
+    gating = 0
+    for i in llm:
+        routable = any(_revisable(ws, n, i, style, state)
+                       for n in _issue_section_keys(str(i.get("section") or "")))
+        if str(i.get("severity") or "").lower() == "high" and routable:
+            gating += 1
+        else:
+            i["advisory"] = True
+    if gating:
+        state["verify"]["llm_fix_used"] = True
+        state["verify"]["llm_issues"] = llm
+        print(f"[verify] {gating} LLM high issue(s) get one revision round", flush=True)
+
+
 def _read_verdict(path: Path) -> Dict[str, Any]:
     """读核验 agent 手写的 verdict.json;容忍 JSON 非法转义(如 \' )。"""
     text = path.read_text(encoding="utf-8")
@@ -1235,6 +1497,17 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
             "verdict": "pass", "summary": "deterministic checks passed; LLM review off",
             "issues": [], "quality_notes": [], "source": "deterministic",
         }, ensure_ascii=False, indent=2), encoding="utf-8")
+    elif mode == "annotate" and state["verify"].get("llm_fix_used"):
+        # LLM 的 high 已定向修订过一轮:之后只跑确定性核验,不再复核(避免 LLM
+        # 每轮换说法导致修订空转);上一轮意见留作复核备注
+        carried = [{**i, "advisory": True, "note": "revised once; not re-reviewed"}
+                   for i in state["verify"].get("llm_issues") or []]
+        verdict_file.write_text(json.dumps({
+            "verdict": "pass", "summary": "deterministic checks passed; LLM issues "
+            "were revised once and are not re-reviewed",
+            "issues": carried, "quality_notes": [], "source": "deterministic",
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        state["verify"][f"llm_attempt_{attempt}"] = "skipped: LLM fix round used"
     else:
         light = mode in ("light", "annotate")
         try:
@@ -1259,11 +1532,9 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
     if not verdict_file.exists():
         raise RuntimeError("verifier finished but verify/verdict.json missing")
     verdict = _read_verdict(verdict_file)
-    if mode == "annotate" and not high_fails and not args.fake_zcode:
-        # 轻量核验看不到快照,判不了数字对错;意见只作备注,门控交给确定性核验
-        for i in verdict.get("issues") or []:
-            if i.get("source") != "deterministic":
-                i["advisory"] = True
+    if (mode == "annotate" and not high_fails and not args.fake_zcode
+            and not state["verify"].get("llm_fix_used")):
+        _gate_llm_issues(ws, verdict, args.style, state)
 
     # Merge deterministic high fails into verdict (orchestrator owns the gate)
     if high_fails:
@@ -1687,11 +1958,13 @@ def main() -> int:
         return 1
     ws.mkdir(parents=True, exist_ok=True)
     snap_data = json.loads(snapshot.read_text(encoding="utf-8"))
-    if assign_item_ids(snap_data.get("sources") or {}):
-        # v8.4 前构建的快照没有条目 id;只加编号、不动内容,台账才能按条目引用
+    snap_src = snap_data.get("sources") or {}
+    if (assign_item_ids(snap_src) + annotate_event_units(snap_src)
+            + flag_reported_items(snap_src)):
+        # 旧快照补条目 id、日历单位与传闻标记;只加字段、不动数值,台账才能按条目引用
         snapshot.write_text(json.dumps(snap_data, ensure_ascii=False, default=str),
                             encoding="utf-8")
-        print("[snapshot] assigned item ids (pre-v8.4 snapshot)", flush=True)
+        print("[snapshot] backfilled item ids / event units / reported flags", flush=True)
     state = load_state(ws)
     t_start = time.time()
 
