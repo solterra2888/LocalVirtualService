@@ -124,6 +124,28 @@ $PY tools/morning-brief/run_pipeline.py {日期}          # 默认 --style cn
 
 以下 `$PY` 均指 `/root/miniconda3/envs/guanhe/bin/python`,在仓库根目录执行。
 
+### 6.0 操作纪律(踩坑检查单 —— 每次动手前先扫一遍)
+
+以下每条都是实际踩过的坑,编号对应 [TEST-2026-11-04.md](TEST-2026-11-04.md):
+
+1. **探测/检查脚本先 dump 真实返回结构,再取值**。禁止按直觉猜键名或形状
+   (P1、P20 两次同源事故:`fetch_closing_bell` 返回的键是 `transcript` 不是
+   `text`,键存在≠值非空;先 `list(d.keys())` / `inspect.signature` 再写格式化)。
+   给自己写探测脚本时,第一步永远是把结构原样打出来。
+2. **后台命令与重定向一律绝对路径**。shell 的 cwd 会在仓库内漂移,相对路径
+   曾把快照写进 `tools/morning-brief/backend/...`(2026-11-05 双坑:日志和脚本
+   路径同时踩)。
+3. **日志全量落盘(`> file 2>&1`),判定以 `state.json` 为准**。禁止 `| tail`
+   管道(吞中间日志、掩盖真实退出码,P5)。
+4. **手工改章节 `.md` 必须成对重生成 `.claims.json`**——文件契约是一对;
+   只改一半会让确定性核验继续报 high、并触发 verdict 复用空转(P17)。
+5. **盘中不生成 T 日报告**。北京时间上午只跑 T-1 的美股日;同日重复构建时
+   确认 triage.json 覆盖了完整交易时段(盘中生成的 triage 残片会被复用逻辑
+   当作当日有效选材,必须 `--force-triage`,2026-11-05 实例)。
+6. **排障常识**:zcode 子进程以 `node` 形态存在(cmdline 首段是 node 路径,
+   grep `[z]code` 会误判全挂,P9);DB 是 Postgres,连接用
+   `DatabaseManager(get_database_config())`,不是本地 sqlite。
+
 ### 6.1 生成 / 重跑指定日期(标准入口)
 
 ```bash
