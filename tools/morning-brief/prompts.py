@@ -1030,50 +1030,62 @@ def _sec_label(name: str) -> str:
             if name in SECTION_ORDER else name)
 
 
-def build_plan_prompt(owners: List[str]) -> str:
+def build_plan_prompt(owners: List[str], digest: str = "") -> str:
+    """单发版编辑计划 prompt(v8.5-fix):digest 全文内联,输出走 stdout JSON,
+    不挂附件、不带工作区 —— agent 无文件可读、无工具需求,游荡在结构上不可能
+    (2026-11-05 事故:游荡 11 次请求/1.74M 输入 + CLI 挂死,见 TEST P23)。"""
     roles = "\n".join(f"- {n}: {PLAN_OWNER_ROLES[n]}" for n in owners
                       if n in PLAN_OWNER_ROLES)
-    return f"""\
-You are the editor of a scheduled morning brief. Before the section writers
-start, decide what the day's stories are and which section owns each one, so
-the brief tells each story once and every number reads the same everywhere.
-
-plan_input.md (attached) is a complete digest of today's data and news with
-item ids — everything you need. Do NOT open, list or search any other file,
-do not re-read the digest in pieces, and do not run tools beyond writing
-plan.json ONCE. This is a quick editorial call, not research.
-
-Sections that can own a story today:
-{roles}
-(Section 01 narrative summarises the lead stories' conclusions and owns none;
-03 positioning covers flows only.)
-
-Write plan.json:
-{{"stories": [{{"id": "s1", "title": "<one line>", "owner": "<section key>",
-   "may_mention": ["<section key>"], "angle": "<what the owner argues, ≤20 words>"}}],
- "canonical": [{{"entity": "NVDA", "metric": "move", "value": "2.1%",
-   "path": "market.sp500_constituents[ticker=NVDA].change_percent"}}]}}
-Rules:
-- 4–7 stories, ordered by market impact; exactly one owner each, chosen from
-  the list above.
-- Items marked [reported] are anonymous-source claims or rumours: one may be
-  part of a story, but never the story's sole basis or its canonical number.
-- may_mention: other sections that may reference the story in one clause
-  (e.g. outlook for what comes next); leave it empty when none should.
-- canonical: at most 12 entries — the key number of the lead stories (stock
-  moves, index closes/moves, yields, Fed odds, reported revenue/EPS), ONE
-  number per entry exactly as the brief should state it ("2.1%", not
-  "53356.12 (+3.03%)"; a close and its move are two entries), with its
-  source — a snapshot path for data, or the news item (news.flash[id=f21]).
-  Only numbers shown in the digest. Treasury yields: path
-  macro_pillars.par_curve.levels_pct.<tenor>, two decimals (4.90%).
-  entity = ticker / cross_asset code / US2Y, US10Y / meeting month
-  (2026-12); metric = move, ah_move, pm_move, close, level, yield, odds,
-  revenue, eps, guide_revenue, guide_eps.
-- Facts and assignments only — no evidence lists, no advice, no prose.
-
-Output file: plan.json
-"""
+    return (
+        "You are the editor of a scheduled morning brief. Before the section "
+        "writers start, decide what the day's stories are and which section "
+        "owns each one, so the brief tells each story once and every number "
+        "reads the same everywhere.\n"
+        "\n"
+        "Below (after the marker) is the complete digest of today's data and "
+        "news with item ids — everything you need. This is a quick editorial "
+        "call, not research: do NOT use any tools, do NOT read or write any "
+        "files; answer from the digest alone, in one reply.\n"
+        "\n"
+        "Sections that can own a story today:\n"
+        f"{roles}\n"
+        "(Section 01 narrative summarises the lead stories' conclusions and "
+        "owns none; 03 positioning covers flows only.)\n"
+        "\n"
+        "Reply with ONE JSON object of this shape (and nothing else — no "
+        "prose, no code fences):\n"
+        '{"stories": [{"id": "s1", "title": "<one line>", '
+        '"owner": "<section key>", "may_mention": ["<section key>"], '
+        '"angle": "<what the owner argues, ≤20 words>"}], '
+        '"canonical": [{"entity": "NVDA", "metric": "move", "value": "2.1%", '
+        '"path": "market.sp500_constituents[ticker=NVDA].change_percent"}]}\n'
+        "Rules:\n"
+        "- 4–7 stories, ordered by market impact; exactly one owner each, "
+        "chosen from the list above.\n"
+        "- Items marked [reported] are anonymous-source claims or rumours: "
+        "one may be part of a story, but never the story's sole basis or its "
+        "canonical number.\n"
+        "- may_mention: other sections that may reference the story in one "
+        "clause (e.g. outlook for what comes next); leave it empty when none "
+        "should.\n"
+        "- canonical: at most 12 entries — the key number of the lead "
+        "stories (stock moves, index closes/moves, yields, Fed odds, "
+        "reported revenue/EPS), ONE number per entry exactly as the brief "
+        'should state it ("2.1%", not "53356.12 (+3.03%)"; a close and its '
+        "move are two entries), with its source — a snapshot path for data, "
+        "or the news item (news.flash[id=f21]). Only numbers shown in the "
+        "digest. Treasury yields: path "
+        "macro_pillars.par_curve.levels_pct.<tenor>, two decimals (4.90%). "
+        "entity = ticker / cross_asset code / US2Y, US10Y / meeting month "
+        "(2026-12); metric = move, ah_move, pm_move, close, level, yield, "
+        "odds, revenue, eps, guide_revenue, guide_eps.\n"
+        "- Facts and assignments only — no evidence lists, no advice, no "
+        "prose.\n"
+        "\n"
+        "===== plan_input digest =====\n"
+        f"{digest}\n"
+        "===== end digest ====="
+    )
 
 
 def plan_brief(plan: Optional[Dict[str, Any]], names: List[str]) -> str:

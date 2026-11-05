@@ -395,3 +395,18 @@ grep -rn "10年期\|10Y\|10 年" backend/reports/morning-brief/$T/sections/*.md 
 - 02 节每个故事的「推断」读起来是否有信息量，有没有变成套话。
 - 09、11 节对 reported 条目的措辞。
 - 07 表格长度是否合适（目前宏观事件每天最多 6 行，另加最多 2 家财报）。
+
+---
+
+## 十、v8.5-fix：plan 单发与调用重试（2026-11-05 下午，当日真机验证）
+
+11-04 重测暴露三重 plan 失败（游荡 1.74M/11 请求、CLI 挂死零进展、300s 线低于经验分布 391/549s），同日修复：
+
+1. **plan 单发**：`_plan_once` 复用 triage 模式——不带 `--cwd`、不挂附件，digest 内联进 prompt，输出 stdout JSON 由编排器校验后落盘 plan.json（agent 不写文件），失败重试 1 次（20s 退避），`PLAN_TIMEOUT_SEC` 300→600。真机实测 **1 请求 / 27.3K 输入 / 180.8s**，7 故事 owner 全合规——第八节反馈项 1 的两个目标（<300s、<150K）双双达成。
+   - 已知待调优：canonical 快照核实通过率 4/12——单发 agent 只见 digest、路径凭记忆；数据锚点为主参照不影响发布。可给 digest 加合法 canonical 路径图例。
+2. **`run_agent` 自动重试**：非零退出重试 1 次（20s 退避）；TimeoutExpired 维持文件契约。当日 2× Turn execution failed 均可被此兜住。
+3. **第一段启动错峰 3s/agent**：削多个 CLI 同时起跑对 db.sqlite 的启动争夺。
+4. **P17**：verdict 复用判定纳入 `.claims.json` mtime（修订只动台账时不再复用过期 verdict）。
+5. **actual 数值统一**：`_clean` 装载强转 + 编排器旧快照补丁幂等强转（回放 16 行字符串→数值；flash 回填与 DB 原生两条路径类型一致）。
+
+验证：AST×3、fake 全流程 rc=0、离线回放（P17 不复用断言、actual 强转）全过；11-04 全量重跑结果见 TEST-2026-11-04.md 五点三。P23（LLM-fix 修订轮漏修）的后查/回执方案留下一批。

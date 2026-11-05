@@ -154,12 +154,21 @@ def run_agent(
             cmd += ["--attach", str(p)]
     if resume_session:
         cmd += ["--resume", resume_session]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"zcode exited {proc.returncode}: {proc.stderr[-500:]}"
-        )
-    return _parse_zcode_json(proc.stdout)
+    # v8.5-fix(P8/P23):非零退出重试 1 次、20s 退避 —— provider/SQLite 锁类
+    # 瞬时故障一天可放倒 2-3 次调用;TimeoutExpired 不重试(文件契约由调用方判定)
+    last_err: Optional[Exception] = None
+    for attempt in (1, 2):
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=timeout)
+        if proc.returncode == 0:
+            return _parse_zcode_json(proc.stdout)
+        last_err = RuntimeError(
+            f"zcode exited {proc.returncode}: {proc.stderr[-500:]}")
+        if attempt == 1:
+            print(f"[agent] transient failure, retrying once in 20s "
+                  f"({str(last_err)[:120]})", flush=True)
+            time.sleep(20)
+    raise last_err  # type: ignore[misc]
 
 
 # ── fake mode(无 ZCode 时测试状态机/门控/重试) ────────────────────────
@@ -1156,7 +1165,8 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
 
 # ── 编辑计划(写作前一次规划) ──────────────────────────────────────────
 
-PLAN_TIMEOUT_SEC = 300
+PLAN_TIMEOUT_SEC = 600  # v8.5-fix:单发模式预期 60-120s;600 为保险带
+                          # (v8.4 实测 391/549s,300 硬杀低于经验分布 → P23)
 PLAN_MAX_STORIES = 8
 PLAN_MAX_CANONICALS = 12
 
@@ -1315,10 +1325,54 @@ def _load_plan(ws: Path, owners: List[str],
                                              sources)[:PLAN_MAX_CANONICALS]}
 
 
+def _plan_once(zcode_bin: str, prompt: str,
+               timeout: int) -> Dict[str, Any]:
+    """编辑计划单发调用(2026-11-05 P23 修复):完整复用 triage 的成熟模式
+    (build_snapshot._triage_chunk)—— 不带 --cwd、不挂附件,工作区文件不可
+    达,agent 无工具需求;失败重试 1 次、20s 退避。返回 zcode envelope
+    (调用方从 response 提取 JSON、从 usage 记账)。"""
+    cmd = [zcode_bin, "-p", prompt, "--json", "--mode", "yolo",
+           "--surface", "terminal"]
+    last_err: Optional[Exception] = None
+    for attempt in (1, 2):
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=timeout)
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"zcode exited {proc.returncode}: {proc.stderr[-300:]}")
+            return _parse_zcode_json(proc.stdout)
+        except Exception as e:  # noqa: BLE001 — 与 _triage_chunk 同语义
+            last_err = e
+            if attempt == 1:
+                print(f"[plan] call failed ({str(e)[:120]}); retry in 20s",
+                      flush=True)
+                time.sleep(20)
+    raise last_err  # type: ignore[misc]
+
+
+def _parse_plan_response(text: str) -> Optional[Dict[str, Any]]:
+    """从单发回复中提取 plan JSON 对象:剥代码围栏,截首尾大括号,容忍前后杂文。"""
+    text = (text or "").strip()
+    for ln in ("```json", "```"):
+        text = text.removeprefix(ln).removesuffix(ln).strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        obj = json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
 def run_plan(args: argparse.Namespace, ws: Path, snapshot_data: Dict[str, Any],
              blocks: Dict[str, Any], state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """写作前一次 LLM 规划:故事归属 + 规范数值。已有有效 plan.json 就复用;
-    失败不阻断(各 agent 按原任务书写,跨节一致性退回"多数/已核实"参照)。"""
+    失败不阻断(各 agent 按原任务书写,跨节一致性退回"多数/已核实"参照)。
+
+    v8.5-fix:改为单发 stdout 模式(_plan_once)——prompt 内联 digest、输出
+    由编排器解析并落盘 plan.json,agent 不写文件;两次失败走 unavailable。"""
     if args.fake_zcode or args.no_plan:
         return None
     owners = _plan_owners(snapshot_data, blocks, args.style)
@@ -1329,16 +1383,25 @@ def run_plan(args: argparse.Namespace, ws: Path, snapshot_data: Dict[str, Any],
     if all(section_done(ws, n) for n in SECTION_ORDER):
         return None
     inp = ws / "plan_input.md"
-    inp.write_text(render_plan_input(snapshot_data, blocks), encoding="utf-8")
-    print("[plan] editorial plan ...", flush=True)
+    digest = render_plan_input(snapshot_data, blocks)
+    inp.write_text(digest, encoding="utf-8")  # 工件留档,便于排障与复现
+    print("[plan] editorial plan (single-shot) ...", flush=True)
     t0 = time.time()
     try:
-        result = run_agent(args.zcode_bin, ws, build_plan_prompt(owners), None,
-                           min(args.timeout, PLAN_TIMEOUT_SEC), extra_attachments=[inp])
-        _add_usage(state, result.get("usage"), "plan")
+        envelope = _plan_once(
+            args.zcode_bin, build_plan_prompt(owners, digest),
+            min(args.timeout, PLAN_TIMEOUT_SEC))
+        _add_usage(state, envelope.get("usage"), "plan")
+        obj = _parse_plan_response(envelope.get("response") or "")
+        if obj is not None and isinstance(obj.get("stories"), list) \
+                and obj["stories"]:
+            (ws / "plan.json").write_text(
+                json.dumps(obj, ensure_ascii=False, indent=2),
+                encoding="utf-8")
+        else:
+            print("[plan] response had no usable JSON object", flush=True)
     except (subprocess.TimeoutExpired, RuntimeError) as e:
-        print(f"[plan] agent failed ({str(e)[:120]}); using plan.json if written",
-              flush=True)
+        print(f"[plan] single-shot failed ({str(e)[:120]})", flush=True)
     _record_timing(state, "plan", time.time() - t0)
     plan = _load_plan(ws, owners, sources)
     state["plan"] = {"status": "done" if plan else "unavailable",
@@ -1378,9 +1441,14 @@ def run_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
                                       blocks, agent, prior, plan))
             continue
         with ThreadPoolExecutor(max_workers=len(stage)) as pool:
-            futs = {pool.submit(_run_one_agent, args, ws, snapshot,
-                                snapshot_data, blocks, a, prior, plan): a
-                    for a in stage}
+            # v8.5-fix:提交错峰 3s —— 削 N 个 CLI 同时起跑时对 db.sqlite 的
+            # 启动争夺(2026-11-05 plan CLI 挂死 300s 零进展的疑似诱因)
+            futs: Dict[Any, Any] = {}
+            for i, a in enumerate(stage):
+                if i:
+                    time.sleep(3)
+                futs[pool.submit(_run_one_agent, args, ws, snapshot,
+                                 snapshot_data, blocks, a, prior, plan)] = a
             first_err: Optional[BaseException] = None
             for fut in as_completed(futs):
                 try:
@@ -1442,11 +1510,16 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
     # 无需再付一整轮核验成本。用严格大于(>):同秒并发的 mtime 并列(如 fake
     # 模式)不构成"更新",避免误复用陈旧 fail 引发空转修订循环。
     section_files = [ws / SECTION_SPECS[n]["output_file"] for n in SECTION_ORDER]
+    # P17 修复:复用判定同时看配套 claims 台账 —— 修订只动 .claims.json 不动
+    # .md 时,旧 verdict 不应被当作"仍有效"(2026-11-04 实测空转两轮修订)
+    claims_files = [claims_path(ws, n) for n in SECTION_ORDER]
     consecutive_reuses = state["verify"].get("consecutive_reuses", 0)
     if (consecutive_reuses < 2
             and verdict_file.exists() and all(f.exists() for f in section_files)):
         v_mtime = verdict_file.stat().st_mtime
-        newest_section = max(f.stat().st_mtime for f in section_files)
+        newest_section = max(
+            f.stat().st_mtime for f in
+            section_files + [c for c in claims_files if c.exists()])
         if v_mtime > newest_section:
             try:
                 verdict = _read_verdict(verdict_file)
@@ -1926,6 +1999,27 @@ def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
     return out
 
 
+def _coerce_event_actuals(sources: Dict[str, Any]) -> int:
+    """旧快照的日历 actual 字符串 → 数值(幂等;与 build_snapshot._clean 同规则)。
+    返回转换行数,供补丁批次判断是否需要回写快照。"""
+    def _num(s: str) -> Optional[float]:
+        try:
+            return float(s.replace(",", "").replace("−", "-"))
+        except ValueError:
+            return None
+
+    n = 0
+    econ = sources.get("economic_events") or {}
+    for bucket in ("recent", "upcoming"):
+        for row in econ.get(bucket) or []:
+            if isinstance(row, dict) and isinstance(row.get("actual"), str):
+                v = _num(row["actual"].replace("%", ""))
+                if v is not None:
+                    row["actual"] = int(v) if v == int(v) else v
+                    n += 1
+    return n
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report_date", help="YYYY-MM-DD,对应 build_snapshot 的日期")
@@ -1960,11 +2054,13 @@ def main() -> int:
     snap_data = json.loads(snapshot.read_text(encoding="utf-8"))
     snap_src = snap_data.get("sources") or {}
     if (assign_item_ids(snap_src) + annotate_event_units(snap_src)
-            + flag_reported_items(snap_src)):
-        # 旧快照补条目 id、日历单位与传闻标记;只加字段、不动数值,台账才能按条目引用
+            + flag_reported_items(snap_src) + _coerce_event_actuals(snap_src)):
+        # 旧快照补条目 id、日历单位、传闻标记与 actual 数值化;只加字段/统一
+        # 类型、不动数值含义,台账才能按条目引用、核验比较不踩类型坑
         snapshot.write_text(json.dumps(snap_data, ensure_ascii=False, default=str),
                             encoding="utf-8")
-        print("[snapshot] backfilled item ids / event units / reported flags", flush=True)
+        print("[snapshot] backfilled item ids / event units / reported flags "
+              "/ numeric actuals", flush=True)
     state = load_state(ws)
     t_start = time.time()
 

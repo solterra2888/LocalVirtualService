@@ -804,6 +804,12 @@ def _economic_events(report_date: date) -> Dict[str, Any]:
             if not isinstance(e, dict) or best.get(_event_key(e)) is not e:
                 continue
             row = {k: e[k] for k in keep if e.get(k) not in (None, "")}
+            if isinstance(row.get("actual"), str):
+                # P21-fix:actual 列是 VARCHAR,同步值为字符串;可解析则统一为
+                # 数值(与 flash 回填路径的 float 一致,整数值转 int 保显示干净)
+                v = _num(row["actual"].replace("%", ""))
+                if v is not None:
+                    row["actual"] = int(v) if v == int(v) else v
             if not row:
                 continue
             row.update(_to_et(row.get("date"), row.get("time")))
