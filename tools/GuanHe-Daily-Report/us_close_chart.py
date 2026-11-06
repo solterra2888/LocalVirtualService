@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """GuanHe-style "US close" overview chart (FT-market-table look) from guanhetech DB.
 
-Replicates the first chart of GuanHe Trading's daily report (Overall Market section):
+Replicates the first chart of GuanHe Trading's daily report (大盘总览 section):
 a cream-background table grouped into EQUITIES / RATES / CREDIT / COMMODITIES /
 FX / VOLATILITY / S&P 500 SECTORS. Each row shows Name (TICKER), Last, a
 zero-centred 1-day bar, and 1D/1W/1M/YTD columns. Rows whose |1D| passes the

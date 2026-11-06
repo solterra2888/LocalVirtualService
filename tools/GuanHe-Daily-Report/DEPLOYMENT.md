@@ -29,7 +29,7 @@ backend/reports/guanhe-daily-report/{报告日期}/final/charts/*.png   # 01_mar
 | Python | `/root/miniconda3/envs/guanhe/bin/python` | 第三方包:matplotlib、squarify、pillow、requests、numpy、psycopg2(随 backend 依赖装好) |
 | 数据库 | `.env` 中 `DB_*` 指向的 Postgres | 管线**只读**下游表;唯一写操作是经济日历 actual 回填(见 §6.6) |
 | ZCode CLI | `/root/.zcode/server/bin/zcode` | 无头 LLM 调用(`-p --json --mode yolo`) |
-| 外网 | FRED / EODHD / Yahoo Finance | 利率、ETF 历史、历史涨跌回填;均无需梯子直连 |
+| 外网 | FRED / EODHD / Yahoo Finance / 腾讯行情 | 利率、ETF 历史、历史涨跌回填、港/A股成交额榜与中文名;均无需梯子直连 |
 | 上游 ingest | 见 §9 | 节目转录、twitter 快讯、Finviz 快照、Admin 订阅源(星球/推特/news/substack/youtube)抓取由仓库现有定时任务持续入库,管线只消费 |
 
 关键数据表(全部只读,除经济日历回填):
@@ -46,7 +46,7 @@ backend/reports/guanhe-daily-report/{报告日期}/final/charts/*.png   # 01_mar
 | Key | 用途 | 缺失后果 |
 |---|---|---|
 | `DB_HOST/PORT/NAME/USER/PASSWORD` | 一切数据库访问 | 立即失败 |
-| `EODHD_API_TOKEN` | 经济日历 actual 回填;FRED 未发布时的利率回落 | 日历无 actual、利率行缺当日值 |
+| `EODHD_API_TOKEN` | 经济日历 actual 回填;FRED 未发布时的利率回落;港股/A股成交额榜(bulk 端点) | 日历无 actual、利率行缺当日值、涨跌榜缺港股/A股两表 |
 | `FRED_API_KEY` | 宏观底座(曲线/ranks/fed_odds) | macro_pillars 大部分子块缺失 |
 
 FRED 走公开 CSV 端点(有 key 更稳)、Yahoo 走公开 chart API,均**无需梯子**。
@@ -99,13 +99,19 @@ $PY tools/guanhe-daily-report/run_pipeline.py {日期}          # 默认 --style
 
 ## 5. 定时运行(cron)
 
-**当前状态:未安装**(按用户决定先手动跑通)。安装时建议:
+**当前状态:已安装(2026-11-06 起)**,北京时间 **08:31 周二~周六**(用户选择,
+尽量赶早交付;实测 08:31 The Close 转录已入库,但中文 digest 层(08:51-09:22
+发布)会系统性缺失,靠 research/geo 兜底)。两个已知代价,检查效果时留意:
+
+- 09:00 中文晨报素材(约 08:51-09:22 发布)与节目转录(10 点后稳定)可能未齐,
+  首日若 01-03/07 节内容偏薄,先怀疑时点再怀疑代码;改回 10:00 只需编辑
+  crontab 第一字段;
+- 与旧管线 US-market-report(09:20)并行约 40 分钟 —— 锁与产物目录独立,
+  zcode 并发有 3s 错峰 + 重试兜底(v8.5-fix)。
 
 ```cron
-# guanhe-daily-report: 北京时间 10:00 周二~周六
-# (10:00 而非 09:20:中文晨报素材约 08:51-09:22 发布,节目转录 10 点后稳定;
-#  旧管线 US-market-report 仍以 09:20 在跑,两者互不影响)
-0 10 * * 2-6 /bin/bash /opt/guanhetech/tools/guanhe-daily-report/cron_daily.sh >> /opt/guanhetech/backend/reports/guanhe-daily-report/cron.log 2>&1
+# guanhe-daily-report: 北京时间 08:31 周二~周六(美股交易日次晨)
+31 8 * * 2-6 /bin/bash /opt/guanhetech/tools/GuanHe-Daily-Report/cron_daily.sh >> /opt/guanhetech/backend/reports/guanhe-daily-report/cron.log 2>&1
 ```
 
 `cron_daily.sh` 逻辑(`PIPE` 已指向 `tools/guanhe-daily-report`):
@@ -195,7 +201,12 @@ $PY tools/guanhe-daily-report/render_charts.py backend/reports/guanhe-daily-repo
 --llm-verify light   # 默认:确定性全绿后,轻量 LLM 只读各节正文查跨节矛盾
 --llm-verify off     # 只跑确定性核验(省一轮 LLM)
 --llm-verify full    # 旧版全量(挂快照),一般不用
+--strict-verify      # 核验超限时回到旧行为:rc=2 转人工不发布
 --fake-zcode         # 不调 LLM 的状态机自测
+
+v8.7 起核验超限(轮次用尽/问题只涉锁定节)**默认不再拦截**:照常发布,未决
+问题自动标注在报告顶部(指针)与文末(核验备注清单);复核意见仍全文进
+report.audit.md。需要人工把关的时期用 --strict-verify。
 ```
 
 ### 6.6 写库说明(唯一的库写操作)
@@ -211,11 +222,12 @@ COALESCE upsert(把 EODHD 实际值补进事件行)。只补空不覆盖;调试�
 | 定时任务日志 | `backend/reports/guanhe-daily-report/cron.log` | 每个交易日一行 `cron end (rc=0)` |
 | 每步耗时/tokens | `{date}/state.json` 的 `timings` / `usage_total` | 见 §8 成本参考 |
 | 核验结论 | `{date}/verify/verdict.json` | `"verdict": "pass"` |
-| 转人工 | `{date}/NEEDS_HUMAN_REVIEW.md` | **不应常驻**;出现即人工介入(见 §10) |
+| 转人工(仅 --strict-verify) | `{date}/NEEDS_HUMAN_REVIEW.md` | 默认模式下不存在;降级发布的信号是成品顶部「⚠️ 核验备注」指针与文末清单 |
 | 宏观素材层 | `{date}/snapshot.json` 的 `sources.news_macro` | digest/research/geo 三层非空(中英混合);周五 digest 空属已知边界(notes 有记录) |
+| 每日流程卡 | `{date}/pipeline-overview.html` | 发报成功后自动生成(纯脚本零 LLM):产品全景/运营实测/数据流向桑基图/栏目溯源/质检漏斗,数据取自当日工作区工件 |
 | 成品 | `{date}/final/report.md` | 顶部有图;07-11 节中文标题齐全,「展望与策略」以免责行收尾 |
 
-**退出码**:`0` 已发布 / `1` 运行错误(看 cron.log) / `2` 核验超限转人工。
+**退出码**:`0` 已发布(含带核验备注降级发布) / `1` 运行错误(看 cron.log) / `2` 核验超限转人工(仅 `--strict-verify`)。
 
 日常巡检一条命令:
 
@@ -264,7 +276,7 @@ tail -5 /opt/guanhetech/backend/reports/guanhe-daily-report/cron.log
 | `build_snapshot failed` | DB 不通 / `.env` 缺项 / 外网异常 | 看日志首个 traceback;按 §4.3 自检 |
 | 转录缺失(`errors` 记 the_close / cnbc_closing_bell) | 上游 ingest 滞后 | 等入晚些重跑 6.2 + 6.1;持续缺 → 查上游 ingest 任务 |
 | `news_macro.digest` 空(非周五) | 当日无标题命中的晨报或抓取滞后 | 看 `subscription_content` 当日行与 Admin 订阅;research/geo 层可兜底 |
-| `rc=2` + `NEEDS_HUMAN_REVIEW.md` | 核验多轮仍有 high fail | 打开该文件看 issues 清单,人工修订章节后重跑 6.1 |
+| `rc=2` + `NEEDS_HUMAN_REVIEW.md`(仅 --strict-verify) | 核验多轮仍有 high fail | 打开该文件看 issues 清单,人工修订章节后重跑 6.1;默认模式则看成品文末「核验备注」清单 |
 | 热力图/Markets 图缺 | `finviz_screener` 无 ≤T+1 快照 / FRED+EODHD 均失败 | 报告仍会发布(图缺省);查上游 Finviz 任务与 EODHD 配额 |
 | zcode 超时(默认单 agent 1800s) | 上游 API 抖动 | 直接重跑 6.1,断点续跑只补缺;若章节文件其实已写完会自动识别 |
 

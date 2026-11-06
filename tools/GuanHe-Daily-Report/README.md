@@ -1,18 +1,19 @@
 # guanhe-daily-report — 盘前晨报项目(xiao 式宏观地缘晨报;cron 未装,手动跑通中)
 
-用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。01-06 节对齐 GuanHe **现行版式**(2026-10-12 之后);v8 起 **Macros 推倒重来**,按 `report_from_xiao.md` 参考稿改为「回顾/当下/展望」五文件结构(中文标题、直接给投资建议)。v5 起节目正文**只用清洗转录、不读摘要表**(The Close youtube 自识别 + Closing Bell 主段/Overtime 播客双行直查);v6 增**新闻事件层**(`sources.news`:twitter 快讯 flash + Yahoo/Seeking Alpha 全文 wire + SA 电话会纪要 calls);v8 增**宏观地缘素材层**(`sources.news_macro`:digest 晨间日报 + research 宏观解读 + geo 地缘快讯(Admin 订阅,中英))、**FOMC 表**(`sources.fomc`:决议/定价路径/声明)与**四经济体指标表底座**(`sources.macro_dashboard`)。
+用无头 ZCode(`zcode -p`)作为"超级 LLM 系统调用",按**章节分步生成 + 核验门控**定时产出市场简报。01-06 节对齐 GuanHe **现行版式**(2026-10-12 之后);v8 起 **Macros 推倒重来**,按 xiao 式参考稿(v8 设计时借鉴,参考文件已移除)改为「回顾/当下/展望」五文件结构(中文标题、直接给策略应对)。v5 起节目正文**只用清洗转录、不读摘要表**(The Close youtube 自识别 + Closing Bell 主段/Overtime 播客双行直查);v6 增**新闻事件层**(`sources.news`:twitter 快讯 flash + Yahoo/Seeking Alpha 全文 wire + SA 电话会纪要 calls);v8 增**宏观地缘素材层**(`sources.news_macro`:digest 晨间日报 + research 宏观解读 + geo 地缘快讯(Admin 订阅,中英))、**FOMC 表**(`sources.fomc`:决议/定价路径/声明)与**四经济体指标表底座**(`sources.macro_dashboard`)。
 
 | 报告部分 | 章节 | 叙事 / 数据源 |
 |---|---|---|
 | OVERALL MARKET | narrative / drivers / positioning | **The Close 转录**(叙事) + 跨资产/曲线/fed_odds/广度(数字锚) |
 | EQUITY MARKET | sector_action / movers / deep_dives | 按市场重要性选题:Finviz 全成分涨跌 + **Closing Bell 主段+Overtime 转录** + 新闻层(催化剂、评级/目标价); movers 由成分股快照确定性渲染 |
-| MACROS(v8) | 宏观速览(确定性) / 回顾·宏观数据 / 回顾·地缘政治 / 美联储观察 / 展望与策略 | 速览=macro_dashboard+fomc+cross_asset 纯代码渲染(四经济体表+商品+前瞻日历);宏观数据=多国日历+券商宏观日报(边际变化);地缘=中文 geo 层主题块(命中量开块)+焦点事件;FOMC=决议表(投票/异议)+声明措辞对比+定价路径;展望=第二段综合读前节成品,大事预判/主线跟踪/投资建议 |
+| MACROS(v8) | 宏观速览(确定性) / 回顾·宏观数据 / 回顾·地缘政治 / 美联储观察 / 展望与策略 | 速览=macro_dashboard+fomc+cross_asset 纯代码渲染(四经济体表+商品+前瞻日历);宏观数据=多国日历+券商宏观日报(边际变化);地缘=中文 geo 层主题块(命中量开块)+焦点事件;FOMC=决议表(投票/异议)+声明措辞对比+定价路径;展望=第二段综合读前节成品,大事预判/主线跟踪/策略应对 |
 
 v7(2026-11,对照 CNT 参考稿评估后)文风契约:正文只给原始出处(Reuters/FT/CNBC/券商),
 管线标签与生产过程用语(snapshot/transcript/on air/节目名/不可得)不进正文,由
 `verify_checks.py` 以 high 拦截;可追溯性全部落在 audit 注释 + claims 台账。
 v8 追加:Macros 各节**完全不读节目转录**;展望节判断句必须读作判断(「建议」「预计」),
-数字仍逐条入台账,投资建议以「(以上为本报观点,不构成投资建议。)」收尾。
+数字仍逐条入台账;正文不出现「投资建议」字眼(小节名为 策略应对),
+末尾以「(以上为本报观点,不构成投资建议。)」免责行收尾。
 
 ## 全流程图
 
@@ -132,7 +133,7 @@ v8 追加:Macros 各节**完全不读节目转录**;展望节判断句必须读�
                                 无深读、无官员表态 → 代码渲染两块(平静日,锁定)
     ——— 第二段 ———
     outlook         → 11        展望与策略:读 01/02/04/07-10 成品 + 快照数字,
-                                大事预判 / 主线跟踪(可省) / 投资建议(直接建议)
+                                大事预判 / 主线跟踪(可省) / 策略应对(组合级操作口径)
   ▼
   每节同会话写 sections/NN_*.claims.json(数字台账:value + snapshot 路径
   + 可选 entity/metric;节目数字路径 = the_close.clean_transcript /
@@ -208,8 +209,8 @@ $PY tools/guanhe-daily-report/us_close_chart.py --workspace backend/reports/guan
 perf 列取 finviz 快照(MAX(snapshot_date)≤T+1);1W/1M=T-7/T-30 日历日前最近收盘;
 ETF 的 W/M/YTD 用 adjusted_close 总回报;利率行优先 FRED 财政部曲线(DGS2/10/30,
 发布滞后时自动回落 EODHD 并在页脚注明);DXY 走 Yahoo;MOVE 无源跳过。
-嵌入版式与 GuanHe 一致:01_us_close 放正文 "## Overall Market" 标题下(顶部),
-02_finviz_map 放 "## Equity Market" 段、紧贴 Sector Action 上方,不使用顶部
+嵌入版式与 GuanHe 一致:01_us_close 放正文 "## 大盘总览" 标题下(顶部),
+02_finviz_map 放 "## 美股全景" 段、紧贴 板块动态 上方,不使用顶部
 Charts 图廊;03/04/05 系列图表暂停生成(待逐张优化,函数保留在 render_charts.py)。
 
 `finviz_map_chart.py` 背景:elite.finviz.com/map 在本服务器 IP 上被 Cloudflare
@@ -241,7 +242,7 @@ Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
    「数值 (Est. …, Prior …)」快讯回填(actual_source 记来源条目,量级/期别/
    国家/比较口径不符不回填);同一事件因 DST/改时重复的日历行去重;geo_themes = 中文 geo 层关键词命中 ≥3 开主题块(美伊/俄乌/中东/
    贸易制裁);focal_events = 选举类命中 ≥2 且过半条目未归入已开主题时开「焦点事件」;fomc_deep = 决议在
-   [T-2, T] 开「决议深读」(声明对比 + 异议理由);展望(大事预判/投资建议)
+   [T-2, T] 开「决议深读」(声明对比 + 异议理由);展望(大事预判/策略应对)
    恒在。07 宏观速览 = macro_dashboard/fomc/cross_asset 确定性渲染,零 LLM。
 7. **审计分层** — 正文只有读者文体与原始出处;管线标签、口径块与
    `<!-- audit: -->` 全部进 sidecar,正文出现管线标签或生产过程用语即 high
@@ -276,9 +277,11 @@ Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
 - Finviz 是整表刷新的当前状态,不能回溯历史交易日。测管线用最新有快照的日期。
 - Finviz 热力图、真 RRG、ETF/个股 K 线未做。现有图是跨资产面板、板块表、
   1M 对 1D 的轮动散点(RRG 的简化替代)、Release 柱状图、个股收盘价折线。
-- Today's Movers(v7)由编排器从 S&P 500 成分股快照确定性渲染 Winners / Losers
-  两表(市值 ≥$100 亿,各 8 只),Earnings 栏只陈述 EPS 对预期、不写 beat/miss;
-  没有盘后行情源,故不出 After-Hours 表。
+- 今日涨跌榜(v8.6)由编排器确定性渲染美股/港股/A股三个成交额榜(各前 8):
+  美股 ≥$10 亿(S&P 500 成分股价格×成交量近似)、港股 ≥10 亿港元、A股 ≥20 亿
+  元人民币(两者走 EODHD bulk 端点,按报告日 T 显式取数,Type=Common Stock
+  过滤指数/ETF);A/港股公司名经腾讯行情接口补中文名(失败回退英文);
+  榜单在 Stage 0 冻结进 market.volume_leaders,渲染器只读不取数。
 - 节目转录 ingest 偶发滞后(历史批次晚 5-7 天):cron/手动构建应晚于当晚
   转录入库(北京时间次日上午 10 点后实测稳定);缺哪行记 `errors`。
 - 节目口播数字是约数且偶有口误/ASR 断词(如 "SERVICE. NOW"),引用时以

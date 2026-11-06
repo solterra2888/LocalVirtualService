@@ -315,7 +315,7 @@ def render_all(ws: Path) -> List[Path]:
                 print(f"[charts] wrote {p.name} (legacy)", flush=True)
         except Exception as e:  # noqa: BLE001
             print(f"[charts] render_us_close failed: {e}", flush=True)
-    # 02_finviz_map: finviz 风格板块热力图(GuanHe Equity Market 首图;自绘自
+    # 02_finviz_map: finviz 风格板块热力图(美股全景 首图;自绘自
     # finviz_screener 快照 —— elite.finviz.com/map 在本机 IP 被 Cloudflare
     # 交互挑战拦截,无法程序化截图;快照数值与 GuanHe 截图逐格一致)
     try:

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Finviz-style market heatmap (sector > industry > stock treemap).
 
-Replicates the heatmap GuanHe embeds under "Equity Market", matching the live
+Replicates the heatmap the report embeds under "美股全景", matching the live
 elite.finviz.com/map (filters: map · s&p500 · 1-day performance). Spec was
 reverse-engineered from the user's screenshots and verified cell-by-cell:
 

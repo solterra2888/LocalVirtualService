@@ -6,7 +6,8 @@
     Stage 0   build_snapshot.py 产出的冻结快照(本脚本不重建,只校验存在)
     Stage 1-6 三组章节 Agent 并行(节目转录 + 新闻层为素材,无摘要):
               overall_market(The Close) / company_desk(Closing Bell 主段+OT)
-              / macro;Today's Movers 由成分股快照确定性渲染;macro 块矩阵由
+               / macro;今日涨跌榜(美股/港股/A股成交额榜)由编排器按冻结
+              数据确定性渲染;macro 块矩阵由
               编排器按美国一线白名单 / 极端行情阈值纯代码判定后注入任务书
     Stage 7a  确定性 verify_checks.py(数字/三元组/since/概率/矩阵/结构)
     Stage 7b  核验 Agent:叙事质量审查 → verify/verdict.json
@@ -335,7 +336,7 @@ def _geo_stats(snapshot: Dict[str, Any]) -> tuple:
 
 
 def macro_blocks(snapshot: Dict[str, Any]) -> Dict[str, Any]:
-    """v8 Macros 块矩阵 —— 纯代码判定,对齐 report_from_xiao 的回顾/当下/展望。
+    """v8 Macros 块矩阵 —— 纯代码判定,对齐 xiao 式参考稿的回顾/当下/展望。
 
     review_releases  四经济体 T 日边际变化选题(每国 ≤2 族)
     geo_themes       地缘主题(快照 geo 层命中 ≥3 开块,附 top 条目)
@@ -364,79 +365,55 @@ def macro_blocks(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# Today's Movers(v7):S&P 500 成分股按当日涨跌幅确定性渲染,催化剂只取
-# 能解释当日股价的财报(前一交易日盘后 / 当日盘前),不经 LLM、无台账。
-MOVERS_MIN_CAP_MN = 10_000   # finviz market_cap 单位是百万美元 → $100 亿
-MOVERS_ROWS = 8
-STYLE_NOTHING = "Nothing notable today."
+# 今日涨跌榜(v8.6):美股/港股/A股成交额榜。三榜在 Stage 0 由 build_snapshot
+# 冻结进 market.volume_leaders(美股=finviz 成分股近似,港/A股=EODHD bulk),
+# 编排器只渲染不取数,不经 LLM、无台账。
+VL_MARKETS = (("us", "美股", "亿美元"), ("hk", "港股", "亿港元"),
+              ("cn", "A股", "亿元"))
 
 
-def _fmt_eps(v: Any) -> str:
-    v = float(v)
-    return f"-${abs(v):.2f}" if v < 0 else f"${v:.2f}"
-
-
-def _earnings_cell(row: Dict[str, Any]) -> str:
-    """只陈述 EPS 对预期;不写 beat/miss —— 股价常由指引而非当季 EPS 驱动。"""
-    est, act = row.get("eps_estimate"), row.get("eps_actual")
-    if est is None or act is None:
-        return ""
-    try:
-        return f"EPS {_fmt_eps(act)} vs {_fmt_eps(est)} est"
-    except (TypeError, ValueError):
-        return ""
+def _vl_code(row: Dict[str, Any]) -> str:
+    """EODHD 内部后缀(SHG/SHE/HK)→ 中文行情惯例的展示码。"""
+    code, ex = str(row.get("code", "")), row.get("exchange")
+    if ex == "US":
+        return code
+    if ex == "HK":
+        return f"{code.zfill(4)}.HK"
+    if ex == "SHG":
+        return f"{code}.SH"
+    if ex == "SHE":
+        return f"{code}.SZ"
+    return code
 
 
 def render_movers(snapshot: Dict[str, Any]) -> str:
-    sources = snapshot.get("sources") or {}
-    rows = ((sources.get("market") or {}).get("sp500_constituents") or [])
-    universe = []
-    for r in rows:
-        try:
-            cap = float(r.get("market_cap") or 0)
-            chg = float(r.get("change_percent"))
-        except (TypeError, ValueError):
+    vl = ((snapshot.get("sources") or {}).get("market") or {}
+          ).get("volume_leaders")
+    if not vl:
+        # 旧快照无 volume_leaders 块 —— 如实说明缺失,不编榜单(勿用禁词)
+        return "## 今日涨跌榜\n\n当日成交额榜数据不可用,本表从略。\n"
+    parts = ["## 今日涨跌榜", "",
+             "美股 ≥10 亿美元、港股 ≥10 亿港元、A股 ≥20 亿元人民币,"
+             "按当日成交额降序,各取前 8。", ""]
+    for key, label, unit in VL_MARKETS:
+        m = vl.get(key) or {}
+        parts += [f"### {label}", ""]
+        rows = m.get("rows") or []
+        if not rows:
+            parts += [m.get("note") or "当日无成交额达标个股。", ""]
             continue
-        if cap >= MOVERS_MIN_CAP_MN:
-            universe.append((chg, r))
-    if not rows:
-        # 成分股快照整体缺失(finviz 是当前状态表,历史日期无当日数据)——
-        # 如实说明数据缺失,不写「今日无显著行情」误导读者(勿用「快照」等禁词)
-        return "## Today's Movers\n\nFinviz 当日无成分股数据,本表从略。\n"
-    if not universe:
-        return f"## Today's Movers\n\n{STYLE_NOTHING}\n"
-
-    earnings: Dict[str, Dict[str, Any]] = {}
-    ec = sources.get("earnings_calendar") or {}
-    for e in ec.get("prior_after_close") or []:
-        earnings[str(e.get("code", "")).upper()] = e
-    for e in ec.get("today") or []:
-        if e.get("session") != "after":
-            earnings[str(e.get("code", "")).upper()] = e
-
-    def _table(picked: List[tuple]) -> List[str]:
-        out = ["| Ticker | Company | Change | Price | Earnings |",
-               "|---|---|---|---|---|"]
-        for chg, r in picked:
-            tk = str(r.get("ticker", ""))
+        parts += ["| 代码 | 公司 | 收盘价 | 涨跌幅 | 成交额 |",
+                  "|---|---|---|---|---|"]
+        for r in rows:
+            chg = r.get("change_percent")
+            chg_s = f"{chg:+.2f}%" if isinstance(chg, (int, float)) else "—"
             price = r.get("price")
-            price_s = f"${float(price):,.2f}" if price not in (None, "") else ""
-            cat = _earnings_cell(earnings.get(tk.upper(), {}))
-            out.append(f"| {tk} | {r.get('company', '')} | {chg:+.1f}% | "
-                       f"{price_s} | {cat} |")
-        return out
-
-    universe.sort(key=lambda x: x[0], reverse=True)
-    winners = [x for x in universe if x[0] > 0][:MOVERS_ROWS]
-    losers = [x for x in reversed(universe) if x[0] < 0][:MOVERS_ROWS]
-    lines = ["## Today's Movers", "",
-             "S&P 500 members above $10bn market value, ranked by "
-             "one-day change.", ""]
-    if winners:
-        lines += ["### Winners", "", *_table(winners), ""]
-    if losers:
-        lines += ["### Losers", "", *_table(losers), ""]
-    return "\n".join(lines)
+            price_s = f"{float(price):,.2f}" if price not in (None, "") else "—"
+            name = r.get("name_cn") or r.get("name", "")
+            parts.append(f"| {_vl_code(r)} | {name} | {price_s} "
+                         f"| {chg_s} | {r.get('turnover', 0) / 1e8:.1f}{unit} |")
+        parts += [""]
+    return "\n".join(parts)
 
 
 def write_movers(ws: Path, snapshot: Dict[str, Any]) -> None:
@@ -1897,7 +1874,7 @@ def _extract_headline(narrative_text: str, report_date: str) -> str:
             line = line.strip().strip('"').strip()
             if line:
                 return line
-    return f"Daily market brief — {report_date}"
+    return f"GuanHe 每日晨报 — {report_date}"
 
 
 AUDIT_SIDECAR_HEADER = (
@@ -1941,9 +1918,16 @@ def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
     parts = [
         f"# {headline}",
         "",
-        f"*Daily market brief — {report_date}*",
+        f"*GuanHe 每日晨报 — {report_date}*",
         "",
     ]
+    # v8.7:核验未通过时照常发布 —— 顶部一行指针 + 文末核验备注清单
+    degraded = verdict.get("verdict") != "pass"
+    open_issues = [i for i in verdict.get("issues") or [] if not i.get("advisory")]
+    if degraded:
+        n = len(open_issues)
+        parts += [f"> ⚠️ 本期有 {n} 项未通过自动核验的问题,报告照常发布;"
+                  "清单见文末「核验备注」,阅读时请对照。", ""]
     audit_parts = [
         AUDIT_SIDECAR_HEADER,
         "",
@@ -1971,9 +1955,9 @@ def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
         clean = re.sub(r"\n{3,}", "\n\n", clean).rstrip()
         audit_parts.append("\n".join(found))
         parts += [clean, "", "---", ""]
-    # 图表嵌入(与 GuanHe 版式一致): US close 总览在正文首个 "## Overall Market"
-    # 标题下(顶部); finviz 热力图放 "## Equity Market" 段、紧贴 Sector Action
-    # 上方。其余图表暂不嵌入(逐张优化中)。
+    # 图表嵌入(与 GuanHe 版式一致): US close 总览在正文首个 "## 大盘总览"
+    # 标题下(顶部); finviz 热力图放 "## 美股全景" 段、紧贴 今日涨跌榜
+    # 上方(涨跌榜排在板块动态之前)。其余图表暂不嵌入(逐张优化中)。
     charts_dir = ws / "final" / "charts"
 
     def _chart_block(heading: str, fname: str) -> List[str]:
@@ -1981,16 +1965,34 @@ def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
                 f"![{fname.split('.')[0]}](charts/{fname})", ""]
 
     if (charts_dir / "01_markets.png").exists():
-        block = _chart_block("Overall Market", "01_markets.png")
+        block = _chart_block("大盘总览", "01_markets.png")
+        # 插在正文首个 ## 标题之前(= 标题/日期/核验指针区之后;不再用固定
+        # 下标 4,顶部指针行会移动插入点)
+        idx0 = next((i for i, p in enumerate(parts) if p.startswith("## ")),
+                    len(parts))
         for i, line in enumerate(block):
-            parts.insert(4 + i, line)  # 标题/日期行之后、Today's Narrative 之前
+            parts.insert(idx0 + i, line)
     if (charts_dir / "02_finviz_map.png").exists():
-        block = _chart_block("Equity Market", "02_finviz_map.png")
-        # 定位 Sector Action 标题行,插到它正上方(各 section 内容以标题行开头)
+        block = _chart_block("美股全景", "02_finviz_map.png")
+        # 定位「## 今日涨跌榜」标题行,插到它正上方(各 section 内容以标题行开头)
         idx = next((i for i, p in enumerate(parts)
-                    if p.startswith("## Sector Action")), len(parts))
+                    if p.startswith("## 今日涨跌榜")), len(parts))
         for i, line in enumerate(block):
             parts.insert(idx + i, line)
+    if degraded:
+        shown = open_issues or (verdict.get("issues") or [])
+        # 末节收尾已带一条 ---,这里不重复加分隔线
+        parts += [f"## ⚠️ 核验备注(自动标注,{len(shown)} 项未决)", ""]
+        for i in shown:
+            tag = str(i.get("severity") or "?")
+            if i.get("advisory"):
+                tag += ", advisory"
+            parts.append(
+                (f"- **[{tag}]** ({i.get('section')}) {i.get('claim')}"
+                 f" — {i.get('suggestion') or ''}").rstrip(" —"))
+        parts += ["",
+                  "*以上由自动核验标注,供阅读时对照;口径与审计轨迹见同目录 "
+                  "report.audit.md。*", ""]
     out = ws / "final" / "report.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(parts), encoding="utf-8")
@@ -2037,6 +2039,10 @@ def main() -> int:
              "确定性核验有 high 失败时一律跳过 LLM、直接修订")
     parser.add_argument("--no-plan", action="store_true",
                         help="跳过写作前的编辑计划(故事归属 + 规范数值)")
+    parser.add_argument("--strict-verify", action="store_true",
+                        help="核验超限时回到旧行为:rc=2 转人工、不发布"
+                             "(v8.7 起默认照常发布,未决问题自动标注在报告"
+                             "顶部与文末)")
     parser.add_argument("--fake-zcode", action="store_true",
                         help="不用 ZCode:写占位章节,核验先 fail 后 pass,验证门控逻辑")
     parser.add_argument("--publish-cmd",
@@ -2076,17 +2082,38 @@ def main() -> int:
             return 2
 
         while True:
+            # 手工删 verdict 重跑(核验器修复后的标准动作,见 DEPLOYMENT §6.3)
+            # 应重开核验计数 —— 否则上一段的确定性失败会吃掉 LLM 修订轮的
+            # 预算(2026-11-05 实测:attempts=4>3 直接转人工,修订轮没跑)。
+            # llm_fix_used 同理重置:上一轮若没真正发生修订,不该抑制本轮
+            # 的 LLM 复审(P26:曾导致两个真问题未修就发布)。
+            if not (ws / "verify" / "verdict.json").exists():
+                if state["verify"].get("attempts") or state["verify"].get("llm_fix_used"):
+                    print(f"[verify] verdict reset detected; attempts "
+                          f"{state['verify'].get('attempts')} -> 0, "
+                          f"llm_fix_used -> False", flush=True)
+                state["verify"]["attempts"] = 0
+                state["verify"]["llm_fix_used"] = False
             verdict = run_verifier(args, ws, snapshot, state)
             if verdict.get("verdict") == "pass":
                 break
             attempts = state["verify"]["attempts"]
+            reason = None
             if attempts > args.max_verify_retries:
-                return _needs_human(
-                    verdict, f"verify failed after {attempts} attempts")
-            if not revise_sections(args, ws, snapshot, state,
-                                   _high_issues(verdict)):
-                return _needs_human(
-                    verdict, "high issues only touch locked sections")
+                reason = f"verify failed after {attempts} attempts"
+            elif not revise_sections(args, ws, snapshot, state,
+                                     _high_issues(verdict)):
+                reason = "high issues only touch locked sections"
+            if reason:
+                if args.strict_verify:
+                    return _needs_human(verdict, reason)
+                # v8.7:核验超限不再拦截 —— 照常发布,未决问题自动标注在
+                # 报告(顶部指针 + 文末核验备注);旧 rc=2 转人工行为由
+                # --strict-verify 恢复。轮次用尽/锁定节两类超限同此处理。
+                print(f"[verify] {reason} — publishing with annotations",
+                      file=sys.stderr, flush=True)
+                state["verify"]["published_with_issues"] = True
+                break
 
         # Charts before assemble so report.md can link them
         try:
@@ -2106,6 +2133,13 @@ def main() -> int:
         print(f"published: {report}")
         print(f"token usage: {state.get('usage_total')}")
         print(f"timings: {state.get('timings')}")
+        # 每日流程卡(纯脚本,不调 LLM):把当日运行数据注入模板,产出
+        # {ws}/pipeline-overview.html;失败只提示,绝不阻断发报。
+        try:
+            import gen_pipeline_card
+            print(f"[card] {gen_pipeline_card.generate(ws)}", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[card] skipped: {e}", flush=True)
         return 0
     except (subprocess.TimeoutExpired, RuntimeError) as e:
         print(f"pipeline error: {e}", file=sys.stderr)

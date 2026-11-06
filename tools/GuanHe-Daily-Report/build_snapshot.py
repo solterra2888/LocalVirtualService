@@ -67,6 +67,7 @@ import argparse
 import json
 import os
 import re
+import requests
 import subprocess
 import sys
 import time
@@ -213,6 +214,11 @@ _CN_RESEARCH_MAX, _CN_RESEARCH_CAP = 8, 2500
 _CN_GEO_MAX, _CN_GEO_CAP = 40, 1200
 TOP_MOVERS_LIMIT = 30
 TOP_MOVERS_MIN_CAP_M = 2000  # finviz market_cap 单位:百万美元 → $20 亿
+# 盘中残片防护:finviz_screener 每个 snapshot_date 只留最新一份,美股盘中
+# (北京时间 22:30 后)重刷会把当日行覆盖为盘中数据(量能只有开市一小段,
+# 2026-11-05 23:00 实测 AAPL 仅 1100 万股/全天约 5000 万)。S&P 500 全天
+# 成交量约 3-4B 股;低于 2B 判为不完整 —— 宁可缺源降级,不能用错数据。
+FINVIZ_MIN_DAY_VOLUME = 2e9
 
 
 def _conn() -> Any:
@@ -371,6 +377,14 @@ def _finviz_snapshot(report_date: date) -> Dict[str, Any]:
                     "perf_month": _pct(pm),
                     "perf_ytd": _pct(py),
                 })
+            # 盘中残片防护(见 FINVIZ_MIN_DAY_VOLUME 注释):总量不足即拒绝,
+            # 让外层 errors 记录 market.finviz 并降级,不用盘中错数据。
+            total_vol = sum(float(r["volume"] or 0) for r in constituents)
+            if constituents and total_vol < FINVIZ_MIN_DAY_VOLUME:
+                raise RuntimeError(
+                    f"finviz snapshot {snap_date} looks intraday/incomplete "
+                    f"(S&P500 total volume {total_vol / 1e6:.0f}M shares < "
+                    f"{FINVIZ_MIN_DAY_VOLUME / 1e6:.0f}M)")
             sectors = [
                 {"sector": sec, "count": len(chgs),
                  "avg_change_pct": round(sum(chgs) / len(chgs), 2)}
@@ -440,8 +454,200 @@ def _finviz_snapshot(report_date: date) -> Dict[str, Any]:
         conn.close()
 
 
+# ── 成交额榜(v8.6):美股/港股/A股成交额前列个股,冻结进快照供渲染 ────────
+# 美股从 finviz_screener 成分股近似(价格×成交量;S&P 500 内近似 —— 日成交
+# 额 ≥$10 亿的个股几乎都在指数内);港股/A股走 EODHD 批量端点 eod-bulk-
+# last-day,按报告日 T 显式取数(不受构建时刻影响),用 exchange-symbol-list
+# 的 Type=Common Stock 过滤指数/ETF/窝轮,前导零(0700/700)与 -OL 变体去重。
+# 港股后缀 .HK、沪 .SHG、深 .SHE 是 EODHD 内部代码,展示层再转 .HK/.SH/.SZ。
+VOL_LEADERS_US_MIN = 1e9   # 美股:成交额 ≥ 10 亿美元
+VOL_LEADERS_HK_MIN = 1e9   # 港股:成交额 ≥ 10 亿港元
+VOL_LEADERS_CN_MIN = 2e9   # A股:成交额 ≥ 20 亿元人民币
+VOL_LEADERS_ROWS = 8
+
+
+def _eodhd_api(path: str, params: Dict[str, str]) -> Any:
+    tok = os.environ.get("EODHD_API_TOKEN", "")
+    if not tok:
+        env_path = REPO_ROOT / ".env"
+        if env_path.exists():
+            m = re.search(r"^EODHD_API_TOKEN=(.+)$",
+                          env_path.read_text(encoding="utf-8"), re.MULTILINE)
+            if m:
+                tok = m.group(1).strip()
+    if not tok:
+        raise RuntimeError("EODHD_API_TOKEN not configured")
+    resp = requests.get(f"https://eodhd.com/api/{path}",
+                        params={**params, "api_token": tok, "fmt": "json"},
+                        timeout=90)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _bulk_turnover_rows(exchange: str, day: date) -> Dict[str, Dict[str, Any]]:
+    """EODHD bulk 指定日收盘 {code: {close, volume, turnover}}(休市日为空)。"""
+    rows = _eodhd_api(f"eod-bulk-last-day/{exchange}",
+                      {"date": day.isoformat()})
+    out: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(rows, list):
+        return out
+    for r in rows:
+        code = str(r.get("code") or "").strip()
+        if not code:
+            continue
+        try:
+            close_, vol = float(r.get("close") or 0), float(r.get("volume") or 0)
+        except (TypeError, ValueError):
+            continue
+        if close_ > 0 and vol > 0:
+            out[code] = {"close": close_, "volume": vol,
+                         "turnover": close_ * vol}
+    return out
+
+
+def _prev_trading_days(day: date, tries: int = 3) -> List[date]:
+    """往前跳过周末的候选交易日(每个市场最多回看 tries 个,覆盖周一/节假日)。"""
+    out: List[date] = []
+    d = day - timedelta(days=1)
+    while len(out) < tries:
+        if d.weekday() < 5:
+            out.append(d)
+        d -= timedelta(days=1)
+    return out
+
+
+def _volume_leaders_us(market: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = []
+    for r in market.get("sp500_constituents") or []:
+        p, v = r.get("price"), r.get("volume")
+        if not p or not v:
+            continue
+        turnover = float(p) * float(v)
+        if turnover < VOL_LEADERS_US_MIN:
+            continue
+        rows.append({
+            "code": r.get("ticker", ""), "exchange": "US",
+            "name": r.get("company", ""), "price": float(p),
+            "change_percent": r.get("change_percent"),
+            "turnover": round(turnover, 2),
+        })
+    rows.sort(key=lambda x: x["turnover"], reverse=True)
+    return rows[:VOL_LEADERS_ROWS]
+
+
+def _resolve_cn_names(rows: List[Dict[str, Any]]) -> None:
+    """EODHD 只有英文名;用腾讯行情接口批量补中文名(A股/港股),失败保留英文。
+
+    只取名字不改数字 —— 价格/成交额仍以 EODHD 冻结数据为准。腾讯一条
+    请求可混带沪深港代码(sz300308,sh688825,hk00700),GBK 编码,免密钥。
+    """
+    if not rows:
+        return
+
+    def _tx_code(r: Dict[str, Any]) -> str:
+        code, ex = r["code"], r["exchange"]
+        if ex == "HK":
+            return "hk" + code.zfill(5)
+        return ("sh" if ex == "SHG" else "sz") + code
+
+    try:
+        q = ",".join(_tx_code(r) for r in rows)
+        resp = requests.get(f"http://qt.gtimg.cn/q={q}", timeout=10)
+        txt = resp.content.decode("gbk", "replace")
+        names: Dict[str, str] = {}
+        for line in txt.strip().split(";"):
+            line = line.strip()
+            if "=" not in line:
+                continue
+            var, payload = line.split("=", 1)
+            key = var[2:] if var.startswith("v_") else var
+            fields = payload.strip('"').split("~")
+            if len(fields) > 1 and fields[1]:
+                names[key.strip()] = fields[1]
+        for r in rows:
+            n = names.get(_tx_code(r))
+            if n:
+                r["name_cn"] = n
+    except Exception:  # noqa: BLE001
+        pass  # 名称解析失败不阻塞榜单,保留英文名
+
+
+def _volume_leaders_eodhd(report_date: date) -> Dict[str, Any]:
+    """港股/A股成交额榜。美股榜独立计算(见 _volume_leaders_us),此函数可整体失败。"""
+    exchanges = ("HK", "SHG", "SHE")
+    listings: Dict[str, Dict[str, str]] = {}
+    for ex in exchanges:
+        rows = _eodhd_api(f"exchange-symbol-list/{ex}", {})
+        listings[ex] = {
+            str(x.get("Code")): str(x.get("Name") or "")
+            for x in rows if x.get("Type") == "Common Stock"
+        }
+    day_rows = {ex: _bulk_turnover_rows(ex, report_date) for ex in exchanges}
+    prev_closes: Dict[str, Dict[str, float]] = {}
+    for ex in exchanges:
+        if not day_rows[ex]:
+            continue  # 该市场 T 日休市(如 A 股黄金周),无需涨跌幅
+        for cand in _prev_trading_days(report_date):
+            prev = _bulk_turnover_rows(ex, cand)
+            if prev:
+                prev_closes[ex] = {c: r["close"] for c, r in prev.items()}
+                break
+
+    def _pick(ex: str) -> Dict[str, Dict[str, Any]]:
+        """去重(0700/700 取标准零填充码、丢弃 -OL 衍生行)+ Type 过滤。"""
+        best: Dict[str, Dict[str, Any]] = {}
+        for code, r in day_rows[ex].items():
+            if code not in listings[ex]:
+                continue  # 指数/ETF/窝轮/未知代码
+            stem, _, suffix = code.partition("-")
+            if suffix:
+                continue
+            key = stem.lstrip("0").upper() or stem
+            cur = best.get(key)
+            if cur is None or len(code) > len(cur["code"]):
+                best[key] = {"code": code, "exchange": ex, **r}
+        return best
+
+    def _rows(exs: tuple, min_turnover: float) -> List[Dict[str, Any]]:
+        merged: Dict[str, Dict[str, Any]] = {}
+        for ex in exs:
+            for key, r in _pick(ex).items():
+                merged.setdefault(key, r)
+        out = []
+        for r in merged.values():
+            if r["turnover"] < min_turnover:
+                continue
+            pc = (prev_closes.get(r["exchange"]) or {}).get(r["code"])
+            chg = round((r["close"] / pc - 1) * 100, 2) if pc else None
+            out.append({
+                "code": r["code"], "exchange": r["exchange"],
+                "name": listings[r["exchange"]].get(r["code"], ""),
+                "price": r["close"], "change_percent": chg,
+                "turnover": round(r["turnover"], 2),
+            })
+        out.sort(key=lambda x: x["turnover"], reverse=True)
+        return out[:VOL_LEADERS_ROWS]
+
+    hk_rows = _rows(("HK",), VOL_LEADERS_HK_MIN)
+    cn_rows = _rows(("SHG", "SHE"), VOL_LEADERS_CN_MIN)
+    for rows in (hk_rows, cn_rows):
+        _resolve_cn_names(rows)
+    return {
+        "hk": {
+            "currency": "HKD", "min_turnover": VOL_LEADERS_HK_MIN,
+            "as_of": report_date.isoformat(), "rows": hk_rows,
+            "note": None if hk_rows else "港股当日休市或无成交额达标个股。",
+        },
+        "cn": {
+            "currency": "CNY", "min_turnover": VOL_LEADERS_CN_MIN,
+            "as_of": report_date.isoformat(), "rows": cn_rows,
+            "note": None if cn_rows else "A股当日休市或无成交额达标个股。",
+        },
+    }
+
+
 def _earnings_calendar(report_date: date) -> Dict[str, Any]:
-    """当日已公布 + 未来 10 日安排(喂 Deep Dives / Movers / Forward Catalysts)。"""
+    """当日已公布 + 未来 10 日安排(喂 个股深挖 / 今日涨跌榜 / Forward Catalysts)。"""
     from backend.services.earnings_calendar_service import EarningsCalendarService
 
     svc = EarningsCalendarService()
@@ -481,7 +687,7 @@ def _earnings_calendar(report_date: date) -> Dict[str, Any]:
     while prev.weekday() >= 5:  # 周一 → 上周五,而不是周日
         prev -= timedelta(days=1)
     # T-1 盘后 + T 全天:Movers 催化剂(T-1 盘后公布的在 T 开盘反应);T 盘后的在 T+1 才反应,
-    # 仅作 Deep Dives / Forward 上下文。
+    # 仅作 个股深挖 / Forward 上下文。
     recent_rows = _slim(_view(prev, report_date, EARNINGS_TODAY_MIN_CAP, 150), True)
     prior_after_close = [r for r in recent_rows
                          if r["report_date"] == prev.isoformat() and r["session"] == "after"]
@@ -553,7 +759,7 @@ _FLASH_TEXT_CAP = 300
 _WIRE_MAX_ITEMS = 50        # 超出时按 L1>L2>L3/未评级 + 时序新者优先
 _WIRE_MIN_CHARS = 800       # 导语/标题级短条目不进 wire(全文层)
 _WIRE_TEXT_CAP = 1200
-_CALLS_MAX_ITEMS = 6        # SA 电话会节选(Deep Dives 的 Management said 素材)
+_CALLS_MAX_ITEMS = 6        # SA 电话会节选(个股深挖 的 Management said 素材)
 _CALLS_TEXT_CAP = 8000
 # L 轴排序权重:小者先保留;L4 已在 SQL 排除,未评级(NULL,存量/滞后)与 L3 同档
 _L_RANK = {"L1": 0, "L2": 1, "L3": 2, None: 2, "": 2}
@@ -1764,6 +1970,24 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
         market.update(_finviz_snapshot(report_date))
     except Exception as e:  # noqa: BLE001
         errors["market.finviz"] = str(e)[:300]
+    # 成交额榜(v8.6):美股(finviz 本地计算)与 港股/A股(EODHD bulk)
+    # 独立容错,任一失败不拖垮其余两榜。
+    volume_leaders: Dict[str, Any] = {}
+    try:
+        us_rows = _volume_leaders_us(market)
+        volume_leaders["us"] = {
+            "currency": "USD", "min_turnover": VOL_LEADERS_US_MIN,
+            "as_of": report_date.isoformat(), "rows": us_rows,
+            "note": None if us_rows else "美股当日无成交额达标个股。",
+        }
+    except Exception as e:  # noqa: BLE001
+        errors["market.volume_leaders.us"] = str(e)[:300]
+    try:
+        volume_leaders.update(_volume_leaders_eodhd(report_date))
+    except Exception as e:  # noqa: BLE001
+        errors["market.volume_leaders.hk_cn"] = str(e)[:300]
+    if volume_leaders:
+        market["volume_leaders"] = volume_leaders
     sources["market"] = market or None
 
     # MACROS 确定性数据底座(六子块 + release_series + 拍卖补字段)

@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """章节任务书与核验任务书(xiao 式晨报,v8 Macros)。
 
-v8 对齐 report_from_xiao 参考稿,Macros 推倒重来为「回顾/当下/展望」五文件:
+v8 对齐 xiao 式晨报参考稿(设计出处;参考文件已删,风格固化于各节任务书),
+Macros 推倒重来为「回顾/当下/展望」五文件:
   07 宏观速览   确定性渲染(编排器,零 LLM):四经济体指标表 + 商品行情 + 前瞻日历
   08 回顾·宏观数据  边际变化:多国数据意外(美欧中日),券商宏观解读挂名
   09 回顾·地缘政治 + 焦点事件  主题块按快照命中量开块(美伊/俄乌/中东/贸易)
   10 美联储观察 利率与决议(投票/异议)+ 声明措辞对比 + 市场定价路径 + 官员表态
-  11 展望与策略 第二段综合:大事预判 / 主线跟踪 / 投资建议(直接建议)
+  11 展望与策略 第二段综合:大事预判 / 主线跟踪 / 策略应对(直接给操作口径)
 v8 新信源: macro_dashboard(指标表底座)/ fomc(决议·定价·声明)/
 news_macro(宏观地缘素材层:digest 晨间日报 · research 宏观解读 · geo 地缘快讯;
 源池 = Admin user_id=1 的订阅,中英混合)。
@@ -214,8 +215,7 @@ def _style_rules(style: str) -> str:
              if style == "cn" else "")
     return f"""\
 4. Output language: {p['body_language']}. Keep section headings exactly as each
-   task specifies (house style: Sections 01–06 keep their English headings;
-   the Macros sections 07–11 use the Chinese headings given in their tasks).
+   task specifies (house style: 全部章节标题为中文,以各任务书给定的标题为准).
    Keep tickers ($MU, CCI), company/person names and all numbers in their
    original form.{headline}{voice}
 """
@@ -264,7 +264,7 @@ def _common_rules(style: str, allowed_tags: Optional[set] = None) -> str:
 """
     return f"""\
 You are one section-writer inside a scheduled report pipeline. You are writing ONE
-section of a "Daily market brief" for professional investors. Write like a senior
+section of a "GuanHe 每日晨报" for professional investors. Write like a senior
 markets analyst briefing a trading desk: every sentence states a market fact or a
 judgment, numbers are clean and few, and the reader never sees how the brief was
 produced. Model the voice on this reference excerpt (same house):
@@ -444,7 +444,7 @@ HARD RULES (violating any of these fails pipeline verification):
 # ── 章节任务书 ─────────────────────────────────────────────────────────
 
 _POSITIONING_BODY = """\
-Write "## Positioning / Flow" with up to three items, in this order; drop an
+Write "## 持仓与资金流" with up to three items, in this order; drop an
 item entirely when there is no real material for it. Material: the The Close
 guest-strategist segments (allocators, fixed-income/credit views, technicians,
 disagreements, time horizons) and same-day flow/positioning items in
@@ -471,8 +471,7 @@ Each item ≤ 70 words. Do not repeat a driver block's analysis here.
 """
 
 OVERALL_MARKET_TASK = """\
-## Part 1 — Today's Narrative + Top Market Drivers + Positioning
-(one analysis, three files)
+**任务一(一次分析,三个文件)—— 今日叙事 + 核心驱动 + 持仓与资金流**
 
 Read The Close transcript and the trading-day news ONCE, decide the day's 3–5
 real stories, then export THREE files. They complement, never repeat: the
@@ -481,7 +480,7 @@ is reacting.
 
 ### File A — sections/01_narrative.md  (THESIS layer)
 
-Write "## Today's Narrative" with EXACTLY 2–3 bullets. Each bullet is ONE plain
+Write "## 今日叙事" with EXACTLY 2–3 bullets. Each bullet is ONE plain
 sentence (no bold, no credits, no numbers) stating a conclusion about the day —
 what moved and why it matters — e.g.:
 - The AI selloff spread from spenders to suppliers and lenders: memory costs
@@ -505,7 +504,7 @@ the published headline. Any superlative in it must obey the "since" rule.
 
 ### File B — sections/02_drivers.md  (EVIDENCE layer)
 
-Write "## Top Market Drivers" with 3–5 blocks, ordered by market impact. A
+Write "## 核心驱动" with 3–5 blocks, ordered by market impact. A
 block may come from The Close (desk segments, guest interviews, data reads) or
 from market-moving trading-day news in news.flash / news.wire that the show
 missed (M&A, geopolitics, central-bank or government headlines, credit
@@ -526,7 +525,7 @@ events). Each block:
   与 Qualcomm(周三)毛利率守住，则挤压有限、可回补。」 The inference must
   follow from the block's facts — a reported claim may only be the 若
   condition. Keep it specific to this driver; the portfolio-level stance and
-  sector allocation belong to Section 11 (展望与策略).
+  sector allocation belong to 第 11 节(展望与策略).
 Do not restate the same stock move in two blocks.
 
 ### File C — sections/03_positioning.md
@@ -539,12 +538,12 @@ Each file also gets its own claims ledger (rule 11).
 NARRATIVE_TASK = None
 DRIVERS_TASK = None
 
-POSITIONING_TASK = "## Section 3 — Positioning / Flow\n\n" + _POSITIONING_BODY
+POSITIONING_TASK = "**第 3 节任务 —— 持仓与资金流**(输出文件首行必须是 \"## 持仓与资金流\")\n\n" + _POSITIONING_BODY
 
 SECTOR_ACTION_TASK = """\
-## Section 4 — Sector Action
+**第 4 节任务 —— 板块动态**(输出文件首行必须是 "## 板块动态",不要照抄本任务标题)
 
-Write "## Sector Action" as 5–7 thematic blocks (NO sector scorecard / league
+Write "## 板块动态" as 5–7 thematic blocks (NO sector scorecard / league
 table, no sector-average lines). Choose themes by MARKET IMPACT: the biggest
 same-day moves among large caps (market.sp500_constituents / top_movers) and
 the catalysts behind them. The Closing Bell transcripts (main hour
@@ -569,14 +568,14 @@ this section.
 """
 
 DEEP_DIVES_TASK = """\
-## Section 6 — Company Deep Dives
+**第 6 节任务 —— 个股深挖**(输出文件首行必须是 "## 个股深挖",不要照抄本任务标题)
 
-Write "## Company Deep Dives" with the 3–5 most market-relevant single-name
+Write "## 个股深挖" with the 3–5 most market-relevant single-name
 stories of the day, ranked by: size of the move × market cap, an earnings or
 guidance event, an analyst-rating wave, and how much the story drove peers.
 How long the show talked about a name is only a tie-break. A deep dive may be a
 non-listed company when its news moved the market (e.g. a private company's
-IPO, rating or financing). Every subject must also appear in Sector Action.
+IPO, rating or financing). Every subject must also appear in 板块动态.
 
 Sources: the Closing Bell transcripts (main hour + Overtime),
 earnings_calendar, market.sp500_constituents (price, change), news.flash
@@ -606,14 +605,14 @@ Never fabricate estimates, guidance, ratings, targets or quotes.
 """
 
 COMPANY_DESK_TASK = """\
-## Part 2 — Sector Action + Company Deep Dives (one pass, two files)
+**任务二(一次读入,两个文件)—— 板块动态 + 个股深挖**(每个输出文件首行必须是任务规定的 H2 标题,不要照抄本任务标题)
 
 Read the Closing Bell transcripts (main hour + Overtime) ONCE — while
 reading, collect every executive quote (name + title + exact words) and
 analyst view you might use, because you may NOT re-read the transcripts
 afterwards. Then read the large-cap moves (finviz), the earnings calendar and
-news.flash, and export TWO files. Deep Dives subjects MUST
-also appear in Sector Action. (Today's Movers is rendered by the pipeline
+news.flash, and export TWO files. 个股深挖 subjects MUST
+also appear in 板块动态. (今日涨跌榜 is rendered by the pipeline
 from market data — do not write it.)
 
 ### File A — sections/04_sector_action.md
@@ -793,10 +792,10 @@ layers name with a date. FOMC path judgment lives here. 2–4 bullets,
 ### 主线跟踪 (omit when no live cross-market theme deserves it)
 ONE ongoing market theme drawn from the market sections (an AI-capex cycle, a
 rotation, a de-grossing): where it stands, the bull/bear hinge. Never restate
-single-stock moves already written in Sector Action / Deep Dives.
+single-stock moves already written in 板块动态 / 个股深挖.
 
-### 投资建议
-Direct, actionable house advice at PORTFOLIO level, 3–5 bullets: overall
+### 策略应对
+Direct, actionable house positioning at PORTFOLIO level, 3–5 bullets: overall
 stance (加仓/观望/减仓), structure (e.g. 哑铃:高股息防守 + 主线进攻), sectors
 to overweight and to avoid, and the macro/Fed condition that would change
 the stance. The action bullets in sections/02_drivers.md are trade-level
@@ -804,7 +803,8 @@ calls on single drivers — never restate or paraphrase them here; if you
 agree with one, fold it into a sector stance instead of repeating it.
 Judgment IS expected in this block — but every NUMBER still comes from the
 snapshot and enters the claims ledger; judgments must read as judgments
-(「建议」「预计」), never as reported facts. Close the block with exactly:
+(「建议」「预计」), never as reported facts. Do NOT use the heading 投资建议
+or present the block as personalized advice. Close the block with exactly:
 (以上为本报观点,不构成投资建议。)
 
 Cross-section consistency: a fact already stated in Sections 01–10 must read
@@ -873,9 +873,12 @@ SECTION_SPECS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-SECTION_ORDER = ["narrative", "drivers", "positioning", "sector_action",
-                 "movers", "deep_dives", "macro_dashboard", "macro_review",
-                 "geopolitics", "fomc", "outlook"]
+# v8.6:今日涨跌榜(美股/港股/A股成交额榜)上移到板块动态之前 —— 紧跟
+# 美股全景图下方的版式位;章节文件名(05_movers.md)保持不变,避免破坏
+# 断点续跑的文件契约。
+SECTION_ORDER = ["narrative", "drivers", "positioning", "movers",
+                 "sector_action", "deep_dives", "macro_dashboard",
+                 "macro_review", "geopolitics", "fomc", "outlook"]
 
 # 两段编排:第一段互不依赖、并行;第二段(outlook)读第一段成品做综合。
 AGENT_STAGES = [
@@ -899,7 +902,7 @@ AGENT_TASK_BUILDERS = {
 
 _FAKE_SECTIONS = {
     "narrative": (
-        "## Today's Narrative\n"
+        "## 今日叙事\n"
         "- Placeholder narrative bullet (fake mode). "
         "<!-- audit: [show the_close] -->\n"
         "<!-- HEADLINE_CANDIDATES\n"
@@ -907,7 +910,7 @@ _FAKE_SECTIONS = {
         "-->\n"
     ),
     "drivers": (
-        "## Top Market Drivers\n"
+        "## 核心驱动\n"
         "**Placeholder driver.**\n"
         "- Index moved {spx_move} "
         "(fake mode value — deterministic check must flag this). "
@@ -915,18 +918,18 @@ _FAKE_SECTIONS = {
         "- Placeholder action (fake mode).\n"
     ),
     "positioning": (
-        "## Positioning / Flow\n"
+        "## 持仓与资金流\n"
         "- **Primary — Placeholder.** Placeholder (fake mode). "
         "<!-- audit: [show the_close] -->\n"
     ),
     "sector_action": (
-        "## Sector Action\n"
+        "## 板块动态\n"
         "**Placeholder theme.**\n"
         "- Placeholder sector action (fake mode). "
         "<!-- audit: [show cnbc_closing_bell] -->\n"
     ),
     "deep_dives": (
-        "## Company Deep Dives\n"
+        "## 个股深挖\n"
         "### FAKE — Placeholder Corp\n"
         "- **What happened:** placeholder (fake mode). "
         "<!-- audit: [show cnbc_closing_bell] -->\n"
@@ -968,8 +971,8 @@ _FAKE_SECTIONS = {
         "### 大事预判\n"
         "- Placeholder outlook (fake mode). "
         "<!-- audit: [data economic_events.upcoming] -->\n"
-        "### 投资建议\n"
-        "- Placeholder advice (fake mode).\n"
+        "### 策略应对\n"
+        "- Placeholder strategy response (fake mode).\n"
     ),
 }
 
@@ -979,7 +982,7 @@ def fake_section_text(name: str, corrected: bool = False,
     text = _FAKE_SECTIONS[name].replace("{spx_move}", spx_move)
     if corrected and name == "drivers":
         return (
-            "## Top Market Drivers\n"
+            "## 核心驱动\n"
             "**Placeholder driver.**\n"
             "- Placeholder fact (fake mode corrected). "
             "<!-- audit: [show the_close] -->\n"

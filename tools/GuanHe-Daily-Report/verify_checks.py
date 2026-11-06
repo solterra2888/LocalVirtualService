@@ -32,12 +32,13 @@ from prompts import (  # noqa: E402
 
 DONE_MARKER = "<!-- SECTION DONE -->"
 HEADINGS = {
-    "narrative": "## Today's Narrative",
-    "drivers": "## Top Market Drivers",
-    "positioning": "## Positioning / Flow",
-    "sector_action": "## Sector Action",
-    "movers": "## Today's Movers",
-    "deep_dives": "## Company Deep Dives",
+    # v8.6 起 01-06 节标题与 07-11 一样统一为中文
+    "narrative": "## 今日叙事",
+    "drivers": "## 核心驱动",
+    "positioning": "## 持仓与资金流",
+    "sector_action": "## 板块动态",
+    "movers": "## 今日涨跌榜",
+    "deep_dives": "## 个股深挖",
     # v8 Macros(中文标题;07-11 替代旧 07_macro)
     "macro_dashboard": "## 宏观速览",
     "macro_review": "## 回顾 · 宏观数据",
@@ -388,7 +389,11 @@ def _check_value(ctx: Dict[str, Any], path: str, pv: Dict[str, Any]) -> tuple:
         where = _found_in(pv, ctx["pool_index"].get(head, []))
         hint = f"; it appears in {', '.join(where)}" if where else ""
         if "[" in path and full:
-            if _matches_text(pv, _text_numbers(_item_blob(node))):
+            # P25(2026-11-05):台账路径带叶子字段(如 .text)时 node 是字符串,
+            # _item_blob 只认条目 dict,曾返回空 blob 把真实命中的引用误报成
+            # high(修订轮无法收敛)。字符串直接当原文用。
+            blob = node if isinstance(node, str) else _item_blob(node)
+            if _matches_text(pv, _text_numbers(blob)):
                 return (None, "", "", True)
             return ("high", f"cited item does not state this number{hint}",
                     "cite the item that states the number, or fix the number", False)
@@ -776,8 +781,10 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
             add(name, "missing SECTION DONE marker", "required", False, "medium")
         heading = HEADINGS[name]
         if not text.lstrip().startswith(heading):
+            # 2026-11-06 实测:任务书脚手架被照抄成正文标题(## 第 4 节 — 板块动态),
+            # medium 不门控直接带病发布 —— 升为 high,让修订轮当场改掉
             add(name, f"heading must be {heading}", text.splitlines()[0][:80],
-                False, "medium")
+                False, "high")
         if name == "narrative" and "HEADLINE_CANDIDATES" not in text:
             add(name, "missing HEADLINE_CANDIDATES block", "required", False, "medium")
         if name == "deep_dives" and re.search(r"(^|\n)\s*(Read:|推断:)", text):
@@ -976,10 +983,11 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
                 add("fomc", f"missing required block: {needed}", "required",
                     False, "medium")
 
-    # 11 展望与策略:大事预判/投资建议恒在;免责行收尾
+    # 11 展望与策略:大事预判/策略应对恒在;免责行收尾
+    # (小节不叫「投资建议」—— 那是投顾业务口径;免责行反而必须含该词)
     outlook_text = _section_text(ws, "outlook")
     if outlook_text.strip():
-        for needed in ("### 大事预判", "### 投资建议"):
+        for needed in ("### 大事预判", "### 策略应对"):
             if needed not in outlook_text:
                 add("outlook", f"missing required block: {needed}", "required",
                     False, "high")
@@ -987,14 +995,20 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
             add("outlook", "missing disclaimer line (不构成投资建议)", "required",
                 False, "medium")
 
-    # Today's Movers(v7:编排器按成分股快照确定性渲染)
-    has_constituents = bool((sources.get("market") or {}).get("sp500_constituents"))
+    # 今日涨跌榜(v8.6:美股/港股/A股成交额榜,编排器确定性渲染)——
+    # 快照里有榜单的市场,正文必须出现对应小节与榜首代码
+    vl = ((sources.get("market") or {}).get("volume_leaders")) or {}
     movers_text = _section_text(ws, "movers")
-    has_tables = bool(re.search(r"^###\s+(Winners|Losers)\b", movers_text, re.M))
-    if has_constituents and not has_tables:
-        add("movers", "S&P 500 constituents present but no Winners/Losers tables",
-            "market.sp500_constituents", False, "high",
-            "re-render Today's Movers from the constituents snapshot")
+    for key, label in (("us", "美股"), ("hk", "港股"), ("cn", "A股")):
+        rows = (vl.get(key) or {}).get("rows") or []
+        if not rows:
+            continue
+        top_code = str(rows[0].get("code", ""))
+        if f"### {label}" not in movers_text or (
+                top_code and top_code not in movers_text):
+            add("movers", f"volume leaders ({label}) present in data but "
+                f"missing from 今日涨跌榜", f"market.volume_leaders.{key}",
+                False, "high", "re-render 今日涨跌榜 from the volume leaders")
 
     return issues
 

@@ -1,0 +1,667 @@
+<div id="gdr-pipeline-viz">
+  <div class="nav nav-pills" role="tablist" aria-label="晨报产品全景">
+    <button class="nav-link active" id="tab-flow" role="tab" aria-controls="panel-flow" aria-selected="true" type="button">产品全景</button>
+    <button class="nav-link" id="tab-stats" role="tab" aria-controls="panel-stats" aria-selected="false" type="button">运营实测</button>
+    <button class="nav-link" id="tab-sankey" role="tab" aria-controls="panel-sankey" aria-selected="false" type="button">数据流向</button>
+    <button class="nav-link" id="tab-prov" role="tab" aria-controls="panel-prov" aria-selected="false" type="button">栏目与溯源</button>
+    <button class="nav-link" id="tab-verify" role="tab" aria-controls="panel-verify" aria-selected="false" type="button">质检与发版</button>
+  </div>
+
+  <div id="panel-flow" role="tabpanel" aria-labelledby="tab-flow">
+    <h3>一份晨报是怎么诞生的 · 08:31 开工，09:26 送达</h3>
+    <div class="flow">
+
+      <div class="stage">
+        <div class="stage-tag">① 原料采集<br><span class="text-small text-muted">08:31 · 3 分钟</span></div>
+        <div class="stage-body">
+          <div>前一晚美股收盘后，系统自动收齐当天全部原料：<strong>两档王牌节目的完整文字稿</strong>、数百条市场快讯、行情、财报与经济日历、央行资料——<strong>全部封存成一份「当日事实底稿」</strong>，此后每个环节只认这一份。</div>
+          <div class="real">今日实测：约 1,180 条原料 + 18.2 万字节目文字稿</div>
+          <div class="text-small text-muted">技术注：库表 subscription_content / finviz_screener / economic_events 等 + EODHD / FRED / 腾讯行情接口；底稿即冻结的 snapshot.json（0.7MB）；自带盘中数据防护（残缺行情自动拒收）。</div>
+        </div>
+      </div>
+
+      <div class="arrow">↓</div>
+
+      <div class="stage">
+        <div class="stage-tag">② 编辑选题会<br><span class="text-small text-muted">4 分钟</span></div>
+        <div class="stage-body">
+          <div>主编（AI）通读底稿摘要，定下三件事：今天讲哪 <strong>4–7 个故事</strong>、每个故事<strong>归哪个栏目负责</strong>（一个故事只讲一次）、关键数字<strong>统一口径</strong>。</div>
+          <div class="real">今日实测：一次成稿，27K tokens</div>
+          <div class="text-small text-muted">技术注：编辑计划 plan，单次模型调用直出 JSON，编排器校验落盘（plan.json）。</div>
+        </div>
+      </div>
+
+      <div class="arrow">↓</div>
+
+      <div class="stage">
+        <div class="stage-tag">③ 六个编辑部<br>同时开写<br><span class="text-small text-muted">19 分钟<br>（最慢编辑部）</span></div>
+        <div class="stage-body">
+          <div class="grp">
+            <div class="grp-h"><b>市场叙事部</b><span class="text-muted">→ 今日叙事 / 核心驱动 / 持仓与资金流</span><span class="gtime">14.4 min</span></div>
+            <div>先用三句话说清"今天市场在讲什么故事"，再给出证据链和多方观点，最后看资金站在哪一边。</div>
+            <div class="text-small text-muted">原料：彭博 The Close 节目文字稿（主稿）、跨资产行情、涨跌广度、美债曲线、加息概率、FRED 数据、快讯与通讯社；Finviz 持仓数据与电话会纪要仅限对应栏目使用。</div>
+          </div>
+          <div class="grp">
+            <div class="grp-h"><b>公司与板块部</b><span class="text-muted">→ 板块动态 / 个股深挖</span><span class="gtime">18.8 min（最慢）</span></div>
+            <div>今天谁在大涨大跌、为什么；对最重要的几只个股做深挖：发生了什么、管理层原话、分析师怎么反应。</div>
+            <div class="text-small text-muted">原料：CNBC Closing Bell 主段+加时段文字稿、行情与榜单、板块均值、财报日历、快讯；The Close 稿与通讯社不进入该部（防串稿的物理隔离）。</div>
+          </div>
+          <div class="grp">
+            <div class="grp-h"><b>自动数据台</b><span class="text-muted">→ 今日涨跌榜 / 宏观速览</span><span class="gtime">秒级</span></div>
+            <div>两个纯数据栏目<strong>不经过 AI</strong>：三市场成交额榜和四经济体仪表盘由系统直接从底稿生成——零出错设计。</div>
+            <div class="text-small text-muted">原料：成交额三榜（美股 finviz + 港/A股 EODHD + 腾讯中文名）、四经济体指标、经济日历、跨资产、议息日历。</div>
+          </div>
+          <div class="grp">
+            <div class="grp-h"><b>宏观数据部</b><span class="text-muted">→ 回顾·宏观数据</span><span class="gtime">3.7 min</span></div>
+            <div>昨天公布的数字（就业/通胀/PMI）实际值 vs 预期，说明什么、谁在解读。</div>
+            <div class="text-small text-muted">原料：经济日历、FRED、曲线与概率、中文晨报与券商解读（署名引用）、快讯。</div>
+          </div>
+          <div class="grp">
+            <div class="grp-h"><b>地缘政治部</b><span class="text-muted">→ 回顾·地缘政治</span><span class="gtime">9.3 min</span></div>
+            <div>世界大事（战事/选举/大国博弈）对市场的含义，当天没有大事件时自动瘦身。</div>
+            <div class="text-small text-muted">原料：地缘快讯层（中英）、中文晨报与券商解读、快讯与通讯社、跨资产。</div>
+          </div>
+          <div class="grp">
+            <div class="grp-h"><b>美联储观察部</b><span class="text-muted">→ 美联储观察</span><span class="gtime">7.7 min</span></div>
+            <div>最近四次决议与异议、声明措辞变化、市场为下次会议定价了多少。</div>
+            <div class="text-small text-muted">原料：FOMC 决议/声明/定价路径、加息概率、美债曲线、FRED、经济日历、快讯。</div>
+          </div>
+          <div class="text-small text-muted">技术注：六个组真并行；每个编辑部只能看到自己栏目的原料库（系统级权限切片，非口头约定）；写作崩溃自动重试一次。</div>
+        </div>
+      </div>
+
+      <div class="arrow">↓</div>
+
+      <div class="stage">
+        <div class="stage-tag">④ 收官综述<br><span class="text-small text-muted">7 分钟</span></div>
+        <div class="stage-body">
+          <div>等所有栏目交稿后，主编通读全文，写给读者最关心的三件事：<strong>明天看什么、主线走到哪、组合怎么办</strong>（详见「运营实测」页）。</div>
+        </div>
+      </div>
+
+      <div class="arrow">↓</div>
+
+      <div class="stage">
+        <div class="stage-tag">⑤ 三道质检<br><span class="text-small text-muted">详见第四页</span></div>
+        <div class="stage-body">
+          <div>机器事实核对（逐数字回底稿比对）→ 不合格打回重写 → 主编通读查逻辑矛盾。</div>
+          <div class="real">今日实测：首轮查出 13 处不合格，两轮重写后全部修复</div>
+        </div>
+      </div>
+
+      <div class="arrow">↓</div>
+
+      <div class="stage">
+        <div class="stage-tag">⑥ 排版发版<br><span class="text-small text-muted">09:26</span></div>
+        <div class="stage-body">
+          <div>配两张图、剥离全部内部批注，产出<strong>干净成品</strong> + 一份<strong>内部备忘录</strong>（数据口径、复核意见、每个数字的出处）。</div>
+          <div class="real">今日实测：11 个栏目 1.46 万字 · 全程零人工 · 43 分钟</div>
+          <div class="text-small text-muted">技术注：质检未全过也不断更——带问题清单照常发版（v8.7）；需要人工把关可切换 --strict-verify。</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="panel-stats" role="tabpanel" aria-labelledby="tab-stats" hidden>
+    <h3>首日运营数据 · 2026-11-05 期</h3>
+
+    <div class="stats-block">
+      <h4>① 今天收了多少原料</h4>
+      <table class="table table-sm">
+        <thead><tr><th>原料</th><th>来自</th><th class="text-end">数量</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>市场快讯</td><td>订阅推特账号</td><td class="text-end tabular-nums">300 条</td><td class="text-small text-muted">盘中即时消息</td></tr>
+          <tr><td>新闻全文</td><td>Yahoo/SA/CNBC</td><td class="text-end tabular-nums">50 篇</td><td class="text-small text-muted">通讯社与媒体</td></tr>
+          <tr><td>电话会纪要</td><td>Seeking Alpha</td><td class="text-end tabular-nums">6 篇</td><td class="text-small text-muted">管理层问答</td></tr>
+          <tr><td>券商宏观解读</td><td>订阅星球/通讯</td><td class="text-end tabular-nums">8 篇</td><td class="text-small text-muted">署名引用</td></tr>
+          <tr><td>地缘快讯</td><td>订阅源(含央视)</td><td class="text-end tabular-nums">40 条</td><td class="text-small text-muted">中英混合</td></tr>
+          <tr><td>中文晨报素材</td><td>订阅源</td><td class="text-end tabular-nums">0 条</td><td class="text-small text-muted">8:51 后才发布，8:31 必缺（已知边界）</td></tr>
+          <tr><td>经济日历</td><td>EODHD</td><td class="text-end tabular-nums">77 条</td><td class="text-small text-muted">近 3 天 30 + 未来 7 天 47</td></tr>
+          <tr><td>财报安排</td><td>日历服务</td><td class="text-end tabular-nums">101 条</td><td class="text-small text-muted">前日盘后 56 + 当日 45</td></tr>
+          <tr><td>S&P 500 全成分行情</td><td>Finviz</td><td class="text-end tabular-nums">503 只</td><td class="text-small text-muted">价/量/涨跌/市值</td></tr>
+          <tr><td>榜单与跨资产</td><td>Finviz + EOD</td><td class="text-end tabular-nums">58 项</td><td class="text-small text-muted">涨幅榜 30 + 板块 11 + 跨资产 17</td></tr>
+          <tr><td>三市场成交额榜</td><td>Finviz + EODHD + 腾讯</td><td class="text-end tabular-nums">24 只</td><td class="text-small text-muted">美股/港股/A股 各前 8</td></tr>
+          <tr><td>宏观与央行资料</td><td>FRED + FOMC 表</td><td class="text-end tabular-nums">9 组</td><td class="text-small text-muted">曲线/概率/指标；决议 4 场+声明 3 份</td></tr>
+          <tr><td>节目文字稿</td><td>The Close + Closing Bell</td><td class="text-end tabular-nums">18.2 万字</td><td class="text-small text-muted">82,787 + 45,963 + 53,701</td></tr>
+        </tbody>
+      </table>
+      <div class="text-small text-muted">合计约 1,180 条原料，封存为当日唯一事实底稿。</div>
+    </div>
+
+    <div class="stats-block">
+      <h4>② 投入与产出</h4>
+      <div class="viz-grid" style="--viz-grid-min: 200px;">
+        <div class="card" style="padding:10px 12px;"><div class="text-small text-muted">模型阅读量（按环节）</div>
+          <div class="bar-row"><span>选题会</span><div class="bar"><i style="width:2%"></i></div><b class="tabular-nums">27K</b></div>
+          <div class="bar-row"><span>写作</span><div class="bar"><i style="width:100%"></i></div><b class="tabular-nums">7.75M</b></div>
+          <div class="bar-row"><span>重写</span><div class="bar"><i style="width:32%"></i></div><b class="tabular-nums">2.47M</b></div>
+          <div class="bar-row"><span>质检</span><div class="bar"><i style="width:3%"></i></div><b class="tabular-nums">262K</b></div>
+        </div>
+        <div class="card" style="padding:10px 12px;"><div class="text-small text-muted">内容产出</div>
+          <div class="big-num">14,563 <span class="text-small text-muted">字 · 11 个栏目</span></div>
+          <div class="big-num">223 <span class="text-small text-muted">张数字出处卡</span></div>
+          <div class="big-num">19 <span class="text-small text-muted">个被实际引用的原料库</span></div>
+        </div>
+      </div>
+      <div class="text-small text-muted" style="margin-top:6px;">注：当日素材智能分拣遇到接口抖动，自动切换备用通道，内容照常产出。</div>
+    </div>
+
+    <div class="stats-block">
+      <h4>③ 每个栏目用了多少原料（出处卡实测）</h4>
+      <div id="claims-bars"></div>
+      <div class="text-small text-muted">自动数据台两个栏目（涨跌榜/宏观速览）不走出处卡——它们由底稿直接生成，数字不可能偏离原料。板块动态是信息量最大的栏目：90 张出处卡、6 个原料库。</div>
+    </div>
+
+    <div class="stats-block">
+      <h4>④ 收官栏目（展望与策略）是怎么写出来的</h4>
+      <div class="flow" style="margin-top:4px;">
+        <div class="stage"><div class="stage-tag">读什么</div><div class="stage-body"><div>前面 <strong>10 个栏目的成品</strong>（等全部交稿后才动笔）+ 明天的日程表 + 加息概率与跨资产行情</div></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><div class="stage-tag">写什么</div><div class="stage-body"><div>给读者三件事：<strong>大事预判</strong>（明天每个日程项怎么看）→ <strong>主线跟踪</strong>（本轮主线走到哪、多空分水岭）→ <strong>策略应对</strong>（组合层面：态度/结构/超配回避/什么条件改变判断）</div></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><div class="stage-tag">红线</div><div class="stage-body"><div>① 不重复前面栏目说过的操作建议——只做组合层；② 前文事实必须原样引用，不许换个说法；③ 观点必须写成观点（「建议」「预计」），数字照挂出处卡；④ 结尾固定免责声明</div></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><div class="stage-tag">本期实测</div><div class="stage-body"><div>7 分钟 · 1,364 字 · 13 张出处卡 · 3 个原料库——它做的是综合判断，不是事实罗列，所以取证密度天然低于前段</div></div></div>
+      </div>
+    </div>
+
+    <div class="stats-block">
+      <h4>⑤ 今天的质检报告</h4>
+      <div class="funnel">
+        <div class="f-row"><b class="tabular-nums">223</b><span>个数字逐一回原料比对</span></div>
+        <div class="f-arrow">↓</div>
+        <div class="f-row"><b class="tabular-nums">18 处存疑</b><span>机器核对 · <b class="bad tabular-nums">13 处确认不合格</b>（数字与原料不符 / 口径引错 / 缺必备要素）</span></div>
+        <div class="f-arrow">↓</div>
+        <div class="f-row fix"><b class="tabular-nums">13 → 0</b><span>打回 4 个栏目重写（美联储观察 6 处 / 展望 3 处 / 叙事组 3 处 / 宏观回顾 1 处）</span></div>
+        <div class="f-arrow">↓</div>
+        <div class="f-row"><b class="tabular-nums">主编终审</b><span>通读全文，再抓出 <b class="bad tabular-nums">1 处</b>板块与个股栏目数字互相矛盾</span></div>
+        <div class="f-arrow">↓</div>
+        <div class="f-row fix"><b class="tabular-nums">1 → 0</b><span>打回公司与板块部重写，复核通过</span></div>
+        <div class="f-arrow">↓</div>
+        <div class="f-row ok"><b class="tabular-nums">14 修复 / 3 提示</b><span>共修复 14 个问题；剩 3 条小瑕疵 + 5 条主编建议随内部备忘录发布，正文干净</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel-sankey" role="tabpanel" aria-labelledby="tab-sankey" hidden>
+    <h3>数据源如何流进每个栏目</h3>
+    <div class="viz-row" style="gap:14px;margin:8px 0;">
+      <span class="lg"><i style="background:var(--viz-series-4)"></i>节目转录</span>
+      <span class="lg"><i style="background:var(--viz-series-2)"></i>订阅文本</span>
+      <span class="lg"><i style="background:var(--viz-series-3)"></i>行情与榜单</span>
+      <span class="lg"><i style="background:var(--viz-series-1)"></i>日历与宏观底座</span>
+    </div>
+    <div class="sankey-wrap"><svg id="sankey-svg" role="img" aria-label="数据源经素材池流向报告各栏目的桑基图"></svg></div>
+    <div class="text-small text-muted">左列前五项为 Admin 订阅（YouTube·播客 / Twitter / 知识星球 / Substack / News 全文），后四项为行情与数据服务；中列为当日封存的素材池；右列为 13 个成品栏目（报告顺序）。带的宽度表示用量权重，悬停节点看说明。注：展望与策略还通读前 10 栏成品（图中不重复画线）；涨跌榜的港/A股行情按报告日取自 EODHD，公司中文名来自腾讯行情。</div>
+  </div>
+
+  <div id="panel-prov" role="tabpanel" aria-labelledby="tab-prov" hidden>
+    <h3>十一个栏目 · 点击看「这一栏谁写的、原料从哪来、凭什么可信」</h3>
+    <div class="viz-grid" id="sec-grid" style="--viz-grid-min: 128px;"></div>
+    <div class="card detail" id="sec-detail" aria-live="polite"></div>
+  </div>
+
+  <div id="panel-verify" role="tabpanel" aria-labelledby="tab-verify" hidden>
+    <h3>质检与发版 · 每个数字都有出处卡</h3>
+    <div class="flow">
+
+      <div class="stage">
+        <div class="stage-tag">① 出处卡<br><span class="text-small text-muted">写作时同步生成</span></div>
+        <div class="stage-body">
+          <div>每个写进正文的数字都配一张<strong>出处卡</strong>：这个数来自哪条原料的哪一行——比如"纳指 -6.4% ← 跨资产行情表 NDX 行"。读者看不到卡，但质检和事后审计逐卡可查。<span class="real-inline">本期 223 张</span></div>
+          <div class="text-small text-muted">技术注：.claims.json 台账 + 正文内联 audit 注释（发版时剥离进内部备忘录）。</div>
+        </div>
+      </div>
+
+      <div class="arrow">↓</div>
+
+      <div class="stage">
+        <div class="stage-tag">② 机器事实核对<br><span class="text-small text-muted">秒级</span></div>
+        <div class="stage-body">
+          <ul class="checks">
+            <li><strong>数字回对</strong>：每张出处卡回到原料逐一比对，写多少精度就验多少精度</li>
+            <li><strong>收盘价锚定</strong>：所有价格以收盘口径为准，曲线类保留两位小数</li>
+            <li><strong>全篇同值</strong>：同一个公司同一个指标，所有栏目必须一个数</li>
+            <li><strong>格式规范</strong>：栏目标题、必备要素（免责行等）齐全</li>
+            <li><strong>措辞红线</strong>：「X 年来最大」必须有起点、「概率」必须在 0-100、正文不出现内部用语</li>
+          </ul>
+          <div class="real">本期首轮：18 处存疑，13 处确认不合格</div>
+        </div>
+      </div>
+
+      <div class="arrow">↓</div>
+
+      <div class="stage">
+        <div class="stage-tag">③ 打回重写<br><span class="text-small text-muted">不合格必处理</span></div>
+        <div class="stage-body">
+          <div>不合格的栏目带着问题清单打回重写，改完再验；纯数据栏目不会出错，问题自动路由到对应文字栏目修。</div>
+          <div class="real">本期两轮重写覆盖 5 个栏目，13+1 个问题全部修掉</div>
+        </div>
+      </div>
+
+      <div class="arrow">↓</div>
+
+      <div class="stage">
+        <div class="stage-tag">④ 主编终审<br><span class="text-small text-muted">5 分钟</span></div>
+        <div class="stage-body">
+          <div>机器管数字，主编（AI）管逻辑：通读全文查叙事矛盾——曾抓出"两个栏目给欧元区通胀两个数""备选标题与正文事实相反"这类机器规则覆盖不到的问题。</div>
+        </div>
+      </div>
+
+      <div class="arrow">↓</div>
+
+      <div class="stage">
+        <div class="stage-tag">⑤ 发版策略<br><span class="text-small text-muted">不断更原则</span></div>
+        <div class="stage-body">
+          <div><strong>质检通过</strong> → 正常发版；<strong>实在修不完</strong> → 也照常发版，但把未决问题清清楚楚标在报告上：</div>
+          <div class="mock-note">&gt; ⚠️ 本期有 1 项未通过自动核验的问题，报告照常发布；清单见文末「核验备注」，阅读时请对照。</div>
+          <div class="mock-note">## ⚠️ 核验备注（自动标注）<br>- <strong>[高]</strong> (板块动态) AMD 每股收益两栏数字不一致 — 统一为财报口径</div>
+          <div class="text-small text-muted">每期产出双件：读者版（干净正文）+ 内部版（数据口径、复核意见、全部出处卡）。本期走正常通过路径。</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<style>
+  #gdr-pipeline-viz { font-size: var(--font-size-base); }
+  #gdr-pipeline-viz .flow { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+  #gdr-pipeline-viz .stage { display: flex; gap: 12px; align-items: stretch; }
+  #gdr-pipeline-viz .stage-tag {
+    flex: 0 0 118px; padding: 10px 12px; border-radius: var(--viz-radius-md, 10px);
+    background: var(--muted); font-weight: 500; line-height: 1.4;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  #gdr-pipeline-viz .stage-body {
+    flex: 1; padding: 10px 14px; border-radius: var(--viz-radius-md, 10px);
+    border: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; justify-content: center;
+  }
+  #gdr-pipeline-viz .arrow { text-align: center; color: var(--muted-foreground); line-height: 1; }
+  #gdr-pipeline-viz .real {
+    font-size: 12px; color: var(--foreground); padding: 4px 10px; border-radius: var(--viz-radius-sm, 8px);
+    background: color-mix(in oklab, var(--viz-series-1) 10%, transparent); align-self: flex-start;
+  }
+  #gdr-pipeline-viz .real-inline {
+    font-size: 12px; padding: 1px 8px; border-radius: 999px; margin-left: 6px;
+    background: color-mix(in oklab, var(--viz-series-1) 12%, transparent);
+  }
+  #gdr-pipeline-viz .grp { padding: 8px 10px; border-radius: var(--viz-radius-sm, 8px); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+  #gdr-pipeline-viz .grp-h { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+  #gdr-pipeline-viz .grp-h b { font-weight: 500; }
+  #gdr-pipeline-viz .gtime { margin-left: auto; font-size: 12px; color: var(--muted-foreground); }
+  #gdr-pipeline-viz ul.checks { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+  #gdr-pipeline-viz .mock-note {
+    font-size: 12px; padding: 7px 10px; border-radius: var(--viz-radius-sm, 8px);
+    background: color-mix(in oklab, var(--yellow) 12%, transparent); border: 1px solid var(--border);
+  }
+  #gdr-pipeline-viz .stats-block { margin-top: 18px; }
+  #gdr-pipeline-viz .stats-block h4 { margin: 0 0 8px; font-weight: 500; }
+  #gdr-pipeline-viz .bar-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
+  #gdr-pipeline-viz .bar-row span { flex: 0 0 44px; color: var(--muted-foreground); }
+  #gdr-pipeline-viz .bar { flex: 1; height: 10px; border-radius: 999px; background: var(--muted); overflow: hidden; }
+  #gdr-pipeline-viz .bar i { display: block; height: 100%; background: var(--viz-series-1); min-width: 2px; }
+  #gdr-pipeline-viz .bar-row b { flex: 0 0 52px; text-align: right; }
+  #gdr-pipeline-viz .big-num { font-size: 18px; font-weight: 500; margin-top: 6px; }
+  #gdr-pipeline-viz .cbar-row { display: grid; grid-template-columns: 118px 1fr 92px; gap: 8px; align-items: center; margin-top: 5px; font-size: 12px; }
+  #gdr-pipeline-viz .cbar-row .bar i { background: var(--viz-series-2); }
+  #gdr-pipeline-viz .cbar-row.det .bar i { background: var(--viz-series-3); }
+  #gdr-pipeline-viz .cbar-row .lbl { text-align: right; color: var(--muted-foreground); }
+  #gdr-pipeline-viz .funnel { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+  #gdr-pipeline-viz .f-row { padding: 8px 12px; border-radius: var(--viz-radius-sm, 8px); background: var(--muted); font-size: 13px; }
+  #gdr-pipeline-viz .f-row b { font-weight: 500; margin-right: 8px; }
+  #gdr-pipeline-viz .f-row.fix { background: color-mix(in oklab, var(--green) 12%, transparent); }
+  #gdr-pipeline-viz .f-row.ok { background: color-mix(in oklab, var(--viz-series-1) 12%, transparent); }
+  #gdr-pipeline-viz .f-arrow { text-align: center; color: var(--muted-foreground); line-height: 1.1; font-size: 12px; }
+  #gdr-pipeline-viz .bad { color: var(--destructive); }
+  #gdr-pipeline-viz .tile {
+    width: 100%; text-align: left; border: 1px solid var(--border);
+    border-radius: var(--viz-radius-sm, 8px); padding: 8px 10px; background: transparent;
+    display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+  }
+  #gdr-pipeline-viz .tile .dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; margin-right: 6px; }
+  #gdr-pipeline-viz .tile.is-selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+  #gdr-pipeline-viz .detail { margin-top: 12px; padding: 14px 16px; }
+  #gdr-pipeline-viz .detail h4 { margin: 0 0 8px; font-weight: 500; }
+  #gdr-pipeline-viz .kv { display: grid; grid-template-columns: 96px 1fr; gap: 4px 12px; }
+  #gdr-pipeline-viz .kv dt { color: var(--muted-foreground); font-size: 12px; padding-top: 2px; }
+  #gdr-pipeline-viz .kv dd { margin: 0; }
+  #gdr-pipeline-viz .sankey-wrap { overflow-x: auto; margin-top: 6px; }
+  #gdr-pipeline-viz #sankey-svg { min-width: 780px; width: 100%; height: auto; display: block; }
+  #gdr-pipeline-viz .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
+  #gdr-pipeline-viz .lg i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  #gdr-pipeline-viz .sk-label { fill: var(--foreground); font-size: 12px; font-weight: 500; }
+  #gdr-pipeline-viz .sk-sub { fill: var(--muted-foreground); font-size: 11px; }
+  #gdr-pipeline-viz .sk-node { fill: var(--muted-foreground); }
+  @media (max-width: 560px) {
+    #gdr-pipeline-viz .stage { flex-direction: column; }
+    #gdr-pipeline-viz .stage-tag { flex: none; }
+    #gdr-pipeline-viz .cbar-row { grid-template-columns: 96px 1fr 84px; }
+  }
+</style>
+
+<script>
+(function () {
+  var root = document.getElementById("gdr-pipeline-viz");
+  if (!root) return;
+
+  var KIND = {
+    llm:  { label: "AI 编辑", color: "var(--viz-series-2)" },
+    det:  { label: "自动生成", color: "var(--viz-series-3)" },
+    chart:{ label: "自动制图", color: "var(--viz-series-4)" }
+  };
+
+  var CLAIMS = [
+    { sec: "今日叙事", n: 0, src: 0, chars: 228, det: false },
+    { sec: "核心驱动", n: 25, src: 7, chars: 1436 },
+    { sec: "持仓与资金流", n: 10, src: 5, chars: 629 },
+    { sec: "板块动态", n: 90, src: 6, chars: 3050 },
+    { sec: "今日涨跌榜", n: 0, src: 0, chars: 1459, det: true },
+    { sec: "个股深挖", n: 37, src: 5, chars: 1758 },
+    { sec: "宏观速览", n: 0, src: 0, chars: 2845, det: true },
+    { sec: "回顾·宏观数据", n: 9, src: 2, chars: 298 },
+    { sec: "回顾·地缘政治", n: 26, src: 4, chars: 1949 },
+    { sec: "美联储观察", n: 13, src: 8, chars: 547 },
+    { sec: "展望与策略", n: 13, src: 3, chars: 1364 }
+  ];
+
+  var cb = root.querySelector("#claims-bars");
+  if (cb) {
+    var maxN = 90;
+    CLAIMS.forEach(function (c) {
+      var row = document.createElement("div");
+      row.className = "cbar-row" + (c.det ? " det" : "");
+      row.innerHTML =
+        "<span>" + c.sec + "</span>" +
+        "<div class='bar'><i style='width:" + (c.n / maxN * 100) + "%'></i></div>" +
+        "<span class='lbl tabular-nums'>" + c.n + " 卡 · " + (c.src ? c.src + " 库" : (c.det ? "底稿直读" : "纯叙事")) + " · " + c.chars + " 字</span>";
+      cb.appendChild(row);
+    });
+  }
+
+  var SECTIONS = [
+    { n: "01", name: "大盘总览", kind: "chart",
+      who: "自动制图，置于报告最顶部",
+      src: [["跨资产仪表盘", "股/债/商品/汇率/波动率一图总览，利率取财政部官方曲线"]],
+      prov: "图即数据：直接由当日底稿绘制，不经 AI 手。",
+      stat: "本期：跨资产 17 行 + 板块行情",
+      note: "技术注：us_close_chart.py ← market.cross_asset + finviz + FRED。" },
+    { n: "02", name: "今日叙事", kind: "llm",
+      who: "市场叙事部（AI 编辑），报告的开篇导语",
+      src: [["The Close 节目文字稿", "彭博王牌收盘节目的完整转录（本期 8.3 万字）"], ["行情与广度", "跨资产表现、涨跌家数"], ["市场快讯", "订阅推特池"]],
+      prov: "只讲结论不落数字（2–3 句），数字证据交给下一栏；每句话标注出自哪档节目；同时产出本期主标题备选。",
+      stat: "本期：0 张出处卡（按设计不落数字）· 228 字",
+      note: "技术注：HEADLINE_CANDIDATES 出编辑标题；首个候选即发布标题。" },
+    { n: "03", name: "核心驱动", kind: "llm",
+      who: "市场叙事部（AI 编辑），全报的证据核心",
+      src: [["The Close 节目文字稿", "桌面观点、嘉宾访谈、数据解读"], ["行情/曲线/概率", "跨资产、美债曲线、加息概率"], ["快讯与新闻全文", "节目没覆盖的催化（并购/评级）"]],
+      prov: "3–5 个驱动块：事实与判断分离——事实逐条挂出处卡，每块末尾单独一行「推断」给交易级看法和失效条件。",
+      stat: "本期：25 张出处卡 · 7 个原料库 · 1,436 字",
+      note: "技术注：推断句含「若…则…」失效条件；引用按条目编号（如快讯 f12）。" },
+    { n: "04", name: "持仓与资金流", kind: "llm",
+      who: "市场叙事部（AI 编辑），回答「钱站在哪边」",
+      src: [["The Close 节目文字稿", "嘉宾策略师的观点与分歧"], ["行情与持仓数据", "成分股结构化数字"], ["快讯与新闻", "基金流向、空头、关键价位"]],
+      prov: "三段式：主基调 / 次级资金线索 / 嘉宾点名观点（机构+姓名+目标位）；不许重复上一栏的分析。",
+      stat: "本期：10 张出处卡 · 5 个原料库 · 629 字",
+      note: "技术注：Primary/Secondary/Guest positioning 结构。" },
+    { n: "05", name: "美股全景", kind: "chart",
+      who: "自动制图，紧贴涨跌榜上方",
+      src: [["S&P 500 热力图", "板块>行业>个股的当日颜色地图（503 只）"]],
+      prov: "图即数据，由底稿直绘。",
+      stat: "本期：503 只成分",
+      note: "技术注：finviz_map_chart.py ← finviz_screener 快照。" },
+    { n: "06", name: "今日涨跌榜", kind: "det",
+      who: "自动数据台，零 AI、零出错",
+      src: [["三市场成交额榜", "美股（≥10 亿美元）/ 港股（≥10 亿港元）/ A股（≥20 亿元）各前 8：代码、现价、涨跌幅、成交额"]],
+      prov: "系统从底稿直接排版——数字不可能写错，也不需要出处卡。港/A股公司自动配中文名。",
+      stat: "本期：24 行 · 1,459 字",
+      note: "技术注：volume_leaders ← finviz + EODHD bulk（按报告日取数）+ 腾讯中文名。" },
+    { n: "07", name: "板块动态", kind: "llm",
+      who: "公司与板块部（AI 编辑），本期信息量最大的栏目",
+      src: [["Closing Bell 节目文字稿", "主段+加时段（本期约 10 万字），催化剂与嘉宾观点"], ["行情与榜单", "成分股、涨幅榜、板块均值"], ["财报日历 + 快讯", "业绩催化与节目外的消息"]],
+      prov: "5–7 个主题块按影响力排序；提到的每家公司必须真实存在于行情库；数字逐条挂出处卡。",
+      stat: "本期：90 张出处卡（全报之最）· 6 个原料库 · 3,050 字",
+      note: "技术注：物理隔离——The Close 稿与通讯社不进入该部原料库，防串稿。" },
+    { n: "08", name: "个股深挖", kind: "llm",
+      who: "公司与板块部（AI 编辑），当天最重要的 3–5 只个股",
+      src: [["Closing Bell 节目文字稿", "管理层原话必须逐字"], ["行情与财报", "价格涨跌、指引 vs 预期"], ["快讯", "评级/目标价/交易条款"]],
+      prov: "每只个股一个固定档案：发生了什么 → 细节 → 管理层原话 → 分析师反应 → 反方观点（如有）；入选个股必须同时出现在板块动态。",
+      stat: "本期：37 张出处卡 · 5 个原料库 · 1,758 字",
+      note: "技术注：What happened/Guide/Management said/Analyst reaction 模板。" },
+    { n: "09", name: "宏观速览", kind: "det",
+      who: "自动数据台，零 AI、零出错",
+      src: [["四经济体仪表盘", "美欧中日增长/通胀/政策利率"], ["经济日历 + 议息日历", "已公布与即将公布"], ["商品与汇率"]],
+      prov: "纯表格由底稿直出，编辑无权改动。",
+      stat: "本期：2,845 字（全表格）",
+      note: "技术注：锁定栏目——质检问题路由到文字栏目，不改这里。" },
+    { n: "10", name: "回顾·宏观数据", kind: "llm",
+      who: "宏观数据部（AI 编辑）",
+      src: [["经济日历", "实际值 vs 预期 vs 前值"], ["券商宏观解读", "署名引用观点"], ["曲线与概率", "市场反应佐证"]],
+      prov: "只写「边际变化」——数字超预期/不及预期的含义；同一指标有两个官方口径时必须选对（曾因选错被抓过）。",
+      stat: "本期：9 张出处卡 · 2 个原料库 · 298 字",
+      note: "技术注：选题由系统按当日日历判定后注入。" },
+    { n: "11", name: "回顾·地缘政治", kind: "llm",
+      who: "地缘政治部（AI 编辑）",
+      src: [["地缘快讯层", "中英文地缘消息（含央视）"], ["券商解读", "机构观点"], ["行情", "油价/金价等反应"]],
+      prov: "按主题分块（战事/选举/大国博弈），当天没大事自动瘦身；事实逐条挂出处卡。",
+      stat: "本期：26 张出处卡 · 4 个原料库 · 1,949 字",
+      note: "技术注：主题块按命中量开启。" },
+    { n: "12", name: "美联储观察", kind: "llm",
+      who: "美联储观察部（AI 编辑）",
+      src: [["决议档案", "最近 4 场决议的投票与异议、3 份声明原文、定价路径"], ["概率与曲线", "下次会议加息概率（含上期对比）"], ["日历与快讯"]],
+      prov: "声明措辞逐句对比引原文；概率必须写明变化方向（「升至」≠「维持」）。",
+      stat: "本期：13 张出处卡 · 8 个原料库（全报最多）· 547 字",
+      note: "技术注：非议息周可走平静日模板。" },
+    { n: "13", name: "展望与策略", kind: "llm",
+      who: "主编收官综述（等前 10 栏全部交稿后动笔）",
+      src: [["前 10 栏成品", "综述的全部事实基础"], ["明天日程", "前瞻日历"], ["概率与行情"]],
+      prov: "给读者三件事：明天看什么 / 主线走到哪 / 组合怎么办。观点必须标注为观点，结尾固定免责声明。",
+      stat: "本期：13 张出处卡 · 3 个原料库 · 1,364 字 · 7 分钟",
+      note: "生成逻辑展开见「运营实测」页 ④。" }
+  ];
+
+  var grid = root.querySelector("#sec-grid");
+  var detail = root.querySelector("#sec-detail");
+
+  function renderDetail(s) {
+    var k = KIND[s.kind];
+    detail.innerHTML =
+      "<h4>" + s.n + " · " + s.name + "　<span class='viz-badge'><span class='dot' style='background:" + k.color + ";width:7px;height:7px;border-radius:999px;display:inline-block;margin-right:4px;'></span>" + k.label + "</span></h4>" +
+      "<dl class='kv'>" +
+      "<dt>定位</dt><dd>" + s.who + "</dd>" +
+      "<dt>原料来自</dt><dd><dl class='kv' style='grid-template-columns: 1fr;'>" + s.src.map(function (p) {
+        return "<dd><b style='font-weight:500'>" + p[0] + "</b> <span class='text-small text-muted'>— " + p[1] + "</span></dd>";
+      }).join("") + "</dl></dd>" +
+      "<dt>凭什么可信</dt><dd>" + s.prov + "</dd>" +
+      "<dt>本期用量</dt><dd><span class='real-inline'>" + s.stat + "</span></dd>" +
+      "<dt class='text-small'>技术注</dt><dd class='text-small text-muted'>" + s.note + "</dd>" +
+      "</dl>";
+  }
+
+  SECTIONS.forEach(function (s, i) {
+    var k = KIND[s.kind];
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "tile btn viz-tile" + (i === 0 ? " is-selected" : "");
+    b.setAttribute("aria-pressed", i === 0 ? "true" : "false");
+    b.innerHTML =
+      "<span><span class='dot' style='background:" + k.color + "'></span>" + s.n + " " + s.name + "</span>" +
+      "<span class='text-small text-muted'>" + k.label + "</span>";
+    b.addEventListener("click", function () {
+      grid.querySelectorAll(".tile").forEach(function (t) {
+        t.classList.remove("is-selected");
+        t.setAttribute("aria-pressed", "false");
+      });
+      b.classList.add("is-selected");
+      b.setAttribute("aria-pressed", "true");
+      renderDetail(s);
+    });
+    grid.appendChild(b);
+  });
+
+  renderDetail(SECTIONS[0]);
+})();
+</script>
+
+<script>
+(function () {
+  var svg = document.getElementById("sankey-svg");
+  if (!svg) return;
+
+  var CAT_COLOR = { show: "var(--viz-series-4)", text: "var(--viz-series-2)",
+                    mkt: "var(--viz-series-3)", cal: "var(--viz-series-1)" };
+
+  var SOURCES = [
+    { id: "S1", label: "YouTube·播客订阅", sub: "The Close / Closing Bell", tip: "Admin 订阅的两档节目,每天自动转成完整文字稿(本期共 18.2 万字)" },
+    { id: "S2", label: "Twitter 订阅", sub: "~35 个账号", tip: "盘中快讯的主要来源;部分长解读进宏观解读池,地缘类账号进地缘池" },
+    { id: "S3", label: "知识星球", sub: "调研鹅纪要等", tip: "券商调研纪要与宏观解读,署名引用" },
+    { id: "S4", label: "Substack", sub: "英文宏观通讯", tip: "英文宏观作者通讯" },
+    { id: "S5", label: "News 全文订阅", sub: "Yahoo/SA/CNBC/CCTV 等", tip: "新闻全文库与电话会纪要;央视联播快讯进地缘池" },
+    { id: "S6", label: "Finviz 行情快照", sub: "S&P 500 全成分", tip: "每日整表刷新:价/量/涨跌/市值,本期 503 只" },
+    { id: "S7", label: "EODHD", sub: "经济日历 + 港/A股行情", tip: "经济与财报日历;港股/A股按报告日取批量行情" },
+    { id: "S8", label: "FRED / 财政部", sub: "利率与宏观指标", tip: "收益率曲线、宏观指标排名等确定性底座" },
+    { id: "S9", label: "FOMC 资料表", sub: "决议/声明/概率", tip: "最近 4 场决议、3 份声明、市场定价路径" }
+  ];
+
+  var POOLS = [
+    { id: "P1", label: "The Close 转录", sub: "8.3 万字", cat: "show", tip: "彭博 The Close 收盘节目完整转录" },
+    { id: "P2", label: "Closing Bell 转录", sub: "主段+OT 10 万字", cat: "show", tip: "CNBC Closing Bell 主段+加时段,板块与个股栏目主稿" },
+    { id: "P3", label: "快讯池", sub: "300 条", cat: "text", tip: "订阅推特即时消息,多个栏目共享的盘中催化" },
+    { id: "P4", label: "全文库+电话会", sub: "56 条", cat: "text", tip: "新闻全文与 SA 电话会纪要" },
+    { id: "P5", label: "宏观解读池", sub: "星球/通讯 8 篇", cat: "text", tip: "知识星球+Substack+推特长解读,供宏观数据/地缘栏目署名引用" },
+    { id: "P6", label: "地缘池", sub: "40 条(含央视)", cat: "text", tip: "中英地缘快讯,地缘栏目主源" },
+    { id: "P7", label: "行情与榜单库", sub: "503 只 + 三榜 24", cat: "mkt", tip: "成分股/涨幅榜/板块均值/广度 + 三市场成交额榜(港/A股取自 EODHD,中文名取自腾讯)" },
+    { id: "P8", label: "经济与财报日历", sub: "178 条", cat: "cal", tip: "已公布 77 条 + 财报安排 101 条" },
+    { id: "P9", label: "宏观底座", sub: "曲线/概率/跨资产", cat: "cal", tip: "利率曲线、加息概率、FOMC 表、跨资产行情——多个栏目共用的确定性数字" }
+  ];
+
+  var SECS = [
+    { id: "X1", label: "大盘总览", sub: "自动制图" },
+    { id: "X2", label: "今日叙事", sub: "0 卡 · 228 字" },
+    { id: "X3", label: "核心驱动", sub: "25 卡" },
+    { id: "X4", label: "持仓与资金流", sub: "10 卡" },
+    { id: "X5", label: "美股全景", sub: "自动制图" },
+    { id: "X6", label: "今日涨跌榜", sub: "三市场 24 行" },
+    { id: "X7", label: "板块动态", sub: "90 卡(最重)" },
+    { id: "X8", label: "个股深挖", sub: "37 卡" },
+    { id: "X9", label: "宏观速览", sub: "自动表格" },
+    { id: "X10", label: "回顾·宏观数据", sub: "9 卡" },
+    { id: "X11", label: "回顾·地缘政治", sub: "26 卡" },
+    { id: "X12", label: "美联储观察", sub: "13 卡" },
+    { id: "X13", label: "展望与策略", sub: "13 卡 · 另读前 10 栏" }
+  ];
+
+  var SP = [
+    ["S1", "P1", 4], ["S1", "P2", 5],
+    ["S2", "P3", 6], ["S2", "P5", 1.5], ["S2", "P6", 2],
+    ["S3", "P5", 2.5],
+    ["S4", "P5", 2],
+    ["S5", "P4", 4], ["S5", "P6", 1.5],
+    ["S6", "P7", 5],
+    ["S7", "P7", 2], ["S7", "P8", 4],
+    ["S8", "P9", 4],
+    ["S9", "P9", 3]
+  ];
+
+  var PS = [
+    ["P1", "X2", 3], ["P1", "X3", 3], ["P1", "X4", 3],
+    ["P2", "X7", 3], ["P2", "X8", 3],
+    ["P3", "X2", 1], ["P3", "X3", 1], ["P3", "X4", 1], ["P3", "X7", 1.2], ["P3", "X8", 1], ["P3", "X10", 1.2], ["P3", "X11", 1.2], ["P3", "X12", 1.2],
+    ["P4", "X3", 1], ["P4", "X4", 1], ["P4", "X10", 1], ["P4", "X11", 1], ["P4", "X12", 1],
+    ["P5", "X10", 3], ["P5", "X11", 1.2],
+    ["P6", "X11", 3],
+    ["P7", "X1", 1.2], ["P7", "X3", 1], ["P7", "X4", 1.2], ["P7", "X5", 3], ["P7", "X6", 3], ["P7", "X7", 3], ["P7", "X8", 1.2],
+    ["P8", "X7", 1.2], ["P8", "X8", 1.2], ["P8", "X9", 3], ["P8", "X10", 3], ["P8", "X12", 1.2], ["P8", "X13", 3],
+    ["P9", "X1", 3], ["P9", "X2", 1.2], ["P9", "X3", 3], ["P9", "X4", 1.2], ["P9", "X9", 3], ["P9", "X11", 1.2], ["P9", "X12", 3], ["P9", "X13", 1.2]
+  ];
+
+  var W = 900, H = 810, padTop = 18, nodeW = 10;
+  var XS = { S: 158, P: 452, X: 742 };
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+
+  function colLayout(nodes, edgesOut, edgesIn, gap, minH) {
+    var usable = H - padTop * 2;
+    var sum = 0;
+    nodes.forEach(function (n) {
+      n.w = Math.max(
+        edgesOut.filter(function (e) { return e[0] === n.id; }).reduce(function (a, e) { return a + e[2]; }, 0),
+        edgesIn.filter(function (e) { return e[1] === n.id; }).reduce(function (a, e) { return a + e[2]; }, 0));
+      sum += n.w;
+    });
+    var flex = Math.max(0, usable - nodes.length * minH - (nodes.length - 1) * gap);
+    var y = padTop;
+    nodes.forEach(function (n) {
+      n.h = minH + (sum > 0 ? flex * n.w / sum : 0);
+      n.y = y; y += n.h + gap;
+    });
+  }
+
+  function ports(nodeId, edges, keyIdx, nodesInCol) {
+    var list = edges.filter(function (e) { return e[keyIdx] === nodeId; });
+    var order = nodesInCol.map(function (n) { return n.id; });
+    list.sort(function (a, b) {
+      return order.indexOf(a[keyIdx === 0 ? 1 : 0]) - order.indexOf(b[keyIdx === 0 ? 1 : 0]);
+    });
+    var total = list.reduce(function (a, e) { return a + e[2]; }, 0) || 1;
+    return { list: list, total: total };
+  }
+
+  function nodeOf(nodes, id) { return nodes.find(function (n) { return n.id === id; }); }
+
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    parent.appendChild(e); return e;
+  }
+
+  colLayout(SOURCES, SP, SP, 14, 20);
+  colLayout(POOLS, PS, SP, 16, 22);
+  colLayout(SECS, PS, PS, 8, 24);
+
+  function drawRibbons(leftNodes, rightNodes, edges, x0, x1) {
+    edges.forEach(function (e) {
+      var a = nodeOf(leftNodes, e[0]), b = nodeOf(rightNodes, e[1]);
+      var pa = ports(a.id, edges, 0, rightNodes), pb = ports(b.id, edges, 1, leftNodes);
+      var ia = pa.list.findIndex(function (x) { return x[1] === b.id; });
+      var ib = pb.list.findIndex(function (x) { return x[0] === a.id; });
+      var offA = pa.list.slice(0, ia).reduce(function (s, x) { return s + x[2]; }, 0);
+      var offB = pb.list.slice(0, ib).reduce(function (s, x) { return s + x[2]; }, 0);
+      var hA = e[2] / pa.total * a.h, hB = e[2] / pb.total * b.h;
+      var y0 = a.y + offA / pa.total * a.h, y1 = b.y + offB / pb.total * b.h;
+      var cx = (x0 + x1) / 2;
+      var d = "M" + (x0 + nodeW) + "," + y0 +
+        "C" + cx + "," + y0 + " " + cx + "," + y1 + " " + x1 + "," + y1 +
+        "L" + x1 + "," + (y1 + hB) +
+        "C" + cx + "," + (y1 + hB) + " " + cx + "," + (y0 + hA) + " " + (x0 + nodeW) + "," + (y0 + hA) + "Z";
+      var pool = nodeOf(POOLS, e[0].charAt(0) === "S" ? e[1] : e[0]);
+      el("path", { d: d, fill: CAT_COLOR[pool.cat], "fill-opacity": "0.3",
+                   "data-tooltip": pool.label + " → " + (e[0].charAt(0) === "S" ? nodeOf(POOLS, e[1]).label : nodeOf(SECS, e[1]).label) }, svg);
+    });
+  }
+
+  drawRibbons(SOURCES, POOLS, SP, XS.S, XS.P);
+  drawRibbons(POOLS, SECS, PS, XS.P, XS.X);
+
+  function drawNodes(nodes, x, labelSide, colorByCat) {
+    nodes.forEach(function (n) {
+      var g = el("g", { "data-tooltip": n.tip || (n.label + " · " + n.sub) }, svg);
+      el("rect", { x: x, y: n.y, width: nodeW, height: Math.max(4, n.h), rx: 3,
+                   class: colorByCat && n.cat ? "" : "sk-node",
+                   fill: colorByCat && n.cat ? CAT_COLOR[n.cat] : "" }, g);
+      var t1 = el("text", { x: labelSide === "left" ? x - 8 : x + nodeW + 8,
+                            y: n.y + n.h / 2 - 2, class: "sk-label",
+                            "text-anchor": labelSide === "left" ? "end" : "start" }, g);
+      t1.textContent = n.label;
+      var t2 = el("text", { x: t1.getAttribute("x"), y: n.y + n.h / 2 + 12, class: "sk-sub",
+                            "text-anchor": labelSide === "left" ? "end" : "start" }, g);
+      t2.textContent = n.sub;
+    });
+  }
+
+  drawNodes(SOURCES, XS.S, "left", false);
+  drawNodes(POOLS, XS.P, "right", true);
+  drawNodes(SECS, XS.X, "right", false);
+})();
+</script>
