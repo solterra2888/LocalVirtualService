@@ -366,10 +366,17 @@ HARD RULES (violating any of these fails pipeline verification):
      block, a "so what" clause), but never dress an inference up as a
      reported fact.
 8. AUDIT TRAIL (hidden layer, mandatory — this is where traceability lives):
-   append an HTML comment at the end of each factual bullet carrying the
-   precise snapshot key(s), e.g. `<!-- audit: [show the_close] -->`,
-   `<!-- audit: [data market.cross_asset] [news flash] -->`. Stripped at
-   publish time into an audit sidecar; the verifier reads them.
+   append an HTML comment at the END OF THE SAME LINE as each factual bullet
+   carrying the precise snapshot key(s), e.g.
+   `<!-- audit: [show the_close] -->`,
+   `<!-- audit: [data market.cross_asset] [news flash f12 f40] -->`,
+   `<!-- audit: [news_macro.geo g3] [news wire w2] -->`.
+   News and macro material are cited BY ITEM ID — never a bare bucket like
+   [news flash]; cite the items whose text actually carries the bullet's
+   facts, not every related item. The publisher turns these ids into the
+   reader-visible source tag (outlet, time, importance/evidence grade), so
+   an id that does not exist fails the section. Never write grades (L1/E2)
+   or item ids in the prose yourself.
 9. NUMBER STYLE:
    - Price/index/stock changes: one decimal ("fell 28.6%", "rose 2.2%"). After
      a direction verb (fell/rose/gained/lost/slid) write NO sign — never

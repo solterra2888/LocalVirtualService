@@ -68,6 +68,7 @@ from prompts import (  # noqa: E402
     fake_section_text,
 )
 from verify_checks import claims_path, run_checks, verified_canonicals  # noqa: E402
+from provenance import item_index, render_section  # noqa: E402
 
 DEFAULT_ZCODE_BIN = "/root/.zcode/server/bin/zcode"
 DEFAULT_TIMEOUT_SEC = 1800  # v7 任务书更重:company_desk 连续两次撞 1200s 线(1169/1200.1s),留余量
@@ -1909,8 +1910,12 @@ def _review_notes(ws: Path, verdict: Dict[str, Any]) -> List[str]:
 
 
 def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
-             style: str) -> Path:
-    """拼接成品:正文仅标题+七节(GuanHe 表面文体);口径块与审计注释进 sidecar。"""
+             style: str, provenance: bool = True) -> Path:
+    """拼接成品:正文仅标题+七节(GuanHe 表面文体);口径块与审计注释进 sidecar。
+
+    provenance=True 时 audit 注释先反查成要点末尾的来源/L·E 标记与节末来源列表
+    (provenance.py),原始注释仍完整保留在 sidecar。
+    """
     snapshot = json.loads((ws / "snapshot.json").read_text(encoding="utf-8"))
     narrative_raw = (ws / SECTION_SPECS["narrative"]["output_file"]
                      ).read_text(encoding="utf-8")
@@ -1944,17 +1949,25 @@ def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
     audit_comment_re = re.compile(r"[ \t]*<!--\s*audit:.*?-->")
     headline_block_re = re.compile(r"<!--\s*HEADLINE_CANDIDATES.*?-->\s*",
                                    re.DOTALL)
+    sources = snapshot.get("sources") or {}
+    items = item_index(sources)
     for name in SECTION_ORDER:
         content = (ws / SECTION_SPECS[name]["output_file"]).read_text(encoding="utf-8")
         content = content.replace(DONE_MARKER, "").rstrip()
         audit_parts.append(f"\n## {name}\n")
         found = re.findall(r"<!--\s*audit:.*?-->", content) or []
         clean = headline_block_re.sub("", content)
+        src_lines: List[str] = []
+        if provenance:
+            clean, src_lines = render_section(clean, sources, report_date, items)
         clean = audit_comment_re.sub("", clean)
         clean = re.sub(r"[ \t]+(\n|$)", r"\1", clean)
         clean = re.sub(r"\n{3,}", "\n\n", clean).rstrip()
         audit_parts.append("\n".join(found))
-        parts += [clean, "", "---", ""]
+        parts += [clean, ""]
+        if src_lines:
+            parts += [*src_lines, ""]
+        parts += ["---", ""]
     # 图表嵌入(与 GuanHe 版式一致): US close 总览在正文首个 "## 大盘总览"
     # 标题下(顶部); finviz 热力图放 "## 美股全景" 段、紧贴 今日涨跌榜
     # 上方(涨跌榜排在板块动态之前)。其余图表暂不嵌入(逐张优化中)。
@@ -2039,6 +2052,8 @@ def main() -> int:
              "确定性核验有 high 失败时一律跳过 LLM、直接修订")
     parser.add_argument("--no-plan", action="store_true",
                         help="跳过写作前的编辑计划(故事归属 + 规范数值)")
+    parser.add_argument("--no-provenance", action="store_true",
+                        help="成品不渲染要点来源标记与节末来源列表(审计注释仍进 sidecar)")
     parser.add_argument("--strict-verify", action="store_true",
                         help="核验超限时回到旧行为:rc=2 转人工、不发布"
                              "(v8.7 起默认照常发布,未决问题自动标注在报告"
@@ -2122,7 +2137,8 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001 — charts are best-effort
             print(f"[charts] skipped: {e}", flush=True)
 
-        report = assemble(ws, args.report_date, verdict, args.style)
+        report = assemble(ws, args.report_date, verdict, args.style,
+                          provenance=not args.no_provenance)
         if args.publish_cmd:
             env = {**os.environ, "REPORT_FILE": str(report)}
             subprocess.run(shlex.split(args.publish_cmd), env=env, check=True)

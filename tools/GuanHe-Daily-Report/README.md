@@ -186,6 +186,7 @@ backend/reports/guanhe-daily-report/{date}/
 | `prompts.py` | 章节任务书 + 叙事核验任务书; SECTION_SOURCE_MATRIX |
 | `run_pipeline.py` | 编排器:块矩阵、movers、门控、组装 |
 | `verify_checks.py` | 确定性数字/矩阵/结构对账 |
+| `provenance.py` | audit 注释 → 要点来源标记 + 节末来源列表(含 L/E);引用 id 核验 |
 | `render_charts.py` | matplotlib 确定性出图 |
 | `us_close_chart.py` | GuanHe 同款 "US close" 总览图(FT 表格风,7 分组×Last/1D/1W/1M/YTD) |
 | `finviz_map_chart.py` | GuanHe 同款 finviz 板块热力图(Equity Market 首图,自绘) |
@@ -247,6 +248,12 @@ Defensive, Energy] | [Industrials, Utilities, Real Estate, Basic Materials],
 7. **审计分层** — 正文只有读者文体与原始出处;管线标签、口径块与
    `<!-- audit: -->` 全部进 sidecar,正文出现管线标签或生产过程用语即 high
    (v8 中文禁词追加了素材/管线/入库/白名单/订阅源/抓取/星球/早报)。
+   **正文溯源**(`provenance.py`,组装时渲染,`--no-provenance` 关闭):audit 注释
+   反查快照条目,要点末尾加 `〔f78 f82 · L1/E2｜Bloomberg The Close｜跨资产收盘行情〕`,
+   每节末附「本节来源」(条目 id · L/E · 作者 · 时间:原文摘录)。L/E 只取入库
+   打标(INFO_GRADING_STANDARD.md),agent 不写等级;多条目时 L 取最高、E 并列
+   不合成;带 reported 的条目标「传闻」;节目与结构化数据只标来源、无等级。
+   audit 引用不存在的条目 id → high,整桶引用(`[news flash]`)→ medium。
 8. **转录为素材、不用 Surveillance、不读摘要表** — 节目只读 The Close /
    Closing Bell(主段+OT)清洗转录,与新闻层、成分股数据一起作为素材;
    选题按市场重要性,不按节目时长。**v8 起 Macros(07-11)完全不读节目转录**。

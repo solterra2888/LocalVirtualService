@@ -29,6 +29,7 @@ from prompts import (  # noqa: E402
     STYLE_PROFILES,
     allowed_source_paths,
 )
+from provenance import citation_issues, item_index  # noqa: E402
 
 DONE_MARKER = "<!-- SECTION DONE -->"
 HEADINGS = {
@@ -760,6 +761,7 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
 
     ctx = _make_ctx(ws, sources)
     show_texts = ctx["show_texts"]
+    items = item_index(sources)
     state_secs = _state_sections(ws)
     collect: List[Dict[str, Any]] = []
     for name in SECTION_ORDER:
@@ -831,6 +833,11 @@ def run_checks(ws: Path, style: str = "en") -> List[Dict[str, Any]]:
             add(name, "audit cites sources outside section whitelist: "
                 + ", ".join(sorted(outside)), ",".join(sorted(allowed_heads)),
                 False, "medium")
+        # 条目 id 会渲染成读者可见的来源标记:不存在的 id 必须改掉
+        for claim, sev in citation_issues(text, items):
+            add(name, claim, "news/news_macro item ids", False, sev,
+                "cite the exact item ids (e.g. [news flash f12 f40], "
+                "[news_macro.geo g3]) whose text carries the bullet's facts")
 
         # Since-claims: fred_ranks 预计算口径,或新闻/节目原文里的同一说法
         ranks = ((sources.get("macro_pillars") or {}).get("fred_ranks") or {})
