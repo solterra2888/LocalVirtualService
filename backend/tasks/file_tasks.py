@@ -318,7 +318,8 @@ def trigger_auto_analyze(
             return
 
     # ── 文档/网页/文本笔记: 未传 template_id 走 LLMTemplateResolver('file_analysis')
-    # Web Clipper (process_web_clip_task) 没有弹窗，必须走这条路才能触发 AI 分析.
+    # 注: Web Clipper (process_web_clip_task) 默认不再触发 AI 分析
+    # (WEB_CLIP_AUTO_ANALYZE_ENABLED, 见 process_web_clip_task 内说明).
     if not is_audio_like and not resolved_template_id:
         try:
             from backend.utils.user_resolver import get_user_id_by_username
@@ -3006,24 +3007,23 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
         info(f"Web Clip 文本提取完成: file_detail_id={file_detail_id}, content_length={len(plain_text)}",
              source="celery_web_clip")
 
-        # PR-4 R1: 与 upload-web-link / upload-and-process-document 对齐, 4 路并行 LLM 全部触发.
-        # Chrome Extension 不传 template_id; trigger_auto_analyze 内部走
-        #   LLMTemplateResolver.resolve('file_analysis', user_id) fallback:
-        #   - 用户有私有 file_analysis 模板 → 用用户模板
-        #   - 否则 → 系统默认 file_analysis_v1
-        #   - username 为空或 Resolver 异常 → 跳过 (不会无意触发空 LLM 调用)
+        # PR-4 R1: 与 upload-web-link / upload-and-process-document 对齐, 触发 tag/naming/classify.
+        # Web Clip (Chrome Extension 快剪藏) 不再触发 AI 分析 (用户决策 2026-11-06):
+        # clip 定位是快存快打标, 完整分析报告成本高; 需要分析时可在 Sources 页手动发起.
+        # 如需恢复自动分析, 设 WEB_CLIP_AUTO_ANALYZE_ENABLED=true (默认 false).
         trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
         trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
-        trigger_auto_analyze(
-            file_detail_id=file_detail_id,
-            execution_id=processing_stats_id,
-            file_type='web',
-            template_id=None,
-            template_variables=None,
-            username=username,
-            delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
-        )
+        if os.getenv('WEB_CLIP_AUTO_ANALYZE_ENABLED', 'false').lower() == 'true':
+            trigger_auto_analyze(
+                file_detail_id=file_detail_id,
+                execution_id=processing_stats_id,
+                file_type='web',
+                template_id=None,
+                template_variables=None,
+                username=username,
+                delay=int(os.getenv('AUTO_ANALYZE_DELAY', '2')),
+            )
 
         return {
             'status': 'completed',

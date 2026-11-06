@@ -173,7 +173,17 @@ class ContentTaggingService:
         
         # 5. 解析结果
         report_content = analysis_result.get('report_content', '')
-        
+
+        # 空响应显式报错: qwen3-max 等思考型模型可能把 max_tokens 预算全部耗在
+        # thinking 上导致正文为空 (历史案例: file_tagging 模板 max_tokens=2000 时
+        # 30 天内 38/43 次调用空返回, 打标静默失败). 不再让空内容落到 JSON 解析
+        # 报出误导性的 "格式错误".
+        if not report_content or not report_content.strip():
+            raise ValueError(
+                f"AI返回内容为空，无法打标签 (输出可能被 max_tokens 上限截断或 "
+                f"thinking 耗尽输出预算): {filename}"
+            )
+
         # 尝试解析JSON结果
         try:
             # 移除可能的markdown代码块标记

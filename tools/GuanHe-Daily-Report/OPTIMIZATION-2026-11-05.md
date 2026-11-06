@@ -454,3 +454,81 @@ outlook 生成逻辑/质检漏斗)、数据流向桑基图(Admin 订阅细化到
 substack/youtube/新闻)、栏目溯源、质检与发版五页。模板自带主题与标签页
 (独立 HTML 零依赖);日志按信息量评分挑选(修订轮记录最多的一份),漏斗
 缺中间记录时退化为终态展示;生成失败只提示不阻断发报。
+
+---
+
+## 十四、P28:降级路径打标字段对齐(2026-11-06)
+
+11-06 首日生产触发 triage 兜底后排查同类问题:主路径关联打标表
+(subscription_content_tags)而孪生路径丢失评级/过滤的共 2 处,均已修复:
+
+1. **正则兜底 `_fetch`**(news_macro):查询无 tags JOIN —— 降级时条目丢
+   evidence_level、无 L4 噪音排除。修复:与 triage 候选查询同款
+   LEFT JOIN(容 NULL,打标滞后时行为与旧兜底一致)+ L4 排除;条目带
+   evidence_level。实测 11-05:49 条全部带字段,E2/E3 分级可见。
+2. **news.calls 组装**:查询本就带评级,但组装时丢弃 —— calls 条目缺
+   info_level/evidence_level(wire 条目一直带)。修复:带入字段。
+   实测 6/6 条带 E2 分级。
+
+排查结论(无需修复):flash/wire 主查询 ✓(JOIN+L4 排除+溢出按 L 轴排序);
+triage 候选/组池 ✓;节目转录不适用(L/E 为内容分级,不覆盖节目源);
+FRED→EODHD 利率回落与 prior_odds 双路径为设计内降级且字段不缩水。
+
+---
+
+## 十五、EODHD news 规则打标(零 LLM,2026-11-06)
+
+**动机**:news 渠道不经 LLM 自动打标,条目缺 L/E,下游溢出排序、L4 排除、
+兜底路径全看不到分级。经 106 篇分层抽样(Yahoo60/SA25/U.Today8/CCTV8/CNBC5)
++ 7 天全量 7,971 条实证:**EODHD 自带结构信号填充率极高**(sentiment/symbols
+在 Yahoo/SA/CNBC 100%,api_tags ~90%),E 轴(来源属性)可完全规则化,
+L 轴保守粗筛可行;按用户决定不做 LLM 兜底,判不出留 NULL。
+
+**实现**:`backend/services/news_rule_tagger.py`(纯函数 rule_tag + 补缺落库),
+接线 `eodhd_news_feed_service` Step 3.5(落库即打标,失败不阻断);只补缺不
+覆盖(无行插入/有行仅填 NULL 列,旧行保持原 schema)。
+
+**规则**(证据→判定):
+- E1:正文头 300 字含 (BUSINESS WIRE)/(GlobeNewswire)/(PR Newswire)/(Accesswire)
+  通稿标记(实测每周 200+ 条)
+- E2:来源 ∈ 权威/专业清单(22 家);E3:U.Today(单一加密博客)与未知来源
+  (fail closed)
+- L4:例行盘面(Sector Update)、例行分红(declares dividend,特别/上调除外)、
+  CCTV [视频] 非财经(92 条中 84 条视频、22 条财经)、U.Today 符号饱和(≥50)
+- L2:1-3 标的 + 标题重大事件动词(beat/raise guidance/downgrade/FDA/merger…)
+- L3:4+ 标的(板块/宏观代理);其余 NULL(不猜)
+
+**回填结果**(14 天):inserted 72 / updated 8,945 / 判不出留 NULL 4,169;
+分布 L3/E2 5,741、L-空/E2 4,041、L2/E2 615、L4 451(含 U.Today E3 137)、
+E1 通稿 268。**下游实测**:wire 池 L4 残留 0(排除生效),E 分布全 E2;
+regex 兜底路径条目现带 evidence_level(P28 join 生效)。
+
+---
+
+## 十六、E1 判据收紧:发行商标记 ≠ 一手披露(2026-11-07)
+
+**用户质疑成立**:复检 150 条通稿标记条目(30 天窗口,人工逐条判读)发现
+发行商渠道混有四类内容——公司经营自述(真 E1)、监管文件(Form 8.3,真 E1)、
+研究机构行业报告促销(Market Research Report Featuring Google…,对被点名
+标的是第三方分析)、会议参展/榜单获奖/产品营销(主体≠标的或低价值)。
+**发行商标记只保证「发行主体自述」,不保证「发行主体 = 投资标的」**(主体
+限定规则),一刀切 E1 过宽。
+
+**收紧后的 E1 判据**(两个通道——平台来源 WIRE_SOURCES 与正文标记——同规):
+1. 监管披露文件(Form 8.3 持仓/要约披露类)→ E1;
+2. 发行主体=标的 且 自报经营事实:正文含「公司名 (Nasdaq/NYSE/TSX…:代码)」
+   交易所代码署名 + 经营动词(today reported/announced/financial results/
+   trading volume/declares…),且不命中营销否定模式 → E1;
+3. 营销/第三方研究(报告促销、榜单、会议、产品发布)→ E2 + L4/L3;
+4. 其余通稿 → E2(主体-标的关系未验证,谨慎降档)。
+
+**顺手修掉三个 bug**:`research report` 模式误伤 Forrester 自家业绩稿
+(降档错误);`GLOBE NEWSWIRE` 带空格变体未识别(条目漏出通稿分支);
+`__main__` 残留重复 apply。
+
+**recheck 纠正**:重算规则-owned 行 59,925,修正 12,504(含上一版通稿
+E1 一刀切的批量误判与旧 Globenewswire 全量回填)。纠正后 30 天分布:
+E1 共 194 条(全部带监管文件或交易所代码署名证据);L4/E1 22 条正是标准
+所述「E1 的例行公告留档」组合。150 样本复测:真披露全部保住 E1
+(Tradeweb/Forrester/Solid Power/Form 8.3),促销全部降档
+(Machine Translation Market Report → L4/E2,Named a Leader → L4/E2)。

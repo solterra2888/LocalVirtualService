@@ -257,7 +257,7 @@ tail -5 /opt/guanhetech/backend/reports/guanhe-daily-report/cron.log
 | CNBC Closing Bell 播客(主段+OT) | `subscription_content` | sector_action/movers/deep_dives 降级 |
 | **Admin(user_id=1)订阅的全部 twitter**(v7 起无白名单,~35 账号) | `subscription_content` | drivers 新闻事件块缺失 |
 | **Admin 订阅 news 全文源**(Yahoo/SA/CNBC/CCTV/Globenewswire) | `subscription_content` | wire/calls 层缺失 |
-| **subscription_content_tags 打标**(含 L/E 分级,`info_level`/`evidence_level` 列) | `subscription_content_tags` | flash/wire 溢出退化为时序截断(未评级=NULL 不排除);triage 轻扫缺 summary/concepts,分拣质量下降但可用 |
+| **subscription_content_tags 打标**(含 L/E 分级,`info_level`/`evidence_level` 列) | `subscription_content_tags` | flash/wire 溢出退化为时序截断(未评级=NULL 不排除);triage 失败走正则兜底时字段不再缩水(P28:兜底已关联打标表,L4 同样排除) |
 | **Admin(user_id=1)订阅源**(深蓝Alpha/调研鹅纪要等星球、Bloomberg TV/Reuters、CCTV、Geopolitical Dispatch、英文宏观推特号) | `subscription_content` + `subscription_list` | 对应素材缺失;整层退化表现为 news_macro 子层为空(errors 记录)。订阅增删即时改变源池,无需改代码 |
 | **调研鹅纪要(知识星球)** | `subscription_content` | 券商宏观解读缺失 |
 | Finviz screener 整表刷新 | `finviz_screener` | 两张图表失败 |

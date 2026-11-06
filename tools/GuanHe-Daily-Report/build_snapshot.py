@@ -912,6 +912,8 @@ def _news_snapshot(report_date: date,
                 calls.append({
                     "author": author, "title": (title or "")[:200],
                     "tickers": matched[:4],
+                    # P28:查询本就取了评级,组装时别丢(wire 条目一直带)
+                    "info_level": lv, "evidence_level": ev,
                     **_et_fields(ts),
                     "text": body[:_CALLS_TEXT_CAP],
                 })
@@ -1716,11 +1718,15 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
             def _fetch(window: tuple, types: tuple) -> List[Dict[str, Any]]:
                 # Admin 订阅驱动:JOIN subscription_list(user_id=1, enabled),
                 # 键覆盖 channel_id / author_identifier / feed_url / channel_url /
-                # author_name(channel_identifier 与 author_name 任一命中即可)
+                # author_name(channel_identifier 与 author_name 任一命中即可)。
+                # 打标表与 triage 候选查询同款关联(P28 修复:兜底路径原本不
+                # JOIN,降级时条目丢 evidence_level、且无 L4 噪音排除;LEFT JOIN
+                # 容 NULL —— 打标滞后/缺行时行为与旧兜底一致,保证快照永远可建)
                 cur.execute(
                     """
                     SELECT c.published_at, c.channel_type, c.author_name,
-                           c.title, c.content
+                           c.title, c.content,
+                           t.info_level, t.evidence_level
                     FROM subscription_content c
                     JOIN subscription_list l
                       ON l.user_id = %(uid)s AND l.enabled = true
@@ -1729,7 +1735,10 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
                           OR c.author_identifier = l.channel_identifier::text
                           OR c.feed_url = l.channel_url
                           OR c.author_name = l.channel_name)
+                    LEFT JOIN subscription_content_tags t
+                      ON t.subscription_content_id = c.id
                     WHERE c.channel_type = ANY(%(types)s)
+                      AND (t.info_level IS NULL OR t.info_level <> 'L4')
                       AND c.published_at >= %(lo)s AND c.published_at < %(hi)s
                     ORDER BY c.published_at DESC
                     """,
@@ -1765,6 +1774,8 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
             "channel_type": row.get("channel_type"),
             "author": row.get("author_name"),
             "title": (row.get("title") or "").strip()[:120],
+            # P28:与 triage 路径条目对齐,降级不丢证据分级(未评级为 None)
+            "evidence_level": row.get("evidence_level"),
             "text": text,
         }
 
