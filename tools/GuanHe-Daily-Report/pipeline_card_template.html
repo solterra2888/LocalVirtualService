@@ -109,7 +109,7 @@
   </div>
 
   <div id="panel-flow" role="tabpanel" aria-labelledby="tab-flow">
-    <h3>一份晨报是怎么诞生的 · 08:31 开工，09:26 送达</h3>
+    <h3>一份晨报是怎么诞生的 · <span id="flow-header-time">08:31 开工，09:26 送达</span></h3>
     <div class="flow">
 
       <div class="stage">
@@ -252,6 +252,7 @@
       <h4>⑤ 今天的质检报告</h4>
       <div class="funnel" id="funnel"></div>
       </div>
+  </div><!-- /panel-stats -->
 
   <div id="panel-sankey" role="tabpanel" aria-labelledby="tab-sankey" hidden>
     <h3>数据源如何流进每个栏目</h3>
@@ -278,7 +279,7 @@
       <div class="stage">
         <div class="stage-tag">① 出处卡<br><span class="text-small text-muted">写作时同步生成</span></div>
         <div class="stage-body">
-          <div>每个写进正文的数字都配一张<strong>出处卡</strong>：这个数来自哪条原料的哪一行——比如"纳指 -6.4% ← 跨资产行情表 NDX 行"。读者看不到卡，但质检和事后审计逐卡可查。<span class="real-inline">本期 223 张</span></div>
+          <div>每个写进正文的数字都配一张<strong>出处卡</strong>：这个数来自哪条原料的哪一行——比如"纳指 -6.4% ← 跨资产行情表 NDX 行"。读者看不到卡，但质检和事后审计逐卡可查。<span class="real-inline" id="verify-claims-n">本期 223 张</span></div>
           <div class="text-small text-muted">技术注：.claims.json 台账 + 正文内联 audit 注释（发版时剥离进内部备忘录）。</div>
         </div>
       </div>
@@ -295,7 +296,7 @@
             <li><strong>格式规范</strong>：栏目标题、必备要素（免责行等）齐全</li>
             <li><strong>措辞红线</strong>：「X 年来最大」必须有起点、「概率」必须在 0-100、正文不出现内部用语</li>
           </ul>
-          <div class="real">本期首轮：18 处存疑，13 处确认不合格</div>
+          <div class="real" id="verify-firstpass">本期首轮：18 处存疑，13 处确认不合格</div>
         </div>
       </div>
 
@@ -305,7 +306,7 @@
         <div class="stage-tag">③ 打回重写<br><span class="text-small text-muted">不合格必处理</span></div>
         <div class="stage-body">
           <div>不合格的栏目带着问题清单打回重写，改完再验；纯数据栏目不会出错，问题自动路由到对应文字栏目修。</div>
-          <div class="real">本期两轮重写覆盖 5 个栏目，13+1 个问题全部修掉</div>
+          <div class="real" id="verify-revise">本期两轮重写覆盖 5 个栏目，13+1 个问题全部修掉</div>
         </div>
       </div>
 
@@ -326,7 +327,7 @@
           <div><strong>质检通过</strong> → 正常发版；<strong>实在修不完</strong> → 也照常发版，但把未决问题清清楚楚标在报告上：</div>
           <div class="mock-note">&gt; ⚠️ 本期有 1 项未通过自动核验的问题，报告照常发布；清单见文末「核验备注」，阅读时请对照。</div>
           <div class="mock-note">## ⚠️ 核验备注（自动标注）<br>- <strong>[高]</strong> (板块动态) AMD 每股收益两栏数字不一致 — 统一为财报口径</div>
-          <div class="text-small text-muted">每期产出双件：读者版（干净正文）+ 内部版（数据口径、复核意见、全部出处卡）。本期走正常通过路径。</div>
+          <div class="text-small text-muted">每期产出双件：读者版（干净正文）+ 内部版（数据口径、复核意见、全部出处卡）。<span id="verify-final-note">本期走正常通过路径。</span></div>
         </div>
       </div>
 
@@ -357,8 +358,19 @@ document.querySelectorAll('#gdr-pipeline-viz .nav-link').forEach(function (btn) 
   function set(id, t) { var e = document.getElementById(id); if (e && t != null) e.innerHTML = t; }
   function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
   if (RUN.statsTitle) set('stats-title', esc(RUN.statsTitle));
-  ['flow-raw','flow-plan','flow-verify','flow-final','outlook-stat','triage-note','flow-stage1','flow-outlook']
-    .forEach(function (k) { if (RUN.flow && RUN.flow[k]) set(k, esc(RUN.flow[k])); });
+  // DOM id → RUN.flow 键(不带 flow- 前缀);flow 值为生成器产出的安全串,
+  // stage1 内含 <br> 故不经 esc
+  [['flow-header-time','header-time'],['flow-raw','raw'],['flow-plan','plan'],
+   ['flow-stage1','stage1'],['flow-outlook','outlook'],['flow-verify','verify'],
+   ['flow-final','final'],['outlook-stat','outlook-stat']]
+    .forEach(function (p) { if (RUN.flow && RUN.flow[p[1]] != null) set(p[0], String(RUN.flow[p[1]])); });
+  if (RUN.triageNote) set('triage-note', esc(RUN.triageNote));
+  // 质检与发版页:当日数字接真值(出处卡数/首轮核对/打回清单/终态)
+  if (RUN.totals && RUN.totals[1]) set('verify-claims-n', '本期 ' + RUN.totals[1][0] + ' 张');
+  var vrows = (RUN.funnel || []).filter(function (f) { return !f.arrow; });
+  if (vrows[1]) set('verify-firstpass', '本期首轮:' + vrows[1].text);
+  if (vrows[2]) set('verify-revise', '本期' + vrows[2].text);
+  if (vrows.length) set('verify-final-note', vrows[vrows.length - 1].text);
   var tb = document.getElementById('pool-tbody');
   if (tb && RUN.pools) tb.innerHTML = RUN.pools.map(function (p) {
     return '<tr><td>' + esc(p.label) + '</td><td class="text-small text-muted">' + esc(p.src) +
@@ -433,7 +445,7 @@ document.querySelectorAll('#gdr-pipeline-viz .nav-link').forEach(function (btn) 
       note: "技术注：us_close_chart.py ← market.cross_asset + finviz + FRED。" },
     { n: "02", name: "今日叙事", kind: "llm",
       who: "市场叙事部（AI 编辑），报告的开篇导语",
-      src: [["The Close 节目文字稿", "彭博王牌收盘节目的完整转录（本期 8.3 万字）"], ["行情与广度", "跨资产表现、涨跌家数"], ["市场快讯", "订阅推特池"]],
+      src: [["The Close 节目文字稿", "彭博王牌收盘节目的完整转录（当日万字级全文）"], ["行情与广度", "跨资产表现、涨跌家数"], ["市场快讯", "订阅推特池"]],
       prov: "只讲结论不落数字（2–3 句），数字证据交给下一栏；每句话标注出自哪档节目；同时产出本期主标题备选。",
       stat: "本期：0 张出处卡（按设计不落数字）· 228 字",
       note: "技术注：HEADLINE_CANDIDATES 出编辑标题；首个候选即发布标题。" },
@@ -463,7 +475,7 @@ document.querySelectorAll('#gdr-pipeline-viz .nav-link').forEach(function (btn) 
       note: "技术注：volume_leaders ← finviz + EODHD bulk（按报告日取数）+ 腾讯中文名。" },
     { n: "07", name: "板块动态", kind: "llm",
       who: "公司与板块部（AI 编辑），本期信息量最大的栏目",
-      src: [["Closing Bell 节目文字稿", "主段+加时段（本期约 10 万字），催化剂与嘉宾观点"], ["行情与榜单", "成分股、涨幅榜、板块均值"], ["财报日历 + 快讯", "业绩催化与节目外的消息"]],
+      src: [["Closing Bell 节目文字稿", "主段+加时段（当日约 10 万字），催化剂与嘉宾观点"], ["行情与榜单", "成分股、涨幅榜、板块均值"], ["财报日历 + 快讯", "业绩催化与节目外的消息"]],
       prov: "5–7 个主题块按影响力排序；提到的每家公司必须真实存在于行情库；数字逐条挂出处卡。",
       stat: "本期：90 张出处卡（全报之最）· 6 个原料库 · 3,050 字",
       note: "技术注：物理隔离——The Close 稿与通讯社不进入该部原料库，防串稿。" },
@@ -559,12 +571,12 @@ document.querySelectorAll('#gdr-pipeline-viz .nav-link').forEach(function (btn) 
                     mkt: "var(--viz-series-3)", cal: "var(--viz-series-1)" };
 
   var SOURCES = [
-    { id: "S1", label: "YouTube·播客订阅", sub: "The Close / Closing Bell", tip: "Admin 订阅的两档节目,每天自动转成完整文字稿(本期共 18.2 万字)" },
+    { id: "S1", label: "YouTube·播客订阅", sub: "The Close / Closing Bell", tip: "Admin 订阅的两档节目,每天自动转成完整文字稿(当晨万字级全文)" },
     { id: "S2", label: "Twitter 订阅", sub: "~35 个账号", tip: "盘中快讯的主要来源;部分长解读进宏观解读池,地缘类账号进地缘池" },
     { id: "S3", label: "知识星球", sub: "调研鹅纪要等", tip: "券商调研纪要与宏观解读,署名引用" },
     { id: "S4", label: "Substack", sub: "英文宏观通讯", tip: "英文宏观作者通讯" },
     { id: "S5", label: "News 全文订阅", sub: "Yahoo/SA/CNBC/CCTV 等", tip: "新闻全文库与电话会纪要;央视联播快讯进地缘池" },
-    { id: "S6", label: "Finviz 行情快照", sub: "S&P 500 全成分", tip: "每日整表刷新:价/量/涨跌/市值,本期 503 只" },
+    { id: "S6", label: "Finviz 行情快照", sub: "S&P 500 全成分", tip: "每日整表刷新:价/量/涨跌/市值(S&P 全成分)" },
     { id: "S7", label: "EODHD", sub: "经济日历 + 港/A股行情", tip: "经济与财报日历;港股/A股按报告日取批量行情" },
     { id: "S8", label: "FRED / 财政部", sub: "利率与宏观指标", tip: "收益率曲线、宏观指标排名等确定性底座" },
     { id: "S9", label: "FOMC 资料表", sub: "决议/声明/概率", tip: "最近 4 场决议、3 份声明、市场定价路径" }
