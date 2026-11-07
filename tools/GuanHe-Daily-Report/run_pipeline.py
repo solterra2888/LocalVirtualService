@@ -1036,6 +1036,31 @@ def section_done(ws: Path, name: str) -> bool:
     return f.exists() and DONE_MARKER in f.read_text(encoding="utf-8")
 
 
+def _sp_mover_view(cons: List[Dict[str, Any]], top_n: int = 15) -> List[Dict[str, Any]]:
+    """S&P 异动视图:|涨跌| 前 top_n 只 ∪ 每板块 |涨跌| 最大 1 只(板块代表)。
+
+    v8.8 company_desk 瘦身:替代 503 行成分全表进切片。同键名
+    (sp500_constituents)写回,claims 的 [ticker=X] 选择器对全量快照
+    依然可解析;榜单只含大盘股,与转录/flash 的叙事覆盖宇宙对齐。
+    """
+    def amp(r: Dict[str, Any]) -> float:
+        try:
+            return abs(float(r.get("change_percent") or 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    top = sorted(cons, key=amp, reverse=True)[:top_n]
+    picked = {id(r) for r in top}
+    covered = {r.get("sector") for r in top}
+    for r in sorted(cons, key=amp, reverse=True):
+        s = r.get("sector")
+        if s and s not in covered and id(r) not in picked:
+            top.append(r)
+            covered.add(s)
+            picked.add(id(r))
+    return top
+
+
 def _sliced_snapshot(ws: Path, snapshot: Path, agent: str) -> Path:
     """按 agent 白名单物理切片快照(v8.3)。
 
@@ -1065,6 +1090,40 @@ def _sliced_snapshot(ws: Path, snapshot: Path, agent: str) -> Path:
         sliced["market"] = {**mkt, "cross_asset": [
             r for r in mkt["cross_asset"]
             if not UST_CODE_RE.match(str((r or {}).get("code") or ""))]}
+    # v8.8 company_desk 瘦身(2026-11-06 实测:叙事源对 top_movers 覆盖率
+    # 7/30、S&P 占比 3/30、agent 实际引用 1/144,该组却连续撞 1200/1800s
+    # 超时线):constituents 全表 → S&P 异动视图;top_movers 移出;
+    # earnings_calendar 只留与(视图 ∪ flash 涉及 ticker)相交条目,
+    # 深挖的财报催化剂保留、无关小票噪音清掉。全量快照不动,核验/图表
+    # /涨跌榜照旧读全量。
+    if agent == "company_desk":
+        full = snap.get("sources") or {}
+        cons = (full.get("market") or {}).get("sp500_constituents") or []
+        view = _sp_mover_view(cons) if cons else []
+        if isinstance(sliced.get("market"), dict):
+            if view:
+                sliced["market"]["sp500_constituents"] = view
+                sliced["market"]["_constituents_note"] = (
+                    f"view: top-{len(view)} |move| + sector leaders "
+                    f"(full {len(cons)}-stock table is not in your context)")
+            sliced["market"].pop("top_movers", None)
+        flash_tick = set()
+        for f in ((full.get("news") or {}).get("flash") or []):
+            for t in (f.get("tickers") or []):
+                if isinstance(t, str):
+                    flash_tick.add(t.split(":")[0].strip().upper())
+        want = flash_tick | {str(r.get("ticker") or "").upper()
+                             for r in view if r.get("ticker")}
+        ec = sliced.get("earnings_calendar")
+        if isinstance(ec, dict) and want:
+            def _keep(e: Any) -> bool:
+                if not isinstance(e, dict):
+                    return True
+                code = str(e.get("code") or e.get("ticker") or "").upper()
+                return not code or code in want
+            for k in ("prior_after_close", "today", "upcoming"):
+                if isinstance(ec.get(k), list):
+                    ec[k] = [e for e in ec[k] if _keep(e)]
     snap["sources"] = sliced
     snap["sliced_for"] = agent
     out = ws / f"snapshot.{agent}.json"
@@ -1418,7 +1477,11 @@ def run_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
                 _apply(_run_one_agent(args, ws, snapshot, snapshot_data,
                                       blocks, agent, prior, plan))
             continue
-        with ThreadPoolExecutor(max_workers=len(stage)) as pool:
+        # --max-parallel:限制同时运行的 agent 数(0=全并发,原行为)。
+        # 7GB 机与后端/交互会话同驻时,6 路齐射两次触发全局 OOM(2026-11-06
+        # 20:51/22:40 尸检:击杀 zcode server 与编排器);2 路峰值 ~1.7GB 安全。
+        cap = args.max_parallel if args.max_parallel > 0 else len(stage)
+        with ThreadPoolExecutor(max_workers=min(cap, len(stage))) as pool:
             # v8.5-fix:提交错峰 3s —— 削 N 个 CLI 同时起跑时对 db.sqlite 的
             # 启动争夺(2026-11-05 plan CLI 挂死 300s 零进展的疑似诱因)
             futs: Dict[Any, Any] = {}
@@ -2054,6 +2117,9 @@ def main() -> int:
                         help="跳过写作前的编辑计划(故事归属 + 规范数值)")
     parser.add_argument("--no-provenance", action="store_true",
                         help="成品不渲染要点来源标记与节末来源列表(审计注释仍进 sidecar)")
+    parser.add_argument("--max-parallel", type=int, default=0,
+                        help="限制 stage-1 同时运行的 agent 数(0=全并发,原行为)。"
+                             "与后端/交互会话同机的低内存时段建议 2")
     parser.add_argument("--strict-verify", action="store_true",
                         help="核验超限时回到旧行为:rc=2 转人工、不发布"
                              "(v8.7 起默认照常发布,未决问题自动标注在报告"

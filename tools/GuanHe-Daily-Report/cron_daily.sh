@@ -40,7 +40,10 @@ flock -n 9 || { echo "[cron] previous run still active, skip"; exit 0; }
 
 cd "$PIPE" || exit 1
 
-if ! "$PY" build_snapshot.py; then
+# --no-triage(2026-11-07 起暂用):triage 4 路齐射连续撞 provider 限速
+# (Turn execution failed,生产 0/3,详见 2026-11-06 会话分析),退正则路径
+# P28 已带 L/E 等级;恢复语义分拣时改回默认并配 TRIAGE_WORKERS=1 串行。
+if ! "$PY" build_snapshot.py --no-triage; then
     echo "==== $(date '+%F %T %Z') guanhe-daily-report cron end (rc=1, build_snapshot failed) ===="
     exit 1
 fi

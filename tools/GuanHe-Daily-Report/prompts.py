@@ -249,6 +249,11 @@ def agent_snapshot_filter(agent: str) -> Dict[str, set]:
                 out.setdefault(head, set()).add(parts[1])
             else:
                 out.setdefault(head, set())
+    if agent == "company_desk":
+        # v8.8:top_movers 是全市场筛选榜(小盘为主),叙事源覆盖率 7/30、
+        # agent 实际引用 1/144 —— 移出白名单与切片,见
+        # run_pipeline._sliced_snapshot 的同批改动
+        out.get("market", set()).discard("top_movers")
     return out
 
 
@@ -552,13 +557,14 @@ SECTOR_ACTION_TASK = """\
 
 Write "## 板块动态" as 5–7 thematic blocks (NO sector scorecard / league
 table, no sector-average lines). Choose themes by MARKET IMPACT: the biggest
-same-day moves among large caps (market.sp500_constituents / top_movers) and
-the catalysts behind them. The Closing Bell transcripts (main hour
-clean_transcript + Overtime clean_transcript_ot) supply catalysts, color and
-named guest/analyst views; news.flash supplies catalysts the show missed
-(reports, downgrades, guidance and deal headlines). A big mover the show
-skipped is folded into the theme it belongs to — never a separate "not
-covered" block.
+same-day moves among large caps (market.sp500_constituents — an S&P mover
+view: the top absolute movers plus one leader per sector; the full index
+table is not in your context) and the catalysts behind them. The Closing Bell
+transcripts (main hour clean_transcript + Overtime clean_transcript_ot)
+supply catalysts, color and named guest/analyst views; news.flash supplies
+catalysts the show missed (reports, downgrades, guidance and deal headlines).
+A big mover the show skipped is folded into the theme it belongs to — never
+a separate "not covered" block.
 Each block:
 - A bold one-clause headline stating what happened to the group
   (e.g. **Memory sold off even with prices high.**).
@@ -568,8 +574,8 @@ Each block:
   close a bullet ("Mizuho's Jared Holz called inflows 'unusually strong'").
 - Results only where they explain the move: beat/miss vs estimate, guidance,
   dividend, deal terms.
-Every company named must appear in sp500_constituents, top_movers,
-earnings_calendar, Closing Bell or news items. Use company names in prose
+Every company named must appear in sp500_constituents, earnings_calendar,
+Closing Bell or news items. Use company names in prose
 (tickers only where a name is ambiguous). The index/tape recap is NOT part of
 this section.
 """
@@ -585,7 +591,8 @@ non-listed company when its news moved the market (e.g. a private company's
 IPO, rating or financing). Every subject must also appear in 板块动态.
 
 Sources: the Closing Bell transcripts (main hour + Overtime),
-earnings_calendar, market.sp500_constituents (price, change), news.flash
+earnings_calendar (pre-filtered to newsworthy tickers), market.
+sp500_constituents (the S&P mover view: price, change), news.flash
 (rating and target changes, guidance and results headlines, deal terms).
 
 Format per subject:
@@ -617,9 +624,9 @@ COMPANY_DESK_TASK = """\
 Read the Closing Bell transcripts (main hour + Overtime) ONCE — while
 reading, collect every executive quote (name + title + exact words) and
 analyst view you might use, because you may NOT re-read the transcripts
-afterwards. Then read the large-cap moves (finviz), the earnings calendar and
-news.flash, and export TWO files. 个股深挖 subjects MUST
-also appear in 板块动态. (今日涨跌榜 is rendered by the pipeline
+afterwards. Then read the large-cap moves (finviz — the S&P mover view),
+the earnings calendar and news.flash, and export TWO files. 个股深挖 subjects
+MUST also appear in 板块动态. (今日涨跌榜 is rendered by the pipeline
 from market data — do not write it.)
 
 ### File A — sections/04_sector_action.md
