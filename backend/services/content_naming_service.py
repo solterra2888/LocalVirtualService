@@ -154,7 +154,7 @@ class ContentNamingService:
             raise ValueError(f"清洗后的文件名为空: raw='{raw_name}'")
         
         self.log(f"正在保存 display_name 到数据库: {filename} -> {display_name}")
-        self.save_display_name(file_id, display_name)
+        self.save_display_name(file_id, display_name, force=force)
         
         processing_time = time.time() - start_time
         
@@ -177,20 +177,38 @@ class ContentNamingService:
             }
         }
     
-    def save_display_name(self, file_id: int, display_name: str):
-        """将 display_name 写入 file_processing_details"""
+    def save_display_name(self, file_id: int, display_name: str, force: bool = False):
+        """将 display_name 写入 file_processing_details
+
+        非 force 时仅在上游仍为空（display_name IS NULL）时写入，
+        避免覆盖任务执行期间用户手动设置的显示名称。
+        """
         conn = self.db_manager.get_connection()
         if not conn:
             raise ValueError("无法连接到数据库")
-        
+
         try:
             cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE file_processing_details
-                SET display_name = %s
-                WHERE id = %s
-            """, (display_name, file_id))
+            if force:
+                cursor.execute("""
+                    UPDATE file_processing_details
+                    SET display_name = %s
+                    WHERE id = %s
+                """, (display_name, file_id))
+            else:
+                cursor.execute("""
+                    UPDATE file_processing_details
+                    SET display_name = %s
+                    WHERE id = %s AND display_name IS NULL
+                """, (display_name, file_id))
+                if cursor.rowcount == 0:
+                    self.log(
+                        f"display_name 已被手动设置，跳过自动命名写入: file_id={file_id}",
+                        level="info"
+                    )
+                    return False
             conn.commit()
+            return True
         except Exception as e:
             conn.rollback()
             self.log(f"保存 display_name 失败: {str(e)}", level="error")

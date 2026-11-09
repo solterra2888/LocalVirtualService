@@ -88,6 +88,19 @@ def _run_log(ws: Path) -> str:
     return best
 
 
+def _header_time(ws: Path, total_s: Optional[int]) -> str:
+    """页头「HH:MM 开工,HH:MM 送达」:成品 mtime 反推开工(减 total),缺件则只给送达。"""
+    from datetime import datetime, timedelta
+    rep = ws / "final" / "report.md"
+    if not rep.exists():
+        return ""
+    end = datetime.fromtimestamp(rep.stat().st_mtime)
+    if total_s:
+        start = end - timedelta(seconds=total_s)
+        return f"{start:%H:%M} 开工,{end:%H:%M} 送达"
+    return f"送达 {end:%H:%M}"
+
+
 def build_run(ws: Path) -> Dict[str, Any]:
     snap = _j(ws / "snapshot.json") or {}
     src = snap.get("sources") or {}
@@ -253,6 +266,7 @@ def build_run(ws: Path) -> Dict[str, Any]:
         "verify": ("今日实测:首轮查出 %d 处不合格,%d 轮重写后%s" % (highs[0] if highs else 0, len(rounds),
                     "带清单发布" if degraded else "全部修复")) if highs else "今日实测:核验完成",
         "final": f"今日实测:11 个栏目 {chars_total:,} 字 · 全程零人工 · {round((total_s or 0) / 60)} 分钟",
+        "header-time": _header_time(ws, total_s),
     }
     out_md = ws / "final" / "report.md"
     headline = ""
@@ -260,8 +274,10 @@ def build_run(ws: Path) -> Dict[str, Any]:
         headline = out_md.read_text(encoding="utf-8").splitlines()[0].lstrip("# ").strip()
 
     triage_note = "注:当日素材智能分拣正常运行。"
-    if log and "chunk failed" in log:
+    if log and ("chunk failed" in log or "[triage] FAILED" in log):
         triage_note = "注:当日素材智能分拣遇到接口抖动,自动切换备用通道,内容照常产出。"
+    elif log and "triage" not in log:
+        triage_note = "注:当日按配置跳过语义分拣,直接使用规则分拣(素材分级不受影响)。"
 
     return {
         "date": ws.name, "headline": headline,

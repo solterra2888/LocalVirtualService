@@ -189,7 +189,6 @@ const MobileSourcesInner: React.FC = () => {
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [executionToRename, setExecutionToRename] = useState<TaskExecution | null>(null);
   const [renameStem, setRenameStem] = useState('');
-  const [renameExtension, setRenameExtension] = useState('');
   const [renameLoading, setRenameLoading] = useState(false);
 
   const [deleteExecutionVisible, setDeleteExecutionVisible] = useState(false);
@@ -531,29 +530,37 @@ const MobileSourcesInner: React.FC = () => {
 
   const handleOpenRename = (execution: TaskExecution) => {
     setExecutionToRename(execution);
-    const raw = execution.first_filename || 'Untitled';
-    const { stem, extension } = filesAPI.splitFilenameStemAndExtension(raw);
-    setRenameStem(stem);
-    setRenameExtension(extension);
+    // 优先预填当前显示的名称（AI 命名），否则用源文件名去掉扩展名
+    let initial = execution.first_display_name || '';
+    if (!initial && execution.first_filename) {
+      const { stem } = filesAPI.splitFilenameStemAndExtension(execution.first_filename);
+      initial = stem;
+    }
+    setRenameStem(initial);
     setRenameModalVisible(true);
   };
 
   const handleConfirmRename = async () => {
-    if (!executionToRename || !renameStem.trim()) return;
-    const newFilename = `${renameStem.trim()}${renameExtension}`;
+    if (!executionToRename) return;
+    const newDisplayName = renameStem.trim();
     try {
       setRenameLoading(true);
-      await tasksAPI.renameExecutionFile(executionToRename.id, newFilename);
+      const res = await tasksAPI.updateExecutionDisplayName(executionToRename.id, newDisplayName);
+      const updatedDisplayName = res.display_name ?? (newDisplayName || null);
       setTaskExecutions(prev =>
         prev.map(exec =>
-          exec.id === executionToRename.id ? { ...exec, first_filename: newFilename, first_display_name: null } : exec
+          exec.id === executionToRename.id ? { ...exec, first_display_name: updatedDisplayName } : exec
         )
+      );
+      setDetailExecution(prev =>
+        prev && prev.id === executionToRename.id
+          ? { ...prev, first_display_name: updatedDisplayName }
+          : prev
       );
       message.success('Renamed');
       setRenameModalVisible(false);
       setExecutionToRename(null);
       setRenameStem('');
-      setRenameExtension('');
     } catch (error: unknown) {
       message.error(getErrorMessage(error, 'Rename failed'));
     } finally {
@@ -1447,10 +1454,8 @@ const MobileSourcesInner: React.FC = () => {
           setRenameModalVisible(false);
           setExecutionToRename(null);
           setRenameStem('');
-          setRenameExtension('');
         }}
         onOk={handleConfirmRename}
-        okButtonProps={{ disabled: !renameStem.trim() }}
         confirmLoading={renameLoading}
         okText="Save"
         cancelText="cancel"
@@ -1461,9 +1466,12 @@ const MobileSourcesInner: React.FC = () => {
         <Input
           value={renameStem}
           onChange={e => setRenameStem(e.target.value)}
-          addonAfter={renameExtension || undefined}
-          placeholder="File name"
+          placeholder="Display name"
+          maxLength={200}
         />
+        <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, opacity: 0.65 }}>
+          Leave empty to show the original file name
+        </p>
       </Modal>
 
       <Modal

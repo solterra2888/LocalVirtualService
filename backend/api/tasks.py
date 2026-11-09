@@ -486,6 +486,10 @@ class RenameExecutionRequest(BaseModel):
     filename: str
 
 
+class UpdateExecutionDisplayNameRequest(BaseModel):
+    display_name: Optional[str] = None
+
+
 class UpdateFinalReportRequest(BaseModel):
     final_report: str
 
@@ -628,6 +632,85 @@ async def rename_execution_file(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"rename failed: {str(e)}"
+        )
+    finally:
+        conn.close()
+
+
+@router.patch("/executions/{execution_id}/display-name", summary="更新执行记录的显示名称")
+async def update_execution_display_name(
+    execution_id: str,
+    body: UpdateExecutionDisplayNameRequest,
+    current_user=Depends(get_current_user)
+):
+    """
+    更新执行记录中首个文件的 display_name（用户手动修改显示名称，覆盖 AI 自动命名）
+    传入空值时清除 display_name，恢复显示源文件名
+    """
+    display_name = (body.display_name or "").strip()
+    if not display_name:
+        display_name = None
+    elif len(display_name) > 200:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="显示名称不能超过 200 字符"
+        )
+
+    db_conn_params = get_database_config()
+    db_manager = DatabaseManager(db_conn_params)
+    conn = db_manager.get_connection()
+    if not conn:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="无法连接到数据库"
+        )
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            'SELECT ps.id, ps."user" FROM processing_stats ps WHERE ps.id = %s',
+            (execution_id,)
+        )
+        stat = cursor.fetchone()
+        if not stat:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务执行不存在"
+            )
+        if stat[1] != current_user.username:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="权限不足"
+            )
+
+        cursor.execute(
+            "SELECT id FROM file_processing_details WHERE processing_stats_id = %s ORDER BY id ASC LIMIT 1",
+            (execution_id,)
+        )
+        first_file = cursor.fetchone()
+        if not first_file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="该执行记录下无文件"
+            )
+        file_id = first_file[0]
+
+        cursor.execute(
+            "UPDATE file_processing_details SET display_name = %s WHERE id = %s",
+            (display_name, file_id)
+        )
+        conn.commit()
+        return {
+            "message": "display name updated successfully",
+            "display_name": display_name
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"update display name failed: {str(e)}"
         )
     finally:
         conn.close()

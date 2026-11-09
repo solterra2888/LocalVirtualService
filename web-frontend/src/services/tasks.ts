@@ -117,6 +117,17 @@ export const tasksAPI = {
     );
   },
 
+  // 更新执行记录的显示名称（覆盖 AI 自动命名；传空字符串恢复显示源文件名）
+  updateExecutionDisplayName: async (
+    executionId: string,
+    displayName: string
+  ): Promise<{ message: string; display_name: string | null }> => {
+    return api.patch<{ message: string; display_name: string | null }>(
+      `/tasks/executions/${executionId}/display-name`,
+      { display_name: displayName }
+    );
+  },
+
   // 更新任务执行的 AI 分析报告内容
   updateExecutionFinalReport: async (
     executionId: string,
