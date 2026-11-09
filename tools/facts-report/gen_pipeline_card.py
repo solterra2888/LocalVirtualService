@@ -293,6 +293,331 @@ def build_run(ws: Path) -> Dict[str, Any]:
     }
 
 
+
+# ─────────────────────────────────────────────────────────────
+# 数据流向 tab:交互桑基 payload(v7 gen-logic-sankey 的通用化移植)
+# 数据源→切片→栏目→交付,含下钻数据(切片JSON/栏目md/任务书/配给清单)。
+# 任何一块缺失就跳过,绝不阻断出卡。
+# ─────────────────────────────────────────────────────────────
+
+_SLICE_AGENTS = [("overall_market", "② 市场叙事部", 10),
+                 ("company_desk", "③ 公司与板块部", 9),
+                 ("macro_review", "④ 宏观数据部", 4),
+                 ("geopolitics", "⑤ 地缘政治部", 4),
+                 ("fomc", "⑥ 美联储观察部", 3),
+                 ("outlook", "⑦ 展望与策略部", 4)]
+_SLICE_SECS = {"overall_market": [0, 1, 2], "company_desk": [3, 5],
+               "macro_review": [7], "geopolitics": [8], "fomc": [9], "outlook": [10]}
+# SEC_MAP 索引(sections 文件序 0-10)→栏目显示名
+_SEC_NAMES = ["01_narrative", "02_drivers", "03_positioning", "04_sector_action", "05_movers",
+              "06_deep_dives", "07_macro_dashboard", "08_macro_review", "09_geopolitics",
+              "10_fomc", "11_outlook"]
+_DEPT_OF = {0: "②叙事部", 1: "②叙事部", 2: "②叙事部", 3: "③公司板块部", 5: "③公司板块部",
+            4: "规则直出", 6: "规则直出", 7: "④宏观数据部", 8: "⑤地缘政治部",
+            9: "⑥美联储观察部", 10: "⑦展望部"}
+
+_SRC_CFG = {
+ 'tc': {'label': 'The Close 节目', 'unit': '字',
+        'role': '②市场叙事部主稿(全文进切片);④⑤⑦部作上下文引用',
+        'mp': ['the_close.clean_transcript'], 'dp': ['the_close'], 'vol': 'tc_chars'},
+ 'cb': {'label': 'Closing Bell 主段+加时', 'unit': '字',
+        'role': '③公司与板块部主稿(催化剂与嘉宾观点)',
+        'mp': ['cnbc_closing_bell.clean_transcript', 'cnbc_closing_bell.clean_transcript_ot'],
+        'dp': ['cnbc_closing_bell'], 'vol': 'cb_chars'},
+ 'tw': {'label': '推特快讯池', 'unit': '条', 'role': '快讯供给:全部编辑部辅材;⑤地缘/⑥美联储的实时补充',
+        'mp': ['news.flash', 'news.wire', 'news.calls'], 'dp': ['news'], 'vol': 'news_counts'},
+ 'cn': {'label': '中文研究池', 'unit': '条', 'role': '④宏观数据部边际变化(研报转述)+⑤地缘政治部主题原料',
+        'mp': ['news_macro.digest', 'news_macro.research', 'news_macro.geo'], 'dp': ['news_macro'], 'vol': 'nm_counts'},
+ 'cal': {'label': 'EODHD 日历', 'unit': '条', 'role': '④宏观数据部数据日历;③公司部财报催化剂(相交瘦身)',
+        'mp': ['economic_events.recent', 'economic_events.upcoming', 'earnings_calendar.prior_after_close',
+               'earnings_calendar.today', 'earnings_calendar.upcoming'],
+        'dp': ['economic_events', 'earnings_calendar'], 'vol': 'cal_counts'},
+ 'fz': {'label': 'Finviz 行情', 'unit': '行', 'role': '③公司部行情(切片内为 S&P 异动视图:top15+板块领涨);涨跌榜/热力图规则直出',
+        'mp': ['market.sp500_constituents', 'market.sp500_sector_avg', 'market.top_movers', 'market.volume_leaders'],
+        'dp': ['market.sp500_constituents', 'market.sp500_sector_avg', 'market.top_movers', 'market.volume_leaders'],
+        'vol': 'fz_counts'},
+ 'fred': {'label': 'FRED/美财政部', 'unit': '系列/行', 'role': '利率与宏观支柱;⑥美联储观察部曲线与实际利率;FT 图绘制',
+        'mp': ['macro_pillars.par_curve', 'macro_pillars.fred_extras', 'macro_pillars.fred_ranks',
+               'macro_pillars.release_series', 'macro_pillars.effr', 'macro_pillars.auction_events',
+               'market.cross_asset', 'market.breadth'],
+        'dp': ['macro_pillars', 'market.cross_asset', 'market.breadth'], 'vol': 'fred_counts'},
+ 'fomc': {'label': 'FOMC 资料+期现概率', 'unit': '条', 'role': '⑥美联储观察部核心材料(声明/路径/概率);⑦展望部引用',
+        'mp': ['fomc.decisions', 'fomc.path', 'macro_pillars.fomc_calendar', 'macro_pillars.fed_odds',
+               'macro_pillars.next_fomc_odds', 'prior_odds'],
+        'dp': ['fomc', 'prior_odds'], 'vol': 'fomc_counts'},
+}
+_CLAIM_PREFIX = [('the_close', 'tc'), ('cnbc_closing_bell', 'cb'), ('news.', 'tw'), ('news_macro.', 'cn'),
+                 ('economic_events', 'cal'), ('earnings_calendar', 'cal'), ('market.cross_asset', 'fred'),
+                 ('market.', 'fz'), ('macro_pillars.fed_odds', 'fomc'), ('macro_pillars.next_fomc_odds', 'fomc'),
+                 ('macro_pillars.fomc_calendar', 'fomc'), ('macro_pillars.', 'fred'), ('fomc', 'fomc'),
+                 ('prior_odds', 'fomc')]
+_SRC2SLICE = [('tc', 'overall_market'), ('tw', 'overall_market'), ('fred', 'overall_market'),
+              ('cb', 'company_desk'), ('fz', 'company_desk'), ('cal', 'company_desk'), ('tw', 'company_desk'),
+              ('cal', 'macro_review'), ('cn', 'macro_review'), ('tc', 'macro_review'), ('fred', 'macro_review'),
+              ('cn', 'geopolitics'), ('tw', 'geopolitics'),
+              ('fomc', 'fomc'), ('fred', 'fomc'), ('tw', 'fomc'),
+              ('tc', 'outlook'), ('fomc', 'outlook'), ('fred', 'outlook')]
+_SRC2SLICE_W = {('tc', 'overall_market'): 8, ('tw', 'overall_market'): 3, ('fred', 'overall_market'): 2,
+                ('cb', 'company_desk'): 8, ('fz', 'company_desk'): 4, ('cal', 'company_desk'): 2, ('tw', 'company_desk'): 2,
+                ('cal', 'macro_review'): 4, ('cn', 'macro_review'): 3, ('tc', 'macro_review'): 3, ('fred', 'macro_review'): 1,
+                ('cn', 'geopolitics'): 5, ('tw', 'geopolitics'): 3,
+                ('fomc', 'fomc'): 5, ('fred', 'fomc'): 3, ('tw', 'fomc'): 2,
+                ('tc', 'outlook'): 4, ('fomc', 'outlook'): 2, ('fred', 'outlook'): 1}
+
+
+def _dig(obj, path):
+    v = obj
+    for part in path.split('.'):
+        v = v.get(part) if isinstance(v, dict) else None
+        if v is None:
+            return None
+    return v
+
+
+def _measure(v, unit):
+    if v is None:
+        return 0
+    if unit == '字':
+        return len(v) if isinstance(v, str) else 0
+    if isinstance(v, list):
+        return len(v)
+    if isinstance(v, dict):
+        return len(v)
+    return 1
+
+
+def _claim_src(path):
+    for pre, k in _CLAIM_PREFIX:
+        if path.startswith(pre):
+            return k
+    return 'other'
+
+
+def _src_volume_label(sources, key):
+    """数据源节点的第二行标签(当日实测量)。"""
+    try:
+        if key == 'tc':
+            return f"{len(_dig(sources, 'the_close.clean_transcript') or ''):,} 字"
+        if key == 'cb':
+            a = len(_dig(sources, 'cnbc_closing_bell.clean_transcript') or '')
+            b = len(_dig(sources, 'cnbc_closing_bell.clean_transcript_ot') or '')
+            return f"{a + b:,} 字"
+        if key == 'tw':
+            n = sum(len(_dig(sources, p) or []) for p in ('news.flash', 'news.wire', 'news.calls'))
+            return f"{n} 条(flash/wire/calls)"
+        if key == 'cn':
+            n = sum(len(_dig(sources, p) or []) for p in ('news_macro.digest', 'news_macro.research', 'news_macro.geo'))
+            return f"{n} 条(研报+地缘)"
+        if key == 'cal':
+            n = sum(len(_dig(sources, p) or []) for p in ('economic_events.recent', 'economic_events.upcoming'))
+            m = sum(len(_dig(sources, p) or []) for p in ('earnings_calendar.prior_after_close', 'earnings_calendar.today', 'earnings_calendar.upcoming'))
+            return f"经济事件 {n}+财报 {m}"
+        if key == 'fz':
+            c = len(_dig(sources, 'market.sp500_constituents') or [])
+            mv = len(_dig(sources, 'market.top_movers') or [])
+            sa = len(_dig(sources, 'market.sp500_sector_avg') or [])
+            return f"{c} 成分+{mv} 异动+{sa} 板块"
+        if key == 'fred':
+            n = sum(_measure(_dig(sources, p), '行') for p in _SRC_CFG['fred']['mp'])
+            return f"宏观 {n} 系列/行"
+        if key == 'fomc':
+            n = sum(_measure(_dig(sources, p), '条') for p in _SRC_CFG['fomc']['mp'])
+            return f"决议/路径/概率 {n} 条"
+    except Exception:
+        pass
+    return ''
+
+
+def _sankey_payload(ws: Path) -> Dict[str, Any]:
+    """数据流向 tab 的全部数据;缺件跳过,永不抛错。"""
+    out: Dict[str, Any] = {'nodes': [], 'links': [], 'slices': {}, 'sliceMeta': {},
+                           'md': {}, 'mdMeta': {}, 'prompts': {}, 'promptMeta': {},
+                           'pipes': {}, 'srcCfg': {}, 'name2src': {}}
+    try:
+        snap = _j(ws / "snapshot.json") or {}
+        sources = snap.get('sources') or {}
+        state = _j(ws / "state.json") or {}
+        tim = {k: v[0] for k, v in (state.get('timings') or {}).items() if isinstance(v, list) and v}
+        # 栏目字数/claims
+        chars, claims = {}, {}
+        rep = ws / "final" / "report.md"
+        if rep.exists():
+            for sec in re.split(r'^## ', rep.read_text(encoding='utf-8'), flags=re.M)[1:]:
+                chars[sec.splitlines()[0]] = len(sec)
+        for i, key in enumerate(_SEC_NAMES):
+            cp = ws / 'sections' / f'{key}.claims.json'
+            if cp.exists():
+                try:
+                    claims[i] = len(_j(cp) or [])
+                except Exception:
+                    claims[i] = 0
+        # md / prompts
+        for i, key in enumerate(_SEC_NAMES):
+            fp = ws / 'sections' / f'{key}.md'
+            if fp.exists():
+                out['md'][f'sections/{key}.md'] = fp.read_text(encoding='utf-8')
+        if rep.exists():
+            out['md']['final/report.md'] = rep.read_text(encoding='utf-8')
+        aud = ws / 'final' / 'report.audit.md'
+        if aud.exists():
+            out['md']['final/report.audit.md'] = aud.read_text(encoding='utf-8')
+        try:
+            import prompts as P
+            import run_pipeline as RP
+            blocks = RP.macro_blocks(snap)
+            for i, name in enumerate(['narrative', 'drivers', 'positioning', 'sector_action', 'movers',
+                                      'deep_dives', 'macro_dashboard', 'macro_review', 'geopolitics', 'fomc', 'outlook']):
+                path = f'sections/{_SEC_NAMES[i]}.md'
+                if path not in out['md']:
+                    continue
+                spec = P.SECTION_SPECS.get(name)
+                if spec is None or spec.get('mode') == 'deterministic':
+                    out['prompts'][path] = '本栏目为规则直出,不经过 LLM,无 prompt 模板。'
+                    out['promptMeta'][path] = '规则单元 · 零 LLM'
+                    continue
+                try:
+                    t = P.build_section_prompt(spec, 'cn', blocks)
+                except ValueError:
+                    agent = next(a for a in P.AGENT_ORDER if name in P.agent_section_names(a))
+                    task = P.AGENT_TASK_BUILDERS[agent]('cn', blocks)
+                    task = task.replace('{missing_mark}', P.STYLE_PROFILES['cn']['missing_mark'])
+                    t = (f"{P._common_rules('cn', allowed_tags=P.SECTION_SOURCE_MATRIX.get(name))}\n{task}\n\n"
+                         f"Output file: {spec['output_file']}\n")
+                out['prompts'][path] = t
+                out['promptMeta'][path] = _DEPT_OF[i] + f' · {len(t):,} 字符'
+            out['prompts']['final/report.md'] = 'report.md 由 assemble 程序化拼装(11 栏目按架构顺序合并+溯源渲染),不经过 LLM,无 prompt 模板。'
+            out['promptMeta']['final/report.md'] = '组装器 · 程序化'
+            out['prompts']['final/report.audit.md'] = '内部版同为程序化拼装(口径说明/复核意见/出处卡清单),无 prompt 模板。'
+            out['promptMeta']['final/report.audit.md'] = '组装器 · 程序化'
+        except Exception:
+            pass
+        # 节点
+        nodes, links, NAME = [], [], {}
+        def N(k, depth, value, label, color, art=None, mdfile=None):
+            NAME[k] = label
+            nd = {'name': label, 'depth': depth, 'value': round(value, 1), 'itemStyle': {'color': color}, 'art': art or []}
+            if mdfile:
+                nd['mdfile'] = mdfile
+            nodes.append(nd)
+        def L(a, b, v):
+            if a in NAME and b in NAME:
+                links.append({'source': NAME[a], 'target': NAME[b], 'value': v})
+        SRC, SLC, SEC, QC, DLV = '#f59e0b', '#3b82f6', '#10b981', '#ef4444', '#0d9488'
+        NLc = chr(10)
+        src_links = {'tc': 8, 'cb': 9, 'tw': 7, 'cn': 4, 'cal': 4, 'fz': 6, 'fred': 5, 'fomc': 3}
+        for k, cfg in _SRC_CFG.items():
+            vol = _src_volume_label(sources, k)
+            N(k, 0, src_links[k], cfg['label'] + (NLc + vol if vol else ''), SRC,
+              ['当日快照 bucket: ' + ', '.join(cfg['dp'])])
+            out['name2src'][cfg['label']] = k
+            out['srcCfg'][k] = {'label': cfg['label'], 'unit': cfg['unit'], 'role': cfg['role'], 'dp': cfg['dp']}
+        mm = lambda s: f"{round(tim.get(s, 0) / 60)}min"
+        # 切片
+        slice_files = {}
+        for agent, dept, v in _SLICE_AGENTS:
+            fn = f'snapshot.{agent}.json'
+            fp = ws / fn
+            if not fp.exists():
+                continue
+            slice_files[agent] = fn
+            try:
+                out['slices'][fn] = _j(fp) or {}
+            except Exception:
+                out['slices'][fn] = {}
+            kb = fp.stat().st_size / 1024
+            nsec = len(_SLICE_SECS[agent])
+            N('sl_' + agent, 1, v, f'{fn}{NLc}{kb:.1f} KB · {dept}', SLC,
+              [f'{fn} · 供{dept} · 点击本节点或其右侧管道打开 JSON 数据'])
+            secs_txt = '/'.join(_SEC_NAMES[i].split('_')[1] for i in _SLICE_SECS[agent])
+            out['sliceMeta'][fn] = f'{dept} → {secs_txt}'
+        # 栏目(报告架构顺序)
+        ORDER = [('大盘总览', None, None), ('今日要闻', 'overall_market', 0), ('核心驱动', 'overall_market', 1),
+                 ('持仓与资金流', 'overall_market', 2), ('美股全景', None, None), ('今日涨跌榜', None, 4),
+                 ('板块动态', 'company_desk', 3), ('个股深挖', 'company_desk', 5), ('宏观速览', None, 6),
+                 ('回顾 · 宏观数据', 'macro_review', 7), ('回顾 · 地缘政治', 'geopolitics', 8),
+                 ('美联储观察', 'fomc', 9), ('展望与策略', 'outlook', 10)]
+        SEC_KEY = {}
+        for i, (h, agent, ci) in enumerate(ORDER):
+            key = 's' + str(i)
+            SEC_KEY[h] = key
+            c = chars.get(h)
+            if ci is not None:
+                lab = f'{_SEC_NAMES[ci]}.md + claims({claims.get(ci, 0)}卡){NLc}{h} · {c:,}字 · {_DEPT_OF[ci]}' if c else \
+                      f'{_SEC_NAMES[ci]}.md{NLc}{h} · {_DEPT_OF[ci]}'
+                art = [f'sections/{_SEC_NAMES[ci]}.md', f'claims {claims.get(ci, 0)} 张出处卡', '点击看产出 markdown+Prompt 模板']
+                N(key, 2, (c / 400 if c else 1), lab, SEC, art, mdfile=f'sections/{_SEC_NAMES[ci]}.md')
+            else:
+                N(key, 2, 0.4, h + '(图)' + NLc + '由规则图件直出', SEC,
+                  ['图载体:01_markets.png / 02_finviz_map.png'] if i in (0, 4) else ['规则表:write_movers / write_macro_dashboard'],
+                  mdfile=('sections/05_movers.md' if i == 5 else 'sections/07_macro_dashboard.md') if i in (5, 8) else None)
+        # 核验/图件/交付
+        N('chk', 3, 4, 'verify/check_results.json' + NLc + '规则核对', QC, ['verify_checks.py 每轮覆写'])
+        N('vd', 3, 4, 'verify/verdict.json' + NLc + 'LLM跨节质检', QC, ['质检 agent 手写'])
+        def fsize(rel):
+            fp = ws / rel
+            return f'{fp.stat().st_size / 1024:.1f} KB' if fp.exists() else ''
+        for rel, tag in (('final/charts/01_markets.png', 'FT 行情图'), ('final/charts/02_finviz_map.png', '热力图')):
+            N('c' + rel[-5], 3, 2, rel + (NLc + fsize(rel) if fsize(rel) else ''), DLV, [tag + '(规则)'])
+        rep_n = f"final/report.md{NLc}{fsize('final/report.md')} · 读者版"
+        N('rep', 4, 30, rep_n, DLV, ['11 栏目拼装+2 图嵌入', '点击查看整份报告'], mdfile='final/report.md')
+        aud_n = f"final/report.audit.md{NLc}{fsize('final/report.audit.md')} · 内部版"
+        N('aud', 4, 6, aud_n, DLV, ['口径/复核/出处卡', '点击查看内部版'], mdfile='final/report.audit.md')
+        card_n = 'pipeline-overview.html' + NLc + '五 tab 流程卡(本页)'
+        N('card', 4, 4, card_n, DLV, ['gen_pipeline_card 注入 __RUN__/__SANKEY__'])
+        # 连线
+        for a, b in _SRC2SLICE:
+            L(a, 'sl_' + b, _SRC2SLICE_W[(a, b)])
+        for h, agent, ci in ORDER:
+            if agent and ('sl_' + agent) in NAME and SEC_KEY[h] in NAME:
+                L('sl_' + agent, SEC_KEY[h], round((chars.get(h) or 160) / 400, 1))
+        L('fz', SEC_KEY['今日涨跌榜'], 3)
+        L('fred', SEC_KEY['宏观速览'], 2)
+        L('cal', SEC_KEY['宏观速览'], 1)
+        L('fred', 'c_s.png', 2)
+        L('fz', 'c_s.png', 1)
+        L('fz', 'c_p.png', 3)
+        for h, agent, ci in ORDER:
+            L(SEC_KEY[h], 'chk', 0.2)
+            L(SEC_KEY[h], 'vd', 0.2)
+            L(SEC_KEY[h], 'rep', round((chars.get(h) or 160) / 400 if ci is not None else 0.4, 1))
+            L(SEC_KEY[h], 'aud', 0.2)
+        L('c_s.png', 'rep', 1.5)
+        L('c_p.png', 'rep', 1.5)
+        L('vd', 'aud', 2.5)
+        L('chk', 'aud', 1)
+        L('rep', 'card', 5)
+        L('aud', 'card', 2)
+        out['nodes'], out['links'] = nodes, links
+        # 配给清单
+        for sk, agent in _SRC2SLICE:
+            fn = slice_files.get(agent)
+            if not fn:
+                continue
+            cfg = _SRC_CFG[sk]
+            tot = sum(_measure(_dig(sources, p), cfg['unit']) for p in cfg['mp'])
+            sliced = (out['slices'].get(fn) or {}).get('sources') or {}
+            got = sum(_measure(_dig(sliced, p), cfg['unit']) for p in cfg['mp'])
+            cb = {}
+            for ci in _SLICE_SECS[agent]:
+                md = f'sections/{_SEC_NAMES[ci]}.md'
+                cp = ws / 'sections' / f'{_SEC_NAMES[ci]}.claims.json'
+                if not cp.exists():
+                    continue
+                try:
+                    lst = _j(cp) or []
+                except Exception:
+                    lst = []
+                n = sum(1 for c in lst if _claim_src(c.get('path', '')) == sk)
+                if n:
+                    cb[md.split('/')[-1]] = n
+            out['pipes'][sk + '|' + fn] = {'tot': tot, 'got': got, 'unit': cfg['unit'],
+                                           'share': round(got / tot * 100) if tot else 0,
+                                           'claims': sum(cb.values()), 'claimsBy': cb}
+    except Exception as e:
+        print(f"[card] sankey payload degraded: {e}", flush=True)
+    return out
+
+
 def generate(ws: Path) -> Path:
     ws = Path(ws).resolve()
     run = build_run(ws)
@@ -301,6 +626,9 @@ def generate(ws: Path) -> Path:
     assert marker in tpl, "模板缺少注入点"
     run["flow"]["outlook-stat"] = run.pop("outlookStat")
     html = tpl.replace(marker, "window.__RUN__ = " + json.dumps(run, ensure_ascii=False) + ";")
+    marker2 = "window.__SANKEY__ = null; /*GEN:SANKEY*/"
+    if marker2 in tpl:
+        html = html.replace(marker2, "window.__SANKEY__ = " + json.dumps(_sankey_payload(ws), ensure_ascii=False) + ";")
     out = ws / "pipeline-overview.html"
     out.write_text(html, encoding="utf-8")
     return out
