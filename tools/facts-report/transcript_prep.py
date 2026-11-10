@@ -464,6 +464,8 @@ def prep_workspace(ws: Path) -> int:
             _clean_and_write(ws, "the_close", tc["transcript"], src)
             src["transcript"] = src.pop("clean_transcript_file")
             snap["sources"]["the_close"] = src
+            # 就绪门重试成功时清掉此前留下的缺源错误(show_gate 轮询依赖)
+            snap.setdefault("errors", {}).pop("the_close", None)
             meta = src["transcript"]
             print(f"[the_close] {meta['format']}: raw {meta['raw_chars']} -> "
                   f"clean {meta['clean_chars']} chars "
@@ -492,6 +494,10 @@ def prep_workspace(ws: Path) -> int:
                     r["transcript"], src,
                     field="clean_transcript" if slot == "main"
                     else "clean_transcript_ot")
+                # 同上:重试补回后清陈旧错误键
+                snap.setdefault("errors", {}).pop(
+                    "cnbc_closing_bell" if slot == "main"
+                    else "cnbc_closing_bell.overtime", None)
                 src[slot] = {"video_id": r["content_id"],
                              "video_title": r["title"],
                              "episode_url": r.get("episode_url"),
