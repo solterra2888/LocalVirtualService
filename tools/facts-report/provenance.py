@@ -186,8 +186,11 @@ def source_line(iid: str, it: Dict[str, Any], report_date: str) -> str:
         head.append(g)
     if _is_reported(it):
         head.append("传闻")
-    meta = [m for m in (str(it.get("author") or "").lstrip("*").strip(),
-                        _when(it, report_date)) if m]
+    author = str(it.get("author") or "").lstrip("*").strip()
+    url = str(it.get("url") or "").strip()
+    if url:
+        author = f"[{author}]({url})" if author else f"[源链接]({url})"
+    meta = [m for m in (author, _when(it, report_date)) if m]
     title = str(it.get("title") or "").strip()
     # 星球等源的标题是正文前若干字的截断("13:01 俄罗斯称对乌克兰两...")
     if not title or title.endswith(("...", "…")):
@@ -246,7 +249,14 @@ def render_section(text: str, sources: Dict[str, Any], report_date: str,
         src = ["**本节来源**", ""]
         src += [source_line(i, idx[i], report_date) for i in order_ids]
         if shows:
-            src.append("- 节目:" + "、".join(SHOW_LABELS.get(s, s) for s in shows))
+            parts = []
+            for s in shows:
+                nm = SHOW_LABELS.get(s, s)
+                vid = ((sources.get("the_close") or {}).get("video_id")
+                       if s == "the_close" else None)
+                parts.append(f"[{nm}](https://www.youtube.com/watch?v={vid})"
+                             if vid else nm)
+            src.append("- 节目:" + "、".join(parts))
         if data:
             src.append("- 数据:" + "、".join(data))
     return "\n".join(out_lines), src

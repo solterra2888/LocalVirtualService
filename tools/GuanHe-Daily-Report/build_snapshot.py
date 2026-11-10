@@ -798,7 +798,7 @@ def _news_snapshot(report_date: date,
                 """
                 SELECT c.author_name, c.published_at,
                        coalesce(c.content, ''),
-                       t.info_level, t.evidence_level
+                       t.info_level, t.evidence_level, c.url
                 FROM subscription_content c
                 JOIN subscription_list l
                   ON l.user_id = %(uid)s AND l.enabled = true
@@ -821,7 +821,7 @@ def _news_snapshot(report_date: date,
                 """
                 SELECT c.author_name, c.title, c.published_at,
                        coalesce(c.content, ''),
-                       t.info_level, t.evidence_level
+                       t.info_level, t.evidence_level, c.url
                 FROM subscription_content c
                 JOIN subscription_list l
                   ON l.user_id = %(uid)s AND l.enabled = true
@@ -859,7 +859,7 @@ def _news_snapshot(report_date: date,
     # flash:同文去重(RT/转发),截断 + ticker 提取;L/E 随条目冻结
     flash: List[Dict[str, Any]] = []
     seen_text: set = set()
-    for author, ts, text, lv, ev in frows:
+    for author, ts, text, lv, ev, url in frows:
         body = re.sub(r"\s+", " ", (text or "")).strip()
         if not body or body.startswith("RT @"):
             continue
@@ -868,7 +868,7 @@ def _news_snapshot(report_date: date,
             continue
         seen_text.add(key)
         flash.append({
-            "author": author,
+            "author": author, "url": url,
             **_et_fields(ts),
             "text": body[:_FLASH_TEXT_CAP],
             "tickers": sorted(set(_NEWS_TICKER_RE.findall(text or "")))[:8],
@@ -893,7 +893,7 @@ def _news_snapshot(report_date: date,
                 ec_codes.add(str(r["code"]).upper())
     qualified: List[tuple] = []
     calls: List[Dict[str, Any]] = []
-    for author, title, ts, text, lv, ev in wrows:
+    for author, title, ts, text, lv, ev, url in wrows:
         body = re.sub(r"\s+", " ", (text or "")).strip()
         if len(body) < _WIRE_MIN_CHARS:
             continue
@@ -910,7 +910,7 @@ def _news_snapshot(report_date: date,
             matched = sorted(tkrs & ec_codes) if ec_codes else sorted(tkrs)
             if matched and len(calls) < _CALLS_MAX_ITEMS:
                 calls.append({
-                    "author": author, "title": (title or "")[:200],
+                    "author": author, "title": (title or "")[:200], "url": url,
                     "tickers": matched[:4],
                     # P28:查询本就取了评级,组装时别丢(wire 条目一直带)
                     "info_level": lv, "evidence_level": ev,
@@ -918,15 +918,15 @@ def _news_snapshot(report_date: date,
                     "text": body[:_CALLS_TEXT_CAP],
                 })
             continue
-        qualified.append((author, title, ts, body, lv, ev))
+        qualified.append((author, title, ts, body, lv, ev, url))
     qualified.sort(key=lambda r: _L_RANK.get(r[4], 2))   # 稳定:同档时序不变
     wire = [{
-        "author": author, "title": (title or "")[:200],
+        "author": author, "title": (title or "")[:200], "url": url,
         **_et_fields(ts),
         "text": body[:_WIRE_TEXT_CAP],
         "info_level": lv,
         "evidence_level": ev,
-    } for author, title, ts, body, lv, ev in qualified[:_WIRE_MAX_ITEMS]]
+    } for author, title, ts, body, lv, ev, url in qualified[:_WIRE_MAX_ITEMS]]
 
     out = {
         "filter": (f"flash:Admin订阅twitter {len({a for a, *_ in frows})}源"
@@ -1307,7 +1307,7 @@ def _fomc_snapshot(report_date: date) -> Dict[str, Any]:
 
             cur.execute(
                 """
-                SELECT meeting_date, word_count, raw_content
+                SELECT meeting_date, word_count, raw_content, source_url
                 FROM fomc_documents
                 WHERE central_bank = 'FED' AND doc_type = 'statement'
                   AND meeting_date <= %(t)s AND raw_content IS NOT NULL
@@ -1315,8 +1315,8 @@ def _fomc_snapshot(report_date: date) -> Dict[str, Any]:
                 """, {"t": report_date})
             stmts = [
                 {"meeting_date": str(md)[:10], "word_count": int(wc or 0),
-                 "text": (raw or "")[:5000]}
-                for md, wc, raw in cur.fetchall()
+                 "text": (raw or "")[:5000], "source_url": su}
+                for md, wc, raw, su in cur.fetchall()
             ]
     finally:
         conn.close()
@@ -1605,7 +1605,7 @@ def _news_macro_triage_pools(report_date: date,
             cur.execute(
                 """
                 SELECT c.id, c.published_at, c.channel_type, c.author_name,
-                       c.title, c.content,
+                       c.title, c.content, c.url,
                        t.info_level, t.evidence_level
                 FROM subscription_content c
                 LEFT JOIN subscription_content_tags t
@@ -1635,6 +1635,7 @@ def _news_macro_triage_pools(report_date: date,
             "channel_type": row.get("channel_type"),
             "author": row.get("author_name"),
             "title": (row.get("title") or "").strip()[:120],
+            "url": row.get("url"),
             "text": text[:cap],
             "theme": v.get("theme") or "",
             "importance": v.get("importance"),
@@ -1725,7 +1726,7 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
                 cur.execute(
                     """
                     SELECT c.published_at, c.channel_type, c.author_name,
-                           c.title, c.content,
+                           c.title, c.content, c.url,
                            t.info_level, t.evidence_level
                     FROM subscription_content c
                     JOIN subscription_list l
@@ -1774,6 +1775,7 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
             "channel_type": row.get("channel_type"),
             "author": row.get("author_name"),
             "title": (row.get("title") or "").strip()[:120],
+            "url": row.get("url"),
             # P28:与 triage 路径条目对齐,降级不丢证据分级(未评级为 None)
             "evidence_level": row.get("evidence_level"),
             "text": text,

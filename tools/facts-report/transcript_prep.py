@@ -34,6 +34,7 @@ import argparse
 import json
 import re
 import sys
+import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -41,6 +42,7 @@ from typing import Any, Dict, List, Optional, Tuple
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+import requests  # noqa: E402  — Closing Bell 单集溯源(RSS)
 from backend.database.db_manager import DatabaseManager  # noqa: E402
 from backend.utils.database_config import get_database_config  # noqa: E402
 
@@ -54,6 +56,14 @@ GAP_SEC_PARA = 3.0
 
 # ── 直查取数:节目自识别指纹 ───────────────────────────────────────────
 TC_SELF_ID_RE = re.compile(r"THIS\s+IS\s*[\"\u201c]?\s*THE\s+CLOSE", re.I)
+try:  # 生产级识别器(2026-11-10 起):标题层+其他栏目排除+16000字口播窗,单一事实源
+    from backend.services.the_close_summary_service import (
+        is_bloomberg_the_close_video as _is_tc_prod,
+    )
+except Exception:  # backend 不可导入时退回本地正则(独立可跑)
+    _is_tc_prod = None
+
+TC_TITLE_DATE_RE = re.compile(r"the\s+close\s+0?\d{1,2}/0?\d{1,2}", re.I)
 CB_OT_SELF_ID_RE = re.compile(r"CLOS\w*\s*(?:THE\s+)?BELL\s+OVERTIME", re.I)
 
 
@@ -67,7 +77,8 @@ def _row(cur: Any, channel: str, t0: datetime, t1: datetime,
     cur.execute(
         """
         SELECT content_id, title, published_at,
-               COALESCE(transcript_cleaned, transcript)
+               COALESCE(transcript_cleaned, transcript),
+               url, feed_url
         FROM subscription_content
         WHERE channel_type = %(ch)s
           AND published_at >= %(t0)s AND published_at < %(t1)s
@@ -77,11 +88,12 @@ def _row(cur: Any, channel: str, t0: datetime, t1: datetime,
         {"ch": channel, "t0": t0, "t1": t1},
     )
     out = []
-    for cid, title, pub, tr in cur.fetchall():
+    for cid, title, pub, tr, url, feed in cur.fetchall():
         if len(tr or "") < min_len:
             continue
         out.append({"content_id": cid, "title": title or "",
-                    "published_at": pub, "transcript": tr})
+                    "published_at": pub, "transcript": tr,
+                    "url": url, "feed_url": feed})
     return out
 
 
@@ -97,7 +109,13 @@ def fetch_the_close(conn: Any, session_date: date) -> Optional[Dict[str, Any]]:
             rows = _row(cur, "youtube", day0 + timedelta(hours=t0h),
                         day0 + timedelta(hours=t1h), min_len=50000)
             for r in rows:
-                if TC_SELF_ID_RE.search(r["transcript"][:2500]):
+                # 2026-11-10 修复:自标识句可能被长冷开场推后(11-09 首次出现在第
+                # 7945 字),搜索窗 2500→12000;另加日期式标题兜底("The Close
+                # 11/9/2026")。标题两种形态互补:11-06 整期标题是新闻句式,单靠
+                # 标题会漏;单靠开头正则会漏 11-09 —— 取或。
+                head = r["transcript"][:12000]
+                if (_is_tc_prod(r["title"], transcript=r["transcript"]) if _is_tc_prod
+                    else (TC_SELF_ID_RE.search(head) or TC_TITLE_DATE_RE.search(r["title"] or ""))):
                     return r
     return None
 
@@ -113,6 +131,50 @@ def _cb_title_has_date(title: str, session_date: date) -> bool:
         rf"0?{session_date.month}/0?{session_date.day}/"
         rf"(?:{session_date.strftime('%y')}|{session_date.year})")
     return bool(pat.search(title))
+
+
+
+CB_FEED_FALLBACK = "https://feeds.simplecast.com/Nh1wIaXT"
+_CB_FEED_CACHE: Dict[str, Dict[str, str]] = {}
+
+
+def _cb_feed_items(feed: str) -> Dict[str, str]:
+    """官方播客源 → {标题: 单集链接};失败返回空。"""
+    if feed in _CB_FEED_CACHE:
+        return _CB_FEED_CACHE[feed]
+    items: Dict[str, str] = {}
+    try:
+        resp = requests.get(feed, timeout=25,
+                            headers={"User-Agent": "Mozilla/5.0"})
+        root = ET.fromstring(resp.content)
+        for it in root.iter("item"):
+            t = (it.findtext("title") or "").strip()
+            # CNBC 官方 RSS 的 <link> 全是首页占位;单集最源头是
+            # <enclosure>(节目 MP3 音频,转录的原始素材),无 enclosure 才退 link。
+            enc = it.find("enclosure")
+            link = (enc.get("url") if enc is not None else None) \
+                or (it.findtext("link") or "").strip()
+            if t and link and link != "https://www.cnbc.com":
+                items[t] = link
+    except Exception:  # noqa: BLE001 — 溯源增强,失败不阻断建快照
+        pass
+    _CB_FEED_CACHE[feed] = items
+    return items
+
+
+def _cb_episode_link(r: Dict[str, Any], rows: List[Dict[str, Any]]) -> str:
+    feed = (r.get("feed_url") or CB_FEED_FALLBACK) or CB_FEED_FALLBACK
+    items = _cb_feed_items(feed)
+    title = (r.get("title") or "").strip()
+    if title and title in items:
+        return items[title]
+    # 标题微差兜底:双方去空格小写后互相包含
+    tl = re.sub(r"\s+", "", title.lower())
+    for t, link in items.items():
+        if tl and (tl in re.sub(r"\s+", "", t.lower())
+                   or re.sub(r"\s+", "", t.lower()) in tl):
+            return link
+    return feed
 
 
 def fetch_closing_bell(conn: Any,
@@ -131,6 +193,9 @@ def fetch_closing_bell(conn: Any,
         ranked = sorted(rows, key=lambda r: 0 if "closing bell" in r["title"].lower() else 1)
         rows = ranked[:2]
     main = ot = None
+    # 溯源:官方播客 RSS 匹配单集链接(匹配失败回退官方源,绝不阻断)
+    for r in rows:
+        r["episode_url"] = _cb_episode_link(r, rows)
     if len(rows) == 1:
         only = rows[0]
         head = only["transcript"][:1500]
@@ -429,6 +494,8 @@ def prep_workspace(ws: Path) -> int:
                     else "clean_transcript_ot")
                 src[slot] = {"video_id": r["content_id"],
                              "video_title": r["title"],
+                             "episode_url": r.get("episode_url"),
+                             "podcast_feed": r.get("feed_url") or CB_FEED_FALLBACK,
                              "published_utc": _pub_iso(r["published_at"]),
                              "transcript": src.pop(
                                  "clean_transcript_file" if slot == "main"

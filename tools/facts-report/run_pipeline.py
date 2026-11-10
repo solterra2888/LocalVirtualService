@@ -3,7 +3,7 @@
 """facts-report:GuanHe-Daily-Report 的事实/观点分离变体(郑翔需求 痛点 2)。
 
 与日报同一套编排,差别只在内容规则(见 README):01 节「今日要闻」只写事实;
-各节嘉宾/分析师观点收进块末「观点：」行。快照默认借用日报同日快照。
+各节嘉宾/分析师观点收进块末「观点：」行。快照由本管线 build_snapshot 自建。
 
 以下为原编排说明(v4)。
 
@@ -88,26 +88,10 @@ HEADLINE_RE = re.compile(
 # ── workspace & state ──────────────────────────────────────────────────
 
 REPORTS_DIR = "facts-report"
-# 快照默认借用 GuanHe-Daily-Report 当日的冻结快照(只读复制):两份报告数字同源,
-# 也不重复打外部 API。日报当日没有快照时再自行 build_snapshot。
-SEED_REPORTS_DIR = "guanhe-daily-report"
 
 
 def workspace(report_date: str) -> Path:
     return REPO_ROOT / "backend" / "reports" / REPORTS_DIR / report_date
-
-
-def seed_snapshot(ws: Path, report_date: str) -> bool:
-    """ws 无快照时从日报工作区复制 snapshot.json + transcripts/;返回是否复制。"""
-    src = REPO_ROOT / "backend" / "reports" / SEED_REPORTS_DIR / report_date
-    if (ws / "snapshot.json").exists() or not (src / "snapshot.json").exists():
-        return False
-    ws.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src / "snapshot.json", ws / "snapshot.json")
-    if (src / "transcripts").is_dir():
-        shutil.copytree(src / "transcripts", ws / "transcripts", dirs_exist_ok=True)
-    print(f"[snapshot] seeded from {src}", flush=True)
-    return True
 
 
 def load_state(ws: Path) -> Dict[str, Any]:
@@ -2140,8 +2124,7 @@ def main() -> int:
              "确定性核验有 high 失败时一律跳过 LLM、直接修订")
     parser.add_argument("--no-plan", action="store_true",
                         help="跳过写作前的编辑计划(故事归属 + 规范数值)")
-    parser.add_argument("--no-seed", action="store_true",
-                        help="不从 guanhe-daily-report 同日工作区借用快照")
+
     parser.add_argument("--no-provenance", action="store_true",
                         help="成品不渲染要点来源标记与节末来源列表(审计注释仍进 sidecar)")
     parser.add_argument("--max-parallel", type=int, default=0,
@@ -2160,8 +2143,7 @@ def main() -> int:
 
     ws = workspace(args.report_date)
     snapshot = ws / "snapshot.json"
-    if not args.no_seed:
-        seed_snapshot(ws, args.report_date)
+
     if not snapshot.exists():
         print(f"snapshot missing: {snapshot} — run build_snapshot.py first",
               file=sys.stderr)

@@ -54,6 +54,14 @@ GAP_SEC_PARA = 3.0
 
 # ── 直查取数:节目自识别指纹 ───────────────────────────────────────────
 TC_SELF_ID_RE = re.compile(r"THIS\s+IS\s*[\"\u201c]?\s*THE\s+CLOSE", re.I)
+try:  # 生产级识别器(2026-11-10 起):标题层+其他栏目排除+16000字口播窗,单一事实源
+    from backend.services.the_close_summary_service import (
+        is_bloomberg_the_close_video as _is_tc_prod,
+    )
+except Exception:  # backend 不可导入时退回本地正则(独立可跑)
+    _is_tc_prod = None
+
+TC_TITLE_DATE_RE = re.compile(r"the\s+close\s+0?\d{1,2}/0?\d{1,2}", re.I)
 CB_OT_SELF_ID_RE = re.compile(r"CLOS\w*\s*(?:THE\s+)?BELL\s+OVERTIME", re.I)
 
 
@@ -97,7 +105,13 @@ def fetch_the_close(conn: Any, session_date: date) -> Optional[Dict[str, Any]]:
             rows = _row(cur, "youtube", day0 + timedelta(hours=t0h),
                         day0 + timedelta(hours=t1h), min_len=50000)
             for r in rows:
-                if TC_SELF_ID_RE.search(r["transcript"][:2500]):
+                # 2026-11-10 修复:自标识句可能被长冷开场推后(11-09 首次出现在第
+                # 7945 字),搜索窗 2500→12000;另加日期式标题兜底("The Close
+                # 11/9/2026")。标题两种形态互补:11-06 整期标题是新闻句式,单靠
+                # 标题会漏;单靠开头正则会漏 11-09 —— 取或。
+                head = r["transcript"][:12000]
+                if (_is_tc_prod(r["title"], transcript=r["transcript"]) if _is_tc_prod
+                    else (TC_SELF_ID_RE.search(head) or TC_TITLE_DATE_RE.search(r["title"] or ""))):
                     return r
     return None
 
