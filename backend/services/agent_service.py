@@ -50,6 +50,7 @@ from backend.services.close_brief_report_service import CloseBriefReportService
 from backend.services.closing_bell_report_service import ClosingBellReportService
 from backend.services.daily_market_report_service import DailyMarketReportService
 from backend.services.market_weekly_service import MarketWeeklyService
+from backend.services.morning_brief_report_service import MorningBriefReportService
 from backend.services.surveillance_report_service import SurveillanceReportService
 from backend.services.theme_report_service import ThemeReportService
 from backend.services.twitter_daily_report_service import TwitterDailyReportService
@@ -494,11 +495,12 @@ _REPORT_SERVICES = {
     # Global singleton reports (no per-user row; PAT still required for Agent access)
     "the_close": CloseBriefReportService,
     "closing_bell": ClosingBellReportService,
+    "morning_brief": MorningBriefReportService,
     "bloomberg_surveillance": SurveillanceReportService,
 }
 
 # These reports are platform-wide (one row per report_date), not scoped to user_id.
-_GLOBAL_KINDS = frozenset({"the_close", "closing_bell", "bloomberg_surveillance"})
+_GLOBAL_KINDS = frozenset({"the_close", "closing_bell", "morning_brief", "bloomberg_surveillance"})
 
 
 def _normalize_kind(kind: str) -> str:
@@ -554,6 +556,7 @@ _REPORT_SHARE_PATH = {
     "theme": "/api/theme-report/shared/",
     "the_close": "/api/close-brief-report/shared/",
     "closing_bell": "/api/closing-bell-report/shared/",
+    "morning_brief": "/api/morning-brief-report/shared/",
     "bloomberg_surveillance": "/api/surveillance-report/shared/",
 }
 

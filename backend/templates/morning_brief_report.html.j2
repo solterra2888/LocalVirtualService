@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Morning Brief — {{ report_date }}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         margin: 0; background: #f6f7f9; color: #1f2329; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 24px 20px 60px; }
+  header { border-bottom: 2px solid #3370ff; padding-bottom: 12px; margin-bottom: 20px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .meta { font-size: 12px; color: #646a73; line-height: 1.8; }
+  main { background: #fff; border-radius: 8px; padding: 24px 28px;
+         box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  main h2 { border-left: 4px solid #3370ff; padding-left: 10px; font-size: 18px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 10px 0; }
+  th, td { border: 1px solid #e0e3e8; padding: 6px 10px; text-align: left; }
+  th { background: #f2f3f5; }
+  a { color: #3370ff; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #111417; color: #e8eaed; }
+    main { background: #1b1f24; box-shadow: none; }
+    th { background: #23272e; }
+    th, td { border-color: #3a4048; }
+    .meta { color: #9aa4b2; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Morning Brief（facts-report）</h1>
+    <div class="meta">
+      报告日期 {{ report_date }} · 美股交易日 {{ session_date }}<br>
+      生成于 {{ generated_at_beijing }} / {{ generated_at_new_york }} / {{ generated_at_utc }}<br>
+      工作区 {{ workspace }}
+    </div>
+  </header>
+  <main>{{ summary_html }}</main>
+</div>
+</body>
+</html>

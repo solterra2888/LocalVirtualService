@@ -17,6 +17,7 @@ from . import chat_group_messages
 from . import daily_market_report
 from . import close_brief_report
 from . import closing_bell_report
+from . import morning_brief_report
 from . import bloomberg_surveillance
 from . import surveillance_report
 
@@ -35,6 +36,7 @@ __all__ = [
     'daily_market_report',
     'close_brief_report',
     'closing_bell_report',
+    'morning_brief_report',
     'bloomberg_surveillance',
     'surveillance_report',
 ] 

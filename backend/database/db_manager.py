@@ -1013,6 +1013,7 @@ class DatabaseManager:
                 'theme_report',
                 'market_weekly_report',
                 'daily_market_report',
+                'morning_brief',
                 'the_close_summary',
                 'cnbc_closing_bell',
                 'zhishixingqiu_summary',

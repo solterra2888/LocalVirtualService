@@ -69,6 +69,12 @@ if [ $rc -ne 0 ]; then
         --line "日期: $DATE" --line "退出码: $rc" \
         --line "时间: $(date '+%F %T %Z')" \
         --line "处置: 查看 cron.log / 工作区 run.log 定位" || true
+    # Morning Brief 登记失败态(reports 模块;注册失败不改写本脚本 rc)
+    "$PY" register_morning_brief.py --fail "$DATE" --rc $rc || true
+else
+    # Morning Brief 发布注册(2026-11-11): HTML 落库 morning_brief_reports +
+    # 上传 OSS;注册器失败自行 Lark 告警,不影响管线 rc。
+    "$PY" register_morning_brief.py --ok "$DATE" || true
 fi
 
 echo "==== $(date '+%F %T %Z') facts-report cron end (rc=$rc) ===="

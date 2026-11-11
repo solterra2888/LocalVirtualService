@@ -126,6 +126,12 @@ except ImportError as e:
     print(f"❌ 导入 Daily Market Report 任务模块失败: {e}")
 
 try:
+    from backend.tasks import morning_brief_tasks
+    print(f"✅ 成功导入 Morning Brief 任务模块: {morning_brief_tasks.__name__}")
+except ImportError as e:
+    print(f"❌ 导入 Morning Brief 任务模块失败: {e}")
+
+try:
     from backend.tasks import the_close_summary_tasks
     print(f"✅ 成功导入 The Close Summary 任务模块: {the_close_summary_tasks.__name__}")
 except ImportError as e:

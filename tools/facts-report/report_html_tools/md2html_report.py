@@ -67,7 +67,12 @@ _htmls = md_batch_render(_tab_md_list) if _tab_md_list else []
 _k = 0
 for t in tab_payload:
     for it in t['secs']:
-        it['html'] = _htmls[_k]; _k += 1
+        h = _htmls[_k]; _k += 1
+        # 卡片标题由渲染层(s.h)输出,去掉正文里重复的首个 <h2>
+        m2 = re.match(r'\s*<h2[^>]*>(.*?)</h2>', h)
+        if m2 and m2.group(1).strip() == it['h'].strip():
+            h = h[m2.end():].lstrip()
+        it['html'] = h
         it.pop('md')
 
 # ── FT 跨资产收盘表(替换 Tab1 大盘总览的 PNG)──
@@ -78,7 +83,7 @@ if ftp.exists():
     def _cell(v, u):
         if v is None: return '<td class="num na">—</td>'
         cls = 'pos' if v > 0 else ('neg' if v < 0 else '')
-        sv = f'{v:+.1f}%' if u == '%' else f'{v:+.0f}'
+        sv = f'{v:+.1f}%' if u == '%' else f'{v:+.0f}{u}'
         return f'<td class="num {cls}">{sv}</td>'
     def _bar(v, scale):
         if v is None: return ''
@@ -87,6 +92,18 @@ if ftp.exists():
         cls = 'bpos' if v > 0 else 'bneg'
         return (f'<div class="bwrap"><div class="zero"></div>'
                 f'<div class="bar {cls}" style="{side};width:{w:.1f}%"></div></div>')
+    # 指数→finviz 指数页(内部代码→finviz slug);finviz 无对应页面的代码不展示徽标
+    FINVIZ_INDEX = {'SPX': 'SPX', 'NDX': 'NDX', 'DJIA': 'DJI'}
+    HIDE_TICKER = {'R2K', 'SOX', 'DXY'}          # finviz 无指数/行情页
+    GRAY_TICKER = {'IH', 'IF', 'IC', 'IM'}       # 中金所期货,仅标注不外链
+    def _tk_html(tk):
+        if not tk or tk in HIDE_TICKER:
+            return ''
+        if tk in GRAY_TICKER:
+            return f'<span class="tk nolnk">{tk}</span>'
+        href = (f'https://elite.finviz.com/index/{FINVIZ_INDEX[tk]}?p=d' if tk in FINVIZ_INDEX
+                else f'https://finviz.com/quote.ashx?t={tk}')
+        return f'<a class="tk" href="{href}" target="_blank" rel="noopener">{tk} ↗</a>'
     ft_rows = ''
     for sec in D['sections']:
         ft_rows += (f'<tr class="ftgrp"><td colspan="6" title="条形刻度: {sec["scale_lbl"]}">{sec["title"]}</td></tr>')
@@ -94,13 +111,12 @@ if ftp.exists():
             u = r.get('unit') or '%'
             u = '%' if u in ('%', 'pct') else u
             d1 = r.get('m1d')
-            bv = '—' if d1 is None else f'{d1:+.2f}'.replace('+0.', '+.').replace('-0.', '-.')
+            bv = '—' if d1 is None else (f'{d1:+.2f}%' if u == '%' else f'{d1:+.1f}{u}')
             bvc = 'pos' if (d1 or 0) > 0 else 'neg'
             ft_rows += (
-                f'<tr><td class="ftasset"><b>{r["name"]}</b>'
-                + (f'<a class="tk" href="https://finviz.com/quote.ashx?t={r["ticker"]}" target="_blank" rel="noopener">{r["ticker"]} ↗</a>' if r.get('ticker') else '')
-                + f'</td><td class="num">{r.get("last_str") or "—"}<span class="ftunit">{"" if u == "%" else " " + u}</span></td>'
-                + f'<td class="barcell">{_bar(d1, sec["scale"])}<span class="bv {bvc}">{bv}</span></td>'
+                f'<tr><td class="ftasset"><b>{r["name"]}</b>' + _tk_html(r.get('ticker'))
+                + f'</td><td class="num">{r.get("last_str") or "—"}<span class="ftunit">{"" if u in ("%", "bp") else " " + u}</span></td>'
+                + f'<td class="barcell"><span class="bv {bvc}">{bv}</span>{_bar(d1, sec["scale"])}</td>'
                 + _cell(r.get('m1w'), u) + _cell(r.get('m1m'), u) + _cell(r.get('ytd'), u) + '</tr>')
     FT_TABLE = ('<div class="ftwrap"><table class="fttbl">'
                 '<thead><tr><th>资产</th><th class="num">收盘</th><th>当日</th>'
@@ -252,7 +268,7 @@ tbody tr:hover{background:var(--bg-hover)}
 td.num,th.num{text-align:right;font-family:ui-monospace,Consolas,monospace;font-size:12.8px}
 .pos{color:var(--pos);font-weight:600}.neg{color:var(--neg);font-weight:600}
 .prov{color:var(--text-muted);font-size:8px;background:var(--bg-hover);border-radius:4px;padding:0 3px;white-space:nowrap;vertical-align:0.5em}
-li.viewline,p.viewline{border-left:3px solid #d97706;background:rgba(217,119,6,.07);border-radius:0 6px 6px 0;padding:6px 10px;list-style:none;margin-left:-28px}
+li.viewline,p.viewline{border-left:3px solid #d97706;background:var(--bg-hover);border-radius:0 6px 6px 0;padding:6px 10px;list-style:none;margin-left:-28px;font-size:12px}
 .srcblock{margin-top:14px;padding:10px 14px;background:var(--bg-hover);border-radius:8px;font-size:12.5px;color:var(--text-muted)}
 .srcblock li,.srcblock p{font-size:8px;line-height:1.9}
 .srcblock summary{font-size:12.5px}
@@ -260,6 +276,7 @@ li.viewline,p.viewline{border-left:3px solid #d97706;background:rgba(217,119,6,.
 .ftwrap{overflow-x:auto;margin:6px 0}
 .fttbl{border-collapse:collapse;width:100%;font-size:13.5px}
 .fttbl th{background:var(--bg-table-header);color:#fff;font-weight:600;padding:8px 11px;text-align:left;white-space:nowrap}
+.fttbl th.num{text-align:right}
 .fttbl td{padding:6px 11px;border-bottom:1px solid var(--border-subtle);white-space:nowrap}
 tr.ftgrp td{background:#e7edf5;color:#1e3a5f;font-weight:700;font-size:12.5px;letter-spacing:.06em;padding:7px 11px;border-top:2px solid #cbd7e6}
 .fttbl tbody tr{background:var(--bg-card)}
@@ -272,11 +289,12 @@ td.num{text-align:right;font-family:ui-monospace,Consolas,monospace;font-size:12
 td.na{color:#b6beca}
 .pos{color:var(--pos);font-weight:600}.neg{color:var(--neg);font-weight:600}
 .barcell{min-width:220px}
-.bwrap{position:relative;height:13px;width:56%;display:inline-block;vertical-align:-2px;margin-right:8px}
+.bwrap{position:relative;height:13px;width:58%;display:inline-block;vertical-align:-2px}
 .bwrap .zero{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:#c3ccd6}
 .bar{position:absolute;top:1px;bottom:1px;border-radius:2px}
 .bpos{background:var(--pos)}.bneg{background:var(--neg)}
-.bv{font:600 12.5px ui-monospace,Consolas,monospace}
+.bv{font:600 12.5px ui-monospace,Consolas,monospace;display:inline-block;width:66px;text-align:left;margin-right:10px;vertical-align:1px;white-space:nowrap}
+td.ftasset span.tk.nolnk{color:var(--text-muted);border-bottom:none;cursor:default}
 .ftnote{font-size:11.5px;color:var(--text-muted);margin-top:8px;line-height:1.6}
 __GDRCSS__
 .gdr-stagewrap{position:relative;height:24px;margin:2px 0 10px}
@@ -349,6 +367,8 @@ function decorate(root){
  var jobs = [];
  while(walker.nextNode()){
   var t = walker.currentNode;
+  var pe = t.parentElement;
+  if(pe && (pe.tagName === 'SCRIPT' || pe.tagName === 'STYLE')) continue;
   if(/[-+][0-9]+([.][0-9]+)?%/.test(t.nodeValue)) jobs.push(t);
  }
  jobs.forEach(function(t){
@@ -376,9 +396,9 @@ function decorate(root){
    return '<span class="' + cls + '" ' + d + '>' + m + '</span>';
   });
  });
- // 观点行
+ // 观点/推断行
  document.querySelectorAll('.md li, .md p').forEach(function(el){
-  if(/^观点[：:]/.test(el.textContent.trim())) el.classList.add('viewline');
+  if(/^(观点|推断)[：:]/.test(el.textContent.trim())) el.classList.add('viewline');
  });
  // 本节来源卡片移除(溯源能力由内联标签承担)
  document.querySelectorAll('.md p').forEach(function(el){
@@ -390,8 +410,8 @@ function decorate(root){
    rm.forEach(function(x){ x.remove(); });
   }
  });
- // 表格数字列右对齐
- document.querySelectorAll('.md table').forEach(function(tb){
+ // 表格数字列右对齐(FT 收盘表自带对齐,排除)
+ document.querySelectorAll('.md table:not(.fttbl)').forEach(function(tb){
   var rows = tb.querySelectorAll('tr');
   if(!rows.length) return;
   var n = rows[0].children.length;

@@ -71,6 +71,7 @@ class SchedulerService:
             'theme_report': self._execute_theme_report_task,
             'market_weekly_report': self._execute_market_weekly_report_task,
             'daily_market_report': self._execute_daily_market_report_task,
+            'morning_brief': self._execute_morning_brief_task,
             'the_close_summary': self._execute_the_close_summary_task,
             'cnbc_closing_bell': self._execute_cnbc_closing_bell_task,
             'bloomberg_surveillance': self._execute_bloomberg_surveillance_task,
@@ -1545,6 +1546,46 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"Daily Market Report 任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_morning_brief_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        生成 Morning Brief（facts-report LLM agent 管线，全局单例晨报）。
+
+        生成体是 40-60 分钟的外部管线，celery 任务只做秒级 detached 派发
+        （含 completed 挡板 / 孤儿回收），完成态由管线尾部注册器回写。
+        无任何 HTTP 触发端点 —— 本调度是唯一生成入口。
+
+        Args:
+            params:
+                - report_date: 可选，北京自然日 ISO 日期（默认今天）
+                - force: 可选，强制重派（仅调度 params/CLI 可达）
+        """
+        try:
+            logger.info("分发 Morning Brief Celery 任务", params=params)
+
+            from backend.tasks.morning_brief_tasks import generate_morning_brief_task
+
+            report_date = params.get('report_date')
+            force = params.get('force', False)
+
+            task = generate_morning_brief_task.delay(
+                report_date=report_date,
+                force=force,
+            )
+
+            date_info = f", date={report_date}" if report_date else ", today"
+            force_info = "（强制重派）" if force else ""
+            message = (
+                f"✅ Morning Brief: "
+                f"已提交 Celery 异步任务 {task.id}{date_info}{force_info}"
+            )
+            logger.info(message)
+            return {'success': True, 'message': message, 'celery_task_id': task.id}
+
+        except Exception as e:
+            error_msg = f"Morning Brief 任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

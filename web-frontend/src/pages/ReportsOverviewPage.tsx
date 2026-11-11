@@ -10,6 +10,7 @@ import {
   PlayCircleOutlined,
   BellOutlined,
   RadarChartOutlined,
+  SunOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
@@ -20,6 +21,7 @@ import { themeReportAPI } from '../services/themeReport';
 import { dailyMarketReportAPI } from '../services/dailyMarketReport';
 import { closeBriefReportAPI } from '../services/closeBriefReport';
 import { closingBellReportAPI } from '../services/closingBellReport';
+import { morningBriefReportAPI } from '../services/morningBriefReport';
 import { surveillanceReportAPI } from '../services/surveillanceReport';
 import dayjs from 'dayjs';
 
@@ -234,6 +236,7 @@ interface ReportDatesState {
   dailyMarket: string | null;
   closeBrief: string | null;
   closingBell: string | null;
+  morningBrief: string | null;
   surveillance: string | null;
 }
 
@@ -252,6 +255,7 @@ const ReportsOverviewPage: React.FC = () => {
     dailyMarket: null,
     closeBrief: null,
     closingBell: null,
+    morningBrief: null,
     surveillance: null,
   });
 
@@ -264,6 +268,7 @@ const ReportsOverviewPage: React.FC = () => {
     dailyMarket: true,
     closeBrief: true,
     closingBell: true,
+    morningBrief: true,
     surveillance: true,
   });
 
@@ -339,6 +344,16 @@ const ReportsOverviewPage: React.FC = () => {
         }
       } catch { /* ignore */ }
       setLoading(prev => ({ ...prev, closingBell: false }));
+
+      // Morning Brief (facts-report)
+      setLoading(prev => ({ ...prev, morningBrief: true }));
+      try {
+        const mbRes = await morningBriefReportAPI.getLatest();
+        if (mbRes && mbRes.report_date) {
+          setReportDates(prev => ({ ...prev, morningBrief: mbRes.report_date }));
+        }
+      } catch { /* ignore */ }
+      setLoading(prev => ({ ...prev, morningBrief: false }));
 
       // Bloomberg Surveillance Report
       setLoading(prev => ({ ...prev, surveillance: true }));
@@ -422,6 +437,15 @@ const ReportsOverviewPage: React.FC = () => {
       color: '#13c2c2',
       latestDate: reportDates.closingBell,
       loading: loading.closingBell,
+    },
+    {
+      title: 'Morning Brief',
+      description: 'facts-report LLM daily brief (auto, 08:00 Beijing)',
+      icon: <SunOutlined />,
+      path: '/reports/morning-brief',
+      color: '#fa8c16',
+      latestDate: reportDates.morningBrief,
+      loading: loading.morningBrief,
     },
     {
       title: 'Bloomberg Surveillance Report',
