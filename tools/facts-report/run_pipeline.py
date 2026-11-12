@@ -375,9 +375,11 @@ def macro_blocks(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# 今日涨跌榜(v8.6):美股/港股/A股成交额榜。三榜在 Stage 0 由 build_snapshot
-# 冻结进 market.volume_leaders(美股=finviz 成分股近似,港/A股=EODHD bulk),
-# 编排器只渲染不取数,不经 LLM、无台账。
+# 今日涨跌榜(v8.8):美股/港股/A股成交额达标个股榜,门槛不变(美股 ≥$10 亿、
+# 港股 ≥10 亿港元、A股 ≥20 亿元人民币),仅撤去前 100 截断;三市统一由
+# EODHD bulk 按报告日 T 显式取数(确定性可回填),港/A股中文名走腾讯。
+# 三榜在 Stage 0 由 build_snapshot 冻结进 market.volume_leaders,编排器只
+# 渲染不取数,不经 LLM、无台账。
 VL_MARKETS = (("us", "美股", "亿美元"), ("hk", "港股", "亿港元"),
               ("cn", "A股", "亿元"))
 
@@ -403,8 +405,9 @@ def render_movers(snapshot: Dict[str, Any]) -> str:
         # 旧快照无 volume_leaders 块 —— 如实说明缺失,不编榜单(勿用禁词)
         return "## 今日涨跌榜\n\n当日成交额榜数据不可用,本表从略。\n"
     parts = ["## 今日涨跌榜", "",
-             "美股 ≥10 亿美元、港股 ≥10 亿港元、A股 ≥20 亿元人民币,"
-             "按当日成交额降序,各取前 8。", ""]
+             "当日成交额门槛:美股 ≥10 亿美元、港股 ≥10 亿港元、A股 ≥20 亿元"
+             "人民币,按成交额降序;成交额按收盘价×成交量估算,与实际成交金额"
+             "略有偏差。文档版各取前 8,网页交互榜含全部达标个股。", ""]
     for key, label, unit in VL_MARKETS:
         m = vl.get(key) or {}
         parts += [f"### {label}", ""]
@@ -412,7 +415,7 @@ def render_movers(snapshot: Dict[str, Any]) -> str:
         if not rows:
             parts += [m.get("note") or "当日无成交额达标个股。", ""]
             continue
-        parts += ["| 代码 | 公司 | 收盘价 | 涨跌幅 | 成交额 |",
+        parts += ["| 代码 | 公司 | 收盘价 | 当日 | 成交额 |",
                   "|---|---|---|---|---|"]
         for r in rows[:8]:   # md 文档版固定前 8;网页交互榜单用快照全量(md2html)
             chg = r.get("change_percent")

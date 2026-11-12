@@ -10,7 +10,7 @@ task_scheduling(type=morning_brief) 定时调度；补跑走服务器 CLI。
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from psycopg2 import errors as pg_errors
 
 from backend.auth.jwt_utils import get_current_user
@@ -82,3 +82,34 @@ async def get_shared_report(token: str):
     return HTMLResponse(content=html, headers={
         "Cache-Control": "public, max-age=3600",
     })
+
+
+@router.get("/shared/{token}/quotes")
+async def get_shared_quotes(token: str):
+    """报告打开时刷新 FT 表行情（实时覆盖；无需认证，token 即门禁）。
+
+    报告内嵌 JS 对近两天的报告调用此端点就地刷新收盘/涨跌（与 DMR
+    /shared/{token}/temperature 同模式）。60s 服务端共享缓存挡住匿名
+    分享链接的并发；失败返回 404/5xx，前端静默保留快照。
+    """
+    svc = MorningBriefReportService()
+    data = svc.get_live_quotes_by_token(token)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Report or live spec not found")
+    return JSONResponse(content=data, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/shared/{token}/kline")
+async def get_shared_kline(token: str, m: str, i: int):
+    """今日涨跌榜点击行 → 单只个股日 K（Yahoo OHLC ≤260 根，按需拉取）。
+
+    m∈{us,hk,cn} + 行序 i，symbol 由服务端 metadata.rank_kline 规格决定
+    （客户端不能任意传符号）。600s 进程缓存；失败 404，前端弹窗提示。
+    """
+    if m not in ("us", "hk", "cn") or i < 0:
+        raise HTTPException(status_code=404, detail="Bad market or index")
+    svc = MorningBriefReportService()
+    data = svc.get_rank_kline_by_token(token, m, i)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Kline not available")
+    return JSONResponse(content=data, headers={"Cache-Control": "no-store"})

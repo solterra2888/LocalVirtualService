@@ -219,7 +219,10 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
     # 数据新鲜度台账(us_close_chart._dump_ft_json 落盘):缺 T 收盘的资产
     # 写入元数据 + 推 Lark 告警 —— 报告照常发布(表中已是最近可得数据),
     # 但必须让所有人看见,杜绝静默展示过期行情(2026-11-12 SOX 事故的教训)。
+    # 同一文件还提取实时行情规格 ft_live(行名→实时代码+周期参考价):
+    # 报告打开时 /shared/{token}/quotes 据此就地刷新 FT 表(详见 service)。
     ft_warnings: list[str] = []
+    ft_live: Optional[Dict[str, Any]] = None
     ft_path = ws / "final" / "charts" / "ft_sections.json"
     try:
         if ft_path.exists():
@@ -228,8 +231,31 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
                 f"{s['name']}(截至 {s.get('as_of') or '无数据'})"
                 for s in (_ftd.get("stale") or [])
             ]
+            _spec_rows = [
+                {"n": r.get("name"), "c": r.get("code"),
+                 "u": r.get("unit") or "%", "r": r.get("refs") or {}}
+                for _s in (_ftd.get("sections") or [])
+                for r in (_s.get("rows") or []) if r.get("code")
+            ]
+            if _spec_rows:
+                ft_live = {"t": _ftd.get("t"), "rows": _spec_rows}
     except Exception as exc:  # noqa: BLE001 — 台账读取失败只降级为无告警
         logger.warning(f"[mb] 新鲜度台账读取失败: {exc}")
+    if ft_live:
+        metadata["ft_live"] = ft_live
+    # 涨跌榜按需 K 线规格:行序与网页 __RANK__ 一致,/shared/{token}/kline
+    # 按 (market, 行序) 定符号 —— 服务端决定抓什么,客户端不能任意传符号。
+    try:
+        _sn = json.loads((ws / "snapshot.json").read_text(encoding="utf-8"))
+        _vl = (((_sn.get("sources") or {}).get("market") or {})
+               .get("volume_leaders")) or {}
+        _ks = {m: [r.get("ysym") for r
+                   in ((_vl.get(m) or {}).get("rows") or [])]
+               for m in ("us", "hk", "cn")}
+        if any(_ks.values()):
+            metadata["rank_kline"] = _ks
+    except Exception as exc:  # noqa: BLE001 — 规格缺失只丢了点击蜡烛图
+        logger.warning(f"[mb] rank_kline 规格读取失败: {exc}")
     if ft_warnings:
         metadata["data_warnings"] = ft_warnings
         logger.warning(f"[mb] ⚠ 数据新鲜度告警: {ft_warnings}")
