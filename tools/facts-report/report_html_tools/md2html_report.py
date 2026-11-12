@@ -23,7 +23,8 @@ for chunk in re.split(r'^## ', md, flags=re.M)[1:]:
 
 TAB_DEF = [
     ('大盘总览', ['大盘总览', '今日要闻', '核心驱动', '持仓与资金流']),
-    ('美股全景', ['美股全景', '今日涨跌榜', '板块动态', '个股深挖']),
+    ('美股全景', ['美股全景', '板块动态', '个股深挖']),
+    ('今日涨跌榜', ['今日涨跌榜']),
     ('宏观', ['宏观速览', '回顾 · 宏观数据', '回顾 · 地缘政治', '美联储观察']),
     ('展望与策略', ['展望与策略']),
     ('数据流向', None),
@@ -76,54 +77,116 @@ for t in tab_payload:
         it.pop('md')
 
 # ── FT 跨资产收盘表(替换 Tab1 大盘总览的 PNG)──
+# 数据源:优先本工作区 final/charts/ft_sections.json(管线 render_for_workspace
+# 每日刷新,与 01_markets.png 同批);回退一次性脚本捕获的静态副本(旧工作区)。
 FT_TABLE = ''
-ftp = Path(__file__).parent / 'ft_sections.json'
+FT_STALE = []
+FT_HIST = []
+ftp = WS / 'final' / 'charts' / 'ft_sections.json'
+if not ftp.exists():
+    ftp = Path(__file__).parent / 'ft_sections.json'
 if ftp.exists():
     D = json.loads(ftp.read_text(encoding='utf-8'))
+    FT_STALE = D.get('stale') or []   # 新鲜度台账(us_close_chart 落盘);非空→表格上方横幅
     def _cell(v, u):
         if v is None: return '<td class="num na">—</td>'
         cls = 'pos' if v > 0 else ('neg' if v < 0 else '')
         sv = f'{v:+.1f}%' if u == '%' else f'{v:+.0f}{u}'
         return f'<td class="num {cls}">{sv}</td>'
-    def _bar(v, scale):
-        if v is None: return ''
-        w = min(abs(v) / scale, 1.0) * 50
-        side = 'left:50%' if v > 0 else 'right:50%'
-        cls = 'bpos' if v > 0 else 'bneg'
+    def _barcell(v, scale, unit):
+        """1日涨跌幅单元格:条形区占满整格(零轴居中),数值贴格子外侧边缘
+        (涨右/跌左);标签带卡片底色胶囊,与条形重叠也保持可读。"""
+        if v is None:
+            return ('<div class="bwrap"><div class="zero"></div>'
+                    '<span class="bv na" style="left:50%;'
+                    'transform:translate(-50%,-50%)">—</span></div>')
+        w = min(abs(v) / scale, 1.0) * 48   # 满格 48%:边缘留隙,条形不顶到数值胶囊
+        pos_ = v > 0
+        side = 'left:50%' if pos_ else 'right:50%'
+        cls = 'bpos' if pos_ else 'bneg'
+        bv = f'{v:+.2f}%' if unit == '%' else f'{v:+.1f}{unit}'
+        vc = 'pos' if pos_ else 'neg'
+        edge = 'right:0' if pos_ else 'left:0'
         return (f'<div class="bwrap"><div class="zero"></div>'
-                f'<div class="bar {cls}" style="{side};width:{w:.1f}%"></div></div>')
-    # 指数→finviz 指数页(内部代码→finviz slug);finviz 无对应页面的代码不展示徽标
-    FINVIZ_INDEX = {'SPX': 'SPX', 'NDX': 'NDX', 'DJIA': 'DJI'}
-    HIDE_TICKER = {'R2K', 'SOX', 'DXY'}          # finviz 无指数/行情页
-    GRAY_TICKER = {'IH', 'IF', 'IC', 'IM'}       # 中金所期货,仅标注不外链
+                f'<div class="bar {cls}" style="{side};width:{w:.1f}%"></div>'
+                f'<span class="bv {vc}" style="{edge}">{bv}</span></div>')
+    # 指数代码 → TradingView(DMR Temperature 同款映射与 URL);ETF/板块行情非指数,
+    # 保留 finviz 个股页。之前因 finviz 无页面而隐藏的 R2K/SOX/DXY 因此解锁展示。
+    from urllib.parse import quote as _urlq
+    TV_INDEX = {
+        'SPX': 'TVC:SPX', 'NDX': 'NASDAQ:NDX', 'DJIA': 'TVC:DJI',
+        'R2K': 'TVC:RUT', 'SOX': 'NASDAQ:SOX', 'DXY': 'TVC:DXY',
+        'IH': 'SSE:000016', 'IF': 'SSE:000300',   # 中金所期货 → 标的指数(DMR 同款)
+        'IC': 'SSE:000905', 'IM': 'SSE:000852',
+        '000001.SH': 'SSE:000001', '399001.SZ': 'SZSE:399001',   # 现货现金指数
+        '399006.SZ': 'SZSE:399006',
+        'HSI': 'HSI:HSI',        # TV 官方 symbol_search 确认
+        'N225': 'TVC:NI225', 'KOSPI': 'KRX:KOSPI',               # 国际(DMR 同款)
+        'FTSE': 'TVC:UKX', 'DAX': 'XETR:DAX',
+        '2Y': 'TVC:US02Y', '10Y': 'TVC:US10Y', '30Y': 'TVC:US30Y',  # 美债收益率(DMR 同款)
+    }
     def _tk_html(tk):
-        if not tk or tk in HIDE_TICKER:
+        if not tk:
             return ''
-        if tk in GRAY_TICKER:
-            return f'<span class="tk nolnk">{tk}</span>'
-        href = (f'https://elite.finviz.com/index/{FINVIZ_INDEX[tk]}?p=d' if tk in FINVIZ_INDEX
-                else f'https://finviz.com/quote.ashx?t={tk}')
+        if tk in TV_INDEX:
+            href = (f'https://www.tradingview.com/chart/?symbol={_urlq(TV_INDEX[tk])}'
+                    '&interval=D&range=6M')
+            return (f'<a class="tk" href="{href}" target="_blank" rel="noopener" '
+                    f'title="TradingView: {TV_INDEX[tk]}">{tk} ↗</a>')
+        href = f'https://finviz.com/quote.ashx?t={tk}'
         return f'<a class="tk" href="{href}" target="_blank" rel="noopener">{tk} ↗</a>'
+    def _spark_svg(hist, m1d=None):
+        """近3月走势缩略图(内联SVG,零JS依赖,~80×26)。着色与"1日涨跌幅"同向:
+        当日涨→绿/跌→红/无当日数据→灰(中性);折线形状仍为近3月收盘。
+        亮暗模式自动适配;<15 根历史显示占位符。"""
+        pts = (hist or [])[-63:]
+        if len(pts) < 15:
+            return '<span class="spna">—</span>'
+        vals = [p[-1] for p in pts]   # 收盘:折线 [iso,c] 与蜡烛 [iso,o,h,l,c] 均为末位
+        lo, hi = min(vals), max(vals)
+        rng = (hi - lo) or 1.0
+        W, H = 80, 26
+        xy = [((i / (len(pts) - 1)) * (W - 6) + 3,
+               H - 3 - (v - lo) / rng * (H - 6)) for i, v in enumerate(vals)]
+        cls = 'pos' if (m1d or 0) > 0 else ('neg' if (m1d or 0) < 0 else 'neutral')
+        line = ' '.join(f'{x:.1f},{y:.1f}' for x, y in xy)
+        area = f'3,{H-1} ' + line + f' {W-3:.1f},{H-1}'
+        lx, ly = xy[-1]
+        return (f'<span class="spspark {cls}"><svg viewBox="0 0 {W} {H}" preserveAspectRatio="none">'
+                f'<polygon points="{area}" fill="currentColor" opacity="0.12"/>'
+                f'<polyline points="{line}" fill="none" stroke="currentColor" '
+                f'stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>'
+                f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="1.8" fill="currentColor"/></svg></span>')
     ft_rows = ''
+    FT_HIST = []   # 点击行放大的交互图数据(ECharts),与 tr[data-ri] 索引对齐
     for sec in D['sections']:
-        ft_rows += (f'<tr class="ftgrp"><td colspan="6" title="条形刻度: {sec["scale_lbl"]}">{sec["title"]}</td></tr>')
+        ft_rows += (f'<tr class="ftgrp"><td colspan="7" title="条形刻度: {sec["scale_lbl"]}">{sec["title"]}</td></tr>')
         for r in sec['rows']:
             u = r.get('unit') or '%'
             u = '%' if u in ('%', 'pct') else u
             d1 = r.get('m1d')
-            bv = '—' if d1 is None else (f'{d1:+.2f}%' if u == '%' else f'{d1:+.1f}{u}')
-            bvc = 'pos' if (d1 or 0) > 0 else 'neg'
+            ri = len(FT_HIST)
+            FT_HIST.append({'n': r['name'], 'u': u, 'a': r.get('as_of'), 'h': r.get('hist') or []})
             ft_rows += (
-                f'<tr><td class="ftasset"><b>{r["name"]}</b>' + _tk_html(r.get('ticker'))
+                f'<tr data-ri="{ri}"><td class="ftasset"><b>{r["name"]}</b>' + _tk_html(r.get('ticker'))
                 + f'</td><td class="num">{r.get("last_str") or "—"}<span class="ftunit">{"" if u in ("%", "bp") else " " + u}</span></td>'
-                + f'<td class="barcell"><span class="bv {bvc}">{bv}</span>{_bar(d1, sec["scale"])}</td>'
+                + f'<td class="sparkcell">{_spark_svg(r.get("hist"), r.get("m1d"))}</td>'
+                + f'<td class="barcell">{_barcell(d1, sec["scale"], u)}</td>'
                 + _cell(r.get('m1w'), u) + _cell(r.get('m1m'), u) + _cell(r.get('ytd'), u) + '</tr>')
+    # 列宽固定(auto 布局下 104~337px 参差);走势列(3M缩略图)+1日涨跌幅列见 CSS
     FT_TABLE = ('<div class="ftwrap"><table class="fttbl">'
-                '<thead><tr><th>资产</th><th class="num">收盘</th><th>当日</th>'
+                '<colgroup><col style="width:19%">'
+                '<col style="width:11%"><col style="width:9.5%"><col style="width:23%">'
+                '<col style="width:12.5%"><col style="width:12.5%">'
+                '<col style="width:12.5%"></colgroup>'
+                '<thead><tr><th>资产</th><th class="num">收盘</th><th>走势</th><th class="ftday">1日涨跌幅</th>'
                 '<th class="num">1周</th><th class="num">1月</th><th class="num">YTD</th></tr></thead>'
-                f'<tbody>{ft_rows}</tbody></table>'
-                '<div class="ftnote">条形按各组刻度绘制(悬停组标题可见);利率组单位 bp。'
-                'ETF/板块行情取自最新 finviz 快照(周末冻结即周五收盘),其余按报告日取数,口径与 us_close_chart 一致。</div></div>')
+                f'<tbody>{ft_rows}</tbody></table>')
+    # 新鲜度横幅:上游行情缺 T 日收盘时显著提示,绝不静默展示旧数据
+    if FT_STALE:
+        _det = ', '.join(f"{s['name']}({s.get('as_of') or '无数据'})" for s in FT_STALE)
+        FT_TABLE = (f'<div class="ftstale">⚠ 数据完整性提醒:以下资产缺 {D["t"]} 收盘,'
+                    f'表中为其最近可得数据 — {_det}</div>' + FT_TABLE)
 
 
 
@@ -192,8 +255,8 @@ html = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <title>__TITLE__</title>
 <style>
 :root{
- --bg-page:#f6f8fa; --bg-card:#ffffff; --bg-header:linear-gradient(90deg,#2d4a6f 0%,#1e3a5f 100%);
- --bg-table-header:linear-gradient(180deg,#1e3a5f 0%,#152d4a 100%); --bg-hover:#f0f4f8;
+ --bg-page:#f6f8fa; --bg-card:#ffffff; --bg-header:linear-gradient(180deg,#1b4b7d 0%,#1d5998 100%);
+ --bg-table-header:#1b4b7d; --bg-hover:#f0f4f8;
  --text-primary:#111; --text-secondary:#3d4f5f; --text-muted:#6b7a8a; --text-header:#fff;
  --text-tab:rgba(255,255,255,.65); --text-tab-active:#fff;
  --border:rgba(224,224,224,.6); --border-subtle:#e8ecf1;
@@ -201,19 +264,19 @@ html = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
  --shadow-card:0 2px 12px rgba(0,0,0,.06);
 }
 .dark{
- --bg-page:#0B0E14; --bg-card:#141820; --bg-header:linear-gradient(90deg,#1a2235 0%,#141820 100%);
- --bg-table-header:linear-gradient(180deg,#1a2235 0%,#111622 100%); --bg-hover:#1e2536;
+ --bg-page:#0B0E14; --bg-card:#141820; --bg-header:linear-gradient(180deg,#1b4b7d 0%,#1d5998 100%);
+ --bg-table-header:#1b4b7d; --bg-hover:#1e2536;
  --text-primary:#edf0f4; --text-secondary:#b7c2cf; --text-muted:#7d8a99;
  --border:rgba(60,70,90,.5); --border-subtle:#232b3a; --shadow-card:0 2px 12px rgba(0,0,0,.4);
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg-page);color:var(--text-primary);
  font:15px/1.8 -apple-system,'PingFang SC','Microsoft YaHei',Segoe UI,sans-serif;transition:background .25s}
-.report-header{background:var(--bg-header);padding:22px 26px 0;color:var(--text-header)}
+/* sticky:总标题栏+tab 栏滚动时锁定;z-index 50 —— 内容之上,桑基抽屉(59-61)/溯源气泡(70-71)之下 */
+.report-header{position:sticky;top:0;z-index:50;background:var(--bg-header);padding:22px 26px 0;color:var(--text-header);box-shadow:0 2px 10px rgba(27,75,125,.35)}
 .report-header .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
 .report-header h1{margin:0;font-size:24px;line-height:1.45;max-width:74em}
 .report-header-right{display:flex;align-items:center;gap:12px;font-size:14px;color:var(--text-tab)}
-.badge{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:2px 12px;font-size:12.5px}
 #themeBtn{background:transparent;border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:8px;padding:3px 10px;cursor:pointer;font-size:14px}
 .tab-nav{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
 .tab-btn{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-tab);
@@ -224,9 +287,10 @@ main{max-width:1200px;margin:0 auto;padding:22px 22px 60px}
 .tab-panel{display:none}.tab-panel.active{display:block}
 section.card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;
  box-shadow:var(--shadow-card);padding:18px 22px;margin:0 0 18px}
-section.card>h2{margin:0 0 4px;font-size:19px;color:var(--text-primary);
- border-left:4px solid #2d4a6f;padding-left:10px}
+section.card>h2{margin:0 0 4px;font-size:19px;color:#1b4b7d;
+ border-left:4px solid #1b4b7d;padding-left:10px}
 section.card>h2::before{content:'';display:none}
+.dark section.card>h2{color:#9db8d8;border-left-color:#1d5998}
 .md h3{font-size:16px;color:var(--text-secondary);margin:16px 0 8px}
 .md p{margin:8px 0;color:var(--text-primary)}
 .md li{margin:5px 0}
@@ -263,6 +327,18 @@ section.card>h2::before{content:'';display:none}
 table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
 th{background:var(--bg-table-header);color:#fff;font-weight:600;padding:8px 10px;text-align:left;white-space:nowrap}
 td{padding:7px 10px;border-bottom:1px solid var(--border-subtle);white-space:nowrap}
+@media(min-width:769px){table.ranktbl{table-layout:fixed}}
+@media(min-width:769px){.fttbl{table-layout:fixed}}
+/* 今日涨跌榜交互榜单(排序列头 + 分页栏) */
+th.rk-sort{cursor:pointer;user-select:none}
+th.rk-sort:hover{filter:brightness(1.18)}   /* 提亮原渐变;background 简写会覆盖深色渐变致白字不可见 */
+.rankbar{display:flex;align-items:center;gap:10px;padding:8px 2px 2px;font-size:12.5px;color:var(--text-muted)}
+.rk-btn{background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border-subtle);border-radius:6px;padding:4px 12px;font:600 12.5px/1 inherit;cursor:pointer}
+.rk-btn:hover:not([disabled]){background:var(--bg-card);border-color:var(--border)}
+.rk-btn[disabled]{opacity:.45;cursor:default}
+/* 移动端隐藏桑基下钻抽屉:off-screen 偏移按桌面 vw 校准,min-width:340px 在窄屏
+   会留一截在屏幕内遮挡 tab/内容(不可点);抽屉本身 38vw 起步,手机上不可用 */
+@media(max-width:768px){#gdr-drawer{display:none!important}}
 tbody tr:nth-child(even){background:var(--bg-hover)}
 tbody tr:hover{background:var(--bg-hover)}
 td.num,th.num{text-align:right;font-family:ui-monospace,Consolas,monospace;font-size:12.8px}
@@ -275,8 +351,8 @@ li.viewline,p.viewline{border-left:3px solid #d97706;background:var(--bg-hover);
 .srcblock summary{cursor:pointer;font-weight:600;color:var(--text-secondary)}
 .ftwrap{overflow-x:auto;margin:6px 0}
 .fttbl{border-collapse:collapse;width:100%;font-size:13.5px}
-.fttbl th{background:var(--bg-table-header);color:#fff;font-weight:600;padding:8px 11px;text-align:left;white-space:nowrap}
-.fttbl th.num{text-align:right}
+.fttbl th{background:var(--bg-table-header);color:#fff;font-weight:600;padding:8px 11px;text-align:center;white-space:nowrap}
+.fttbl th.num{text-align:center}
 .fttbl td{padding:6px 11px;border-bottom:1px solid var(--border-subtle);white-space:nowrap}
 tr.ftgrp td{background:#e7edf5;color:#1e3a5f;font-weight:700;font-size:12.5px;letter-spacing:.06em;padding:7px 11px;border-top:2px solid #cbd7e6}
 .fttbl tbody tr{background:var(--bg-card)}
@@ -288,14 +364,41 @@ td.num{text-align:right;font-family:ui-monospace,Consolas,monospace;font-size:12
 .ftunit{color:var(--text-muted);font-size:11px}
 td.na{color:#b6beca}
 .pos{color:var(--pos);font-weight:600}.neg{color:var(--neg);font-weight:600}
-.barcell{min-width:220px}
-.bwrap{position:relative;height:13px;width:58%;display:inline-block;vertical-align:-2px}
+.barcell{min-width:220px}   /* 移动端 auto 布局留条形空间;桌面 fixed 布局忽略 */
+.bwrap{position:relative;height:15px;width:100%;display:block}
 .bwrap .zero{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:#c3ccd6}
-.bar{position:absolute;top:1px;bottom:1px;border-radius:2px}
+.bar{position:absolute;top:1px;bottom:1px;border-radius:2px;min-width:2px}
 .bpos{background:var(--pos)}.bneg{background:var(--neg)}
-.bv{font:600 12.5px ui-monospace,Consolas,monospace;display:inline-block;width:66px;text-align:left;margin-right:10px;vertical-align:1px;white-space:nowrap}
+.bv{position:absolute;top:50%;transform:translateY(-50%);font:600 8px ui-monospace,Consolas,monospace;white-space:nowrap;background:var(--bg-card);padding:0 3px;border-radius:3px;z-index:1}
+.bv.na{color:var(--text-muted)}
+.fttbl th.ftday{text-align:center}.ftstale{background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:8px;
+ padding:8px 12px;font-size:13px;line-height:1.6;margin:0 0 10px}
+.dark .ftstale{background:#332a12;color:#fbbf24;border-color:#665014}
+/* ── 走势列(sparkline) + 点击放大弹窗 ── */
+.sparkcell{white-space:nowrap;text-align:center}
+.spspark{display:inline-flex;vertical-align:middle;width:80px;height:26px}
+.spspark svg{display:block;width:100%;height:100%}
+.spspark.pos{color:var(--pos)} .spspark.neg{color:var(--neg)} .spspark.neutral{color:var(--neutral)}
+.spna{color:var(--text-muted)}
+.fttbl tbody tr[data-ri]{cursor:pointer}
+#ftmodal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;padding:20px}
+#ftmodal.open{display:flex}
+.ftm-mask{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+.ftm-card{position:relative;width:min(880px,94vw);background:var(--bg-card);border:1px solid var(--border);
+ border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.3);padding:14px 16px 10px;max-height:92vh;
+ display:flex;flex-direction:column}
+.ftm-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.ftm-title{font-weight:700;font-size:16px;color:var(--text-primary)}
+.ftm-btns{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;align-items:center}
+.ftm-btn{border:1px solid var(--border);background:transparent;color:var(--text-secondary);
+ border-radius:7px;padding:3px 10px;font-size:12px;cursor:pointer}
+.ftm-btn:hover{background:var(--bg-hover);color:var(--text-primary)}
+.ftm-btn.on{background:var(--bg-hover);color:var(--text-primary);border-color:var(--text-muted)}
+.ftm-x{border:none;background:transparent;color:var(--text-muted);font-size:16px;cursor:pointer;padding:2px 6px}
+.ftm-x:hover{color:var(--text-primary)}
+#ftm-chart{height:360px;width:100%;min-height:0}
+.ftm-foot{font-size:12px;color:var(--text-muted);padding-top:6px}
 td.ftasset span.tk.nolnk{color:var(--text-muted);border-bottom:none;cursor:default}
-.ftnote{font-size:11.5px;color:var(--text-muted);margin-top:8px;line-height:1.6}
 __GDRCSS__
 .gdr-stagewrap{position:relative;height:24px;margin:2px 0 10px}
 .gdr-stage{position:absolute;top:0;left:calc(17px + var(--i) * (100% - 366px) / 5);transform:translateX(-50%);color:#fff;font:600 12px/1.6 inherit;padding:3px 12px;border-radius:12px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.15)}
@@ -305,7 +408,7 @@ __GDRCSS__
 <div class="report-header">
  <div class="top">
   <h1>__TITLE__</h1>
-  <div class="report-header-right"><span class="badge">事实版</span><span>__DATE__</span><button id="themeBtn" onclick="toggleTheme()">🌙</button></div>
+  <div class="report-header-right"><span>__DATE__</span><button id="themeBtn" onclick="toggleTheme()">🌙</button></div>
  </div>
  <div class="tab-nav" id="tabs"></div>
 </div>
@@ -324,7 +427,7 @@ function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/
    document.querySelectorAll('.tab-btn').forEach(function(x){x.classList.remove('active');});
    b.classList.add('active');
    document.querySelectorAll('.tab-panel').forEach(function(p, j){p.classList.toggle('active', j === i);});
-   if(i === 4){ setTimeout(function(){ window.__gdrResize && window.__gdrResize(); }, 60); }
+   if(t.sankey){ setTimeout(function(){ window.__gdrResize && window.__gdrResize(); }, 60); }
    window.scrollTo(0, 0);
   };
   tabsEl.appendChild(b);
@@ -357,6 +460,110 @@ function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/
   panelsEl.appendChild(panel);
  });
  decorate(document);
+})();
+// ── FT 表走势:点击行 → ECharts 交互大图(1M/3M/6M/1Y + MA;数据随 ft_sections.json 冻结) ──
+(function(){
+ var H = window.__FT_HIST__ || [];
+ if(!H.length) return;   // echarts 在 </body> 前才注入,此处不判;首次点击时必已就绪
+ var modal=null, chart=null, cur=-1, rng='3m', mas={5:true,10:true,30:true};
+ var RB={'1m':21,'3m':63,'6m':126,'1y':260};
+ function ensureModal(){
+  if(modal) return;
+  modal=document.createElement('div'); modal.id='ftmodal';
+  modal.innerHTML='<div class="ftm-mask"></div><div class="ftm-card">'
+   +'<div class="ftm-head"><span class="ftm-title" id="ftm-title"></span>'
+   +'<span class="ftm-btns">'
+   +'<button class="ftm-btn" data-r="1m">1M</button>'
+   +'<button class="ftm-btn on" data-r="3m">3M</button>'
+   +'<button class="ftm-btn" data-r="6m">6M</button>'
+   +'<button class="ftm-btn" data-r="1y">1Y</button>'
+   +'<span style="width:8px"></span>'
+   +'<button class="ftm-btn on" data-m="5" style="color:#f59e0b">MA5</button>'
+   +'<button class="ftm-btn on" data-m="10" style="color:#3b82f6">MA10</button>'
+   +'<button class="ftm-btn on" data-m="30" style="color:#a855f7">MA30</button>'
+   +'<button class="ftm-x" title="关闭 (Esc)">✕</button></span></div>'
+   +'<div id="ftm-chart"></div><div class="ftm-foot" id="ftm-foot"></div></div>';
+  document.body.appendChild(modal);
+  modal.querySelector('.ftm-mask').onclick=closeM;
+  modal.querySelector('.ftm-x').onclick=closeM;
+  modal.querySelectorAll('.ftm-btn[data-r]').forEach(function(b){b.onclick=function(){
+   rng=b.getAttribute('data-r');
+   modal.querySelectorAll('.ftm-btn[data-r]').forEach(function(x){x.classList.toggle('on',x===b);});
+   draw();};});
+  modal.querySelectorAll('.ftm-btn[data-m]').forEach(function(b){b.onclick=function(){
+   var m=+b.getAttribute('data-m'); mas[m]=!mas[m]; b.classList.toggle('on'); draw();};});
+ }
+ function maCalc(vals,n){
+  var o=[]; for(var i=0;i<vals.length;i++){
+   if(i<n-1){o.push(null);continue;}
+   var s=0; for(var j=i-n+1;j<=i;j++) s+=vals[j]; o.push(s/n);}
+  return o;
+ }
+ function draw(){
+  if(typeof echarts === 'undefined') return;
+  if(chart){chart.dispose();chart=null;}
+  var d=H[cur]; var all=d.h||[]; var take=RB[rng]||63; var pts=all.slice(-take);
+  var ds=pts.map(function(p){return p[0];});
+  var isK=pts.length && pts[0].length===5;          // [iso,o,h,l,c] → 蜡烛;[iso,c] → 折线
+  var vs=pts.map(function(p){return isK?p[4]:p[1];}); // 收盘序列(MA 与方向色基准)
+  var dark=document.body.classList.contains('dark');
+  var upC=dark?'#00e676':'#0a7c42', dnC=dark?'#ff5252':'#c41230';  // DMR 同款涨跌色
+  chart=echarts.init(document.getElementById('ftm-chart'));
+  var series;
+  if(isK){
+   series=[{name:d.n,type:'candlestick',
+    data:pts.map(function(p){return [p[1],p[4],p[3],p[2]];}),   // ECharts: [open,close,low,high]
+    itemStyle:{color:upC,color0:dnC,borderColor:upC,borderColor0:dnC}}];
+  }else{
+   var up=vs[vs.length-1]>=vs[0]; var lc=up?upC:dnC;
+   series=[{name:d.n,type:'line',data:vs,showSymbol:false,
+    lineStyle:{width:1.8,color:lc},itemStyle:{color:lc},
+    areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,
+     colorStops:[{offset:0,color:lc+'33'},{offset:1,color:lc+'05'}]}}}];
+  }
+  [[5,'#f59e0b'],[10,'#3b82f6'],[30,'#a855f7']].forEach(function(m){
+   if(mas[m[0]]) series.push({name:'MA'+m[0],type:'line',data:maCalc(vs,m[0]),
+    showSymbol:false,lineStyle:{width:1,color:m[1]},itemStyle:{color:m[1]}});});
+  chart.setOption({
+   animation:false,grid:{left:58,right:14,top:14,bottom:26},
+   tooltip:{trigger:'axis',backgroundColor:'rgba(15,23,42,.92)',
+    borderColor:'rgba(255,255,255,.15)',textStyle:{color:'#e2e8f0',fontSize:12},
+    formatter:function(ps){
+     var h=ps[0].axisValue;
+     ps.forEach(function(p){
+      if(p.seriesType==='candlestick'){
+       var v=p.data;
+       h+='<br/>'+p.marker+'开 '+v[1]+' · 收 '+v[2]+'<br/>低 '+v[3]+' · 高 '+v[4];
+      }else{
+       h+='<br/>'+p.marker+p.seriesName+' '+p.data;
+      }});
+     return h;}},
+   xAxis:{type:'category',data:ds,axisLabel:{color:'#7d8a99',fontSize:10,hideOverlap:true},
+    axisLine:{lineStyle:{color:'#475569'}},axisTick:{show:false}},
+   yAxis:{type:'value',scale:true,axisLabel:{color:'#7d8a99',fontSize:10},
+    splitLine:{lineStyle:{color:'rgba(125,138,153,.18)'}}},
+   series:series});
+  var foot='数据截至 '+(d.a||(pts.length?pts[pts.length-1][0]:'—'))+' · 共 '+pts.length+' 个交易日'
+   +(isK?' · 日K':' · 收盘折线(该资产无OHLC)');
+  if(d.u==='bp') foot+=' · 收盘列为收益率 %(bp 变动见1日涨跌幅)';
+  document.getElementById('ftm-foot').textContent=foot;
+ }
+ function openM(i){
+  cur=i; ensureModal(); var d=H[i];
+  document.getElementById('ftm-title').textContent=d.n;
+  modal.classList.add('open');
+  requestAnimationFrame(draw);
+ }
+ function closeM(){
+  if(!modal) return;
+  modal.classList.remove('open');
+  if(chart){chart.dispose();chart=null;}
+ }
+ document.addEventListener('click',function(ev){
+  var tr=ev.target.closest ? ev.target.closest('.fttbl tbody tr[data-ri]') : null;
+  if(tr && !ev.target.closest('a') && tr.getAttribute('data-ri')!==null) openM(+tr.getAttribute('data-ri'));
+ });
+ document.addEventListener('keydown',function(ev){ if(ev.key==='Escape') closeM(); });
 })();
 function decorate(root){
  document.querySelectorAll('.md a, #gdr-md a').forEach(function(a){
@@ -410,7 +617,9 @@ function decorate(root){
    rm.forEach(function(x){ x.remove(); });
   }
  });
- // 表格数字列右对齐(FT 收盘表自带对齐,排除)
+ // 表格数字列右对齐(FT 收盘表自带对齐,排除)。
+ // 数值判定:数字/符号起头且不含 ASCII 字母 —— 9988.HK/300308.SZ 这类
+ // 数字起头的证券代码不含此排除会被误判成数值列,代码列右移,与美股表对不齐。
  document.querySelectorAll('.md table:not(.fttbl)').forEach(function(tb){
   var rows = tb.querySelectorAll('tr');
   if(!rows.length) return;
@@ -420,12 +629,94 @@ function decorate(root){
    for(var r = 1; r < rows.length && r <= 6; r++){
     var cell = rows[r].children[c]; if(!cell) continue;
     var v = cell.textContent.trim();
-    if(v && !/^[-+]?[0-9]/.test(v) && !/^[+$]/.test(v)){ numish = false; break; }
+    var okNum = (/^[-+]?[0-9]/.test(v) || /^[+$]/.test(v)) && !/[A-Za-z]/.test(v);
+    if(v && !okNum){ numish = false; break; }
    }
    if(numish){ rows[0].children[c].classList.add('num');
     for(var r2 = 1; r2 < rows.length; r2++){ if(rows[r2].children[c]) rows[r2].children[c].classList.add('num'); } }
   }
  });
+ // 今日涨跌榜:美股/港股/A股三表共用统一列宽,纵向共线(auto 布局列宽随
+ // 内容浮动,列起点参差)。仅桌面端 fixed;移动端维持 auto+横向滚动现状。
+ document.querySelectorAll('section.card').forEach(function(sec){
+  var h2 = sec.querySelector('h2');
+  if(!h2 || h2.textContent.trim() !== '今日涨跌榜') return;
+  sec.querySelectorAll('table').forEach(function(tb){
+   if(!tb.rows.length || tb.rows[0].children.length !== 5) return;
+   tb.classList.add('ranktbl');
+   var ws = ['12%','38%','13%','13%','24%'];   // 代码/公司/收盘价/涨跌幅/成交额
+   var cg = document.createElement('colgroup');
+   ws.forEach(function(w){ var col = document.createElement('col'); col.style.width = w; cg.appendChild(col); });
+   tb.insertBefore(cg, tb.firstChild);
+  });
+ });
+ // ── 今日涨跌榜:交互榜单(window.__RANK__ 为快照冻结全量;每页 20,─────
+ //    点击「涨跌幅/成交额」列头排序,空值恒垫底;无 payload 的市场保留静态表)
+ if(window.__RANK__){
+  var RK_PS = 20;
+  document.querySelectorAll('section.card').forEach(function(sec){
+   var h2 = sec.querySelector('h2');
+   if(!h2 || h2.textContent.trim() !== '今日涨跌榜') return;
+   var body = sec.querySelector('.md');
+   var intro = body.querySelector('p');
+   if(intro && intro.textContent.indexOf('各取前 8') >= 0)
+    intro.textContent = '美股 ≥10 亿美元、港股 ≥10 亿港元、A股 ≥20 亿元人民币,按当日成交额降序;点击「涨跌幅 / 成交额」列头可重排,分页展示。';
+   body.querySelectorAll('h3').forEach(function(h3){
+    var mkt = null;
+    for(var k in window.__RANK__){ if(window.__RANK__[k].label === h3.textContent.trim()){ mkt = k; break; } }
+    if(!mkt) return;
+    var tbl = h3.nextElementSibling;
+    if(!tbl || tbl.tagName !== 'TABLE') return;
+    var D = window.__RANK__[mkt];
+    var st = {key: 't', dir: -1, page: 0};   // 默认成交额降序(即冻结序)
+    var wrap = document.createElement('div'); wrap.className = 'rankint';
+    tbl.replaceWith(wrap);
+    function sortedRows(){
+     return D.rows.slice().sort(function(a, b){
+      var x = a[st.key], y = b[st.key];
+      if(x == null) return 1; if(y == null) return -1;   // 空值恒垫底
+      return (x - y) * st.dir;
+     });
+    }
+    function render(){
+     var rs = sortedRows();
+     var pages = Math.max(1, Math.ceil(rs.length / RK_PS));
+     if(st.page >= pages) st.page = 0;
+     var pg = rs.slice(st.page * RK_PS, (st.page + 1) * RK_PS);
+     var arr = function(k){ return st.key === k ? (st.dir < 0 ? ' ▼' : ' ▲') : ''; };
+     var h = '<table class="ranktbl"><colgroup>'
+       + '<col style="width:12%"><col style="width:38%"><col style="width:13%"><col style="width:13%"><col style="width:24%"></colgroup>'
+       + '<thead><tr><th>代码</th><th>公司</th><th class="num">收盘价</th>'
+       + '<th class="num rk-sort" data-k="g">涨跌幅' + arr('g') + '</th>'
+       + '<th class="num rk-sort" data-k="t">成交额' + arr('t') + '</th></tr></thead><tbody>';
+     pg.forEach(function(r){
+      var pc = r.g == null ? '' : (r.g > 0 ? ' pos' : (r.g < 0 ? ' neg' : ''));
+      h += '<tr><td>' + esc(r.c) + '</td><td>' + esc(r.n) + '</td>'
+        + '<td class="num">' + (r.p == null ? '—' : Number(r.p).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})) + '</td>'
+        + '<td class="num' + pc + '">' + (r.g == null ? '—' : (r.g > 0 ? '+' : '') + r.g.toFixed(2) + '%') + '</td>'
+        + '<td class="num">' + (r.t == null ? '—' : (r.t / 1e8).toFixed(1) + D.unit) + '</td></tr>';
+     });
+     h += '</tbody></table>'
+        + '<div class="rankbar"><button class="rk-btn" data-a="p"' + (st.page === 0 ? ' disabled' : '') + '>‹ 上一页</button>'
+        + '<span class="rk-info">第 ' + (st.page + 1) + ' / ' + pages + ' 页 · 共 ' + rs.length + ' 只</span>'
+        + '<button class="rk-btn" data-a="n"' + (st.page >= pages - 1 ? ' disabled' : '') + '>下一页 ›</button></div>';
+     wrap.innerHTML = h;
+    }
+    wrap.addEventListener('click', function(ev){
+     var t = ev.target;
+     if(!(t instanceof Element)) return;
+     if(t.classList.contains('rk-sort')){
+      var k = t.getAttribute('data-k');
+      if(st.key === k){ st.dir = -st.dir; } else { st.key = k; st.dir = -1; }
+      st.page = 0; render();
+     } else if(t.classList.contains('rk-btn') && !t.disabled){
+      st.page += (t.getAttribute('data-a') === 'n' ? 1 : -1); render();
+     }
+    });
+    render();
+   });
+  });
+ }
 }
 // ── 溯源标签交互:悬停摘要 / 点击弹原文卡 ──
 var provTip = document.getElementById('provtip');
@@ -500,12 +791,42 @@ function toggleTheme(){
 <script>__ECHARTS__</script>
 <script>__GDRJS__</script>
 </body></html>"""
+# ── 今日涨跌榜交互数据:快照冻结的 volume_leaders 全量(md 文档版只取前 8)──
+VL_MARKETS = (('us', '美股', '亿美元'), ('hk', '港股', '亿港元'), ('cn', 'A股', '亿元'))
+
+def _vl_disp_code(r):
+    """EODHD 内部后缀 → 展示码(与 run_pipeline._vl_code 同口径)。"""
+    code, ex = str(r.get('code', '')), r.get('exchange')
+    if ex == 'US':
+        return code
+    if ex == 'HK':
+        return f"{code.zfill(4)}.HK"
+    if ex == 'SHG':
+        return f"{code}.SH"
+    if ex == 'SHE':
+        return f"{code}.SZ"
+    return code
+
+RANK = {}
+_vl = (((_snap.get('sources') or {}).get('market') or {}).get('volume_leaders')) or {}
+for _k, _label, _unit in VL_MARKETS:
+    _rows = ((_vl.get(_k) or {}).get('rows')) or []
+    if not _rows:
+        continue
+    RANK[_k] = {'label': _label, 'unit': _unit, 'rows': [
+        {'c': _vl_disp_code(r), 'n': r.get('name_cn') or r.get('name') or '',
+         'p': r.get('price'), 'g': r.get('change_percent'), 't': r.get('turnover')}
+        for r in _rows]}
+RANK_JSON = json.dumps(RANK, ensure_ascii=False)
+
 payload_scripts = ''.join(
     '<script>window.__TABS__=(window.__TABS__||[]);window.__TABS__.push(' + json.dumps(t, ensure_ascii=False) + ');</script>' + chr(10)
     for t in tab_payload)
 payload_scripts += '<script>window.__FT_TABLE__=' + json.dumps(FT_TABLE, ensure_ascii=False) + ';</script>' + chr(10)
+payload_scripts += '<script>window.__FT_HIST__=' + json.dumps(FT_HIST, ensure_ascii=False) + ';</script>' + chr(10)
 payload_scripts += '<div id="provtip"></div><div id="provpop"></div>' + chr(10)
 payload_scripts += '<script>window.__PROV__=' + PROV_JS + ';</script>' + chr(10)
+payload_scripts += '<script>window.__RANK__=' + RANK_JSON + ';</script>' + chr(10)
 html = html.replace('<script>' + chr(10) + 'var TABS = window.__TABS__ || [];',
                     payload_scripts + '<script>' + chr(10) + 'var TABS = window.__TABS__ || [];', 1)
 html = (html.replace('__TITLE__', title.replace('<', '&lt;'))
@@ -517,13 +838,11 @@ html = (html.replace('__TITLE__', title.replace('<', '&lt;'))
             .replace('@@SANKEY@@', SANKEY_JSON)
             .replace('__ECHARTS__', ECH)
             .replace('__GDRJS__', _gdr_js))
-html = html.replace(
-    '<style>', '<script type="text/plain" id="pagecss">', 1).replace(
-    '</style>', '</script>', 1)
+# 主 CSS 保留在 <head> 内联(渲染阻塞,首帧即带样式)。此前把首个 <style> 挪进
+# text/plain 再等 DOMContentLoaded 注入,解析期间整页无样式 —— 5MB 文档会先闪
+# 一帧未渲染内容(FOUC)。此处只保留桑基图的 load 后 resize。
 html = html.replace('</body></html>',
     '<script>window.addEventListener("DOMContentLoaded", function(){'
-    + 'document.head.appendChild(Object.assign(document.createElement("style"),'
-    + '{textContent:document.getElementById("pagecss").textContent}));'
     + 'setTimeout(function(){window.__gdrResize && window.__gdrResize();}, 50);'
     + '});</script></body></html>', 1)
 out = WS / 'final' / 'report.html'

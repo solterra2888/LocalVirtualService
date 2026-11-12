@@ -40,6 +40,8 @@ const MorningBriefReportPage: React.FC = () => {
   const [status, setStatus] = useState<MorningBriefStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
+  // iframe 内容(~5MB)加载完成前隐藏,期间显示 loading —— 避免闪现空白/未渲染帧
+  const [iframeLoading, setIframeLoading] = useState(true);
 
   const displayReport: MorningBriefReportRecord | null =
     status?.today_report?.status === 'completed' && status.today_report.share_token
@@ -64,6 +66,11 @@ const MorningBriefReportPage: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // 切换报告(share_token 变化)或手动刷新(iframeKey 变化)时重置加载态
+  useEffect(() => {
+    setIframeLoading(true);
+  }, [displayReport?.share_token, iframeKey]);
 
   // 当日生成中 → 自动轮询（最长 2 小时窗口内的轻量轮询，30s 间隔）
   useEffect(() => {
@@ -207,18 +214,33 @@ const MorningBriefReportPage: React.FC = () => {
             <Spin tip="Loading…" />
           </div>
         ) : displayReport?.share_token ? (
-          <iframe
-            key={iframeKey}
-            src={`/api/morning-brief-report/shared/${displayReport.share_token}`}
-            title="Morning Brief"
-            style={{
-              width: '100%',
-              height: '100%',
-              minHeight: 500,
-              border: 'none',
-              display: 'block',
-            }}
-          />
+          <div style={{ position: 'relative', flex: 1, minHeight: 500, display: 'flex' }}>
+            <iframe
+              key={iframeKey}
+              src={`/api/morning-brief-report/shared/${displayReport.share_token}`}
+              title="Morning Brief"
+              onLoad={() => setIframeLoading(false)}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                display: 'block',
+                visibility: iframeLoading ? 'hidden' : 'visible',
+              }}
+            />
+            {iframeLoading && (
+              <div style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: cardBg,
+              }}>
+                <Spin tip="Loading report…" />
+              </div>
+            )}
+          </div>
         ) : (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Empty

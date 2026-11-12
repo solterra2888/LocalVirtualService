@@ -77,4 +77,8 @@ async def get_shared_report(token: str):
     html = svc.get_report_html_by_token(token)
     if not html:
         raise HTTPException(status_code=404, detail="Report not found")
-    return HTMLResponse(content=html)
+    # token 每次重新发布即轮换(complete 换新),同一 token 的 URL 内容不可变,
+    # 允许浏览器缓存(报告 ~5MB,重复打开 iframe 免再拉取,消除加载闪烁)
+    return HTMLResponse(content=html, headers={
+        "Cache-Control": "public, max-age=3600",
+    })

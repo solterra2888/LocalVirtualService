@@ -414,7 +414,7 @@ def render_movers(snapshot: Dict[str, Any]) -> str:
             continue
         parts += ["| 代码 | 公司 | 收盘价 | 涨跌幅 | 成交额 |",
                   "|---|---|---|---|---|"]
-        for r in rows:
+        for r in rows[:8]:   # md 文档版固定前 8;网页交互榜单用快照全量(md2html)
             chg = r.get("change_percent")
             chg_s = f"{chg:+.2f}%" if isinstance(chg, (int, float)) else "—"
             price = r.get("price")
@@ -1947,7 +1947,7 @@ def _extract_headline(narrative_text: str, report_date: str) -> str:
             line = line.strip().strip('"').strip()
             if line:
                 return line
-    return f"GuanHe 每日晨报(事实版) — {report_date}"
+    return f"GuanHe 每日晨报 — {report_date}"
 
 
 AUDIT_SIDECAR_HEADER = (
@@ -1995,7 +1995,7 @@ def assemble(ws: Path, report_date: str, verdict: Dict[str, Any],
     parts = [
         f"# {headline}",
         "",
-        f"*GuanHe 每日晨报(事实版) — {report_date}*",
+        f"*GuanHe 每日晨报 — {report_date}*",
         "",
     ]
     # v8.7:核验未通过时照常发布 —— 顶部一行指针 + 文末核验备注清单

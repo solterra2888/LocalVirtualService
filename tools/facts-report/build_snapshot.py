@@ -463,7 +463,7 @@ def _finviz_snapshot(report_date: date) -> Dict[str, Any]:
 VOL_LEADERS_US_MIN = 1e9   # 美股:成交额 ≥ 10 亿美元
 VOL_LEADERS_HK_MIN = 1e9   # 港股:成交额 ≥ 10 亿港元
 VOL_LEADERS_CN_MIN = 2e9   # A股:成交额 ≥ 20 亿元人民币
-VOL_LEADERS_ROWS = 8
+VOL_LEADERS_ROWS = 100   # 冻结深度;md 文档版取前 8(render_movers 截断),网页交互榜单用全量
 
 
 def _eodhd_api(path: str, params: Dict[str, str]) -> Any:
@@ -1976,7 +1976,18 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
     # 历史日期无快照)必须独立容错 —— finviz 失败不能连带丢掉跨资产行情。
     market: Dict[str, Any] = {}
     try:
-        market["cross_asset"] = _cross_asset_snapshot(report_date)
+        _ca = _cross_asset_snapshot(report_date)
+        market["cross_asset"] = _ca
+        # 新鲜度台账:关键行情最新日线不是 T → 显式记入快照(notes 同步),
+        # LLM 与下游可见,杜绝静默用过期收盘渲染报告(2026-11-12 SOX 事故)。
+        _ca_stale = {r["code"]: r["date"] for r in _ca
+                     if r.get("date") != report_date.isoformat()}
+        if _ca_stale:
+            market["cross_asset_stale"] = _ca_stale
+            notes["market.cross_asset_stale"] = (
+                f"跨资产行情缺 {report_date.isoformat()} 收盘: "
+                f"{json.dumps(_ca_stale, ensure_ascii=False)};"
+                "相关涨跌幅按最近可得日期计算,表述时须注明数据截止日")
     except Exception as e:  # noqa: BLE001
         errors["market.cross_asset"] = str(e)[:300]
     try:

@@ -24,6 +24,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import sys
 import time
@@ -31,6 +32,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List
 from zoneinfo import ZoneInfo
+
+# cron 重定向下 stdout 为块缓冲,等待期的 [gate] 状态会滞留缓冲区 —— 强制行刷新
+print = functools.partial(print, flush=True)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -97,9 +101,18 @@ def run(ws: Path, deadline: datetime, poll: int, do_notify: bool) -> int:
         now = _now_bj()
 
         if not missing:
+            waited_min = int((now - started).total_seconds() // 60)
             print(f"[gate] ready at {now:%H:%M:%S} — 两档节目转录均已在库"
                   + (f"(等待 {int((now - started).total_seconds())}s)"
                      if now > started else ""))
+            # 🚀 生命周期通知:就绪门放行 = 管线真正开跑(等过 ⚠️ 的场景给出等待时长)
+            _alert(
+                f"【facts-report 🚀】{snap.get('report_date', '?')} 报告开始生成",
+                [f"时间: 北京 {now:%m-%d %H:%M}",
+                 "节目转录: 两档均已就绪"
+                 + (f"(就绪门等待 {waited_min} 分钟后放行)" if waited_min else ""),
+                 "管线预计 40-60 分钟,完成后另行通知"],
+                do_notify)
             return 0
 
         # 首次发现缺失:⚠️ 预警(人工窗口尚在)

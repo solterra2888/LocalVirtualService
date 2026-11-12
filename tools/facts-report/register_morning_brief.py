@@ -14,13 +14,18 @@
 HTML 三级: ① 复用 final/report.html(富版,新于 report.md 时)
           ② subprocess 跑 report_html_tools/md2html_report.py <T>(node 预渲染富版)
           ③ mistune 简版 + morning_brief_report.html.j2 壳兜底
+发布前把 charts/* 相对路径图片内嵌为 base64(单文件自包含 —— /shared
+iframe 与 OSS 签名链接下无 charts/ 兄弟目录,相对路径必 404 裂图)。
 OSS: reports/MorningBrief/report_<YYYYMMDD>.html(确定性键,重跑覆盖同键;失败不致命)。
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import mimetypes
+import re
 import subprocess
 import sys
 import time
@@ -74,6 +79,36 @@ def _rich_html(ws: Path, session_date: str) -> tuple[Optional[str], str]:
     except Exception as exc:  # noqa: BLE001 — 兜底路径
         logger.warning(f"[mb] md2html 失败,走 mistune 兜底: {exc}")
     return None, "mistune_fallback"
+
+
+# img src 引用,兼容两种形态:预渲染 DOM 的裸引号 src="…" 与嵌入 JSON
+# payload 的转义引号 src=\"…\"(report.html 的 tab 数据以 <script> 内嵌)
+_IMG_SRC_RE = re.compile(r'(src=)(\\?["\'])([^"\'\n\\]+?)\2')
+
+
+def _inline_charts(html: str, ws: Path) -> tuple[str, list[str]]:
+    """相对路径图片(charts/*)就地内嵌为 base64 data URI。
+
+    发布物是单文件 HTML(DB html_content + OSS 单对象),charts/ 目录不随行;
+    /shared/{token} iframe 与 OSS 签名链接下相对路径必 404。绝对引用
+    (http/https/data/协议相对)与磁盘上不存在的引用原样保留。
+    """
+    final_dir = (ws / "final").resolve()
+    inlined: list[str] = []
+
+    def _sub(m: re.Match) -> str:
+        path = m.group(3)
+        if re.match(r"^(?:https?:|data:|//)", path):
+            return m.group(0)
+        f = (final_dir / path).resolve()
+        if not f.is_file() or not f.is_relative_to(final_dir):
+            return m.group(0)
+        mime = mimetypes.guess_type(f.name)[0] or "image/png"
+        b64 = base64.b64encode(f.read_bytes()).decode("ascii")
+        inlined.append(path)
+        return f"{m.group(1)}{m.group(2)}data:{mime};base64,{b64}{m.group(2)}"
+
+    return _IMG_SRC_RE.sub(_sub, html), inlined
 
 
 def _fallback_html(ws: Path, session_date: str, report_date: date) -> str:
@@ -151,6 +186,11 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
         html = _fallback_html(ws, session_date, report_date)
         logger.info("[mb] 使用 mistune 兜底渲染")
 
+    # 单文件自包含:相对路径图片内嵌(mistune 兜底版同样需要)
+    html, inlined_imgs = _inline_charts(html, ws)
+    if inlined_imgs:
+        logger.info(f"[mb] 图片已内嵌为 data URI: {inlined_imgs}")
+
     oss_object: Optional[str] = None
     oss_uploaded = False
     if do_oss:
@@ -174,6 +214,26 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
 
     metadata = _state_metadata(ws, session_date, html_src, oss_uploaded,
                                oss_object)
+    metadata["images_inlined"] = inlined_imgs
+
+    # 数据新鲜度台账(us_close_chart._dump_ft_json 落盘):缺 T 收盘的资产
+    # 写入元数据 + 推 Lark 告警 —— 报告照常发布(表中已是最近可得数据),
+    # 但必须让所有人看见,杜绝静默展示过期行情(2026-11-12 SOX 事故的教训)。
+    ft_warnings: list[str] = []
+    ft_path = ws / "final" / "charts" / "ft_sections.json"
+    try:
+        if ft_path.exists():
+            _ftd = json.loads(ft_path.read_text(encoding="utf-8"))
+            ft_warnings = [
+                f"{s['name']}(截至 {s.get('as_of') or '无数据'})"
+                for s in (_ftd.get("stale") or [])
+            ]
+    except Exception as exc:  # noqa: BLE001 — 台账读取失败只降级为无告警
+        logger.warning(f"[mb] 新鲜度台账读取失败: {exc}")
+    if ft_warnings:
+        metadata["data_warnings"] = ft_warnings
+        logger.warning(f"[mb] ⚠ 数据新鲜度告警: {ft_warnings}")
+
     result = MorningBriefReportService().complete(
         report_date,
         file_path=str(md_path),
@@ -182,7 +242,20 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
         metadata=metadata,
     )
     print(f"[mb] registered: {result}")
-    return 0
+
+    if ft_warnings:
+        try:
+            from lark_alert import notify
+
+            notify(
+                f"【facts-report ⚠️】Morning Brief {result['report_date']} 行情数据不完整",
+                [f"美股交易日: {session_date}",
+                 "以下资产缺当日收盘,表中为最近可得数据:",
+                 " · " + "\n · ".join(ft_warnings),
+                 f"报告: /api/morning-brief-report/shared/{result['share_token']}"],
+            )
+        except Exception as exc:  # noqa: BLE001 — 告警失败不影响注册
+            logger.warning(f"[mb] ⚠ 新鲜度 Lark 告警发送失败: {exc}")
 
 
 def register_fail(session_date: str, rc: int) -> int:

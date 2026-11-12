@@ -146,14 +146,65 @@ def _series(conn: Any, code: str, t: date, column: str = "close",
         return [(r[0], float(r[1])) for r in cur.fetchall()]
 
 
+def _series_ohlc(conn: Any, code: str, t: date,
+                 limit: int = 260) -> Optional[List[Tuple[date, float, float, float, float]]]:
+    """(date, open, high, low, close) 降序,最新在前;供网页蜡烛图。
+    OHLC 任一为空的行跳过;整段缺失返回 None(调用方回退收盘折线)。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, open, high, low, close FROM market_data_eod "
+            "WHERE code=%s AND date<=%s AND close IS NOT NULL "
+            "AND open IS NOT NULL AND high IS NOT NULL AND low IS NOT NULL "
+            "ORDER BY date DESC LIMIT %s", (code, t, limit))
+        rows = cur.fetchall()
+    if not rows:
+        return None
+    return [(r[0], float(r[1]), float(r[2]), float(r[3]), float(r[4])) for r in rows]
+
+
+def _yahoo_ohlc(symbol: str, t: date,
+                days: int = 340) -> Optional[List[Tuple[date, float, float, float, float]]]:
+    """Yahoo chart API 的 OHLC(用于 DXY 等无 EODHD 授权的代码);失败返回 None。"""
+    p2 = int(datetime.combine(t + timedelta(days=1), datetime.min.time()).timestamp())
+    try:
+        r = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            params={"period1": p2 - days * 86400, "period2": p2, "interval": "1d"},
+            headers=UA, timeout=15)
+        res = ((r.json().get("chart") or {}).get("result") or [None])[0]
+        ts = (res or {}).get("timestamp") or []
+        q = ((res or {}).get("indicators") or {}).get("quote") or [{}]
+        o, h = q[0].get("open") or [], q[0].get("high") or []
+        l, c = q[0].get("low") or [], q[0].get("close") or []
+        out = []
+        for i in range(min(len(ts), len(o), len(h), len(l), len(c))):
+            d = datetime.fromtimestamp(ts[i]).date()
+            if d > t or o[i] is None or h[i] is None or l[i] is None or c[i] is None:
+                continue
+            out.append((d, float(o[i]), float(h[i]), float(l[i]), float(c[i])))
+        out.sort(key=lambda x: x[0], reverse=True)
+        return out[:260] or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _finviz_rows(conn: Any, t: date) -> Tuple[Dict[str, Dict[str, Any]], date]:
-    """ETF rows from the newest finviz_screener snapshot frozen at/before T+1."""
+    """ETF rows from the newest finviz_screener snapshot frozen at/before T+1.
+
+    finviz_screener 是滚动表(仅保留最新一份快照)。历史工作区重渲(快照比
+    T+1 新)或当日快照尚未刷新(比 T+1 旧)时,回退到库中最新快照 —— ETF 行
+    本就是"快照时点状态",接受此日期偏移,避免整表渲染失败。
+    """
     with conn.cursor() as cur:
         cur.execute("SELECT MAX(snapshot_date) FROM finviz_screener WHERE snapshot_date<=%s",
                     (t + timedelta(days=1),))
         snap = cur.fetchone()[0]
         if snap is None:
-            raise RuntimeError("no finviz_screener snapshot on/before T+1")
+            cur.execute("SELECT MAX(snapshot_date) FROM finviz_screener")
+            snap = cur.fetchone()[0]
+            if snap is None:
+                raise RuntimeError("no finviz_screener snapshot on/before T+1")
+            print(f"[us_close] finviz snapshot {snap} outside T+1 window — relaxed fallback")
         wanted = FINVIZ_ETFS + SECTOR_ETFS
         cur.execute(
             "SELECT ticker, price, change_percent, performance_week, "
@@ -237,9 +288,21 @@ def _yahoo_series(symbol: str, t: date, adjusted: bool = True,
 
 # --------------------------------------------------------------- row assembly
 def _row(name: str, ticker: str, last_str: str, unit: str,
-         ch: Dict[str, Optional[float]], last: Optional[float] = None) -> Dict[str, Any]:
+         ch: Dict[str, Optional[float]], last: Optional[float] = None,
+         as_of: Optional[date] = None, src: Optional[str] = None,
+         hist: Optional[List[Tuple[date, float]]] = None) -> Dict[str, Any]:
+    """as_of = 该行收盘值的实际日期(新鲜度台账,md2html 据此提示过期);
+    src='finviz' 的行按快照日期宽松判定(滚动快照常比 T 早/晚一天,属正常)。
+    hist = 日线序列(降序,最新在前) → 存为升序最多 260 根。两种元素:
+    (date, close)          → [iso, c]         折线(如 FRED 利率,无 OHLC)
+    (date, o, h, l, close) → [iso, o, h, l, c] 蜡烛(DMR 风格,market_data_eod 有 OHLC)
+    供网页版走势 sparkline(近3月)与点击放大交互图(1M/3M/6M/1Y + MA)使用。"""
+    h = [[d.isoformat()] + [round(float(x), 6) for x in rest]
+         for row in list(hist or [])[:260][::-1]
+         for d, *rest in [row]]
     return {"name": name, "ticker": ticker, "last": last, "last_str": last_str,
-            "unit": unit, **ch}
+            "unit": unit, "as_of": as_of.isoformat() if as_of else None,
+            "src": src, "hist": h, **ch}
 
 
 _PAR_TENOR = {"DGS2": "2y", "DGS10": "10y", "DGS30": "30y"}
@@ -270,8 +333,10 @@ def build_sections(conn: Any, t: date,
 
     def idx_row(name: str, ticker: str, code: str) -> Dict[str, Any]:
         s = _series(conn, code, t)
-        return _row(name, ticker, _minus(f"{s[0][1]:,.0f}") if s else "\u2013", "%",
-                    _changes(s), s[0][1] if s else None)
+        ohlc = _series_ohlc(conn, code, t)
+        return _row(name, ticker, _minus(f"{s[0][1]:,.2f}") if s else "\u2013", "%",
+                    _changes(s), s[0][1] if s else None,
+                    as_of=s[0][0] if s else None, hist=ohlc or s)
 
     def etf_row(name: str, ticker: str, perf_source: str = "tr") -> Optional[Dict[str, Any]]:
         """Last/1D from finviz quote; 1W/1M/YTD via perf_source:
@@ -296,32 +361,34 @@ def build_sections(conn: Any, t: date,
             for src, dst in (("m1w", "m1w"), ("m1m", "m1m"), ("ytd", "ytd")):
                 if q.get(src) is not None:
                     ch[dst] = q[src]
-        return _row(name, ticker, _minus(f"{last:.2f}"), "%", ch, last)
+        ohlc = _series_ohlc(conn, db_code, t) if db_code else None
+        return _row(name, ticker, _minus(f"{last:.2f}"), "%", ch, last,
+                    as_of=snap, src="finviz", hist=ohlc or s_adj)
 
-    # ---- EQUITIES (US indices from EODHD history)
-    eq = [idx_row("标普500", "SPX", "GSPC.INDX"),
-          idx_row("纳斯达克100", "NDX", "NDX.INDX"),
-          idx_row("道琼斯", "DJIA", "DJI.INDX"),
-          idx_row("罗素2000", "R2K", "RUT.INDX"),
-          idx_row("费城半导体", "SOX", "SOX.INDX")]
+    # ---- EQUITIES (US indices from EODHD history; 英文表述,FT 原版风格)
+    eq = [idx_row("S&P 500", "SPX", "GSPC.INDX"),
+          idx_row("Nasdaq 100", "NDX", "NDX.INDX"),
+          idx_row("Dow Jones", "DJIA", "DJI.INDX"),
+          idx_row("Russell 2000", "R2K", "RUT.INDX"),
+          idx_row("PHLX Semiconductor", "SOX", "SOX.INDX")]
 
     # ---- CHINA (cash benchmarks first, then CFFEX index futures shown via
     # their underlying cash index — same convention as the Reports module's
     # Market Temperature cards)
-    china = [idx_row("上证综指", "", "SSEC.INDX"),
-             idx_row("深证成指", "", "399001.SHE"),
-             idx_row("恒生指数", "", "HSI.INDX"),
-             idx_row("创业板指", "", "399006.SHE"),
+    china = [idx_row("上证综指", "000001.SH", "SSEC.INDX"),
+             idx_row("深证成指", "399001.SZ", "399001.SHE"),
+             idx_row("恒生指数", "HSI", "HSI.INDX"),
+             idx_row("创业板指", "399006.SZ", "399006.SHE"),
              idx_row("上证50", "IH", "SSE50.INDX"),
              idx_row("沪深300", "IF", "CSI300.INDX"),
              idx_row("中证500", "IC", "CSI500.INDX"),
              idx_row("中证1000", "IM", "CSI1000.INDX")]
 
-    # ---- ASIA & EUROPE (major benchmark indices)
-    intl = [idx_row("日经225", "", "N225.INDX"),
-            idx_row("韩国KOSPI", "", "KS11.INDX"),
-            idx_row("富时100", "", "FTSE.INDX"),
-            idx_row("德国DAX", "", "GDAXI.INDX")]
+    # ---- ASIA & EUROPE (major benchmark indices; 英文表述,中国组除外)
+    intl = [idx_row("Nikkei 225", "N225", "N225.INDX"),
+            idx_row("KOSPI", "KOSPI", "KS11.INDX"),
+            idx_row("FTSE 100", "FTSE", "FTSE.INDX"),
+            idx_row("DAX", "DAX", "GDAXI.INDX")]
 
     # ---- RATES (Treasury par yields: FRED, T spliced from the snapshot's
     # Treasury curve when FRED lags; EODHD only when neither covers T)
@@ -335,46 +402,55 @@ def build_sections(conn: Any, t: date,
         print(f"[us_close] rates: {note}")
         FOOTER_NOTES.append(note)
         rates = []
-        series = {"美债2年": fred["DGS2"], "美债10年": fred["DGS10"], "美债30年": fred["DGS30"]}
-        for nm, s in series.items():
-            rates.append(_row(nm, "", _minus(f"{s[0][1]:.2f}%"), "bp",
-                              _changes(s, pct=False), s[0][1]))
+        series = {"US 2Y Treasury": ("2Y", fred["DGS2"]),
+                  "US 10Y Treasury": ("10Y", fred["DGS10"]),
+                  "US 30Y Treasury": ("30Y", fred["DGS30"])}
+        for nm, (tk, s) in series.items():
+            rates.append(_row(nm, tk, _minus(f"{s[0][1]:.2f}%"), "bp",
+                              _changes(s, pct=False), s[0][1], as_of=s[0][0], hist=s))
     else:
         print("[us_close] rates: FRED and Treasury curve lack T — falling back to EODHD yields")
         FOOTER_NOTES.append("美债收益率来自 EODHD(FRED 与财政部曲线均未覆盖当日)")
 
-        def rate_row(name: str, code: str) -> Dict[str, Any]:
+        def rate_row(name: str, ticker: str, code: str) -> Dict[str, Any]:
             s = _series(conn, code, t)
-            return _row(name, "", _minus(f"{s[0][1]:.2f}%") if s else "\u2013", "bp",
-                        _changes(s, pct=False), s[0][1] if s else None)
+            ohlc = _series_ohlc(conn, code, t)
+            return _row(name, ticker, _minus(f"{s[0][1]:.2f}%") if s else "\u2013", "bp",
+                        _changes(s, pct=False), s[0][1] if s else None,
+                        as_of=s[0][0] if s else None, hist=ohlc or s)
 
-        rates = [rate_row("美债2年", "US2Y.INDX"), rate_row("美债10年", "US10Y.INDX"),
-                 rate_row("美债30年", "US30Y.INDX")]
+        rates = [rate_row("US 2Y Treasury", "2Y", "US2Y.INDX"),
+                 rate_row("US 10Y Treasury", "10Y", "US10Y.INDX"),
+                 rate_row("US 30Y Treasury", "30Y", "US30Y.INDX")]
 
-    comm = [r for r in (etf_row("原油", "USO"), etf_row("黄金", "GLD"),
-                        etf_row("白银", "SLV"), etf_row("铜", "CPER")) if r]
+    comm = [r for r in (etf_row("Crude Oil", "USO"), etf_row("Gold", "GLD"),
+                        etf_row("Silver", "SLV"), etf_row("Copper", "CPER")) if r]
 
     # ---- FX (DXY via Yahoo best-effort; EUR/USD & USD/JPY from EODHD)
     fx: List[Dict[str, Any]] = []
     dxy = _yahoo_series("DX-Y.NYB", t, adjusted=False)
     if dxy:
+        dohlc = _yahoo_ohlc("DX-Y.NYB", t)
         fx.append(_row("US dollar", "DXY", _minus(f"{dxy[0][1]:.2f}"), "%",
-                       _changes(dxy), dxy[0][1]))
+                       _changes(dxy), dxy[0][1], as_of=dxy[0][0], hist=dohlc or dxy))
     else:
         print("[us_close] DXY unavailable via Yahoo — row skipped")
 
     def fx_row(name: str, ticker: str, code: str) -> Dict[str, Any]:
         s = _series(conn, code, t)
-        dp = 4 if code.startswith("EUR") else 2
-        return _row(name, ticker, _minus(f"{s[0][1]:.{dp}f}") if s else "\u2013", "%",
-                    _changes(s), s[0][1] if s else None)
+        ohlc = _series_ohlc(conn, code, t)
+        return _row(name, ticker, _minus(f"{s[0][1]:.2f}") if s else "\u2013", "%",
+                    _changes(s), s[0][1] if s else None,
+                    as_of=s[0][0] if s else None, hist=ohlc or s)
 
     fx += [fx_row("EUR/USD", "", "EURUSD.FOREX"), fx_row("USD/JPY", "", "USDJPY.FOREX")]
 
     # ---- VOLATILITY (VIX from EODHD; MOVE not available in our stack)
     sv = _series(conn, "VIX.INDX", t)
-    vol = [_row("VIX恐慌指数", "", _minus(f"{sv[0][1]:.2f}") if sv else "\u2013", "%",
-                _changes(sv), sv[0][1] if sv else None)]
+    vohlc = _series_ohlc(conn, "VIX.INDX", t)
+    vol = [_row("VIX Volatility Index", "", _minus(f"{sv[0][1]:.2f}") if sv else "\u2013", "%",
+                _changes(sv), sv[0][1] if sv else None,
+                as_of=sv[0][0] if sv else None, hist=vohlc or sv)]
 
     # ---- S&P 500 SECTORS (finviz quotes + finviz perf columns, sorted by 1D desc)
     sectors = sorted((r for r in (etf_row(SECTOR_NAMES[tk], tk, perf_source="finviz")
@@ -503,6 +579,34 @@ def render(sections: List[Dict[str, Any]], t: date, out: Path) -> Path:
     return out
 
 
+def _dump_ft_json(ws: Path, t: date, sections: List[Dict[str, Any]]) -> Path:
+    """FT 表格数据落盘 {ws}/final/charts/ft_sections.json,供 md2html_report
+    生成网页版跨资产表 —— 与 01_markets.png 同源同批、随管线每日刷新。
+    (md2html 曾读一次性脚本捕获的静态副本,数据日期会滞后,已改为优先工作区。)
+
+    同时输出新鲜度台账 stale:严格组(指数/收益率/外汇/波动率,EODHD/FRED/Yahoo
+    官方日收盘)要求 as_of == t;finviz 组(src='finviz')只要求快照日期 >= t
+    (滚动快照本来就取"最新时点",常有 ±1 天北京日期偏移)。stale 非空时由
+    md2html 在表上方渲染提醒横幅、register 记入元数据并推 Lark 告警。
+    """
+    strict = [{"name": r["name"], "as_of": r.get("as_of")}
+              for s in sections for r in s["rows"]
+              if r.get("src") != "finviz" and r.get("as_of") != t.isoformat()]
+    fv = [{"name": r["name"], "as_of": r.get("as_of")}
+          for s in sections for r in s["rows"]
+          if r.get("src") == "finviz" and (r.get("as_of") or "") < t.isoformat()]
+    stale = strict + fv
+    p = ws / "final" / "charts" / "ft_sections.json"
+    p.write_text(json.dumps(
+        {"t": t.isoformat(), "sections": sections, "stale": stale,
+         "generated_at": datetime.now().isoformat(timespec="seconds")},
+        ensure_ascii=False), encoding="utf-8")
+    if stale:
+        print(f"[us_close] ⚠ STALE data rows (t={t}): "
+              f"{[(s['name'], s['as_of']) for s in stale]}")
+    return p
+
+
 def render_for_workspace(ws: Path, conn: Any = None) -> Optional[Path]:
     """Pipeline entry: FT-style chart -> {ws}/final/charts/01_markets.png.
 
@@ -524,6 +628,7 @@ def render_for_workspace(ws: Path, conn: Any = None) -> Optional[Path]:
     n = sum(len(s["rows"]) for s in sections)
     if n < 15:
         raise RuntimeError(f"only {n} rows assembled")
+    _dump_ft_json(ws, t, sections)   # 先落盘数据再画 PNG:PNG 渲染失败不丢表格数据
     return render(sections, t, out)
 
 
@@ -559,6 +664,8 @@ def main() -> int:
     if n < 15:
         print(f"[us_close] only {n} rows assembled — aborting", file=sys.stderr)
         return 1
+    if args.workspace:
+        _dump_ft_json(Path(args.workspace), t, sections)
     render(sections, t, out)
     print(f"[us_close] wrote {out} ({n} rows, {len(sections)} sections)")
     return 0
