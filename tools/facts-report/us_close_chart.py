@@ -19,7 +19,7 @@ Methodology (reverse-engineered from GuanHe 2026-10-30 chart, verified numerical
                              (matches GuanHe incl. dividends: GLD -6.6/USO +15.9)
   - indices/yields/FX/VIX -> market_data_eod close history (EODHD); yields and
                              yields quoted in bp
-  - DXY                   -> Yahoo best-effort; MOVE unavailable (footnote)
+  - DXY                   -> EODHD DXY.INDX EOD (直接 API),Yahoo 回退;MOVE 无源(页脚注明)
   - CHINA / ASIA & EUROPE -> cash-index EODHD history (market_data_eod)
 
 Usage:
@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import os
+import re
 import tempfile
 
 os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp(prefix="mplconfig-"))
@@ -180,7 +181,7 @@ def _series_ohlc(conn: Any, code: str, t: date,
 
 def _yahoo_ohlc(symbol: str, t: date,
                 days: int = 340) -> Optional[List[Tuple[date, float, float, float, float]]]:
-    """Yahoo chart API 的 OHLC(用于 DXY 等无 EODHD 授权的代码);失败返回 None。"""
+    """Yahoo chart API 的 OHLC(DXY 的回退源,EODHD 优先见 _eodhd_eod);失败返回 None。"""
     p2 = int(datetime.combine(t + timedelta(days=1), datetime.min.time()).timestamp())
     try:
         r = requests.get(
@@ -300,6 +301,57 @@ def _yahoo_series(symbol: str, t: date, adjusted: bool = True,
         return s or None
     except Exception:  # noqa: BLE001
         return None
+
+
+def _eodhd_token() -> str:
+    """EODHD token:env 优先,回退解析仓库 .env(与 build_snapshot._eodhd_api 同模式)。"""
+    tok = os.environ.get("EODHD_API_TOKEN", "")
+    if not tok:
+        env_path = ROOT / ".env"
+        if env_path.exists():
+            m = re.search(r"^EODHD_API_TOKEN=(.+)$",
+                          env_path.read_text(encoding="utf-8"), re.MULTILINE)
+            if m:
+                tok = m.group(1).strip()
+    return tok
+
+
+def _eodhd_eod(code: str, t: date,
+               days: int = 400) -> Tuple[Optional[List[Tuple[date, float]]],
+                                         Optional[List[Tuple[date, float, float, float, float]]]]:
+    """EODHD EOD 端点日线,一次调用同时产出收盘序列与 OHLC(均降序,≤t)。
+
+    DXY 用:EODHD 有 DXY.INDX 且当日收盘出数早于 Yahoo 的 DX-Y.NYB 终值
+    (2026-11-13 实测:渲染时刻 21:00 ET EODHD 已有当日值、Yahoo 尚未出);
+    需要 ~340 天历史算 1W/1M/YTD,故直连 API 而不依赖 market_data_eod 的
+    增量入库。任何异常返回 (None, None),由调用方回退 Yahoo。
+    """
+    tok = _eodhd_token()
+    if not tok:
+        return None, None
+    try:
+        r = requests.get(
+            f"https://eodhd.com/api/eod/{code}",
+            params={"from": (t - timedelta(days=days)).isoformat(),
+                    "to": t.isoformat(), "api_token": tok, "fmt": "json"},
+            timeout=90)
+        r.raise_for_status()
+        rows = r.json()
+        if not isinstance(rows, list) or not rows:
+            return None, None
+        series: List[Tuple[date, float]] = []
+        ohlc: List[Tuple[date, float, float, float, float]] = []
+        for row in sorted(rows, key=lambda x: x.get("date", ""), reverse=True):
+            d = date.fromisoformat(row["date"])
+            if d > t or row.get("close") is None:
+                continue
+            series.append((d, float(row["close"])))
+            if all(row.get(k) is not None for k in ("open", "high", "low")):
+                ohlc.append((d, float(row["open"]), float(row["high"]),
+                             float(row["low"]), float(row["close"])))
+        return (series or None), (ohlc or None)
+    except Exception:  # noqa: BLE001
+        return None, None
 
 
 # --------------------------------------------------------------- row assembly
@@ -451,16 +503,25 @@ def build_sections(conn: Any, t: date,
     comm = [r for r in (etf_row("Crude Oil", "USO"), etf_row("Gold", "GLD"),
                         etf_row("Silver", "SLV"), etf_row("Copper", "CPER")) if r]
 
-    # ---- FX (DXY via Yahoo best-effort; EUR/USD & USD/JPY from EODHD)
+    # ---- FX (DXY: EODHD DXY.INDX 优先,Yahoo 回退; EUR/USD & USD/JPY from EODHD)
     fx: List[Dict[str, Any]] = []
-    dxy = _yahoo_series("DX-Y.NYB", t, adjusted=False)
+    dxy, dohlc = _eodhd_eod("DXY.INDX", t)
     if dxy:
+        print("[us_close] DXY via EODHD DXY.INDX")
+    else:
+        # EODHD 失败(配额/网络)才回退 Yahoo;注意 Yahoo 的 DX-Y.NYB 当日
+        # 终值发布偏晚(美东晚间),渲染早于出数时会落入 stale 台账(横幅+告警)
+        dxy = _yahoo_series("DX-Y.NYB", t, adjusted=False)
         dohlc = _yahoo_ohlc("DX-Y.NYB", t)
+        print("[us_close] DXY EODHD unavailable — Yahoo fallback")
+    if dxy:
+        # code 保持 YAHOO 前缀:实时刷新(/shared quotes)仍走 Yahoo —— EODHD
+        # realtime 对 DXY 闭市返回 NA,Yahoo 盘中有实时价
         fx.append(_row("US dollar", "DXY", _minus(f"{dxy[0][1]:.2f}"), "%",
                        _changes(dxy), dxy[0][1], as_of=dxy[0][0], hist=dohlc or dxy,
                        code="YAHOO:DX-Y.NYB", refs=_refs(dxy)))
     else:
-        print("[us_close] DXY unavailable via Yahoo — row skipped")
+        print("[us_close] DXY unavailable via both EODHD and Yahoo — row skipped")
 
     def fx_row(name: str, ticker: str, code: str) -> Dict[str, Any]:
         s = _series(conn, code, t)

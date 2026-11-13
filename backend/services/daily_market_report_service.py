@@ -418,6 +418,7 @@ MARKET_TEMPERATURE_GROUPS: List[Dict[str, Any]] = [
                 "label": "United States",
                 "cards": [
                     ("gspc", "S&P 500", "GSPC.INDX", "", "TVC:SPX"),
+                    ("dji", "Dow Jones", "DJI.INDX", "", "TVC:DJI"),
                     ("comp", "NASDAQ Composite", "IXIC.INDX", "", "NASDAQ:IXIC"),
                     ("ndx", "NASDAQ 100", "NDX.INDX", "", "NASDAQ:NDX"),
                     ("sox", "PHLX Semiconductor", "SOX.INDX", "", "NASDAQ:SOX"),

@@ -298,9 +298,11 @@ body{margin:0;background:var(--bg-page);color:var(--text-primary);
 .tab-nav{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
 /* ── 移动端(≤768px):标题折叠迷你条 + tab 横滑 ───────────────────── */
 @media(max-width:768px){
- .report-header{padding:14px 14px 0;transition:padding .2s}
- .report-header h1{font-size:17px;display:-webkit-box;-webkit-line-clamp:2;
-  -webkit-box-orient:vertical;overflow:hidden}
+ .report-header{padding:12px 14px 0;transition:padding .2s}
+ /* 品牌水印独占首行右上角;标题换行到水印下方,整宽显示,不与水印齐平 */
+ .report-header .top{flex-direction:column;align-items:flex-start;gap:6px}
+ .report-header-right{align-self:flex-end;order:-1}   /* 水印首行(标题在 DOM 里在前) */
+ .report-header h1{font-size:17px;overflow-wrap:anywhere}
  .gh-brand .zh{font-size:12px}.gh-brand .en{font-size:6.5px;letter-spacing:.3em}
  .tab-nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-top:10px}
  .tab-nav::-webkit-scrollbar{display:none}
@@ -410,6 +412,9 @@ body.has-ftcards .ftwrap{display:none}
 /* 移动端隐藏桑基下钻抽屉:off-screen 偏移按桌面 vw 校准,min-width:340px 在窄屏
    会留一截在屏幕内遮挡 tab/内容(不可点);抽屉本身 38vw 起步,手机上不可用 */
 @media(max-width:768px){#gdr-drawer{display:none!important}}
+/* 手机版隐藏"数据流向"tab:桑基图是宽幅多列交互(点击下钻/拖宽抽屉),窄屏
+   不可用;连同 tab 按钮与面板一起隐藏,桌面端不受影响 */
+@media(max-width:768px){.sankey-tab{display:none!important}}
 tbody tr:nth-child(even){background:var(--bg-hover)}
 tbody tr:hover{background:var(--bg-hover)}
 td.num,th.num{text-align:right;font-family:ui-monospace,Consolas,monospace;font-size:12.8px}
@@ -500,7 +505,7 @@ function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/
  var tabsEl = document.getElementById('tabs'), panelsEl = document.getElementById('panels');
  TABS.forEach(function(t, i){
   var b = document.createElement('button');
-  b.className = 'tab-btn' + (i === 0 ? ' active' : '');
+  b.className = 'tab-btn' + (i === 0 ? ' active' : '') + (t.sankey ? ' sankey-tab' : '');
   b.textContent = t.tab; b.dataset.i = i;
   b.onclick = function(){
    document.querySelectorAll('.tab-btn').forEach(function(x){x.classList.remove('active');});
@@ -511,7 +516,7 @@ function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/
   };
   tabsEl.appendChild(b);
   var panel = document.createElement('div');
-  panel.className = 'tab-panel' + (i === 0 ? ' active' : '');
+  panel.className = 'tab-panel' + (i === 0 ? ' active' : '') + (t.sankey ? ' sankey-tab' : '');
   if(t.sankey){
     var cw = document.createElement('div');
     cw.className = 'wide-break';
