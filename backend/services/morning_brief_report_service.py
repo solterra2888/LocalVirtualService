@@ -19,9 +19,11 @@ reports/MorningBrief/report_YYYYMMDD.html 确定性命名，重跑覆盖同键�
 
 from __future__ import annotations
 
+import calendar
 import os
+import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -324,8 +326,14 @@ class MorningBriefReportService:
                                            if r.get("c")]
         if not rows_spec:
             return None
+        # 涨跌榜实时刷新规格(2026-11-13):{市场: [{c:EODHD 代码, r:参考价}|None]}
+        # 行序与 rank_kline 一致;与 FT 共享一次行情拉取(批量,60s 进程缓存)
+        rank_spec: Dict[str, Any] = ((row[0] or {}).get("rank_live")) or {}
+        rank_codes = sorted({e["c"] for ents in rank_spec.values()
+                             if isinstance(ents, list)
+                             for e in ents if e and e.get("c")})
 
-        key = tuple(sorted({r["c"] for r in rows_spec}))
+        key = tuple(sorted({r["c"] for r in rows_spec} | set(rank_codes)))
         now = time.monotonic()
         cached = _live_cache.get(key)
         if cached and now - cached[0] < _LIVE_TTL_SEC:
@@ -333,8 +341,39 @@ class MorningBriefReportService:
 
         quotes = self._fetch_live_quotes(key)
         payload = self._assemble_live_rows(spec, rows_spec, quotes)
+        if rank_spec:
+            payload["rank"] = self._assemble_rank_live(rank_spec, quotes)
         _live_cache[key] = (now, payload)
         return payload
+
+    def _assemble_rank_live(self, rank_spec: Dict[str, Any],
+                            quotes: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """涨跌榜实时行:按行序输出 {市场: [{p,g,w,m,y}|None]},个股恒 '%' 口径。
+
+        窗口与 FT 表共用 _window_changes(按行情实际日期现算,锚点随最新收盘
+        平移对齐 Yahoo);r.s = 生成时预埋的最近 45 根收盘迷你序列,
+        r.ytd = 上年末参考(锚点无关)。
+        """
+        snap_t = str(rank_spec.get("t") or "")[:10]
+        fb = (date.fromisoformat(snap_t)
+              if re.match(r"\d{4}-\d{2}-\d{2}$", snap_t) else None)
+        out: Dict[str, Any] = {}
+        for mkt, ents in rank_spec.items():
+            if not isinstance(ents, list):
+                continue
+            rows_out: List[Optional[Dict[str, Any]]] = []
+            for e in ents:
+                if not isinstance(e, dict):
+                    e = None
+                q = quotes.get((e or {}).get("c") or "") if e else None
+                if not q:
+                    rows_out.append(None)
+                    continue
+                wc = self._window_changes((e or {}).get("r") or {}, q, "%", fb)
+                rows_out.append({"p": round(wc["last"], 4), "g": wc["m1d"],
+                                 "w": wc["m1w"], "m": wc["m1m"], "y": wc["ytd"]})
+            out[mkt] = rows_out
+        return out
 
     @staticmethod
     def _fetch_live_quotes(codes: Tuple[str, ...]) -> Dict[str, Dict[str, Any]]:
@@ -350,8 +389,10 @@ class MorningBriefReportService:
         eodhd = [c for c in codes if not c.startswith("YAHOO:")]
         api_token = os.getenv("EODHD_API_TOKEN")
         if eodhd and api_token:
-            for i in range(0, len(eodhd), _LIVE_BATCH):
-                chunk = eodhd[i:i + _LIVE_BATCH]
+            # 2026-11-13:涨跌榜实时行并入后代码数 ~320(FT 35 + rank ~282),
+            # chunk 12→40 —— 每次刷新约 8 次批量调用,60s 进程缓存内所有观众共享
+            for i in range(0, len(eodhd), 40):
+                chunk = eodhd[i:i + 40]
                 try:
                     r = requests.get(
                         f"https://eodhd.com/api/real-time/{chunk[0]}",
@@ -366,10 +407,14 @@ class MorningBriefReportService:
                         if not isinstance(close, (int, float)):
                             continue  # "NA" = 闭市，走 EOD 降级
                         ts = q.get("timestamp")
+                        _o = q.get("open") if isinstance(q.get("open"), (int, float)) else None
+                        _h = q.get("high") if isinstance(q.get("high"), (int, float)) else None
+                        _l = q.get("low") if isinstance(q.get("low"), (int, float)) else None
                         out[q.get("code")] = {
                             "last": float(close),
                             "prev": float(prev)
                             if isinstance(prev, (int, float)) else None,
+                            "o": _o, "h": _h, "l": _l,
                             "ts": int(ts)
                             if isinstance(ts, (int, float)) else None,
                             "src": "live",
@@ -380,7 +425,9 @@ class MorningBriefReportService:
             try:
                 r = requests.get(
                     f"https://query1.finance.yahoo.com/v8/finance/chart/{c.split(':', 1)[1]}",
-                    params={"range": "5d", "interval": "1d"},
+                    # 1mo(非 5d):Yahoo 对部分沪市指数(000016/000300.SS)5d 图
+                    # 偶发只回今日 1 根 bar,closes[-2] 取不到昨收
+                    params={"range": "1mo", "interval": "1d"},
                     headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
                 res = ((r.json().get("chart") or {}).get("result") or [None])[0]
                 meta = (res or {}).get("meta") or {}
@@ -391,9 +438,17 @@ class MorningBriefReportService:
                 if last is None:
                     continue
                 rmt = meta.get("regularMarketTime")
+                # 当日 OHLC(日线末根;收盘后即终值,盘中即实时值)供 FT 弹窗补当日蜡烛
+                qo = (q.get("open") or [])
+                qh = (q.get("high") or [])
+                ql = (q.get("low") or [])
+                _o = qo[-1] if qo and isinstance(qo[-1], (int, float)) else None
+                _h = qh[-1] if qh and isinstance(qh[-1], (int, float)) else None
+                _l = ql[-1] if ql and isinstance(ql[-1], (int, float)) else None
                 out[c] = {
                     "last": float(last),
                     "prev": float(closes[-2]) if len(closes) >= 2 else None,
+                    "o": _o, "h": _h, "l": _l,
                     "ts": int(rmt) if isinstance(rmt, (int, float)) else None,
                     "src": "live",
                 }
@@ -422,34 +477,80 @@ class MorningBriefReportService:
         return out
 
     @staticmethod
-    def _assemble_live_rows(spec: Dict[str, Any],
+    def _window_changes(refs: Dict[str, Any], q: Dict[str, Any], unit: str,
+                        fallback_anchor: Optional[date]) -> Dict[str, Any]:
+        """按行情实际日期现算 5日/1月/YTD(锚点随最新收盘平移,对齐 Yahoo)。
+
+        refs.s = 生成时预埋的迷你收盘序列(升序 [[iso, close]×≤45]);
+        无序列的旧 spec 回退 refs.w1/m1 标量(T 锚)。unit='bp' 行按价差
+        ×100 出 bp(不用百分比)。m1d 恒 = 最新价/昨收。
+        """
+        last, prev = q["last"], q.get("prev")
+
+        def chg(ref):
+            if ref in (None, 0) or last is None:
+                return None
+            return (round((last / ref - 1) * 100, 2) if unit != "bp"
+                    else round((last - ref) * 100, 2))
+
+        anchor = fallback_anchor or date.today()
+        ts = q.get("ts")
+        if isinstance(ts, (int, float)) and ts > 0:
+            anchor = datetime.fromtimestamp(ts, tz=timezone.utc).date()
+        else:
+            d = q.get("d")
+            if d:
+                try:
+                    anchor = date.fromisoformat(str(d)[:10])
+                except ValueError:
+                    pass
+        if fallback_anchor and anchor < fallback_anchor:
+            anchor = fallback_anchor
+
+        w_ref = m_ref = prev_ref = None
+        hist = refs.get("s")
+        if isinstance(hist, list) and hist:
+            try:
+                y, m = (anchor.year, anchor.month - 1) if anchor.month > 1 \
+                    else (anchor.year - 1, 12)
+                mb = date(y, m, min(anchor.day, calendar.monthrange(y, m)[1]))
+                bars = [(date.fromisoformat(str(x[0])[:10]), float(x[1]))
+                        for x in hist if x and len(x) == 2]
+                before = [b for b in bars if b[0] < anchor]
+                if len(before) >= 5:
+                    w_ref = before[-5][1]
+                if before:
+                    prev_ref = before[-1][1]     # 昨收兜底(行情源无 prev 时)
+                m_ref = next((c for d, c in reversed(bars) if d <= mb), None)
+            except (ValueError, TypeError, IndexError):
+                pass
+        if w_ref is None:
+            w_ref = refs.get("w1")
+        if m_ref is None:
+            m_ref = refs.get("m1")
+        return {"last": last, "m1d": chg(prev if prev is not None else prev_ref),
+                "m1w": chg(w_ref), "m1m": chg(m_ref), "ytd": chg(refs.get("ytd")),
+                "dt": anchor.isoformat()}
+
+    def _assemble_live_rows(self, spec: Dict[str, Any],
                             rows_spec: List[Dict[str, Any]],
                             quotes: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """按行的 unit/参考价把实时快照拼成前端可直接填数的 rows。"""
+        snap_t = str(spec.get("t") or "")[:10]
+        fb = (date.fromisoformat(snap_t)
+              if re.match(r"\d{4}-\d{2}-\d{2}$", snap_t) else None)
         out_rows: List[Dict[str, Any]] = []
         for r in rows_spec:
             q = quotes.get(r["c"])
-            refs = r.get("r") or {}
             if not q:
                 out_rows.append({"n": r.get("n"), "last": None, "m1d": None,
                                  "m1w": None, "m1m": None, "ytd": None})
                 continue
-            last, prev, unit = q["last"], q.get("prev"), (r.get("u") or "%")
-
-            def chg(ref: Optional[float]) -> Optional[float]:
-                if ref in (None, 0) or last is None:
-                    return None
-                return ((last / ref - 1) * 100 if unit != "bp"
-                        else (last - ref) * 100)
-
-            out_rows.append({
-                "n": r.get("n"),
-                "last": round(last, 6),
-                "m1d": chg(prev),
-                "m1w": chg(refs.get("w1")),
-                "m1m": chg(refs.get("m1")),
-                "ytd": chg(refs.get("ytd")),
-            })
+            wc = self._window_changes(r.get("r") or {}, q, r.get("u") or "%", fb)
+            out_rows.append({"n": r.get("n"),
+                             "o": q.get("o"), "h": q.get("h"), "l": q.get("l"),
+                             **{k: (round(v, 6) if k == "last" else v)
+                                for k, v in wc.items()}})
         srcs = {q.get("src") for q in quotes.values() if q}
         src = ("live" if srcs == {"live"}
                else "eod" if srcs == {"eod"} else "mixed") if srcs else "eod"

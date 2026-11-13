@@ -116,7 +116,8 @@ if ftp.exists():
     from urllib.parse import quote as _urlq
     TV_INDEX = {
         'SPX': 'TVC:SPX', 'NDX': 'NASDAQ:NDX', 'DJIA': 'TVC:DJI',
-        'R2K': 'TVC:RUT', 'SOX': 'NASDAQ:SOX', 'DXY': 'TVC:DXY',
+        'RUT': 'TVC:RUT', 'SOX': 'NASDAQ:SOX', 'DXY': 'TVC:DXY',
+        'EURUSD': 'FX:EURUSD', 'USDJPY': 'FX:USDJPY',   # 汇率对 → TV 外汇
         'IH': 'SSE:000016', 'IF': 'SSE:000300',   # 中金所期货 → 标的指数(DMR 同款)
         'IC': 'SSE:000905', 'IM': 'SSE:000852',
         '000001.SH': 'SSE:000001', '399001.SZ': 'SZSE:399001',   # 现货现金指数
@@ -183,7 +184,7 @@ if ftp.exists():
                 '<col style="width:12.5%"><col style="width:12.5%">'
                 '<col style="width:12.5%"></colgroup>'
                 '<thead><tr><th>资产</th><th class="num">收盘</th><th>走势</th><th class="ftday">当日</th>'
-                '<th class="num">1周</th><th class="num">1月</th><th class="num">YTD</th></tr></thead>'
+                '<th class="num">5日</th><th class="num">1月</th><th class="num">YTD</th></tr></thead>'
                 f'<tbody>{ft_rows}</tbody></table>')
     # 新鲜度横幅:上游行情缺 T 日收盘时显著提示,绝不静默展示旧数据
     if FT_STALE:
@@ -624,13 +625,14 @@ function ftBarHTML(v, scale, unit){
    tooltip:{trigger:'axis',backgroundColor:'rgba(15,23,42,.92)',
     borderColor:'rgba(255,255,255,.15)',textStyle:{color:'#e2e8f0',fontSize:12},
     formatter:function(ps){
+     var f=function(x){return x==null?'—':(+x).toFixed(2);};   // 价格/MA 统一两位小数
      var h=ps[0].axisValue;
      ps.forEach(function(p){
       if(p.seriesType==='candlestick'){
        var v=p.data;
-       h+='<br/>'+p.marker+'开 '+v[1]+' · 收 '+v[2]+'<br/>低 '+v[3]+' · 高 '+v[4];
+       h+='<br/>'+p.marker+'开 '+f(v[1])+' · 收 '+f(v[2])+'<br/>低 '+f(v[3])+' · 高 '+f(v[4]);
       }else{
-       h+='<br/>'+p.marker+p.seriesName+' '+p.data;
+       h+='<br/>'+p.marker+p.seriesName+' '+f(p.data);
       }});
      return h;}},
    xAxis:{type:'category',data:ds,axisLabel:{color:'#7d8a99',fontSize:10,hideOverlap:true},
@@ -656,7 +658,22 @@ function ftBarHTML(v, scale, unit){
  }
  document.addEventListener('click',function(ev){
   var tr=ev.target.closest ? ev.target.closest('.ftcard[data-ri],.fttbl tbody tr[data-ri]') : null;
-  if(tr && !ev.target.closest('a') && tr.getAttribute('data-ri')!==null) openM(+tr.getAttribute('data-ri'));
+  if(tr && !ev.target.closest('a') && tr.getAttribute('data-ri')!==null){
+   var ri=+tr.getAttribute('data-ri'), d=H[ri];
+   // 实时价晚于冻结历史 → 弹窗历史追加当日 bar(与涨跌榜点击蜡烛同观感):
+   // 有 OHLC 追蜡烛,无(收盘折线资产)追收盘点;旧数据/接口失败原样打开
+   var lv=d && window.__ftLive && window.__ftLive[d.n];
+   if(d && lv && lv.dt && lv.last!=null && (d.h||[]).length){
+    var lastIso=String(d.h[d.h.length-1][0]).slice(0,10);
+    if(lv.dt>lastIso){
+     var bar=(lv.o!=null&&lv.h!=null&&lv.l!=null)
+      ?[lv.dt,lv.o,lv.h,lv.l,lv.last]:[lv.dt,lv.last];
+     window.__ftRowOpen({n:d.n,u:d.u,a:lv.dt,s:d.s,h:d.h.concat([bar])});
+     return;
+    }
+   }
+   openM(ri);
+  }
  });
  document.addEventListener('keydown',function(ev){ if(ev.key==='Escape') closeM(); });
  // 涨跌榜行复用本弹窗:动态 push 数据(与 FT 表共享 H 数组空间;e=错误/加载文案)
@@ -674,6 +691,23 @@ function ftBarHTML(v, scale, unit){
  var rd = new Date(M.rd + 'T00:00:00');
  var cutoff = new Date(); cutoff.setHours(0,0,0,0); cutoff.setTime(cutoff.getTime() - 86400000);
  if(rd < cutoff) return;                     // 旧报告:保持生成时快照
+ // sparkline 客户端重绘(Python _spark_svg 同款):实时价追加为最后一个点,
+ // 港/A 股收盘后的当日点由此补上;不足 15 根返回空串(占位符由调用方兜)
+ window.__sparkHTML = function(vals, m1d){
+  var pts = (vals || []).slice(-63);
+  if(pts.length < 15) return '';
+  var lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts), rng = (hi - lo) || 1;
+  var xy = pts.map(function(v, i){
+   return [ (i / (pts.length - 1)) * 74 + 3, 23 - (v - lo) / rng * 20 ];
+  });
+  var line = xy.map(function(p){ return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ');
+  var last = xy[xy.length - 1];
+  var cls = m1d > 0 ? 'pos' : m1d < 0 ? 'neg' : 'neutral';
+  return '<span class="spspark ' + cls + '"><svg viewBox="0 0 80 26" preserveAspectRatio="none">'
+   + '<polygon points="3,25 ' + line + ' 77.0,25" fill="currentColor" opacity="0.12"/>'
+   + '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>'
+   + '<circle cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) + '" r="1.8" fill="currentColor"/></svg></span>';
+ };
  function fmtLast(v, u){
   if(v == null) return null;
   return u === 'bp' ? v.toFixed(2) + '%' :
@@ -683,6 +717,7 @@ function ftBarHTML(v, scale, unit){
  function apply(rows, meta){
   var by = {};
   rows.forEach(function(r){ by[r.n] = r; });
+  window.__ftLive = by;   // FT 弹窗点击时据此补当日 bar(o/h/l/dt)
   document.querySelectorAll('.fttbl tbody tr[data-ri]').forEach(function(tr){
    var d = H[+tr.getAttribute('data-ri')], q = d && by[d.n];
    if(!q) return;
@@ -691,8 +726,12 @@ function ftBarHTML(v, scale, unit){
     tds[1].childNodes[0].nodeValue = fmtLast(q.last, u);   // 保留 <span class="ftunit">
    if(q.m1d != null){
     tds[3].innerHTML = ftBarHTML(q.m1d, d.s || 5, u);
-    var sp = tds[2].querySelector('.spspark');
-    if(sp) sp.className = 'spspark ' + (q.m1d > 0 ? 'pos' : q.m1d < 0 ? 'neg' : 'neutral');
+   }
+   if(q.last != null){
+    // 走势图补当日点:收盘序列(升序取收盘)+ 实时价(与末点同值则不追加)
+    var vals = (d.h || []).map(function(p){ return p[p.length - 1]; });
+    if(vals.length && vals[vals.length - 1] !== q.last) vals.push(q.last);
+    tds[2].innerHTML = window.__sparkHTML(vals, q.m1d) || '<span class="spna">—</span>';
    }
    [[4, 'm1w'], [5, 'm1m'], [6, 'ytd']].forEach(function(x){
     var v = q[x[1]];
@@ -736,7 +775,11 @@ function ftBarHTML(v, scale, unit){
   qurl += '/quotes';
   fetch(qurl, {cache: 'no-store'})
    .then(function(r){ busy = false; return r.ok ? r.json() : null; })
-   .then(function(j){ if(!j || !j.rows) fail(); else apply(j.rows, j); })
+   .then(function(j){
+    if(!j || !j.rows){ fail(); return; }
+    apply(j.rows, j);
+    if(j.rank && window.__rkApply) window.__rkApply(j.rank);   // 涨跌榜同步刷新
+   })
    .catch(function(){ busy = false; fail(); });
  }
  refresh();
@@ -765,7 +808,7 @@ function ftBarHTML(v, scale, unit){
     + '<div class="fc-r1"><span class="fc-name">' + t[0].innerHTML + '</span>'
     + '<span class="' + t[2].className + ' fc-spark">' + t[2].innerHTML + '</span></div>'
     + '<div class="fc-r2">' + cp(1) + cp(3) + '</div>'
-    + '<div class="fc-r3"><span><i>1周</i>' + cp(4) + '</span><span><i>1月</i>' + cp(5)
+    + '<div class="fc-r3"><span><i>5日</i>' + cp(4) + '</span><span><i>1月</i>' + cp(5)
     + '</span><span><i>YTD</i>' + cp(6) + '</span></div></div>';
   });
   return h;
@@ -882,6 +925,7 @@ function decorate(root){
  //    点击「涨跌幅/成交额」列头排序,空值恒垫底;无 payload 的市场保留静态表)
  if(window.__RANK__){
   var RK_PS = 20;
+  window.__rkApply = function(rank){ (window.__rkUpd || []).forEach(function(f){ f(rank); }); };
   document.querySelectorAll('section.card').forEach(function(sec){
    var h2 = sec.querySelector('h2');
    if(!h2 || h2.textContent.trim() !== '今日涨跌榜') return;
@@ -956,7 +1000,7 @@ function decorate(root){
         + '<span class="rc-t">' + (r.t == null ? '—' : (r.t / 1e8).toFixed(1) + D.unit) + '</span></div>'
         + '<div class="rc-r2"><span class="rc-p">' + (r.p == null ? '—' : Number(r.p).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})) + '</span>'
         + '<span class="rc-g ' + (r.g > 0 ? 'pos' : r.g < 0 ? 'neg' : '') + '">' + (r.g == null ? '—' : (r.g > 0 ? '+' : '') + r.g.toFixed(2) + '%') + '</span>'
-        + '<span class="rc-ps"><i>1周</i>' + pv(r.w) + '<i>1月</i>' + pv(r.m) + '<i>YTD</i>' + pv(r.y) + '</span></div></div>';
+        + '<span class="rc-ps"><i>5日</i>' + pv(r.w) + '<i>1月</i>' + pv(r.m) + '<i>YTD</i>' + pv(r.y) + '</span></div></div>';
       });
       wrap.innerHTML = h + bar;
       return;
@@ -965,7 +1009,7 @@ function decorate(root){
        + '<col style="width:8%"><col style="width:23.5%"><col style="width:9%"><col style="width:8%"><col style="width:14%"><col style="width:7.5%"><col style="width:7.5%"><col style="width:7.5%"><col style="width:15%"></colgroup>'
        + '<thead><tr><th>代码</th><th>公司</th><th class="num">收盘价</th><th>走势</th>'
        + '<th class="num rk-sort" data-k="g">当日' + arr('g') + '</th>'
-       + '<th class="num rk-sort" data-k="w">1周' + arr('w') + '</th>'
+       + '<th class="num rk-sort" data-k="w">5日' + arr('w') + '</th>'
        + '<th class="num rk-sort" data-k="m">1月' + arr('m') + '</th>'
        + '<th class="num rk-sort" data-k="y">YTD' + arr('y') + '</th>'
        + '<th class="num rk-sort" data-k="t">成交额<i class="rktip" data-tip="成交额为预估值:按收盘价×成交量估算,与交易所公布的实际成交金额(按成交均价计)存在偏差,排序参考请以量级为准">ⓘ</i>' + arr('t') + '</th></tr></thead><tbody>';
@@ -986,6 +1030,29 @@ function decorate(root){
      });
      wrap.innerHTML = h + '</tbody></table>' + bar;
     }
+    // 实时刷新钩子:live-refresh JS 拿到 /quotes 响应的 rank 字段后回调,
+    // 就地改 __RANK__ 行数据(价格/当日/5日/1月/YTD)并重渲 —— 港/A 股收盘
+    // 早于查看时刻,快照 T 日值被刷新为最新收盘;接口失败/旧行保留快照
+    (window.__rkUpd = window.__rkUpd || []).push(function(patch){
+     var pm = patch[mkt];
+     if(!pm) return;
+     pm.forEach(function(v, i){
+      if(!v) return;
+      var r = D.rows[i];
+      if(!r) return;
+      if(v.p != null) r.p = v.p;
+      if(v.g != null) r.g = v.g;
+      if(v.w != null) r.w = v.w;
+      if(v.m != null) r.m = v.m;
+      if(v.y != null) r.y = v.y;
+      if(v.p != null && r.sp && r.sp.length){
+       if(r.sp[r.sp.length - 1] !== v.p) r.sp.push(v.p);   // 补当日点
+       if(window.__sparkHTML)
+        r.sv = window.__sparkHTML(r.sp, v.g != null ? v.g : r.g);
+      }
+     });
+     render();
+    });
     wrap.addEventListener('click', function(ev){
      var t = ev.target;
      if(!(t instanceof Element)) return;
@@ -1159,7 +1226,7 @@ for _k, _label, _unit in VL_MARKETS:
         {'c': _vl_disp_code(r), 'n': r.get('name_cn') or r.get('name') or '',
          'p': r.get('price'), 'g': r.get('change_percent'), 't': r.get('turnover'),
          'w': (r.get('perf') or {}).get('w1'), 'm': (r.get('perf') or {}).get('m1'),
-         'y': (r.get('perf') or {}).get('ytd'),
+         'y': (r.get('perf') or {}).get('ytd'), 'sp': r.get('spark') or [],
          'sv': _rk_spark_svg(r.get('spark'), r.get('change_percent'))}
         for r in _rows]}
 RANK_JSON = json.dumps(RANK, ensure_ascii=False)

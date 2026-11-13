@@ -254,6 +254,32 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
                for m in ("us", "hk", "cn")}
         if any(_ks.values()):
             metadata["rank_kline"] = _ks
+        # 涨跌榜实时刷新规格(2026-11-13):行序对齐 rank_kline;每行 = EODHD
+        # 实时代码 + 周期参考收盘(build_snapshot perf_refs)。报告打开时
+        # /shared/{token}/quotes 就地刷新价格/当日/5日/1月/YTD —— 港/A 股
+        # 收盘早于查看时刻,快照 T 日值会被刷新为最新收盘(对齐 Yahoo 展示)。
+        def _eod_code(r: Dict[str, Any]) -> Optional[str]:
+            ex, code = r.get("exchange"), str(r.get("code") or "")
+            if not code:
+                return None
+            if ex == "US":
+                return code + ".US"
+            if ex == "HK":
+                return code.zfill(4) + ".HK"
+            if ex in ("SHG", "SHE"):
+                return code + "." + ex
+            return None
+        _rl = {"t": _sn.get("report_date")}
+        for _m in ("us", "hk", "cn"):
+            _ents = []
+            for _r in ((_vl.get(_m) or {}).get("rows") or []):
+                _c = _eod_code(_r)
+                _refs = _r.get("perf_refs")
+                _ents.append({"c": _c, "r": _refs} if _c and _refs else None)
+            if any(_ents):
+                _rl[_m] = _ents          # None 占位保行序(kline 索引对齐)
+        if len(_rl) > 1:
+            metadata["rank_live"] = _rl
     except Exception as exc:  # noqa: BLE001 — 规格缺失只丢了点击蜡烛图
         logger.warning(f"[mb] rank_kline 规格读取失败: {exc}")
     if ft_warnings:

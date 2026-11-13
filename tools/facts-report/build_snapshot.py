@@ -67,6 +67,7 @@ UTC,published_at 一律按 UTC 存储比较。
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import os
 import re
@@ -499,16 +500,45 @@ def _ref_close_desc(s_desc: List[Tuple[date, float]],
     return None
 
 
+def _ref_trading_desc(s_desc: List[Tuple[date, float]], n: int) -> Optional[float]:
+    """n 个交易日前的收盘(降序序列,最新为第 0 根)。Yahoo Finance 5D 口径。"""
+    return s_desc[n][1] if len(s_desc) > n else None
+
+
+def _month_back(d: date) -> date:
+    """d 减一个自然月(末日溢出取当月最后一日)。"""
+    y, m = (d.year, d.month - 1) if d.month > 1 else (d.year - 1, 12)
+    return date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
+
+
+def _ref_month_desc(s_desc: List[Tuple[date, float]]) -> Optional[float]:
+    """一个自然月前(含)的最近收盘。Yahoo Finance 1M 口径(2026-11-13 对齐)。"""
+    target = _month_back(s_desc[0][0])
+    return next((c for d, c in s_desc if d <= target), None)
+
+
 def _ytd_close_desc(s_desc: List[Tuple[date, float]]) -> Optional[float]:
     """上年最后一个收盘(YTD 参考)。"""
     return next((c for d, c in s_desc if d.year < s_desc[0][0].year), None)
 
 
-def _rank_perf_spark(sym: str, t: date) -> Optional[Dict[str, Any]]:
-    """Yahoo 2 年日线(复权,≤T 过滤)→ spark(近 63 收盘)+ w1/m1/ytd 涨跌。
+def _rank_perf_spark(sym: str, t: date,
+                     anchor_price: Optional[float] = None,
+                     anchor_chg: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Yahoo 2 年日线(原始收盘,≤T 过滤)→ spark(近 63 收盘)+ w1/m1/ytd 涨跌。
 
-    与 FT 大盘总览同口径:1周/1月 = 日历 7/30 天窗口参考收盘,YTD = 上年
-    最后收盘,全部复权价(总回报)。≤T 过滤保证晚间补跑不混入 T+1 K 线。
+    口径(2026-11-13 对齐 Yahoo Finance):w1 = 5 个交易日前收盘(5D),
+    m1 = 一个自然月前(含)最近收盘(1M),YTD = 上年最后收盘(行业标准,
+    与 Yahoo 一致);价格基准为 Yahoo 原始收盘 quote.close(拆股已追溯
+    复权、股息不复权;adjclose 仅作 quote.close 缺失时的回退)。
+
+    锚点拼接(2026-11-13):构建时刻(美东 19-21 点)常落在 Yahoo 美股"滚日"
+    窗口内(当日 bar 尚未进历史序列,实测 T=11-12 期 81/81 行锚在 T-1),
+    而榜单行的 price/change_percent 来自 EODHD bulk(已含 T 收盘)→ 同一行
+    混用两个交易日。当序列最后一根 < T 且行内提供 EODHD 收盘时,把
+    (T, anchor_price) 拼到序列末尾;拼接前用 change_percent 反推前收与
+    序列最后一根原始收盘核对(容差 0.5%,对不上=拆股/两源打架,放弃拼接
+    保持旧行为)。港/A 股收盘早,序列本就含 T,拼接自然不触发。
     """
     try:
         r = requests.get(
@@ -517,8 +547,9 @@ def _rank_perf_spark(sym: str, t: date) -> Optional[Dict[str, Any]]:
             headers=_UA, timeout=12)
         res = ((r.json().get("chart") or {}).get("result") or [None])[0]
         ind = (res or {}).get("indicators") or {}
+        raw = ((ind.get("quote") or [{}])[0].get("close")) or []
         adj = ((ind.get("adjclose") or [{}])[0].get("adjclose"))
-        vals = adj or ((ind.get("quote") or [{}])[0].get("close")) or []
+        vals = raw or adj or []                 # 原始收盘优先(Google 口径)
         ts = (res or {}).get("timestamp") or []
         pts: List[Tuple[date, float]] = []
         for i in range(min(len(ts), len(vals))):
@@ -527,6 +558,13 @@ def _rank_perf_spark(sym: str, t: date) -> Optional[Dict[str, Any]]:
             d = datetime.fromtimestamp(ts[i]).date()
             if d <= t:
                 pts.append((d, float(vals[i])))
+        spliced = False
+        if (pts and anchor_price and anchor_price > 0
+                and anchor_chg is not None and pts[-1][0] < t):
+            implied_prev = anchor_price / (1 + anchor_chg / 100)
+            if implied_prev > 0 and abs(implied_prev / pts[-1][1] - 1) <= 0.005:
+                pts.append((t, float(anchor_price)))
+                spliced = True
         if len(pts) < 2:
             return None
         s_desc = pts[::-1]                      # 降序,最新在前
@@ -535,10 +573,21 @@ def _rank_perf_spark(sym: str, t: date) -> Optional[Dict[str, Any]]:
         def chg(ref: Optional[float]) -> Optional[float]:
             return None if ref in (None, 0) else round((last / ref - 1) * 100, 2)
 
+        refs = {"w1": _ref_trading_desc(s_desc, 5),
+                "m1": _ref_month_desc(s_desc),
+                "ytd": _ytd_close_desc(s_desc)}
+        # 实时刷新素材(2026-11-13):最近 45 根收盘迷你序列(升序)+ YTD 参考价。
+        # 服务端按行情实际日期现算 5 日/1 月窗口 —— 港/A 股收盘早于查看时刻,
+        # 实时锚点比快照 T 日新,窗口须随锚点平移(YTD 参考为上年末,锚点无关)
+        hist = [[d.isoformat(), round(c, 4)] for d, c in pts[-45:]]
         return {"spark": [round(c, 4) for _, c in pts[-63:]],
-                "w1": chg(_ref_close_desc(s_desc, 7)),
-                "m1": chg(_ref_close_desc(s_desc, 30)),
-                "ytd": chg(_ytd_close_desc(s_desc))}
+                "w1": chg(refs["w1"]),
+                "m1": chg(refs["m1"]),
+                "ytd": chg(refs["ytd"]),
+                "refs": refs,
+                "hist": hist,
+                "ytd_ref": refs["ytd"],
+                "spliced": spliced}
     except Exception:  # noqa: BLE001
         return None
 
@@ -558,17 +607,26 @@ def _rank_sparks(vl: Dict[str, Any], t: date) -> None:
     def _work(r: Dict[str, Any]) -> None:
         if not r.get("ysym"):
             return
-        d = _rank_perf_spark(r["ysym"], t)
+        d = _rank_perf_spark(r["ysym"], t,
+                             anchor_price=r.get("price"),
+                             anchor_chg=r.get("change_percent"))
         if not d:
             return
         r["spark"] = d["spark"]
         r["perf"] = {"w1": d["w1"], "m1": d["m1"], "ytd": d["ytd"]}
+        r["perf_refs"] = ({"s": d.get("hist"), "ytd": d.get("ytd_ref")}
+                          if d.get("hist") else d.get("refs"))
+        r["_spliced"] = bool(d.get("spliced"))
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(_work, rows))
     ok = sum(1 for r in rows if r.get("spark"))
     okp = sum(1 for r in rows if r.get("perf"))
-    print(f"[rank_sparks] 走势小图 {ok}/{len(rows)} 行, 周期涨跌 {okp}/{len(rows)} 行")
+    nsp = sum(1 for r in rows if r.get("_spliced"))
+    for r in rows:
+        r.pop("_spliced", None)                 # 台账字段,不进快照
+    print(f"[rank_sparks] 走势小图 {ok}/{len(rows)} 行, 周期涨跌 {okp}/{len(rows)} 行"
+          f", 锚点拼接 {nsp} 行(Yahoo 日线未含 T 日收盘)")
 
 
 def _eodhd_api(path: str, params: Dict[str, str]) -> Any:

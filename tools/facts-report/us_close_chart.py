@@ -13,8 +13,8 @@ group header.
 Methodology (reverse-engineered from GuanHe 2026-10-30 chart, verified numerically):
   - Last & 1D quotes      -> finviz_screener snapshot MAX(snapshot_date) <= T+1
                              (ETF/sector rows match GuanHe value-for-value)
-  - 1W / 1M windows       -> close on the last trading day <= T-7d / <= T-30d
-                             (calendar windows; 21-trading-days was ruled out)
+  - 5D / 1M windows       -> close 5 trading days back / one calendar month back
+                             (Yahoo Finance window conventions, 2026-11-13)
   - ETF/sector W/M/YTD    -> total return from market_data_eod adjusted_close
                              (matches GuanHe incl. dividends: GLD -6.6/USO +15.9)
   - indices/yields/FX/VIX -> market_data_eod close history (EODHD); yields and
@@ -30,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import sys
 from datetime import date, datetime, timedelta
@@ -112,17 +113,31 @@ def _f_bp(v: Optional[float]) -> str:
 
 
 # ------------------------------------------------------------------ change math
-def _ref_cal(s: List[Tuple[date, float]], days: int) -> Optional[float]:
-    """close on the last trading day <= T-days (calendar window)."""
-    target = s[0][0] - timedelta(days=days)
-    for d, c in s:
-        if d <= target:
-            return c
-    return None
+def _ref_trading(s: List[Tuple[date, float]], n: int) -> Optional[float]:
+    """n 个交易日前的收盘(降序序列,最新为第 0 根)。Yahoo Finance 5D 口径。"""
+    return s[n][1] if len(s) > n else None
+
+
+def _month_back(d: date) -> date:
+    """d 减一个自然月(末日溢出取当月最后一日),如 3-31 → 2-28。"""
+    y, m = (d.year, d.month - 1) if d.month > 1 else (d.year - 1, 12)
+    return date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
+
+
+def _ref_month(s: List[Tuple[date, float]]) -> Optional[float]:
+    """一个自然月前(含)的最近收盘。Yahoo Finance 1M 口径
+    (2026-11-13 定案:T-30 与减自然月在 31 天月份差一天,MU 该日 -3.7%
+    造成 3pp 可见差异;对齐 Yahoo)。"""
+    target = _month_back(s[0][0])
+    return next((c for d, c in s if d <= target), None)
 
 
 def _changes(s: List[Tuple[date, float]], pct: bool = True) -> Dict[str, Optional[float]]:
-    """1D (prev close) / 1W (7cal) / 1M (30cal) / YTD (prior-year close)."""
+    """1D (prev close) / 5D (5 交易日) / 1M (减一个自然月) / YTD (上年末收盘)。
+
+    窗口口径对齐 Yahoo Finance 页面(2026-11-13 用户决策);
+    YTD 本就是行业标准(上年末),与 Yahoo 一致无需改。
+    """
     if len(s) < 2:
         return {"m1d": None, "m1w": None, "m1m": None, "ytd": None}
 
@@ -132,8 +147,8 @@ def _changes(s: List[Tuple[date, float]], pct: bool = True) -> Dict[str, Optiona
         return (s[0][1] / ref - 1) * 100 if pct else (s[0][1] - ref) * 100
 
     ytd_ref = _ytd_ref(s)
-    return {"m1d": chg(s[1][1]), "m1w": chg(_ref_cal(s, 7)),
-            "m1m": chg(_ref_cal(s, 30)), "ytd": chg(ytd_ref)}
+    return {"m1d": chg(s[1][1]), "m1w": chg(_ref_trading(s, 5)),
+            "m1m": chg(_ref_month(s)), "ytd": chg(ytd_ref)}
 
 
 def _ytd_ref(s: List[Tuple[date, float]]) -> Optional[float]:
@@ -142,14 +157,32 @@ def _ytd_ref(s: List[Tuple[date, float]]) -> Optional[float]:
 
 
 def _refs(s: Optional[List[Tuple[date, float]]]) -> Optional[Dict[str, Optional[float]]]:
-    """实时覆盖用的周期参考价(1周/1月/YTD),与 _changes 同窗口口径。
+    """实时覆盖用的周期参考价(5日/1月/YTD)+ 迷你收盘序列,与 _changes 同窗口口径。
 
-    报告打开时后端按 最新价/参考价-1 重算周/月/YTD 涨跌,免存全量历史;
-    序列不足两根时返回 None,该行实时刷新仅更新收盘与 1 日涨跌幅。
+    s = 最近 45 根收盘(升序):服务端按**行情实际日期**现算 5日/1月窗口 ——
+    港/A 股收盘早于查看时刻,实时锚点比快照 T 日新,窗口须随锚点平移;
+    w1/m1/ytd 标量作旧 spec 兼容回退。序列不足两根时返回 None。
     """
     if not s or len(s) < 2:
         return None
-    return {"w1": _ref_cal(s, 7), "m1": _ref_cal(s, 30), "ytd": _ytd_ref(s)}
+    return {"w1": _ref_trading(s, 5), "m1": _ref_month(s), "ytd": _ytd_ref(s),
+            "s": [[d.isoformat(), round(c, 4)] for d, c in s[:45][::-1]]}
+
+
+# 实时行情代码覆盖(2026-11-13):EODHD realtime 对这些代码闭市恒 NA(沪市系
+# 指数/日经/富时/罗素),降级 market_data_eod 会拿到 14:00 盘中入库行而非收盘
+# 终值(上证实测 3642.63 vs 终值 3634.2)→ 改走 Yahoo chart(收盘后即终值;
+# 与 ingest 侧 YAHOO_CHART_CODES 的经验一致)
+_LIVE_YAHOO = {
+    "SSEC.INDX": "YAHOO:000001.SS",
+    "SSE50.INDX": "YAHOO:000016.SS",
+    "CSI300.INDX": "YAHOO:000300.SS",
+    "CSI500.INDX": "YAHOO:000905.SS",
+    "CSI1000.INDX": "YAHOO:000852.SS",
+    "N225.INDX": "YAHOO:^N225",
+    "FTSE.INDX": "YAHOO:^FTSE",
+    "RUT.INDX": "YAHOO:^RUT",
+}
 
 
 # ------------------------------------------------------------------- DB layer
@@ -375,7 +408,8 @@ def _row(name: str, ticker: str, last_str: str, unit: str,
          for d, *rest in [row]]
     return {"name": name, "ticker": ticker, "last": last, "last_str": last_str,
             "unit": unit, "as_of": as_of.isoformat() if as_of else None,
-            "src": src, "hist": h, "code": code, "refs": refs, **ch}
+            "src": src, "hist": h,
+            "code": _LIVE_YAHOO.get(code, code), "refs": refs, **ch}
 
 
 _PAR_TENOR = {"DGS2": "2y", "DGS10": "10y", "DGS30": "30y"}
@@ -444,7 +478,7 @@ def build_sections(conn: Any, t: date,
     eq = [idx_row("S&P 500", "SPX", "GSPC.INDX"),
           idx_row("Nasdaq 100", "NDX", "NDX.INDX"),
           idx_row("Dow Jones", "DJIA", "DJI.INDX"),
-          idx_row("Russell 2000", "R2K", "RUT.INDX"),
+          idx_row("Russell 2000", "RUT", "RUT.INDX"),
           idx_row("PHLX Semiconductor", "SOX", "SOX.INDX")]
 
     # ---- CHINA (cash benchmarks first, then CFFEX index futures shown via
@@ -531,7 +565,8 @@ def build_sections(conn: Any, t: date,
                     as_of=s[0][0] if s else None, hist=ohlc or s,
                     code=code, refs=_refs(s))
 
-    fx += [fx_row("EUR/USD", "", "EURUSD.FOREX"), fx_row("USD/JPY", "", "USDJPY.FOREX")]
+    fx += [fx_row("EUR/USD", "EURUSD", "EURUSD.FOREX"),
+           fx_row("USD/JPY", "USDJPY", "USDJPY.FOREX")]
 
     # ---- VOLATILITY (VIX from EODHD; MOVE not available in our stack)
     sv = _series(conn, "VIX.INDX", t)
@@ -591,7 +626,7 @@ def render(sections: List[Dict[str, Any]], t: date, out: Path) -> Path:
         f"Markets · {t:%A, %B %d, %Y}", 19, INK, weight="bold")
     txt(LAST_R, COLHDR_Y, "最新", 9.5, GRAY, ha="right")
     txt(BAR_CX, COLHDR_Y, "单日变动", 9.5, GRAY, ha="center")
-    for cx, lab in ((C1D, "当日"), (C1W, "1周"), (C1M, "1月"), (CYTD, "年初至今")):
+    for cx, lab in ((C1D, "当日"), (C1W, "5日"), (C1M, "1月"), (CYTD, "年初至今")):
         txt(cx, COLHDR_Y, lab, 9.5, GRAY, ha="right")
 
     name_texts = []  # (text_obj, ticker, y) for 2nd-pass ticker placement

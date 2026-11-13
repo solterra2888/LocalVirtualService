@@ -1,66 +1,53 @@
-# DXY 数据源优化：FT 表 US dollar 行改为 EODHD 优先、Yahoo 回退
+# 涨跌榜 W/M/YTD 修复：锚点拼接 + 口径对齐 Google
 
 ## Context
 
-11-13 期晨报出现数据完整性横幅「US dollar(截至 2026-11-11)」。根因：FT 表三个汇率行中 EUR/USD、USD/JPY 走 EODHD（`market_data_eod`），唯独 DXY 因 `us_close_chart.py:183` 一条**过时的**"无 EODHD 授权"注释走 Yahoo（`DX-Y.NYB`）；而 Yahoo 的 ICE 美元指数当日收盘终值发布时间不固定（本例渲染后 1-1.5 小时才出），渲染时刻（~21:00 美东）常拿不到当日值 → stale 台账 → 横幅+Lark 告警。
+用户核对发现「今日涨跌榜」1月/YTD 与 Google 不一致（NVDA：我们 -23.24%/-6.63% vs Google ≈-27.3%/-10.9%）。排查结论：
 
-**已实测验证**：EODHD EOD 端点有 `DXY.INDX`（正确代码；`DX.INDX`/`DXY.FOREX` 均 Not Found），11-12 收盘 103.128 已在，与 Yahoo 数值差仅 1-4bp；EODHD realtime 对 DXY 闭市返回 NA。结论：EOD 收盘切 EODHD 消除竞态，实时刷新保留 Yahoo 前缀。
+1. **主因·锚点错位一天**：`_rank_perf_spark`（`build_snapshot.py:507`）在快照构建时刻（美东 ~19-21 点）拉 Yahoo 2 年日线，若 Yahoo 尚未滚出 T 日 bar（滚日时间浮动于美东 19:00-22:00，竞态），序列最后一根是 T-1 收盘，spark/W1/M1/YTD 全部以 T-1 为锚、参考日随之平移；而价格/当日涨跌列来自 EODHD bulk（已含 T 收盘）→ 同一行混用两个交易日。T=11-12 期美股 81/81 行全部错位，T=11-11 期 89/89 正常；港/A 股行不受影响。
+2. **次因·价格口径**：涨跌榜用复权价（总回报），Google 用"拆股复权、股息不复权"的原始收盘 → 系统性差 ~0.2pp（NVDA，无拆股小股息）至 ~1pp（高分红股）。
 
-**不选"加进上游 ingest 清单"的原因**：图表需要 ~340 天历史算 1W/1M/YTD（`_changes`/`_refs`），上游 ingest 只增量写近期行，还需一次性 400 天回填且耦合 ingest 调度（07:00 北京跑批）；直接 EODHD EOD 调用一次拿全量历史，自包含、零上游耦合，与本文件已有的 FRED/Yahoo 直连模式一致。
+目标：锚点永远与价格列同为 T 日收盘；口径与 Google/行情软件对齐；顺带修复今天（11-13 期）已发布报告。
 
-## 改动（单文件：`tools/facts-report/us_close_chart.py`）
+## 改动（单文件：`tools/facts-report/build_snapshot.py`）
 
-### 1. 新增 helper `_eodhd_eod(code, t, days=400)`
+### 1. `_rank_perf_spark` 改造（:507-543）
 
-- token 获取照抄 `build_snapshot.py:574-589 _eodhd_api` 模式：`os.environ["EODHD_API_TOKEN"]` → 回退正则解析 `REPO_ROOT/.env`（us_close_chart 目前无 .env 加载，需引入该小段；REPO_ROOT 按本文件路径推导）
-- `GET https://eodhd.com/api/eod/{code}`，params `from=t-400d, to=t, fmt=json`，timeout 90
-- 返回 `(series, ohlc)` 二元组，均降序：series=`[(date, close)]`，ohlc=`[(date,o,h,l,c)]`（同一次调用产出，过滤 `date>t` 与 close/open 为 None 的行，原始升序反转）；任何异常返回 `(None, None)`
+- **序列基准改为原始收盘** `indicators.quote[0].close`（拆股已追溯复权、股息不复权 = Google 口径；adjclose 降级为缺失时的旧回退路径不变，但优先 raw）。函数 docstring 同步改写口径说明。
+- **新增锚点拼接**（新增参数 `anchor_price`、`anchor_chg`，由调用方从行内传入 EODHD bulk 的 `price`/`change_percent`）：
+  - 条件：序列最后一根日期 < T，且 anchor_price > 0、anchor_chg 非 None；
+  - 校验：`implied_prev = anchor_price / (1 + anchor_chg/100)`，要求 `|implied_prev / raw_last_close - 1| ≤ 0.5%`（raw_last_close = 同响应中最后一根 ≤T 的原始收盘；对不上说明有拆股/两源打架 → 放弃拼接，保持旧行为）；
+  - 通过则 `pts.append((T, anchor_price))`，spark/参考日（`_ref_close_desc`/`_ytd_close_desc`）自动以 T 为最新一根重算；
+  - 返回 dict 增加 `"spliced": True/False` 供日志。
 
-### 2. 重写 DXY 块（`us_close_chart.py:454-463`）
+### 2. `_rank_sparks`（:546-571）传参 + 日志
 
-```python
-# ---- FX (DXY: EODHD DXY.INDX 优先,Yahoo 回退; EUR/USD & USD/JPY from EODHD)
-dxy_s, dxy_ohlc = _eodhd_eod("DXY.INDX", t)
-if dxy_s:
-    print("[us_close] DXY via EODHD DXY.INDX")
-else:
-    dxy_s = _yahoo_series("DX-Y.NYB", t, adjusted=False)
-    dxy_ohlc = _yahoo_ohlc("DX-Y.NYB", t)
-    print("[us_close] DXY EODHD unavailable — Yahoo fallback")
-if dxy_s:
-    fx.append(_row("US dollar", "DXY", _minus(f"{dxy_s[0][1]:.2f}"), "%",
-                   _changes(dxy_s), dxy_s[0][1], as_of=dxy_s[0][0],
-                   hist=dxy_ohlc or dxy_s,
-                   code="YAHOO:DX-Y.NYB",  # 实时刷新仍走 Yahoo(EODHD realtime 对 DXY 闭市 NA)
-                   refs=_refs(dxy_s)))
-else:
-    print("[us_close] DXY unavailable via both EODHD and Yahoo — row skipped")
-```
+- `_work` 调用改为 `_rank_perf_spark(r["ysym"], t, anchor_price=r.get("price"), anchor_chg=r.get("change_percent"))`；
+- 末尾 print 增加拼接计数（如 `[rank_sparks] ... 锚点拼接 N 行`），便于日后观测 Yahoo 滚日竞态频率。
+- **保持不动**：`r["ysym"]` 赋值（:556）与行序（turnover 降序，:741）——`metadata.rank_kline` 按行序索引对齐，不能变；us/hk/cn 三市场共用此路径，港/A 股正常日序列本就含 T，拼接为 no-op。
 
-要点：`code` 保持 `YAHOO:DX-Y.NYB`（`morning_brief_report_service._fetch_live_quotes:350/379` 按 `YAHOO:` 前缀路由 Yahoo，实时层不动）；`refs`/`as_of`/`hist` 全部改由 EODHD 序列驱动；stale 判定逻辑（`_dump_ft_json:615` 严格组 `as_of != t`）无需改动。
+### 3. 明确不改
 
-### 3. 修正过时注释
+- kline 弹窗（register 时冻结的 ysym 规格驱动，`register_morning_brief.py:248-258`）不受影响；
+- FT 大盘总览 ETF 行保持复权总回报（GuanHe 版式逆向验证过的口径）；
+- 另两份管线拷贝（无此代码）不同步。
 
-`_yahoo_ohlc` docstring（:183「用于 DXY 等无 EODHD 授权的代码」）及 DXY 块旧注释，改为"Yahoo 回退用于 DXY（EODHD 优先）"。
-
-## 重发布 11-13 期（用户已确认执行）
+## 修复今天这期（T=2026-11-12 工作区）
 
 ```bash
-PY=/root/miniconda3/envs/guanhe/bin/python
-WS=/opt/guanhetech/backend/reports/facts-report/2026-11-12
-$PY tools/facts-report/us_close_chart.py --workspace $WS        # 重渲 01_markets.png + ft_sections.json
-touch $WS/final/report.md                                       # 强制 register 重跑 md2html(复用条件是 html≥md mtime)
-$PY tools/facts-report/register_morning_brief.py --ok 2026-11-12 # 重注册: token 轮换、OSS 同键覆盖
+# 1) 在现有快照上重算涨跌榜（Yahoo 现已含 11-12 bar，锚点自然正确；
+#    顺带验证新代码：此时拼接不触发，走 raw 基准新口径）
+python - <<'EOF'   # 读 snapshot.json → 调 _rank_sparks(vl, T) → 写回
+EOF
+# 2) 重渲染 + 重发布
+$PY tools/facts-report/report_html_tools/md2html_report.py 2026-11-12
+touch .../final/report.md && $PY tools/facts-report/register_morning_brief.py --ok 2026-11-12
 ```
 
 ## 验证
 
-1. **重渲后断言**：`ft_sections.json` 中 DXY 行 `as_of=="2026-11-12"`、`last≈103.128`、`m1d≈+0.21%`、`hist` 最后一天为 11-12 且含 OHLC；`stale` 列表为空；PNG 已更新。
-2. **回退演练**：`EODHD_API_TOKEN=invalid $PY us_close_chart.py --workspace $WS` → 日志出现 "Yahoo fallback"、行仍产出（Yahoo 现已有 11-12 bar，as_of 应为 2026-11-12、last≈103.17）。
-3. **重发布后断言**：DB `morning_brief_reports` 11-13 行 `metadata->'data_warnings'` 为 NULL、share_token 已换新；OSS `reports/MorningBrief/report_20261113.html` 覆盖成功（register 日志）；重渲将演练步骤污染的 ft_sections.json 覆盖回 EODHD 版后再注册（顺序注意：演练 → 正式重渲 → touch → register）。
-4. **页面抽查**：`/api/morning-brief-report/shared/{新token}` 返回 HTML 无横幅、DXY 显示 103.13；`/shared/{token}/quotes` 正常返回（DXY 行走 Yahoo 路由不报错）。
-
-## 范围外（明确不做）
-
-- 另两份同源拷贝（GuanHe-Daily-Report、tools/morning-brief）不同步（用户已确认）
-- 上游 ingest 增加 DXY.INDX、register 时延迟补拉重试（EODHD 优先后原竞态已消除，stale 横幅+Lark 兜底仍保留）
+1. **拼接单测（monkeypatch 演练）**：伪造 Yahoo 响应剥掉最后一根 bar，以 NVDA T=2026-11-12 + anchor(166.19, -4.34) 调 `_rank_perf_spark`：期望 w1=-8.49%、m1=-27.28%、ytd=-10.89%（raw 口径）、spark 尾值 166.19、`spliced=True`；再喂不匹配的 anchor（如 price=100）→ `spliced=False`、行为同旧版。
+2. **口径核对**：对 NVDA 用 raw 序列手算 w1/m1/ytd 与函数输出一致，且与 Google 页面 1月/YTD 数值吻合（±0.3pp 内，参考日可能有 1-2 天差异）。
+3. **快照重算断言**：重跑后美股 81 行 `spark[-1] == price`（±0.02）；NVDA perf 更新为 -8.49/-27.28/-10.89；hk/cn 行数值不变；`[rank_sparks]` 日志行数正常。
+4. **端到端**：md2html 后检查 `window.__RANK__` 中 NVDA 的 m/y 已更新、`rank_kline` 规格与重发布前一致（ysym/行序未动）；register 后抽查分享页涨跌榜数字与 `/kline` 弹窗正常。
+5. **回归面**：`_rank_perf_spark` 全仓库唯一调用方就是 `_rank_sparks`（已确认），无其他消费方。
