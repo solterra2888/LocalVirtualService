@@ -822,7 +822,7 @@ def render_macro_dashboard(snapshot: Dict[str, Any]) -> str:
              for r in (sources.get("market") or {}).get("cross_asset") or []}
 
     lines = ["## 宏观速览", "", "### 四大经济体", "",
-             "| 经济体 | 增长 | 通胀 | 政策利率 |",
+             "| 经济体 | GDP增长 | 通胀 | 政策利率 |",
              "|---|---|---|---|"]
     for c in ("US", "EU", "CN", "JP"):
         block = md.get(c) or {}
