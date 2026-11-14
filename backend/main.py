@@ -194,7 +194,10 @@ app.include_router(subscription_content_tags.router, prefix="/api/subscriptions"
 # PR-N1: Feed 个性化摘要 用户设置 (右上角齿轮配置)
 app.include_router(feed_summary_settings.router, prefix="/api/feeds", tags=["Feed 摘要设置"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表板"])
-# Daily 聚合视图: 把 Upload Files + Feeds 订阅合并成首页时间轴信息流 (/daily 默认页)
+# Daily 聚合视图: 把 Upload Files + Feeds 订阅合并成时间轴信息流。
+# ⚠️ 前端 /daily 页面已暂时下线 (App.tsx 路由重定向到 /feeds-dashboard), 但本路由必须保留:
+#   /api/daily/feed?tickers= 是 Dashboard(FinvizDashboard) 与手机端个股详情的相关新闻数据源,
+#   /api/daily/items/{id} 是 Feeds Dashboard 预览抽屉的条目详情端点 (feeds_dashboard.py 也复用其装配逻辑)
 # 详见 backend/api/daily.py 与 docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md
 app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"])
 # Feeds Dashboard: 把订阅内容按「主题 × 重要性」重组 (/feeds-dashboard), 读路径零 LLM

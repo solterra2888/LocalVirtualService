@@ -8,6 +8,7 @@ sql数据库/
 references/
 node_modules/
 build/
+build-staging/
 jikun/
 参考数据/
 # deployment - 忽略生成文件和敏感配置，保留模板和脚本

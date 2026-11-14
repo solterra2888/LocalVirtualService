@@ -348,7 +348,8 @@ const LandingPage: React.FC = () => {
     else window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const primaryGo = () => navigate(isAuthenticated ? '/daily' : '/login');
+  // Daily 下线后落地页直达 Feeds Dashboard (原为 /daily)
+  const primaryGo = () => navigate(isAuthenticated ? '/feeds-dashboard' : '/login');
   const primaryLabel = isAuthenticated ? '进入工作台  Enter Platform' : '登录  Login';
 
   return (

@@ -18,13 +18,15 @@ import CentralBankDashboardPage from './pages/CentralBankDashboardPage';
 import Form13FPage from './pages/Form13FPage';
 import FilesPage from './pages/FilesPage';
 import MobileSourcesPage from './pages/MobileSourcesPage';
-import DailyPage from './pages/DailyPage';
-import MobileDailyPage from './pages/MobileDailyPage';
+// 暂时下线 Daily 聚合视图页面 (代码保留, 恢复时取消注释并还原 /daily 路由):
+// import DailyPage from './pages/DailyPage';
+// import MobileDailyPage from './pages/MobileDailyPage';
 import UsersPage from './pages/UsersPage';
 import SchedulerPage from './pages/SchedulerPage';
 import MonitoringPage from './pages/MonitoringPage';
 import FeedReaderPage from './pages/FeedReaderPage';
 import FeedsDashboardPage from './pages/FeedsDashboardPage';
+import MobileFeedsDashboardPage from './pages/MobileFeedsDashboardPage';
 import MobileFeedsPage from './pages/MobileFeedsPage';
 import MobileFeedsListView from './pages/MobileFeedsListView';
 import MobileFeedArticlePage from './pages/MobileFeedArticlePage';
@@ -120,7 +122,8 @@ const AppContent: React.FC = () => {
   const LayoutComponent = isMobile ? MobileLayout : Layout;
   const DashboardComponent = isMobile ? MobileDashboardPage : DashboardPage;
   const FilesComponent = isMobile ? MobileSourcesPage : FilesPage;
-  const DailyComponent = isMobile ? MobileDailyPage : DailyPage;
+  // const DailyComponent = isMobile ? MobileDailyPage : DailyPage;  // 暂时下线 Daily
+  const FeedsDashboardComponent = isMobile ? MobileFeedsDashboardPage : FeedsDashboardPage;
 
   return (
     <div className="App">
@@ -140,8 +143,9 @@ const AppContent: React.FC = () => {
             </PrivateRoute>
           }
         >
-          {/* Daily 聚合视图 = 登录后首屏: 把 Upload Files 与 Feeds 订阅按时间轴合并 */}
-          <Route path="daily" element={<DailyComponent />} />
+          {/* Daily 聚合视图暂时下线 (桌面+手机): 路由重定向到 Feeds Dashboard, 页面代码保留
+              (见 Layout.tsx 侧栏 / MobileBottomNav 同口径屏蔽; 恢复时还原本路由与上方 import) */}
+          <Route path="daily" element={<Navigate to="/feeds-dashboard" replace />} />
           <Route path="dashboard" element={<DashboardComponent />} />
           <Route path="markets" element={<MarketsPage />} />
           <Route path="markets/earnings-calendar" element={<EarningsCalendarPage />} />
@@ -170,8 +174,8 @@ const AppContent: React.FC = () => {
           ) : (
             <Route path="feeds" element={<FeedReaderPage />} />
           )}
-          {/* Feeds Dashboard: 按主题 × 重要性聚合的订阅重要信息视图 (P0 桌面优先, 移动端可用) */}
-          <Route path="feeds-dashboard" element={<FeedsDashboardPage />} />
+          {/* Feeds Dashboard: 按主题 × 重要性聚合的订阅重要信息视图 (桌面/移动独立页面, isMobile 切换) */}
+          <Route path="feeds-dashboard" element={<FeedsDashboardComponent />} />
           {/* Reports 路由 */}
           {isMobile ? (
             <>

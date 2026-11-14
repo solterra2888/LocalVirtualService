@@ -140,7 +140,17 @@ Feeds Dashboard（前端 `/feeds-dashboard`，导航 "Feeds Dashboard"）解决*
 - 条目点击 → `DailyPreviewDrawer`（复用 `/api/daily/items/feed_<id>` 详情与 9 种原文渲染器），顶栏 "Open in Feeds" 深链
 - **自动刷新**：每 5 分钟静默 + `visibilitychange` 聚焦即刷（距上次 >5min）；**阅读中不打扰**——抽屉打开 / 词过滤中 / 请求进行中跳过本轮；`load()` 有 in-flight 防重入
 - admin「生成快照」按钮（days=7）
-- 路由 `/feeds-dashboard`（桌面+移动同页响应式；移动端底部导航未加入口——6 项已满）
+- 路由 `/feeds-dashboard`（App.tsx `isMobile` 切换桌面/移动两页）
+
+**移动端独立页面**（`web-frontend/src/pages/MobileFeedsDashboardPage.tsx`，数据层与桌面页同源只换 UI）：
+
+- 吸顶紧凑筛选栏（顶栏 56px + 任务进度条偏移）：第 1 行 日期+重要性 Segmented，第 2 行 范围 Segmented + 热词/刷新/admin 生成按钮
+- **Watchlist 命中 chips 横滑行**置顶（有命中才显示，点按 = ticker 词过滤，再点取消）
+- 词云收进**底部抽屉**（`WordCloudPanel` maxWords=50），主内容直接从主题卡片开始
+- 主题卡片「View all →」**钻入主题详情视图**（状态切换隐藏筛选栏，IntersectionObserver 无限滚动 `/topics/{id}/items`，返回键回首页）
+- 条目预览 `DailyPreviewDrawer placement="bottom"`，Prev/Next 全量列表拉取与桌面同口径
+- 自动刷新 skip 条件在桌面基础上追加「主题详情阅读中」；scope 持久化与桌面共用 `feeds-dashboard-scope` key
+- 移动端底部导航第 1 项（Dashboard）即本路由，无需新增入口
 
 ## 8. 部署清单（新环境 / 更新）
 
