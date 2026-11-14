@@ -4,7 +4,7 @@ import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 interface LoginFormData {
   username: string;
@@ -29,30 +29,12 @@ const LoginPage: React.FC = () => {
     <div className="login-container">
       <Card className="login-form-container">
         <div className="login-logo">
-          <img src="/GuanHeCapital.ico" alt="GuanHe Terminal" style={{ width: 72, height: 72, marginBottom: 16 }} />
-          <Title
-            level={2}
-            className="login-title"
-            style={{
-              fontFamily: "'Aladin', cursive",
-              letterSpacing: '0.02em',
-              marginTop: 0,
-            }}
-          >
-            GuanHe Terminal
-          </Title>
-          <Text
-            className="login-subtitle"
-            style={{
-              fontFamily: "'Aladin', cursive",
-              letterSpacing: '0.02em',
-              display: 'block',
-              marginBottom: 8,
-            }}
-          >
-            觀合終端
-          </Text>
-          <Text type="secondary" style={{ fontSize: 13, letterSpacing: '0.02em' }}>
+          <img
+            src={`${(process.env.PUBLIC_URL || '').replace(/\/$/, '')}/brand/app-wordmark-guanhe-capital.svg`}
+            alt="GuanHe Capital"
+            style={{ display: 'block', margin: '0 auto 10px', width: 185 }}
+          />
+          <Text type="secondary" style={{ fontSize: 13, letterSpacing: '0.02em', display: 'block' }}>
             Do the Right things. Do things right.
           </Text>
         </div>
@@ -102,12 +84,6 @@ const LoginPage: React.FC = () => {
             </Button>
           </Form.Item>
         </Form>
-
-        <div style={{ textAlign: 'center', marginTop: 16 }}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            System Version: v{process.env.REACT_APP_APP_VERSION || '2.0.0'}
-          </Text>
-        </div>
       </Card>
     </div>
   );

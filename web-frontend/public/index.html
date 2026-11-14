@@ -2,8 +2,11 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/GuanHeCapital.ico" />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
+    <!-- favicon：观合竖排版（品牌双字标）；回退在前，SVG 矢量最后声明。
+         静态资源 nginx 配置了 immutable 一年缓存，icon 内容更新必须同步递增 URL 的 ?v= 才会生效 -->
+    <link rel="icon" href="%PUBLIC_URL%/GuanHeCapital.ico?v=fav7" sizes="any" />
+    <link rel="icon" type="image/svg+xml" href="%PUBLIC_URL%/brand/favicon-guanhe.svg?v=fav3" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png?v=20261114f" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -12,14 +15,14 @@
       name="description"
       content="觀合終端 GuanHe Terminal — AI 驱动的二级市场投资研究平台。聚合社交媒体、视频资讯、财经新闻、研报与全球行情，提供每日跨源信息中枢、私人投研资料库、自选股研究终端与 AI Agent 能力。"
     />
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json?v=20261114f" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Aladin&family=Inter:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700;900&family=Playfair+Display:wght@600;700;800;900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Aladin&family=Inter:wght@400;500;600;700&family=LXGW+WenKai+TC:wght@400;700&family=Noto+Serif+SC:wght@600;700;900&family=Outfit:wght@300&family=Playfair+Display:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@700;800&display=swap"
       rel="stylesheet"
     />
-    <title>GuanHe Terminal ｜觀合終端</title>
+    <title>GuanHe Capital - Shared values, joint efforts.</title>
   </head>
   <body>
     <noscript>您需要启用JavaScript才能运行此应用程序。</noscript>

@@ -14,20 +14,47 @@
   background: #1a202c !important;
 }
 
-/* 登录页面样式 */
+/* 登录页面样式：背景与官网底部哲学区同款（品牌蓝渐变 + 观/合水印） */
 .login-container {
+  position: relative;
+  overflow: hidden;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #63aef5 0%, #4a90e2 100%);
+  background: linear-gradient(200deg, #5fc1fa 0%, #44b0f8 42%, #1e86dd 100%);
+}
+/* 观（左上）/ 合（右下）巨幅淡影水印 */
+.login-container::before,
+.login-container::after {
+  content: '';
+  position: absolute;
+  width: 58vmin;
+  height: 58vmin;
+  background-size: contain;
+  background-repeat: no-repeat;
+  opacity: 0.1;
+  pointer-events: none;
+  user-select: none;
+}
+.login-container::before {
+  top: -8vmin;
+  left: -10vmin;
+  background-image: url('../public/brand/ghz-guan-white.png');
+}
+.login-container::after {
+  bottom: -10vmin;
+  right: -8vmin;
+  background-image: url('../public/brand/ghz-he-white.png');
 }
 
 .login-form-container {
+  position: relative;
+  z-index: 1;
   background: white;
   padding: 40px;
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 18px 48px rgba(13, 74, 140, 0.18);
   width: 100%;
   max-width: 400px;
 }
