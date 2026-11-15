@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 import psycopg2
 import psycopg2.extras
@@ -268,27 +269,51 @@ class SubstackClient:
         self.fetch_url = pub_url
 
     def _paginate_archive(self, base_url: str, limit: int, *, timeout: float) -> List[Dict[str, Any]]:
+        """拉取 archive 列表（cursor 分页；2026-11 起 Substack 废弃 offset，带 offset 一律 400）。
+
+        新契约：GET /api/v1/archive?sort=new&limit=N[&cursor=<urlencoded base64>]
+                → {"posts": [...], "nextCursor": "<base64 post_date>"}
+        旧契约（纯数组 + offset）保留兼容：若 Substack 回滚迁移可自动适配。
+        """
         results: List[Dict[str, Any]] = []
-        offset = 0
         page_size = 15
+        offset = 0                    # 旧契约翻页游标
+        cursor: Optional[str] = None  # 新契约翻页游标
         while len(results) < limit:
             endpoint = (
                 f"{base_url.rstrip('/')}/api/v1/archive"
-                f"?sort=new&offset={offset}&limit={page_size}"
+                f"?sort=new&limit={page_size}"
             )
+            if cursor:
+                # nextCursor 为 base64（含 + / =），必须整体 urlencode 再拼接
+                endpoint += f"&cursor={quote(cursor, safe='')}"
+            elif offset:
+                endpoint += f"&offset={offset}"
             if self.auth and getattr(self.auth, "authenticated", False):
                 resp = self.auth.get(endpoint, timeout=timeout)
             else:
                 import requests
                 resp = requests.get(endpoint, timeout=timeout)
             resp.raise_for_status()
-            items = resp.json()
-            if not isinstance(items, list) or not items:
+            data = resp.json()
+            if isinstance(data, dict):
+                items = data.get("posts") or []
+                if not items:
+                    break
+                results.extend(items)
+                next_cursor = data.get("nextCursor")
+                if not next_cursor:
+                    break
+                cursor = next_cursor
+            elif isinstance(data, list):
+                if not data:
+                    break
+                results.extend(data)
+                if len(data) < page_size:
+                    break
+                offset += page_size
+            else:
                 break
-            results.extend(items)
-            if len(items) < page_size:
-                break
-            offset += page_size
         return results[:limit]
 
     def _fetch_archive_items(self, limit: int) -> List[Dict[str, Any]]:
@@ -611,7 +636,8 @@ class SubstackSubscriptionService:
             url = row["publication_url"]
             try:
                 url = normalize_publication_url(url)
-            except ValueError:
+            except ValueError as exc:
+                logger.warning("Substack 订阅 URL 非法，已跳过: %r (%s)", url, exc)
                 continue
             result.append({
                 "publication_url": url,

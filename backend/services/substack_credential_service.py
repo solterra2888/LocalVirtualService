@@ -187,6 +187,12 @@ def _write_temp_cookies(cookies: Dict[str, str]) -> str:
 
 # ---------- URL 归一化（复刻 scripts/substack/substack_common.py） ----------
 
+# host 必须是点分的合法 DNS 标签（拦截 "cassandra unchained.substack.com" 这类含空格/特殊字符的脏数据）
+_VALID_HOST_RE = re.compile(
+    r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+"
+)
+
+
 def normalize_publication_url(value: str) -> str:
     value = (value or "").strip()
     if not value:
@@ -200,6 +206,8 @@ def normalize_publication_url(value: str) -> str:
     host = parsed.netloc.lower().removeprefix("www.")
     if not host:
         raise ValueError(f"invalid publication URL: {value!r}")
+    if not _VALID_HOST_RE.fullmatch(host):
+        raise ValueError(f"invalid publication host: {host!r}")
     return f"https://{host}"
 
 
