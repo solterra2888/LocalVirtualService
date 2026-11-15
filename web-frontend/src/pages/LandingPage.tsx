@@ -1,11 +1,35 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useScrollReveal, useScrolled } from '../hooks/useScrollReveal';
+import { GuanHeLogoCombo } from '../components/GuanHeLogoCombo';
 import './LandingPage.css';
 
 /* 首屏背景视频（参照 FengHe 官网做法） */
 const MEDIA_BASE = `${(process.env.PUBLIC_URL || '').replace(/\/$/, '')}/media`;
+
+/* 背景视频双源：手机/微信走 1080p 轻量版，桌面走 4K 原片。
+   原片为 3440×1946 High@L5.2 yuvj420p（full-range）约 22.5Mbps——桌面浏览器解码无碍，
+   但微信内核（X5/XWeb）与国产 ROM 硬解对 full-range/L5.2 兼容差，且 40MB 在跨境
+   链路必然卡死。轻量版为 1920×1080 High@L4.0 limited-range 2-pass 4Mbps（6.9MB），
+   手机全屏观感与原片无差。
+   判定：移动/微信 UA，或触屏 + 短边 ≤1024（覆盖 iPad 全系）。 */
+const IS_LITE_VIDEO =
+  /Android|iPhone|iPad|iPod|Mobile|MicroMessenger/i.test(navigator.userAgent) ||
+  (navigator.maxTouchPoints > 1 &&
+    Math.min(window.screen.width, window.screen.height) <= 1024);
+const HERO_VIDEO_URL = IS_LITE_VIDEO
+  ? `${MEDIA_BASE}/hero-guanhe-mobile.mp4`
+  : `${MEDIA_BASE}/hero-guanhe.mp4?v=20261114e`;
+
+/* 微信视频诊断面板数据（?vdebug=1 开启；换 URL 天然绕开微信旧会话缓存） */
+interface VdebugInfo {
+  src: string;
+  net: number;
+  ready: number;
+  t: string;
+  paused: boolean;
+  err: string;
+}
 /* 「观合」书法字标：Zhi Mang Xing 行书高清渲染图（与 FengHe「风和」同款笔意） */
 const BRAND_BASE = `${(process.env.PUBLIC_URL || '').replace(/\/$/, '')}/brand`;
 
@@ -25,12 +49,83 @@ const DISCLAIMER_PARAS = [
 ];
 
 const LandingPage: React.FC = () => {
-  const navigate = useNavigate();
   const { isAuthenticated } = useAuthStore();
   const scrolled = useScrolled(40);
   const [modal, setModal] = useState<LoginModal>(null);
   const sloganRef = useRef<HTMLHeadingElement>(null);
   const taglineRef = useRef<HTMLParagraphElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [vdebug, setVdebug] = useState<VdebugInfo | null>(null);
+
+  // 背景视频：微信兜底 + 错误记录 + ?vdebug=1 诊断面板
+  // （1）iOS 微信部分版本 autoplay 需 WeixinJSBridge ready 后触发；
+  // （2）Android 老内核（X5）需 x5-video-player-type 启用 H5 同层播放（见 video 属性）；
+  // （3）出错时静默降级为 poster（CSS 已兜底），console 留痕便于排查；
+  // （4）返回导航兜底：从 /login 等路由 back 回来时组件重挂载，autoplay 已无
+  //     活跃用户手势常被移动端拒绝——数据就绪、页面恢复可见、用户的任意一次
+  //     触摸/点击（捕获阶段，全局）都会重试播放，self-healing。
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    const tryPlay = () => {
+      v.play().catch(() => {});
+    };
+    const onWxReady = () => tryPlay();
+    const wx = (window as unknown as { WeixinJSBridge?: { invoke: (a: string, b: object, cb: () => void) => void } }).WeixinJSBridge;
+    if (typeof wx === 'undefined') {
+      document.addEventListener('WeixinJSBridgeReady', onWxReady, false);
+    } else {
+      wx.invoke('getNetworkType', {}, () => tryPlay());
+    }
+
+    const onMediaReady = () => tryPlay();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tryPlay();
+    };
+    const onGesture = () => {
+      if (v.paused) tryPlay();
+    };
+    v.addEventListener('canplay', onMediaReady);
+    v.addEventListener('loadeddata', onMediaReady);
+    document.addEventListener('visibilitychange', onVisible);
+    // passive：不阻塞滚动；capture：任何区域（含弹窗/按钮）的触摸都能救活视频
+    document.addEventListener('touchend', onGesture, { capture: true, passive: true });
+    document.addEventListener('click', onGesture, true);
+
+    const onError = () => {
+      const e = v.error;
+      console.error('[hero] video error', e && { code: e.code, message: e.message });
+    };
+    v.addEventListener('error', onError);
+
+    const isDebug = new URLSearchParams(window.location.search).has('vdebug');
+    let timer: number | undefined;
+    if (isDebug) {
+      const tick = () =>
+        setVdebug({
+          src: v.currentSrc || v.src || '',
+          net: v.networkState,
+          ready: v.readyState,
+          t: v.currentTime.toFixed(2),
+          paused: v.paused,
+          err: v.error ? `${v.error.code} ${v.error.message || ''}` : '-',
+        });
+      tick();
+      timer = window.setInterval(tick, 500);
+    }
+
+    return () => {
+      document.removeEventListener('WeixinJSBridgeReady', onWxReady);
+      v.removeEventListener('canplay', onMediaReady);
+      v.removeEventListener('loadeddata', onMediaReady);
+      document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('touchend', onGesture, true);
+      document.removeEventListener('click', onGesture, true);
+      v.removeEventListener('error', onError);
+      if (timer) window.clearInterval(timer);
+    };
+  }, []);
 
   // Slogan：每次进入视口都重播字体入场效果（离开即复位）
   useEffect(() => {
@@ -69,10 +164,15 @@ const LandingPage: React.FC = () => {
   // LOGIN：先弹身份选择（Staff / Investor）
   const goLogin = () => setModal('role');
 
-  // 员工：进入 GuanHe Terminal（已登录直达工作台，未登录进入登录页）
+  // 员工：另开独立浏览器窗口进入 GuanHe Terminal——Terminal 是独立系统，不属于官网。
+  // 带尺寸/工具栏特性时浏览器会弹出全新窗口（而非当前窗口里的新标签页）
   const chooseStaff = () => {
     setModal(null);
-    navigate(isAuthenticated ? '/feeds-dashboard' : '/login');
+    window.open(
+      isAuthenticated ? '/feeds-dashboard' : '/login',
+      '_blank',
+      'width=1280,height=900,menubar,toolbar,location,status,resizable,scrollbars'
+    );
   };
 
   // 弹窗打开时：锁定背景滚动 + Esc 关闭
@@ -96,23 +196,8 @@ const LandingPage: React.FC = () => {
       <header className={`fh-header${scrolled ? ' is-scrolled' : ''}`}>
         <div className="fh-header-inner">
           <a href="#top" className="fh-brand" aria-label="GuanHe Capital">
-            <span className="fh-brand-mark" aria-hidden="true">
-              <img
-                className="fh-mark-img fh-mark-light"
-                src={`${BRAND_BASE}/ghz-mark-white.png?v=mx2`}
-                alt=""
-              />
-              <img
-                className="fh-mark-img fh-mark-dark"
-                src={`${BRAND_BASE}/ghz-mark-slate.png?v=mx2`}
-                alt=""
-              />
-            </span>
-            <span className="fh-brand-text">
-              <span className="fh-brand-name">GuanHe</span>
-              <span className="fh-brand-rule" aria-hidden="true" />
-              <span className="fh-brand-sub">Capital</span>
-            </span>
+            {/* 观合 × GuanHe Capital. 组合字标：单体内联 SVG（见 components/GuanHeLogoCombo） */}
+            <GuanHeLogoCombo />
           </a>
         </div>
         <button className="fh-login" onClick={goLogin}>
@@ -127,16 +212,27 @@ const LandingPage: React.FC = () => {
           <div className="fh-hero-glow fh-glow-b" />
           <video
             className="fh-hero-video"
+            ref={videoRef}
             autoPlay
             muted
             loop
             playsInline
             preload="auto"
             poster={`${MEDIA_BASE}/hero-poster.jpg?v=20261114e`}
-          >
-            <source src={`${MEDIA_BASE}/hero-guanhe.mp4?v=20261114e`} type="video/mp4" />
-          </video>
+            src={HERO_VIDEO_URL}
+            // X5（微信安卓老内核）H5 同层播放，避免被系统播放器接管/黑屏；
+            // 非标准属性，绕过 TS 的已知属性检查
+            {...({
+              'x5-video-player-type': 'h5',
+              'x5-video-player-fullscreen': 'true',
+            } as React.VideoHTMLAttributes<HTMLVideoElement>)}
+          />
         </div>
+        {vdebug && (
+          <pre className="fh-vdebug">
+            {`[src] ${vdebug.src}\n[net] ${vdebug.net}  [ready] ${vdebug.ready}  [t] ${vdebug.t}s  [paused] ${vdebug.paused}\n[err] ${vdebug.err}\n[ua] ${navigator.userAgent}`}
+          </pre>
+        )}
         <h1 className="fh-hero-title" ref={sloganRef}>
           <span className="fh-title-row">Shared values,</span>
           <span className="fh-title-row">
@@ -166,26 +262,20 @@ const LandingPage: React.FC = () => {
           aria-hidden="true"
         />
         <div className="fh-philosophy-inner reveal">
+          {/* 品牌名横排：观 (Guan) 合 (He) —— 参照 FengHe 页脚 风(Feng)和(He) 排版 */}
           <div className="fh-philosophy-name">
-            <img
-              className="fh-char-glyph"
-              src={`${BRAND_BASE}/ghz-guan-white.png`}
-              alt="觀"
-            />
-            <img
-              className="fh-char-glyph"
-              src={`${BRAND_BASE}/ghz-he-white.png`}
-              alt="合"
-            />
+            <span className="fh-name-pair">
+              <span className="fh-name-char">观</span>
+              <span className="fh-name-roman">(Guan)</span>
+            </span>
+            <span className="fh-name-pair">
+              <span className="fh-name-char">合</span>
+              <span className="fh-name-roman">(He)</span>
+            </span>
           </div>
           <p className="fh-tagline" ref={taglineRef}>
             <span className="fh-tagline-row">Do the right things.</span>
-            <span className="fh-tagline-row">
-              <span className="fh-tagline-spacer" aria-hidden="true">
-                Do the&nbsp;
-              </span>
-              Do things right.
-            </span>
+            <span className="fh-tagline-row">Do things right.</span>
           </p>
         </div>
       </section>

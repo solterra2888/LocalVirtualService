@@ -7,7 +7,7 @@
 /* -------------------------------------------------------------------------
    自托管字体（/fonts/，同源加载）：不依赖 Google Fonts，
    保证所有浏览器（含无法访问谷歌字体的网络环境）渲染完全一致。
-   观/合 采用 Zhi Mang Xing（与 FengHe 官网同款行书，OFL 免费商用）的单字子集（GuanHeXK），跨平台统一。
+   观/合 取 Noto Serif SC 单字子集，拉丁标题/标语用 IBM Plex Serif（均 OFL 免费商用），跨平台统一。
    ------------------------------------------------------------------------- */
 @font-face {
   font-family: 'Plus Jakarta Sans';
@@ -79,23 +79,56 @@
   src: url('../assets/fonts/inter-600.woff2') format('woff2');
   font-display: swap;
 }
+/* 思源黑体单字子集（= Noto Sans SC，OFL 开源协议，免费商用）：品牌行当前使用。
+   「观」「合」取 Bold 700 子集，拼音 (Guan)/(He) 取 Regular 400 子集 */
 @font-face {
-  font-family: 'GuanHeXK';
+  font-family: 'Noto Sans SC';
   font-style: normal;
   font-weight: 700;
-  src: url('../assets/fonts/ghxk-guan.woff2') format('woff2');
-  unicode-range: U+89C2; /* 观 */
+  src: url('../assets/fonts/notosanssc-guanhe-700.woff2') format('woff2');
   font-display: swap;
 }
 @font-face {
-  font-family: 'GuanHeXK';
+  font-family: 'Noto Sans SC';
   font-style: normal;
-  font-weight: 700;
-  src: url('../assets/fonts/ghxk-he.woff2') format('woff2');
-  unicode-range: U+5408; /* 合 */
+  font-weight: 400;
+  src: url('../assets/fonts/notosanssc-guanhe-400.woff2') format('woff2');
   font-display: swap;
 }
-
+/* 备选字体（曾用/可随时切回，改 --ff-brand 即可）：
+   鼎猎刺猬体（免费商用，允许商标与网页嵌入）maoken.com/freefonts/24997.html
+   字库星球飞扬体（免费商用）maoken.com/freefonts/24955.html */
+@font-face {
+  font-family: 'GuanHeCiwei';
+  font-style: normal;
+  font-weight: 400;
+  src: url('../assets/fonts/ciwei-guanhe.woff2') format('woff2');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'GuanHeFeiyang';
+  font-style: normal;
+  font-weight: 400;
+  src: url('../assets/fonts/feiyang-guanhe.woff2') format('woff2');
+  font-display: swap;
+}
+/* IBM Plex Serif（拉丁）：品牌行拼音 + 标语，OFL 免费商用 */
+@font-face {
+  font-family: 'IBM Plex Serif';
+  font-style: normal;
+  font-weight: 400;
+  src: url('../assets/fonts/plexserif-400.woff2') format('woff2');
+  font-display: swap;
+}
+/* Noto Serif SC 单字子集（观/合）：IBM Plex 无 CJK 字形，
+   宋体与 FengHe 页脚「风 (Feng) 和 (He)」印刷体同风格 */
+@font-face {
+  font-family: 'Noto Serif SC';
+  font-style: normal;
+  font-weight: 400;
+  src: url('../assets/fonts/notoserifsc-guanhe.woff2') format('woff2');
+  font-display: swap;
+}
 html {
   scroll-behavior: smooth;
 }
@@ -113,10 +146,13 @@ html {
   --ff-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --ff-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  /* 行楷：自托管 GuanHeXK（Zhi Mang Xing 志莽行书的观/合單字子集，OFL 免费商用）优先——
-     全浏览器统一；系统华文行楷仅作文件加载失败时的兜底 */
-  --ff-xingkai: 'GuanHeXK', 'STXingkai', 'Xingkai SC', 'STXingkai-SC', '华文行楷',
-    'LXGW WenKai TC', 'Kaiti SC', 'STKaiti', 'KaiTi', serif;
+  /* 品牌行拼音/标语/首屏标语：IBM Plex Serif（拉丁）；观/合 落入自托管 Noto Serif SC 单字子集 */
+  --ff-plex: 'IBM Plex Serif', 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+  /* 品牌行整行：思源黑体（Noto Sans SC，OFL 免费商用）——
+     「观」「合」700 Bold、拼音 400 Regular，自托管单字子集优先；
+     系统苹方/雅黑仅作文件加载失败时的兜底。
+     备选：GuanHeCiwei（刺猬体）/ GuanHeFeiyang（飞扬体）子集均已保留可切回 */
+  --ff-brand: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 
   position: relative;
   min-height: 100vh;
@@ -167,24 +203,20 @@ html {
   right: 0;
   z-index: 100;
   padding: 18px 32px;
-  transition: background 0.4s ease, box-shadow 0.4s ease, padding 0.4s ease;
+  /* 动态对齐 fengheasia.com（Salient）：容器阴影 0.42s ease / 透明度 0.3s ease，
+     背景 0.4s、内边距（含 logo 行高）0.32s ease；无上滑入场（header 常驻固定） */
+  transition:
+    background 0.4s ease,
+    box-shadow 0.42s ease,
+    opacity 0.3s ease,
+    padding 0.32s ease;
 }
-/* 滚动态：磨砂半透明玻璃 + 从顶部滑入出现 */
+/* 滚动态：纯白实底（data-user-set-bg #ffffff），无边框无阴影（data-box-shadow="none"，
+   data-remove-border="true"），非毛玻璃、不滑入——与 FengHe 完全同款行为 */
 .fh-header.is-scrolled {
   padding: 10px 32px;
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(18px) saturate(1.5);
-  -webkit-backdrop-filter: blur(18px) saturate(1.5);
-  box-shadow: 0 1px 0 var(--fh-line), 0 10px 34px rgba(13, 74, 140, 0.1);
-  animation: fh-header-drop 0.5s cubic-bezier(0.25, 1, 0.5, 1);
-}
-@keyframes fh-header-drop {
-  from {
-    transform: translateY(-100%);
-  }
-  to {
-    transform: none;
-  }
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .fh-header-inner {
@@ -199,75 +231,51 @@ html {
 .fh-brand {
   display: inline-flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   text-decoration: none;
 }
 
-/* 观合书法字标：ZMX 行书高清图（深底白版 / 滚动后白底石板蓝版） */
-.fh-brand-mark {
+/* 观合 × GuanHe Capital. 组合字标（单体内联 SVG，见 components/GuanHeLogoCombo.tsx）：
+   高度平滑收缩 0.32s ease（FengHe logo 参数）；观合白/蓝双图层交叉淡入淡出；
+   字标颜色随滚动切换：白 → 深海军蓝/灰蓝。原色版 SVG 仍用于登录页 */
+.fh-brand-combo {
+  position: relative;
   display: block;
+  height: 78px;
   line-height: 0;
   user-select: none;
+  transition: height 0.32s ease;
 }
-.fh-mark-img {
+.fh-header.is-scrolled .fh-brand-combo {
+  height: 56px;
+}
+.fh-brand-combo svg {
   display: block;
-  height: 68px;
+  height: 100%;
   width: auto;
-  transition: height 0.4s ease;
 }
-.fh-header.is-scrolled .fh-mark-img {
-  height: 52px;
+.fh-brand-combo image {
+  transition: opacity 0.32s ease;
 }
-.fh-mark-dark {
-  display: none;
+.fh-brand-combo .mark-dark {
+  opacity: 0;
 }
-.fh-header.is-scrolled .fh-mark-light {
-  display: none;
+.fh-header.is-scrolled .fh-brand-combo .mark-dark {
+  opacity: 1;
 }
-.fh-header.is-scrolled .fh-mark-dark {
-  display: block;
+.fh-brand-combo .combo-main {
+  fill: #ffffff;
+  transition: fill 0.32s ease;
 }
-
-.fh-brand-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1.15;
+.fh-brand-combo .combo-sub {
+  fill: rgba(255, 255, 255, 0.82);
+  transition: fill 0.32s ease;
 }
-.fh-brand-name {
-  /* 官方字标：Plus Jakarta Sans Bold/ExtraBold */
-  font-family: 'Plus Jakarta Sans', var(--ff-sans);
-  font-size: 25px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  color: #ffffff;
-  transition: color 0.4s ease;
+.fh-header.is-scrolled .fh-brand-combo .combo-main {
+  fill: var(--fh-navy);
 }
-.fh-brand-rule {
-  width: 100%;
-  height: 1px;
-  margin: 5px 0 4px;
-  background: rgba(255, 255, 255, 0.55);
-  transition: background 0.4s ease;
-}
-.fh-brand-sub {
-  /* 官方字标：Outfit Regular（mixed case，右对齐至 GuanHe 右缘） */
-  font-family: 'Outfit', var(--ff-sans);
-  font-size: 14px;
-  font-weight: 400;
-  letter-spacing: 0.16em;
-  color: rgba(255, 255, 255, 0.82);
-  transition: color 0.4s ease;
-  align-self: flex-end;
-}
-.fh-header.is-scrolled .fh-brand-name {
-  color: var(--fh-navy);
-}
-.fh-header.is-scrolled .fh-brand-rule {
-  background: rgba(0, 40, 60, 0.35);
-}
-.fh-header.is-scrolled .fh-brand-sub {
-  color: var(--fh-muted);
+.fh-header.is-scrolled .fh-brand-combo .combo-sub {
+  fill: var(--fh-muted);
 }
 
 /* Login：极简文字入口 */
@@ -379,7 +387,7 @@ html {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  font-family: var(--ff-serif);
+  font-family: var(--ff-plex);
   font-weight: 400;
   font-size: clamp(40px, 7vw, 88px);
   line-height: 1.18;
@@ -424,9 +432,9 @@ html {
   background: #ffffff;
   padding: clamp(64px, 8vw, 150px) 10%;
 }
-/* 留白态：内容暂时下线，仅保留一小段呼吸白 */
+/* 留白态：内容待定，仅保留一丝呼吸白（后续填内容时改回 .fh-overview 默认版式） */
 .fh-overview-blank {
-  min-height: 13vh;
+  min-height: clamp(20px, 3vh, 44px);
   padding: 0;
 }
 .fh-overview-grid {
@@ -492,60 +500,85 @@ html {
 
 .fh-watermark {
   position: absolute;
-  width: min(58vw, 540px);
+  /* 宽高双约束：min(宽 58vw/540px, 高 48vh)。竖列能否放下由高度决定——
+     横屏/折叠屏等矮视口按 48vh 等比收缩，观/合两字不再重叠；
+     高屏（PC 竖长屏）仍触 540px 封顶，观感不变 */
+  width: min(58vw, 540px, 48vh);
   height: auto;
   opacity: 0.08;
   pointer-events: none;
   user-select: none;
 }
+/* 垂直排版：观（上）/ 合（下）竖列，水平居中，两字向中部靠拢（同 FengHe 页脚大字水印） */
 .fh-wm-guan {
-  top: -3%;
+  top: 8%;
   left: 50%;
-  transform: translateX(-85%);
+  transform: translateX(-50%);
 }
 .fh-wm-he {
-  bottom: -5%;
+  bottom: 8%;
   left: 50%;
-  transform: translateX(-12%);
+  transform: translateX(-50%);
 }
 
 .fh-philosophy-inner {
   position: relative;
   z-index: 2;
   text-align: center;
+  /* 品牌行 + 标语 = 一个整体：缩放基准统一放在父容器，
+     二者以 em 按固定比例（54:45）随动，任何屏幕下比例一致。
+     系数 8.5vw：单一参数全端共用（PC 触 54px 封顶不变，手机端相应收小） */
+  font-size: clamp(24px, 8.5vw, 54px);
 }
-/* 观合竖排（观上合下），无拼音 */
+/* 观合横排：观 (Guan) 合 (He) —— 字体思源黑体（Noto Sans SC，OFL 免费商用）：
+   「观」「合」Bold 700、拼音 (Guan)/(He) Regular 400；同号（同为 1em）、
+   同色、基线对齐，token 间呈均匀空格节奏。
+   字号基准 54px：思源黑体 Bold 墨高比 ≈0.88/0.95，观/合渲染墨高与 FengHe「风」49px 同档。 */
 .fh-philosophy-name {
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  flex-direction: row;
+  align-items: baseline;
   justify-content: center;
-  gap: clamp(10px, 2vh, 22px);
+  gap: 0.3em;
+  color: #ffffff;
+  /* 1em：跟随父容器基准整体缩放 */
+  font-size: 1em;
+  line-height: 1.1;
 }
-.fh-char-glyph {
-  display: block;
-  height: clamp(88px, 10vw, 124px);
-  width: auto;
+.fh-name-pair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2em;
+}
+.fh-name-char {
+  font-family: var(--ff-brand);
+  font-weight: 700;
+  font-size: 1em;
+}
+.fh-name-roman {
+  font-family: var(--ff-brand);
+  font-weight: 400;
+  font-size: 1em;
+  letter-spacing: 0.02em;
 }
 .fh-tagline {
-  margin: clamp(36px, 5vh, 64px) 0 0;
+  margin: 0.55em 0 0;
   display: inline-flex;
   flex-direction: column;
-  align-items: flex-start;
-  font-family: var(--ff-serif);
+  align-items: center;
+  font-family: var(--ff-plex);
   font-weight: 400;
-  font-size: clamp(19px, 3.2vw, 40px);
+  /* 0.833em：桌面基准 54px 下即 45px，随整体等比缩放，比例恒定 */
+  font-size: 0.833em;
   line-height: 1.55;
   letter-spacing: 0.02em;
   color: #ffffff;
 }
-/* 阶梯排版：to unite 对齐在 insight 正下方（隐藏占位与 "To observe with " 同宽） */
+/* 标语阶梯：每行居中（同 FengHe「Harmony between / risk and return.」），
+   短的第二行因此整体左移、右端留白，形成对称阶梯 */
 .fh-tagline-row {
   display: block;
   white-space: nowrap;
-}
-.fh-tagline-spacer {
-  visibility: hidden;
 }
 
 /* =========================================================================
@@ -821,18 +854,9 @@ html {
   .fh-brand {
     gap: 12px;
   }
-  .fh-mark-img {
-    height: 54px;
-  }
-  .fh-header.is-scrolled .fh-mark-img {
-    height: 44px;
-  }
-  .fh-brand-name {
-    font-size: 20px;
-  }
-  .fh-brand-sub {
-    font-size: 12px;
-    letter-spacing: 0.14em;
+  /* FengHe 手机版 logo 不随滚动收缩（恒定 80px），同款处理：容器高度恒定 */
+  .fh-brand-combo {
+    height: 62px;
   }
   .fh-login {
     right: 20px;
@@ -866,14 +890,15 @@ html {
     padding: 96px 24px;
   }
   .fh-watermark {
-    width: 78vw;
+    /* 同样宽高双约束：手机竖屏宽约束主导（78vw），横屏矮视口按 42vh 收缩 */
+    width: min(78vw, 42vh);
     opacity: 0.06;
   }
-  .fh-philosophy-name {
-    gap: 8px;
-  }
-  .fh-char-glyph {
-    height: 84px;
+  /* 手机上 3vh（≈25px）相对屏宽仍显宽，收窄为固定细线；
+     padding:0 必须在此重申——上方 .fh-overview 的 72px 内容态 padding 会按源顺序覆盖它 */
+  .fh-overview-blank {
+    padding: 0;
+    min-height: 14px;
   }
 
   .fh-footer {
@@ -902,4 +927,21 @@ html {
     transform: none;
     transition: none;
   }
+}
+
+/* ---------- 微信视频诊断面板（?vdebug=1）：仅排查用，常态不渲染 ---------- */
+.fh-vdebug {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  z-index: 9999;
+  max-width: calc(100vw - 16px);
+  padding: 8px 10px;
+  font: 10px/1.5 Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #d1e9ff;
+  background: rgba(0, 22, 44, 0.88);
+  border: 1px solid rgba(144, 202, 249, 0.4);
+  border-radius: 6px;
 }

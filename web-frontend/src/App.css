@@ -14,7 +14,7 @@
   background: #1a202c !important;
 }
 
-/* 登录页面样式：背景与官网底部哲学区同款（品牌蓝渐变 + 观/合水印） */
+/* 登录页样式：华尔街灰调背景（模糊 + 白化蒙层）+ 双栏拆分卡片（蓝欢迎栏 / 白表单栏） */
 .login-container {
   position: relative;
   overflow: hidden;
@@ -22,58 +22,139 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(200deg, #5fc1fa 0%, #44b0f8 42%, #1e86dd 100%);
+  background: #f2f5f8;
 }
-/* 观（左上）/ 合（右下）巨幅淡影水印 */
-.login-container::before,
+/* 背景视频独立图层：官网 Hero 视频复用；模糊 10px + 提亮 1.35 + 轻微放大防露边 */
+.login-videobg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(10px) brightness(1.35);
+  transform: scale(1.08);
+}
+/* 白色蒙层：白化视频，突出卡片 */
 .login-container::after {
   content: '';
   position: absolute;
-  width: 58vmin;
-  height: 58vmin;
-  background-size: contain;
-  background-repeat: no-repeat;
-  opacity: 0.1;
-  pointer-events: none;
-  user-select: none;
-}
-.login-container::before {
-  top: -8vmin;
-  left: -10vmin;
-  background-image: url('../public/brand/ghz-guan-white.png');
-}
-.login-container::after {
-  bottom: -10vmin;
-  right: -8vmin;
-  background-image: url('../public/brand/ghz-he-white.png');
+  inset: 0;
+  background: rgba(255, 255, 255, 0.38);
 }
 
-.login-form-container {
+/* 双栏拆分卡片 */
+.login-card {
   position: relative;
   z-index: 1;
-  background: white;
-  padding: 40px;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 18px 48px rgba(13, 74, 140, 0.18);
-  width: 100%;
-  max-width: 400px;
+  display: flex;
+  width: min(880px, 92vw);
+  min-height: 480px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 24px 64px rgba(13, 74, 140, 0.18), 0 4px 16px rgba(0, 0, 0, 0.06);
 }
 
-.login-logo {
+/* 左：品牌蓝欢迎栏（蓝渐变与官网同语言） */
+.login-brand-panel {
+  position: relative;
+  width: 44%;
+  padding: 48px 42px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: linear-gradient(200deg, #5fc1fa 0%, #44b0f8 42%, #1e86dd 100%);
+}
+.login-brand-logo {
+  width: 170px;
+  margin-bottom: 44px;
+}
+.login-brand-welcome {
+  color: #fff;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+}
+.login-brand-bar {
+  display: block;
+  width: 44px;
+  height: 3px;
+  border-radius: 2px;
+  background: #fff;
+  margin: 16px 0 20px;
+}
+.login-brand-tagline {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+  line-height: 1.8;
+  letter-spacing: 0.02em;
+}
+
+/* 右：白色表单栏 */
+.login-form-panel {
+  width: 56%;
+  padding: 56px 56px 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: #fff;
+}
+.login-form-head {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 34px;
 }
-
-.login-title {
-  font-size: 28px;
-  font-weight: 400;
+.login-form-head h3 {
+  font-size: 24px;
+  font-weight: 700;
   color: #1f2937;
-  margin-bottom: 8px;
+  letter-spacing: 0.01em;
+}
+.login-head-bar {
+  display: block;
+  width: 40px;
+  height: 3px;
+  border-radius: 2px;
+  background: #1677ff;
+  margin: 12px auto 0;
 }
 
-.login-subtitle {
-  color: #6b7280;
-  margin-bottom: 32px;
+/* 下划线式输入框（极简风，无框线只留底线） */
+.login-form-panel .ant-input,
+.login-form-panel .ant-input-password {
+  border: none;
+  border-bottom: 1px solid #d9d9d9;
+  border-radius: 0;
+  background: transparent;
+  padding: 7px 2px;
+  box-shadow: none !important;
+}
+.login-form-panel .ant-input-password .ant-input {
+  border-bottom: none;
+  padding: 0;
+}
+.login-form-panel .ant-input::placeholder {
+  color: #b9c2cc;
+}
+.login-form-panel .ant-input:focus,
+.login-form-panel .ant-input-password.ant-input-affix-wrapper-focused,
+.login-form-panel .ant-input-password.ant-input-affix-wrapper:focus {
+  border-bottom-color: #1677ff;
+}
+
+/* 胶囊登录按钮：190px 定宽居中（沿用主色 #1677ff） */
+.login-form-panel .login-submit.ant-btn {
+  display: block;
+  width: 190px;
+  height: 46px;
+  margin: 6px auto 0;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 24px rgba(22, 119, 255, 0.35);
 }
 
 /* 主布局样式 */
@@ -312,9 +393,31 @@
     padding: 0 16px 16px;
   }
 
-  .login-form-container {
-    margin: 16px;
-    padding: 24px;
+  /* 登录卡片：窄屏上下堆叠 */
+  .login-card {
+    flex-direction: column;
+    width: min(420px, 92vw);
+    min-height: 0;
+  }
+  .login-brand-panel {
+    width: 100%;
+    padding: 32px 28px;
+  }
+  .login-brand-logo {
+    width: 140px;
+    margin-bottom: 18px;
+  }
+  .login-brand-welcome {
+    font-size: 20px;
+  }
+  /* 手机端蓝栏仅保留 logo + 欢迎语：短横杠/标语均隐藏 */
+  .login-brand-bar,
+  .login-brand-tagline {
+    display: none;
+  }
+  .login-form-panel {
+    width: 100%;
+    padding: 36px 28px;
   }
 }
 
