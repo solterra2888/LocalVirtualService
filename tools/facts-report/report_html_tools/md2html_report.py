@@ -14,6 +14,32 @@ date = ''
 m = re.search(r'—\s*(20\d\d-\d\d-\d\d)', md[:400])
 if m: date = m.group(1)
 
+# ── 标题栏品牌行:左 logo + 右报告日期 ──────────────────────────────
+# 生成日 = 美股交易日 T+1(北京晨报日,与 register_morning_brief 口径一致);
+# T 优先取正文标题日期,回退工作区目录名
+from datetime import date as _D, timedelta as _TD
+_WD = '一二三四五六日'
+def _hdr_dates(sess):
+    try:
+        d = _D.fromisoformat(sess)
+    except (ValueError, TypeError):
+        return sess or '', ''
+    gen = d + _TD(days=1)
+    return (f'{gen.year}年{gen.month}月{gen.day}日 星期{_WD[gen.weekday()]}',
+            f'美股交易日 {d.isoformat()}（周{_WD[d.weekday()]}）')
+DATE_MAIN, DATE_SUB = _hdr_dates(date or WS.name)
+
+# 品牌组合白标(观合资本,登录页同款)base64 内嵌 —— 发布物单文件自包含
+_LOGO = Path('/opt/guanhetech/web-frontend/public/brand/guanhe-logo-combo-white.svg')
+try:
+    _LOGO_B64 = base64.b64encode(_LOGO.read_bytes()).decode('ascii')
+except OSError:
+    _LOGO_B64 = ''   # 资产缺失→退回文字字标,绝不让渲染失败
+_BRAND = (f'<img class="gh-logo" src="data:image/svg+xml;base64,{_LOGO_B64}" '
+          f'alt="观合资本 GuanHe Capital">' if _LOGO_B64 else
+          '<span class="name"><span class="zh">觀合資本</span>'
+          '<span class="en">GUANHE CAPITAL</span></span>')
+
 secs = {}
 order = []
 for chunk in re.split(r'^## ', md, flags=re.M)[1:]:
@@ -282,36 +308,43 @@ body{margin:0;background:var(--bg-page);color:var(--text-primary);
  font:15px/1.8 -apple-system,'PingFang SC','Microsoft YaHei',Segoe UI,sans-serif;transition:background .25s}
 /* sticky:总标题栏+tab 栏滚动时锁定;z-index 50 —— 内容之上,桑基抽屉(59-61)/溯源气泡(70-71)之下 */
 .report-header{position:sticky;top:0;z-index:50;background:var(--bg-header);padding:22px 26px 0;color:var(--text-header);box-shadow:0 2px 10px rgba(27,75,125,.35)}
-.report-header .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
 .report-header h1{margin:0;font-size:24px;line-height:1.45;max-width:74em}
-.report-header-right{display:flex;align-items:center;gap:12px;font-size:14px;color:var(--text-tab)}
-/* 品牌字标(觀合資本 GuanHe Capital):衬线双语,香槟金,华尔街研报风 */
-.gh-brand{display:flex;align-items:center}
+/* 品牌行:左 logo(观合资本组合白标,登录页同款,base64 内嵌)+ 右报告日期 */
+.brand-row{display:flex;justify-content:space-between;align-items:center;gap:14px;
+ padding-bottom:13px;margin-bottom:15px;border-bottom:1px solid rgba(255,255,255,.18)}
+.gh-brand{display:flex;align-items:center;min-width:0}
+.gh-logo{height:46px;width:auto;display:block}
+.report-header.mini .brand-row{display:none}   /* 滚动收起:品牌行让位内容(桌面+移动) */
+/* 文字字标兜底(logo 资产缺失时):衬线双语,香槟金 */
 .gh-brand .name{display:flex;flex-direction:column;line-height:1.2}
 .gh-brand .zh{font:600 17px/1.2 Georgia,'Songti SC','STSong','SimSun','Noto Serif TC',serif;
  color:#e9d6a4;letter-spacing:.14em}
 .gh-brand .en{font:600 8.5px/1 Georgia,'Times New Roman',serif;color:rgba(255,255,255,.55);
  letter-spacing:.42em;text-indent:.42em;margin-top:4px;white-space:nowrap}
-@media(max-width:768px){.gh-brand .zh{font-size:14px}.gh-brand .en{font-size:7.5px}}
-/* 日期:标题栏右下角(tab 行最右),order:99 保证排在 JS 追加的 tab 按钮之后 */
-.hdr-date{order:99;margin-left:auto;align-self:center;font-size:10px;
- color:var(--text-tab);letter-spacing:.03em;font-variant-numeric:tabular-nums}
+/* 报告日期(右侧):生成日主显 + 美股交易日次显 */
+.hdr-date{display:flex;flex-direction:column;align-items:flex-end;gap:2px;
+ text-align:right;line-height:1.3;flex:none}
+.hdr-date .d-label{font:600 9px/1 Georgia,'Times New Roman',serif;color:rgba(255,255,255,.55);
+ letter-spacing:.34em;text-indent:.34em}
+.hdr-date .d-main{font-size:17px;font-weight:600;color:#fff;letter-spacing:.02em;
+ font-variant-numeric:tabular-nums;white-space:nowrap}
+.hdr-date .d-sub{font-size:10.5px;color:var(--text-tab);white-space:nowrap}
+@media(max-width:768px){.gh-brand .zh{font-size:14px}.gh-brand .en{font-size:7.5px}
+ .gh-logo{height:34px}.brand-row{padding-bottom:8px;margin-bottom:10px}
+ .hdr-date .d-main{font-size:13px}.hdr-date .d-sub{font-size:9.5px}
+ .hdr-date .d-label{display:none}}
 .tab-nav{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
 /* ── 移动端(≤768px):标题折叠迷你条 + tab 横滑 ───────────────────── */
 @media(max-width:768px){
  .report-header{padding:12px 14px 0;transition:padding .2s}
- /* 品牌水印独占首行右上角;标题换行到水印下方,整宽显示,不与水印齐平 */
- .report-header .top{flex-direction:column;align-items:flex-start;gap:6px}
- .report-header-right{align-self:flex-end;order:-1}   /* 水印首行(标题在 DOM 里在前) */
  .report-header h1{font-size:17px;overflow-wrap:anywhere}
  .gh-brand .zh{font-size:12px}.gh-brand .en{font-size:6.5px;letter-spacing:.3em}
  .tab-nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-top:10px}
  .tab-nav::-webkit-scrollbar{display:none}
  .tab-btn{white-space:nowrap;flex:none;padding:8px 12px}
- .hdr-date{display:none}   /* tab 行内日期让位横滑;完整日期在迷你条外随头部收起 */
- /* 迷你条 = tab 导航条:隐藏标题/品牌,tab 常驻可随时切栏目 */
+ /* 迷你条 = tab 导航条:隐藏标题/品牌行,tab 常驻可随时切栏目 */
  .report-header.mini{padding:2px 8px 0}
- .report-header.mini h1,.report-header.mini .gh-brand{display:none}
+ .report-header.mini h1{display:none}
  .report-header.mini .tab-nav{margin-top:2px}
 }
 .tab-btn{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-tab);
@@ -388,7 +421,14 @@ th.rk-sort:hover{filter:brightness(1.18)}   /* 提亮原渐变;background 简写
 .fc-spark .spspark{width:64px;height:22px}
 .fc-r2{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12.5px}
 .fc-r2 .num{font-weight:600}
-.fc-day{flex:1;min-width:110px;display:block}
+/* 当日列(拷贝自表格 td,类名 barcell):定宽右锚 —— 各卡价格文字宽窄不一,
+   flex:1 会让条形区起点漂移、中轴错位;定宽+margin-left:auto 统一右缘,
+   所有卡片的零轴/胶囊连成一条竖线。数值胶囊居中(桌面表格里钉格子外缘的
+   内联 left/right 以 !important 改写;胶囊带卡片底色 z-index:1,重叠可读) */
+.fc-r2 .barcell{flex:none;width:58%;margin-left:auto;display:flex;justify-content:center}
+/* 胶囊加厚到盖住 13px 条形(否则条形上下露头像瑕疵);大幅涨跌时条形仍从两侧伸出表幅度 */
+.fc-r2 .barcell .bv{left:50%!important;right:auto!important;transform:translate(-50%,-50%);padding:3px 5px}
+.fc-r2 .barcell .zero{display:none}   /* 卡片里零轴无参照意义 */
 .fc-r3{display:flex;gap:16px;margin-top:6px;font-size:11.5px;align-items:center}
 .fc-r3 > span{display:inline-flex;align-items:center;white-space:nowrap}
 .fc-r3 i,.fc-r3 .fc-i{font-style:normal;color:var(--text-muted);font-size:9.5px;margin-right:3px}
@@ -491,11 +531,12 @@ __GDRCSS__
 @media(max-width:768px){main{padding:14px 10px 40px}section.card{padding:14px}td,th{padding:5px 7px;font-size:12.5px}.md{overflow-x:auto}}
 </style></head><body>
 <div class="report-header">
- <div class="top">
-  <h1>__TITLE__</h1>
-  <div class="report-header-right"><div class="gh-brand" aria-label="觀合資本 GuanHe Capital"><span class="name"><span class="zh">觀合資本</span><span class="en">GUANHE CAPITAL</span></span></div></div>
+ <div class="brand-row">
+  <div class="gh-brand" aria-label="观合资本 GuanHe Capital">__BRAND__</div>
+  <div class="hdr-date"><span class="d-label">MORNING BRIEF</span><span class="d-main">__DATE_MAIN__</span><span class="d-sub">__DATE_SUB__</span></div>
  </div>
- <div class="tab-nav" id="tabs"><span class="hdr-date">__DATE__</span></div>
+ <h1>__TITLE__</h1>
+ <div class="tab-nav" id="tabs"></div>
 </div>
 <main id="panels"></main>
 <script>
@@ -1159,17 +1200,18 @@ document.addEventListener('keydown', function(e){
   if(e.key === 'Escape' && provPop) provPop.style.display = 'none';
 });
 
-// 移动端标题折叠:滚过首屏后收成 tab 导航迷你条(标题让位 tabs),回顶展开 —— rAF 节流
+// 标题栏滚动折叠:滚过首屏后收成迷你条 —— 移动端隐藏标题+品牌行(仅 tab),
+// 桌面端隐藏品牌行(保留标题,sticky 栏不再吃屏),回顶展开 —— rAF 节流
 (function(){
- if(!matchMedia('(max-width:768px)').matches) return;
  var hdr = document.querySelector('.report-header');
  if(!hdr) return;
+ var mq = matchMedia('(max-width:768px)');
  var ticking = false;
  window.addEventListener('scroll', function(){
   if(ticking) return;
   ticking = true;
   requestAnimationFrame(function(){
-   hdr.classList.toggle('mini', window.scrollY > 110);
+   hdr.classList.toggle('mini', window.scrollY > (mq.matches ? 110 : 160));
    ticking = false;
   });
  }, {passive: true});
@@ -1243,9 +1285,11 @@ payload_scripts += '<script>window.__RANK__=' + RANK_JSON + ';</script>' + chr(1
 html = html.replace('<script>' + chr(10) + 'var TABS = window.__TABS__ || [];',
                     payload_scripts + '<script>' + chr(10) + 'var TABS = window.__TABS__ || [];', 1)
 html = (html.replace('__TITLE__', title.replace('<', '&lt;'))
-            .replace('__DATE__', date or WS.name)
-            
-            
+            .replace('__DATE_MAIN__', DATE_MAIN)
+            .replace('__DATE_SUB__', DATE_SUB)
+            .replace('__BRAND__', _BRAND)
+
+
             .replace('__GDRCSS__', _gdr_css)
             .replace('__GDRDOM__', _gdr_dom)
             .replace('@@SANKEY@@', SANKEY_JSON)
