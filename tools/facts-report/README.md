@@ -48,6 +48,23 @@ $PY run_pipeline.py 2026-11-05 --fake-zcode     # 不调 LLM,冒烟测试编排�
 
 其余参数与日报 `run_pipeline.py` 相同(`--no-plan`、`--no-provenance`、`--llm-verify`…)。
 
+## 行情新鲜度自愈(2026-11-13 事故)
+
+事故链:market_data 定时任务在「美股收盘(北京 T+1 05:00)→ 晨报构建(08:00)」
+窗口内只有 05:20 一抓,EODHD 当日 EOD 发布偶发晚于该时点(2026-11-13 五个
+code 缺 T 日收盘,横幅出街,数据 11:20 才入库)。三层防护:
+
+1. **调度加密**:market_data cron 由 `20 5,11,14,19` 加 07:20 一抓
+   (`20 5,7,11,14,19 * * *`,= ET 18:20,收盘后 2h20m、晨报前 40min)。
+2. **快照自愈**:`build_snapshot.py` 发现活报告缺 T 日收盘 → 每 5min 对 stale
+   code 直拉 EODHD/Yahoo EOD 幂等 upsert(`ON CONFLICT (code,date)`),
+   轮询至 `--quotes-deadline`(默认 09:30,≤ 转录门 09:40,不推高总最坏时延);
+   ⚠️(首次缺)/🔴(超截止)Lark 同步状态,等待轮数记入
+   `notes.market.cross_asset_wait`。历史重跑、过截止点的白天补跑不等待;
+   `--no-quotes-wait` 可整体关闭。
+3. **失败告警**:scheduler 对 market_data 执行失败推 Lark(服务状态监测群;
+   `SCHEDULER_LARK_FAIL_ALERT_TYPES` 逗号分隔可调,默认仅 market_data)。
+
 ## 定时
 
 `cron_daily.sh` 排在日报之后,优先借用日报 6 小时内写出的最新快照,否则自建:

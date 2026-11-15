@@ -314,6 +314,123 @@ def _cross_asset_snapshot(report_date: date) -> List[Dict[str, Any]]:
         conn.close()
 
 
+# ── 跨资产行情新鲜度自愈(2026-11-13 事故) ──
+# 事故链:market_data 定时任务在「美股收盘(北京 T+1 05:00)→ 晨报构建(08:00)」
+# 窗口内只有 05:20 一抓,EODHD 当日 EOD 发布偶发晚于该时点(11-13 五个 code
+# 缺 T 日收盘,横幅出街;数据 11:20 才入库)。此处把"一次查询"升级为
+# 「兜底重拉 + 轮询到截止」:复用 MarketDataService 既有 EOD 拉取与
+# ON CONFLICT (code,date) 幂等 upsert,语义与转录就绪门(show_gate)一致。
+QUOTES_WAIT_DEADLINE_DEFAULT = "09:30"   # 北京时刻;≤ show_gate 09:40,不推高总最坏时延
+QUOTES_WAIT_POLL_DEFAULT = 300           # 轮询间隔秒
+# parse_eod_data 需要 asset_type;按 code 后缀归类(与 MarketDataService 各 *_MAP 同值域)
+_CODE_SUFFIX_ASSET_TYPE = ((".COMMODITY", "commodity"), (".FOREX", "forex"), (".INDX", "index"))
+
+
+def _refetch_stale_cross_asset(stale_codes: List[str]) -> int:
+    """对 stale 的关键行情 code 直拉 EOD/Yahoo EOD 并 upsert market_data_eod。
+
+    走 MarketDataService 既有链路(YAHOO_CHART_CODES 路由 / NA 清洗 / 幂等
+    upsert 一致),失败只记日志返回 0 —— 兜底是旁路,绝不阻断快照主流程。
+    """
+    from backend.services.market_data_service import create_market_data_service
+    records: List[Dict[str, Any]] = []
+    try:
+        svc = create_market_data_service()
+        for code in stale_codes:
+            asset_type = next(
+                (t for sfx, t in _CODE_SUFFIX_ASSET_TYPE if code.endswith(sfx)), "index")
+            bars = (svc.fetch_eod_status(code, days=7).get("data") or [])
+            records.extend(svc.parse_eod_data(code, asset_type, bars))
+        if not records:
+            return 0
+        return int(svc.store_eod_data(records).get("success_count") or 0)
+    except Exception as e:  # noqa: BLE001 — 网络/DB 抖动由外层轮询兜住
+        logger.warning(f"[quotes] stale 行情兜底重拉失败(忽略): {e}")
+        return 0
+
+
+def _cross_asset_snapshot_with_retry(
+    report_date: date,
+    deadline_hhmm: str = QUOTES_WAIT_DEADLINE_DEFAULT,
+    poll_s: int = QUOTES_WAIT_POLL_DEFAULT,
+    do_notify: bool = True,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """_cross_asset_snapshot 的就绪门版:关键行情缺 T 日收盘时兜底重拉+轮询。
+
+    - 仅"活报告"(report_date == 美股最近已收盘交易日)才等待;历史重跑、
+      已过截止点的白天补跑都立即返回,不阻塞。
+    - 首次发现缺失发 ⚠️ Lark(人工窗口);到截止仍缺发 🔴 后放行,
+      stale 台账照旧落快照(报告横幅如实标注)——绝不静默,也绝不阻断。
+    返回 (rows, wait_meta);wait_meta 由调用方记入 notes 供事后审计。
+    """
+    from zoneinfo import ZoneInfo
+
+    def _stale_of(rows: List[Dict[str, Any]]) -> Dict[str, str]:
+        return {r["code"]: r["date"] for r in rows
+                if r.get("date") != report_date.isoformat()}
+
+    rows = _cross_asset_snapshot(report_date)
+    stale = _stale_of(rows)
+    meta: Dict[str, Any] = {"waited_sec": 0, "retry_rounds": 0, "refetched_rows": 0}
+    if not stale:
+        return rows, meta
+
+    # 活报告判定 + 截止点(北京);非活/过点 → 与旧行为完全一致,立即返回
+    from backend.services.market_session import expected_session_date
+    from backend.utils.datetime_utils import utcnow
+    if expected_session_date("GSPC.INDX", utcnow()) != report_date:
+        meta["skipped"] = "historical rerun"
+        return rows, meta
+    bj = ZoneInfo("Asia/Shanghai")
+    h, m = (int(x) for x in deadline_hhmm.split(":"))
+    now_bj = datetime.now(bj)
+    deadline = now_bj.replace(hour=h, minute=m, second=0, microsecond=0)
+    if deadline <= now_bj:
+        meta["skipped"] = "past deadline"
+        return rows, meta
+
+    def _alert(title: str, lines: List[str]) -> None:
+        if do_notify:
+            from lark_alert import notify
+            notify(title, lines)
+
+    _labels = {c: CROSS_ASSET_CODES.get(c, c) for c in stale}
+    _det = "; ".join(f"{_labels[c]}({d})" for c, d in sorted(stale.items()))
+    _alert(f"【facts-report ⚠️】{report_date} 关键行情缺 T 日收盘",
+           [f"时间: 北京 {now_bj:%m-%d %H:%M}",
+            f"缺失: {_det}",
+            f"自愈: 每 {poll_s}s 兜底重拉 EODHD/Yahoo 直写 market_data_eod,"
+            f" {deadline:%H:%M} 截止",
+            "处置: 无需人工;到截止仍缺则报告以最近可得收盘生成(横幅标注)"])
+    print(f"[quotes] stale={sorted(stale)} deadline={deadline:%H:%M}", flush=True)
+
+    started = time.monotonic()
+    warned_deadline = False
+    while True:
+        meta["retry_rounds"] += 1
+        meta["refetched_rows"] += _refetch_stale_cross_asset(sorted(stale))
+        rows = _cross_asset_snapshot(report_date)
+        stale = _stale_of(rows)
+        if not stale:
+            meta["waited_sec"] = int(time.monotonic() - started)
+            print(f"[quotes] healed after {meta['waited_sec']}s, "
+                  f"rounds={meta['retry_rounds']}, stored={meta['refetched_rows']}",
+                  flush=True)
+            return rows, meta
+        now_bj = datetime.now(bj)
+        if now_bj >= deadline:
+            meta["waited_sec"] = int(time.monotonic() - started)
+            if not warned_deadline:
+                warned_deadline = True
+                _alert(f"【facts-report 🔴】{report_date} 超截止仍缺关键行情",
+                       [f"时间: 北京 {now_bj:%m-%d %H:%M}",
+                        f"仍缺: {_det}",
+                        f"等待: {meta['waited_sec']}s 后放行,"
+                        "报告将以最近可得收盘生成(横幅如实标注)"])
+            return rows, meta
+        time.sleep(min(poll_s, max(1, int((deadline - now_bj).total_seconds()))))
+
+
 def _pct(raw: Any) -> Optional[float]:
     """finviz_screener 的百分比列是 VARCHAR('+1.23%'),宽容解析为 float。"""
     if raw is None:
@@ -2084,7 +2201,10 @@ def _prior_odds(report_date: date) -> Optional[Dict[str, Any]]:
 
 
 def build_snapshot(report_date: date, do_backfill: bool = True,
-                   out_dir: Optional[Path] = None) -> Dict[str, Any]:
+                   out_dir: Optional[Path] = None,
+                   quotes_deadline: str = QUOTES_WAIT_DEADLINE_DEFAULT,
+                   quotes_poll: int = QUOTES_WAIT_POLL_DEFAULT,
+                   quotes_wait: bool = True) -> Dict[str, Any]:
     errors: Dict[str, str] = {}
     sources: Dict[str, Any] = {}
     notes: Dict[str, Any] = {}
@@ -2151,7 +2271,13 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
     # 历史日期无快照)必须独立容错 —— finviz 失败不能连带丢掉跨资产行情。
     market: Dict[str, Any] = {}
     try:
-        _ca = _cross_asset_snapshot(report_date)
+        if quotes_wait:
+            _ca, _ca_wait = _cross_asset_snapshot_with_retry(
+                report_date, quotes_deadline, quotes_poll)
+            if _ca_wait.get("retry_rounds"):
+                notes["market.cross_asset_wait"] = _ca_wait
+        else:
+            _ca = _cross_asset_snapshot(report_date)
         market["cross_asset"] = _ca
         # 新鲜度台账:关键行情最新日线不是 T → 显式记入快照(notes 同步),
         # LLM 与下游可见,杜绝静默用过期收盘渲染报告(2026-11-12 SOX 事故)。
@@ -2258,6 +2384,12 @@ def main() -> int:
                         help="只分拣前 N 条候选(冒烟测试用)")
     parser.add_argument("--zcode-bin", default=os.environ.get(
         "ZCODE_BIN", DEFAULT_ZCODE_BIN))
+    parser.add_argument("--quotes-deadline", default=QUOTES_WAIT_DEADLINE_DEFAULT,
+                        help=f"关键行情缺 T 日收盘时的轮询截止(北京 HH:MM,默认 {QUOTES_WAIT_DEADLINE_DEFAULT})")
+    parser.add_argument("--quotes-poll", type=int, default=QUOTES_WAIT_POLL_DEFAULT,
+                        help=f"行情轮询间隔秒(默认 {QUOTES_WAIT_POLL_DEFAULT})")
+    parser.add_argument("--no-quotes-wait", action="store_true",
+                        help="跳过行情新鲜度自愈(本地联调/历史重跑用)")
     args = parser.parse_args()
 
     report_date = resolve_report_date(args.date)
@@ -2281,7 +2413,9 @@ def main() -> int:
                       f"regex", flush=True)
 
     snapshot = build_snapshot(
-        report_date, do_backfill=not args.no_backfill, out_dir=out_path.parent)
+        report_date, do_backfill=not args.no_backfill, out_dir=out_path.parent,
+        quotes_deadline=args.quotes_deadline, quotes_poll=args.quotes_poll,
+        quotes_wait=not args.no_quotes_wait)
     # default=str: DB 返回的 Decimal/时间等类型兜底转字符串,快照写入永不因类型崩溃
     out_path.write_text(
         json.dumps(snapshot, ensure_ascii=False, indent=2, default=str),

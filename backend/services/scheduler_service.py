@@ -912,6 +912,8 @@ class SchedulerService:
                 )
                 await self._increment_fail_count(task_id)
                 logger.error(f"任务执行失败: {task_id}, 错误: {result.get('message', '未知错误')}")
+                await self._notify_fail_lark(
+                    task_type, task_id, task_name, result.get('message', '未知错误'))
             
         except asyncio.CancelledError:
             # 🔄 任务被取消（通常是因为应用重新加载）
@@ -940,12 +942,45 @@ class SchedulerService:
             
             await self._increment_fail_count(task_id)
             logger.error(f"任务执行异常: {task_id}, 错误: {str(e)}")
+            await self._notify_fail_lark(task_type, task_id, task_name, str(e))
         
         finally:
             # DB 周期窗口锁通过唯一索引行持久存在，无需显式释放。
             # 下一 cron tick 会使用新的 period_key，自然进入新窗口。
             pass
-    
+
+    async def _notify_fail_lark(self, task_type: str, task_id: str,
+                                task_name: str, error_msg: str) -> None:
+        """任务失败 Lark 旁路告警(默认仅 market_data,可按类型扩展)。
+
+        2026-11-13 事故:market_data 收盘后首抓失败只落库/日志,无人感知,
+        晨报只能带 stale 横幅出街。旁路告警绝不影响任务主流程:
+        类型不在名单 / 发送失败均静默。名单由 SCHEDULER_LARK_FAIL_ALERT_TYPES
+        覆盖(逗号分隔 task_type,默认 "market_data")。
+        """
+        wanted = {t.strip() for t in os.getenv(
+            "SCHEDULER_LARK_FAIL_ALERT_TYPES", "market_data").split(",") if t.strip()}
+        if task_type not in wanted:
+            return
+        try:
+            from backend.utils.lark_notifier import (
+                LARK_WEBHOOK_SERVICE_STATUS, send_text,
+            )
+
+            def _send() -> bool:
+                return send_text(
+                    f"【scheduler 🔴】{task_name} 执行失败",
+                    [f"任务: {task_id}",
+                     f"时间: {datetime.now(tz=timezone.utc).isoformat(timespec='seconds')}",
+                     f"错误: {str(error_msg)[:300]}",
+                     "处置: 查看 task_execution_logs / logs/app.log;"
+                     "晨报管线对缺 T 日收盘另有自愈(见 facts-report build_snapshot)"],
+                    webhook_url=LARK_WEBHOOK_SERVICE_STATUS)
+
+            await asyncio.get_event_loop().run_in_executor(None, _send)
+        except Exception as e:  # noqa: BLE001 — 告警是旁路,绝不向上抛
+            logger.warning(f"任务失败 Lark 告警发送异常(忽略): {e}")
+
     async def _execute_twitter_subscription_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行Twitter订阅推文获取任务 — 通过 Celery 异步分发给 data-worker。
