@@ -120,6 +120,15 @@
   src: url('../assets/fonts/plexserif-400.woff2') format('woff2');
   font-display: swap;
 }
+/* PT Serif Caption（Google Fonts，OFL 开源协议，免费商用）拉丁子集：
+   首屏标语 / 品牌哲学标语专用，同源加载保证渲染一致 */
+@font-face {
+  font-family: 'PT Serif Caption';
+  font-style: normal;
+  font-weight: 400;
+  src: url('../assets/fonts/ptserifcaption-400.woff2') format('woff2');
+  font-display: swap;
+}
 /* Noto Serif SC 单字子集（观/合）：IBM Plex 无 CJK 字形，
    宋体与 FengHe 页脚「风 (Feng) 和 (He)」印刷体同风格 */
 @font-face {
@@ -142,6 +151,18 @@
   src: url('../assets/fonts/yuji-guanhe.woff2') format('woff2');
   font-display: swap;
 }
+/* 志莽行书（Google Fonts「Zhi Mang Xing」，OFL-1.1 免费商用；
+   授权书 assets-src/ZhiMangXing-OFL.txt，源字体 assets-src/ZhiMangXing-Regular.ttf）。
+   品牌哲学区「观」「合」竖排指定字体；该字体仅含简体「观」（无繁体「觀」），
+   故品牌名用简体。按需求声明为 700，匹配 .fh-name-char 的字重、避免浏览器仿粗。
+   「观」「合」两字子集 1.2KB 同源加载；佑字【肅】（GuanHeYuji）保留为备选可切回 */
+@font-face {
+  font-family: 'GuanHeZhiMang';
+  font-style: normal;
+  font-weight: 700;
+  src: url('../assets/fonts/zhimang-guanhe.woff2') format('woff2');
+  font-display: swap;
+}
 html {
   scroll-behavior: smooth;
 }
@@ -161,14 +182,17 @@ html {
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   /* 品牌行拼音/标语/首屏标语：IBM Plex Serif（拉丁）；观/合 落入自托管 Noto Serif SC 单字子集 */
   --ff-plex: 'IBM Plex Serif', 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+  /* 首屏标语（Shared values, joint efforts.）与品牌哲学标语（Do the right things…）：
+     PT Serif Caption（拉丁，OFL 免费商用，自托管同源加载），系统衬线兜底 */
+  --ff-pt-caption: 'PT Serif Caption', Georgia, 'Times New Roman', serif;
   /* 品牌行整行：思源黑体（Noto Sans SC，OFL 免费商用）——
      「观」「合」700 Bold、拼音 400 Regular，自托管单字子集优先；
      系统苹方/雅黑仅作文件加载失败时的兜底。
      备选：GuanHeCiwei（刺猬体）/ GuanHeFeiyang（飞扬体）子集均已保留可切回 */
   --ff-brand: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  /* 品牌行中文单字：佑字【肅】书法体（GuanHeYuji，OFL 免费商用）——
-     页脚「觀」「合」专用（繁体），拼音仍走 --ff-brand；兜底思源黑体 Bold 子集 */
-  --ff-brand-char: 'GuanHeYuji', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', serif;
+  /* 品牌哲学区中文名：志莽行书（GuanHeZhiMang，OFL 免费商用，「观」「合」子集）——
+     「观（上）」「合（下）」竖排专用；佑字【肅】（GuanHeYuji）保留作备选；兜底思源黑体 */
+  --ff-brand-char: 'GuanHeZhiMang', 'GuanHeYuji', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', serif;
 
   position: relative;
   min-height: 100vh;
@@ -219,8 +243,12 @@ html {
   right: 0;
   z-index: 100;
   padding: 18px 32px;
+  /* 初始态：黑灰半透明底（原为全透明）。背景视频高亮时白字 Logo/Login 会糊掉，
+     加深色纱保证对比；不用毛玻璃（backdrop-filter）——fixed 条 + 全屏视频逐帧重采样，低端机易掉帧 */
+  background: rgba(20, 25, 31, 0.45);
   /* 动态对齐 fengheasia.com（Salient）：容器阴影 0.42s ease / 透明度 0.3s ease，
-     背景 0.4s、内边距（含 logo 行高）0.32s ease；无上滑入场（header 常驻固定） */
+     背景 0.4s、内边距（含 logo 行高）0.32s ease；无上滑入场（header 常驻固定）。
+     滚动态仍为纯白实底，与本底色平滑过渡 */
   transition:
     background 0.4s ease,
     box-shadow 0.42s ease,
@@ -411,7 +439,7 @@ html {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  font-family: var(--ff-plex);
+  font-family: var(--ff-pt-caption);
   font-weight: 400;
   font-size: clamp(40px, 7vw, 88px);
   line-height: 1.18;
@@ -438,15 +466,23 @@ html {
 .fh-hero-title.is-in .fh-title-row:nth-child(2) {
   transition-delay: 0.22s;
 }
-.fh-tagline {
+/* 标语入场：与首屏 Slogan（.fh-title-row）完全同款——自下淡入上浮归位
+   （translateY(0.9em) → 0，1s 缓动，第二行阶梯延迟 0.22s）；
+   每次进入视口都重播（.is-in 由 taglineRef observer 驱动） */
+.fh-tagline-row {
+  display: block;
+  white-space: nowrap;
   opacity: 0;
-  transform: translateY(1em);
-  transition: opacity 1.1s cubic-bezier(0.25, 1, 0.5, 1),
-    transform 1.1s cubic-bezier(0.25, 1, 0.5, 1);
+  transform: translateY(0.9em);
+  transition: opacity 1s cubic-bezier(0.25, 1, 0.5, 1),
+    transform 1s cubic-bezier(0.25, 1, 0.5, 1);
 }
-.fh-tagline.is-in {
+.fh-tagline.is-in .fh-tagline-row {
   opacity: 1;
   transform: none;
+}
+.fh-tagline.is-in .fh-tagline-row:nth-child(2) {
+  transition-delay: 0.22s;
 }
 
 /* =========================================================================
@@ -508,7 +544,7 @@ html {
 }
 
 /* =========================================================================
-   品牌哲学：深海军蓝 + 巨幅淡影书法 + 觀（Guan）合（He）
+   品牌哲学：深海军蓝 + 巨幅淡影书法 + 观合竖排（志莽行书）
    ========================================================================= */
 .fh-philosophy {
   position: relative;
@@ -549,48 +585,103 @@ html {
   position: relative;
   z-index: 2;
   text-align: center;
-  /* 品牌行 + 标语 = 一个整体：缩放基准统一放在父容器，
-     二者以 em 按固定比例（54:45）随动，任何屏幕下比例一致。
+  /* 缩放基准统一放在父容器：品牌名已按需求定档 200px（见 .fh-name-char），
+     此基准现仅驱动标语（0.833em ≈ 45px @54px 基准）随视口收放。
      系数 8.5vw：单一参数全端共用（PC 触 54px 封顶不变，手机端相应收小） */
   font-size: clamp(24px, 8.5vw, 54px);
 }
-/* 观合横排：觀 (Guan) 合 (He) —— 「觀」「合」用佑字【肅】书法体（GuanHeYuji，OFL 免费商用），
-   拼音 (Guan)/(He) 仍为思源黑体（Noto Sans SC）Regular 400；同号（同为 1em）、
-   同色、基线对齐，token 间呈均匀空格节奏。
-   字号基准 54px：佑字书法字面较小，观感墨高与 FengHe「风」49px 同档。 */
+/* 观合竖排：观 (Guan) / 合 (He) —— 志莽行书（GuanHeZhiMang，OFL 免费商用），
+   汉字竖叠居中；拼音同字体 70px，绝对定位于各字右侧、底部与字底齐平（不入占宽 → 观/合严格同轴）。
+   字号按需求定档：汉字 200px、拼音 70px；窄屏以 38vw / 13.5vw 封顶
+   （维持 70:200 比例，且拼音挂右后整组在手机竖屏内不溢出）。
+   动效：pair 整组（字+拼音）同步淡入轻移归位；归位停留 2s 后仅拼音溶解淡出，
+   「观」「合」常显。.is-in 由 IntersectionObserver 随视口进出 toggle
+   （LandingPage.tsx brandNameRef），每次滑入该区都重播，滑出即复位。 */
 .fh-philosophy-name {
   display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  justify-content: center;
-  gap: 0.3em;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15em;
   color: #ffffff;
   /* 1em：跟随父容器基准整体缩放 */
   font-size: 1em;
   line-height: 1.1;
 }
 .fh-name-pair {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.2em;
+  position: relative;
+  /* 行框=字框（消除半行距）：拼音 bottom:0 才能真正贴到「观」「合」底部 */
+  line-height: 1;
+  opacity: 0;
 }
 .fh-name-char {
   font-family: var(--ff-brand-char);
   font-weight: 700;
-  font-size: 1em;
+  font-size: min(200px, 38vw);
 }
-.fh-name-roman {
-  font-family: var(--ff-brand);
-  font-weight: 400;
-  font-size: 1em;
-  letter-spacing: 0.02em;
+.fh-name-pinyin {
+  position: absolute;
+  /* 挂在本字右侧：pair 宽 = 汉字 em 框，left:100% 即字框右缘；0.2em ≈ 14px 留白 */
+  left: calc(100% + 0.2em);
+  bottom: 0;
+  font-family: var(--ff-brand-char);
+  font-weight: 700;
+  font-size: min(70px, 13.5vw);
+  line-height: 1;
+  white-space: nowrap;
+}
+/* 入场方向：观组自左、合组自右（1.1em ≈ 60px @54px 基准，随视口等比） */
+.fh-name-pair:nth-child(1) {
+  --enter-x: -1.1em;
+}
+.fh-name-pair:nth-child(2) {
+  --enter-x: 1.1em;
+}
+/* 编排（两条时间线并行）：
+   ① pair 整组（字+拼音）：1.1s 淡入轻移归位，播完停在显示态（both），两字常显不淡出；
+   ② 拼音：归位停留 2s 后溶解淡出（4.5s 时间线，68.9% ≈ 3.1s 起隐 = 归位1.1s+停留2s，
+      末段 1.4s 渐隐，both 播完保持隐形）；合组整体延迟 0.15s 错拍，
+      各自归位后满 2s 才淡出。滑出视口 is-in 移除 → 两条动画一并复位，下次滑入重播 */
+.fh-philosophy-name.is-in .fh-name-pair {
+  animation: guanhe-pair-enter 1.1s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+.fh-philosophy-name.is-in .fh-name-pair:nth-child(2) {
+  animation-delay: 0.15s;
+}
+@keyframes guanhe-pair-enter {
+  0% {
+    opacity: 0;
+    transform: translateX(var(--enter-x));
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.fh-philosophy-name.is-in .fh-name-pinyin {
+  animation: guanhe-pinyin-dissolve 4.5s ease-out both;
+}
+.fh-philosophy-name.is-in .fh-name-pair:nth-child(2) .fh-name-pinyin {
+  animation-delay: 0.15s;
+}
+@keyframes guanhe-pinyin-dissolve {
+  0% {
+    opacity: 1;
+  }
+  /* 68.9% ≈ 3.1s：归位已满 2s，开始溶解 */
+  68.9% {
+    opacity: 1;
+  }
+  /* 末段 1.4s：拼音溶解淡出；「观」「合」不受影响保持显示 */
+  100% {
+    opacity: 0;
+  }
 }
 .fh-tagline {
   margin: 0.55em 0 0;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  font-family: var(--ff-plex);
+  font-family: var(--ff-pt-caption);
   font-weight: 400;
   /* 0.833em：桌面基准 54px 下即 45px，随整体等比缩放，比例恒定 */
   font-size: 0.833em;
@@ -599,11 +690,8 @@ html {
   color: #ffffff;
 }
 /* 标语阶梯：每行居中（同 FengHe「Harmony between / risk and return.」），
-   短的第二行因此整体左移、右端留白，形成对称阶梯 */
-.fh-tagline-row {
-  display: block;
-  white-space: nowrap;
-}
+   短的第二行因此整体左移、右端留白，形成对称阶梯
+   （display/nowrap 已并入上方入场动效块） */
 
 /* =========================================================================
    底部：General Enquiries + 版权
@@ -918,6 +1006,14 @@ html {
     width: min(78vw, 42vh);
     opacity: 0.06;
   }
+  /* 观合品牌名手机缩放：桌面定档 200px/70px，≤860px 收至 20vw/7vw（保持 70:200 比例）
+     ——375px 屏上汉字 75px、拼音 26px，约为桌面四成，避免手机上占比过大 */
+  .fh-name-char {
+    font-size: min(200px, 20vw);
+  }
+  .fh-name-pinyin {
+    font-size: min(70px, 7vw);
+  }
   /* 手机上 3vh（≈25px）相对屏宽仍显宽，收窄为固定细线；
      padding:0 必须在此重申——上方 .fh-overview 的 72px 内容态 padding 会按源顺序覆盖它 */
   .fh-overview-blank {
@@ -938,10 +1034,22 @@ html {
     display: none;
   }
   .fh-hero-title .fh-title-row,
-  .fh-tagline {
+  .fh-tagline,
+  .fh-tagline .fh-tagline-row {
     opacity: 1;
     transform: none;
     transition: none;
+  }
+  /* 品牌名「观/合」+ 拼音：跳过入场与溶解动效，全部静置显示
+     （选择器带 .is-in 链以匹配动画规则的特异性，确保 animation:none 生效） */
+  .fh-name-pair,
+  .fh-name-pinyin,
+  .fh-philosophy-name.is-in .fh-name-pair,
+  .fh-philosophy-name.is-in .fh-name-pinyin {
+    opacity: 1;
+    transform: none;
+    transition: none;
+    animation: none;
   }
   .fh-header.is-scrolled {
     animation: none;

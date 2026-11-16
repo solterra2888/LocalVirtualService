@@ -87,6 +87,8 @@
 }
 .login-brand-tagline {
   color: rgba(255, 255, 255, 0.9);
+  /* 与官网落地页标语同字体（@font-face 声明见 LandingPage.css，全站全局生效） */
+  font-family: 'PT Serif Caption', Georgia, 'Times New Roman', serif;
   font-size: 14px;
   line-height: 1.8;
   letter-spacing: 0.02em;
