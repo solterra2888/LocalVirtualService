@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { Form, Input, Button, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -9,62 +9,16 @@ interface LoginFormData {
   password: string;
 }
 
-/* 登录页背景视频：复用官网 Hero 视频 1080p 版（public/media，零新增文件），
-   模糊+白化渲染后细节不可辨，1080p 足够；poster 取自同款灰调静帧兜底弱网 */
+/* 登录页背景：动画 WebP（与官网微信兜底完全同 URL——含 ?v=，命中同一
+   immutable 缓存条目，经官网进入的用户零额外下载）。
+   背景本就叠 blur(10px)+白化蒙层，细节不可辨，864px 动画与视频无差；
+   <img> 不受媒体自动播放策略限制——原 <video> 实现在安卓微信（XWeb 硬拒绝）
+   里同样需要点击才动，换成 <img> 后全端零点击自动循环，整段视频抢救
+   机制（WeixinJSBridge/手势重试等）随之删除。
+   login-bg.jpg 灰调静帧作容器底图：WebP 加载失败/慢网直入时立显，不露纯色底 */
 const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login, loading } = useAuthStore();
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  // 背景视频：与官网 Hero 同款微信兜底机制（LandingPage.tsx 同源实现）
-  // （1）iOS 微信 autoplay 需 WeixinJSBridge ready 后触发；（2）Android 老内核（X5）
-  // 需 x5-video-player-type 同层播放；（3）返回导航/熄屏恢复时 autoplay 常被拒绝——
-  // 数据就绪、页面可见、任意触摸/点击（捕获阶段）都会重试播放，self-healing。
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-
-    const tryPlay = () => {
-      v.play().catch(() => {});
-    };
-    const onWxReady = () => tryPlay();
-    const wx = (window as unknown as { WeixinJSBridge?: { invoke: (a: string, b: object, cb: () => void) => void } }).WeixinJSBridge;
-    if (typeof wx === 'undefined') {
-      document.addEventListener('WeixinJSBridgeReady', onWxReady, false);
-    } else {
-      wx.invoke('getNetworkType', {}, () => tryPlay());
-    }
-
-    const onMediaReady = () => tryPlay();
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') tryPlay();
-    };
-    const onGesture = () => {
-      if (v.paused) tryPlay();
-    };
-    v.addEventListener('canplay', onMediaReady);
-    v.addEventListener('loadeddata', onMediaReady);
-    document.addEventListener('visibilitychange', onVisible);
-    // passive：不阻塞滚动；capture：任何区域（含表单/按钮）的触摸都能救活视频
-    document.addEventListener('touchend', onGesture, { capture: true, passive: true });
-    document.addEventListener('click', onGesture, true);
-
-    const onError = () => {
-      const e = v.error;
-      console.error('[login] video error', e && { code: e.code, message: e.message });
-    };
-    v.addEventListener('error', onError);
-
-    return () => {
-      document.removeEventListener('WeixinJSBridgeReady', onWxReady);
-      v.removeEventListener('canplay', onMediaReady);
-      v.removeEventListener('loadeddata', onMediaReady);
-      document.removeEventListener('visibilitychange', onVisible);
-      document.removeEventListener('touchend', onGesture, true);
-      document.removeEventListener('click', onGesture, true);
-      v.removeEventListener('error', onError);
-    };
-  }, []);
 
   const handleLogin = async (values: LoginFormData) => {
     try {
@@ -77,23 +31,18 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="login-container">
-      <video
+    <div
+      className="login-container"
+      style={{
+        backgroundImage: `url(${loginBgPoster})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      }}
+    >
+      <img
         className="login-videobg"
-        ref={videoRef}
-        src={`${(process.env.PUBLIC_URL || '').replace(/\/$/, '')}/media/hero-guanhe-mobile.mp4`}
-        poster={loginBgPoster}
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="auto"
-        // X5（微信安卓老内核）H5 同层播放，避免被系统播放器接管/黑屏；
-        // 非标准属性，绕过 TS 的已知属性检查
-        {...({
-          'x5-video-player-type': 'h5',
-          'x5-video-player-fullscreen': 'true',
-        } as React.VideoHTMLAttributes<HTMLVideoElement>)}
+        src={`${(process.env.PUBLIC_URL || '').replace(/\/$/, '')}/media/hero-guanhe-ambience.webp?v=20261116`}
+        alt=""
         aria-hidden="true"
       />
       <div className="login-card">

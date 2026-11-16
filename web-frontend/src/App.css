@@ -24,7 +24,9 @@
   justify-content: center;
   background: #f2f5f8;
 }
-/* 背景视频独立图层：官网 Hero 视频复用；模糊 10px + 提亮 1.35 + 轻微放大防露边 */
+/* 背景动画图层（<img> WebP，与官网微信兜底同 URL 共享缓存；原为 Hero 视频，
+   2026-11-16 换动画图——蒙板下画质无差且全端零点击自动循环）；
+   模糊 10px + 提亮 1.35 + 轻微放大防露边 */
 .login-videobg {
   position: absolute;
   inset: 0;
