@@ -129,6 +129,19 @@
   src: url('../assets/fonts/notoserifsc-guanhe.woff2') format('woff2');
   font-display: swap;
 }
+/* 佑字【肅】Yuji Syuku 单字子集（觀/合）：日本书家片冈裕司毛笔楷书，
+   OFL-1.1 免费商用（授权书 assets-src/Yuji-OFL.txt，源字体 assets-src/YujiSyuku-Regular.ttf）。
+   品牌哲学页脚「觀 (Guan) 合 (He)」指定用佑字字体 + 繁体；
+   按需求声明为 700，匹配 .fh-name-char 的字重、避免浏览器仿粗。
+   备选款式：佑字【舞】Yuji Mai（圆润灵动）/ 佑字【墨】Yuji Boku（浓墨厚重），
+   均含「觀」「合」，换源文件重新子集化即可（google/fonts ofl/yujimai、ofl/yujiboku） */
+@font-face {
+  font-family: 'GuanHeYuji';
+  font-style: normal;
+  font-weight: 700;
+  src: url('../assets/fonts/yuji-guanhe.woff2') format('woff2');
+  font-display: swap;
+}
 html {
   scroll-behavior: smooth;
 }
@@ -153,6 +166,9 @@ html {
      系统苹方/雅黑仅作文件加载失败时的兜底。
      备选：GuanHeCiwei（刺猬体）/ GuanHeFeiyang（飞扬体）子集均已保留可切回 */
   --ff-brand: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  /* 品牌行中文单字：佑字【肅】书法体（GuanHeYuji，OFL 免费商用）——
+     页脚「觀」「合」专用（繁体），拼音仍走 --ff-brand；兜底思源黑体 Bold 子集 */
+  --ff-brand-char: 'GuanHeYuji', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', serif;
 
   position: relative;
   min-height: 100vh;
@@ -332,6 +348,14 @@ html {
 .fh-hero-bg {
   position: absolute;
   inset: 0;
+  /* 海报兜底层：poster 属性在 iOS Safari 上并非可靠——视频卡在加载态
+     （弱网跨境 stall / 低电量模式阻止自动播放）时 poster 可能整幅不绘制，
+     2026-11-16 排查 iPhone Safari「一直不出现视频」时补上。
+     背景图 URL 由 LandingPage.tsx 内联注入（CRA 的 css-loader 不认 /media/ 绝对路径），
+     与 <video poster> 同图同 URL 共享缓存；视频播起来后自然被盖住 */
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
 }
 .fh-hero-glow {
   position: absolute;
@@ -530,10 +554,10 @@ html {
      系数 8.5vw：单一参数全端共用（PC 触 54px 封顶不变，手机端相应收小） */
   font-size: clamp(24px, 8.5vw, 54px);
 }
-/* 观合横排：观 (Guan) 合 (He) —— 字体思源黑体（Noto Sans SC，OFL 免费商用）：
-   「观」「合」Bold 700、拼音 (Guan)/(He) Regular 400；同号（同为 1em）、
+/* 观合横排：觀 (Guan) 合 (He) —— 「觀」「合」用佑字【肅】书法体（GuanHeYuji，OFL 免费商用），
+   拼音 (Guan)/(He) 仍为思源黑体（Noto Sans SC）Regular 400；同号（同为 1em）、
    同色、基线对齐，token 间呈均匀空格节奏。
-   字号基准 54px：思源黑体 Bold 墨高比 ≈0.88/0.95，观/合渲染墨高与 FengHe「风」49px 同档。 */
+   字号基准 54px：佑字书法字面较小，观感墨高与 FengHe「风」49px 同档。 */
 .fh-philosophy-name {
   display: flex;
   flex-direction: row;
@@ -551,7 +575,7 @@ html {
   gap: 0.2em;
 }
 .fh-name-char {
-  font-family: var(--ff-brand);
+  font-family: var(--ff-brand-char);
   font-weight: 700;
   font-size: 1em;
 }

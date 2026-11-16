@@ -7,19 +7,37 @@ import './LandingPage.css';
 /* 首屏背景视频（参照 FengHe 官网做法） */
 const MEDIA_BASE = `${(process.env.PUBLIC_URL || '').replace(/\/$/, '')}/media`;
 
-/* 背景视频双源：手机/微信走 1080p 轻量版，桌面走 4K 原片。
-   原片为 3440×1946 High@L5.2 yuvj420p（full-range）约 22.5Mbps——桌面浏览器解码无碍，
-   但微信内核（X5/XWeb）与国产 ROM 硬解对 full-range/L5.2 兼容差，且 40MB 在跨境
-   链路必然卡死。轻量版为 1920×1080 High@L4.0 limited-range 2-pass 4Mbps（6.9MB），
-   手机全屏观感与原片无差。
-   判定：移动/微信 UA，或触屏 + 短边 ≤1024（覆盖 iPad 全系）。 */
-const IS_LITE_VIDEO =
+/* 背景视频三态自适应（2026-11-16 大陆跨境链路优化）：
+   - 高清版 hero-guanhe.mp4：1920×1080 High@L4.0 2-pass 2.5Mbps（≈4.4MB），桌面默认；
+     （母带 3440×1946 @22.5Mbps 的 4K 原片 39.5MB 已弃用——桌面白字压画背景下肉眼无差，
+      大陆无 VPN 用户却要为此硬啃 40MB；母带保留在 assets-src 可随时重出）
+   - 轻量版 hero-guanhe-mobile.mp4：1280×720 2-pass 0.95Mbps（1.66MB）；
+     手机/微信/平板一律轻量版（服务器在阿里云香港，大陆跨境直连实测吞吐仅 0.4~2Mbps，
+     iOS 对码率高于链路吞吐的媒体会长期缓冲不出首帧）。
+   桌面恒默认高清，唯一的降级通道是「运行时看门狗」（全浏览器，见下方 useEffect）：
+   采样 video.buffered 增长速率，下载持续跟不上播放（4 秒采样窗缓冲增长 <1.2 秒内容
+   ≈ 下载速率不足码率 30%，物理上永远缓冲不出来）→ 热切换轻量版。
+   教训：不用 Network Information API 做初始分档——Chrome 的 downlink 估计值
+   在 VPN 隧道下会长期偏低（RTT 被握手开销抬高），快网被误降轻量版（实际复现过）；
+   基于真实缓冲速率的看门狗才是证据驱动的降级。
+   判定移动端：移动/微信 UA，或触屏 + 短边 ≤1024 + 主输入为手指（pointer: coarse，
+   覆盖 iPad 全系；触屏笔记本主输入是鼠标/触控板，不在此列）。 */
+const IS_MOBILE_LIKE =
   /Android|iPhone|iPad|iPod|Mobile|MicroMessenger/i.test(navigator.userAgent) ||
   (navigator.maxTouchPoints > 1 &&
-    Math.min(window.screen.width, window.screen.height) <= 1024);
-const HERO_VIDEO_URL = IS_LITE_VIDEO
-  ? `${MEDIA_BASE}/hero-guanhe-mobile.mp4`
-  : `${MEDIA_BASE}/hero-guanhe.mp4?v=20261114e`;
+    Math.min(window.screen.width, window.screen.height) <= 1024 &&
+    window.matchMedia?.('(pointer: coarse)').matches === true);
+const HERO_URL_HD = `${MEDIA_BASE}/hero-guanhe.mp4?v=20261116c`;
+const HERO_URL_LITE = `${MEDIA_BASE}/hero-guanhe-mobile.mp4?v=20261116b`;
+type VideoTier = 'hd' | 'lite';
+
+/* 安卓微信（XWeb）：开局直接进动画 WebP 模式，零等待自动动。
+   新版 XWeb 对无手势视频硬性拦截（play 重试/WeixinJSBridge 均无效，实测），
+   与其「静态海报数秒 → 再切动画」，不如开局即动画；顺带省掉视频下载字节
+   （微信内动画图已足够，慢链路上反而更稳）。iOS 微信不受影响（真视频自动
+   播正常），其余环境保留「视频优先 + 硬拒绝 6~12 秒后切动画」的兜底路径 */
+const IS_ANDROID_WECHAT =
+  /MicroMessenger/i.test(navigator.userAgent) && /Android/i.test(navigator.userAgent);
 
 /* 微信视频诊断面板数据（?vdebug=1 开启；换 URL 天然绕开微信旧会话缓存） */
 interface VdebugInfo {
@@ -56,6 +74,64 @@ const LandingPage: React.FC = () => {
   const taglineRef = useRef<HTMLParagraphElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [vdebug, setVdebug] = useState<VdebugInfo | null>(null);
+  // 视频档位：移动端恒轻量，桌面恒默认高清——降级只由运行时看门狗基于
+  // 真实缓冲速率触发（见下方 useEffect），不用网络信息 API 做初始猜测
+  const [videoTier, setVideoTier] = useState<VideoTier>(
+    IS_MOBILE_LIKE ? 'lite' : 'hd'
+  );
+  // 自动播放被「硬拒绝」（WebView 策略，重试无效）时切换为循环动画 WebP：
+  // <img> 不受媒体自动播放策略限制，保住零点击自动动。
+  // 安卓微信开局即 true（零等待，见 IS_ANDROID_WECHAT 注释）
+  const [videoBlocked, setVideoBlocked] = useState<boolean>(IS_ANDROID_WECHAT);
+
+  // 桌面高清版看门狗：按 1080p/2.5Mbps（≈0.31MB/s）校准阈值。
+  // 每 4 秒采样一次 buffered 末端的增长量——增长 <1.2 秒内容（下载速率不足码率
+  // 30%，物理上永远追不平）即判链路带不动，热切轻量版；
+  // 健康退出：已开播且缓冲领先播放位置 3 秒。快网（含 Low Power Mode 短暂
+  // 不预载的场景）会在几秒内填满缓冲正常退出，不会误降级。
+  useEffect(() => {
+    if (videoTier !== 'hd') return;
+    const v = videoRef.current;
+    if (!v) return;
+    const bufEnd = () => (v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0);
+    const started = performance.now();
+    let last = { t: started, buf: bufEnd() };
+    const timer = window.setInterval(() => {
+      const now = performance.now();
+      const buf = bufEnd();
+      if (!v.paused && v.readyState >= 3 && buf - v.currentTime > 3) {
+        window.clearInterval(timer);
+        return;
+      }
+      const windowed = (now - last.t) / 1000;
+      const grew = buf - last.buf;
+      if (windowed >= 4) {
+        if ((now - started) / 1000 >= 5 && grew < 1.2) {
+          setVideoTier('lite');
+          window.clearInterval(timer);
+          return;
+        }
+        last = { t: now, buf };
+      }
+      if ((now - started) / 1000 > 15 && buf < 2) {
+        setVideoTier('lite');
+        window.clearInterval(timer);
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [videoTier]);
+
+  // 档位热切换：React 只改 src 属性不触发重载，需手动 load()；
+  // 元素上的 canplay/loadeddata/手势监听仍然有效，会自动接续重试播放
+  const prevTierRef = useRef<VideoTier>(videoTier);
+  useEffect(() => {
+    if (prevTierRef.current === videoTier) return; // 首次挂载不重复 load()
+    prevTierRef.current = videoTier;
+    const v = videoRef.current;
+    if (!v) return;
+    v.load();
+    v.play().catch(() => {});
+  }, [videoTier]);
 
   // 背景视频：微信兜底 + 错误记录 + ?vdebug=1 诊断面板
   // （1）iOS 微信部分版本 autoplay 需 WeixinJSBridge ready 后触发；
@@ -67,6 +143,14 @@ const LandingPage: React.FC = () => {
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
+
+    // 静音双保险：React 的 muted 只作为 DOM property 写入、不落为 HTML 属性，
+    // 个别 iOS Safari 版本在元素插入时评估自动播放策略会拿不到该状态，
+    // 导致 muted 自动播放被拒（页面加 ref 强制兜底，幂等无害）
+    v.muted = true;
+    v.defaultMuted = true;
+    v.setAttribute('muted', '');
+    v.setAttribute('playsinline', '');
 
     const tryPlay = () => {
       v.play().catch(() => {});
@@ -92,6 +176,53 @@ const LandingPage: React.FC = () => {
     // passive：不阻塞滚动；capture：任何区域（含弹窗/按钮）的触摸都能救活视频
     document.addEventListener('touchend', onGesture, { capture: true, passive: true });
     document.addEventListener('click', onGesture, true);
+
+    // （5）自动播放有界重试（2026-11-16 小米微信复现：ready=4 数据全缓冲、
+    //     paused=true、err=-——XWeb 对无手势 play 的策略拒绝，且部分厂商
+    //     WebView 的自动播放白名单是页面加载后才异步就绪的，早期单次调用
+    //     被拒后无人重试就永久卡住）。
+    //     挂载后 12 秒内每 1.5 秒重试：仅在 paused 时尝试，播起来即停；
+    //     期间若 WeixinJSBridge 是晚注入的，也补一次桥内播放（桥上下文的
+    //     play 在微信内不受手势限制）。
+    //     连续 4 次 NotAllowedError（≈6 秒）判定「硬拒绝」（如新版 XWeb 不再
+    //     暴露桥、或用户开了省流/禁止自动播放）→ 置 videoBlocked，
+    //     切换为循环动画 WebP（<img> 不受媒体自动播放策略限制，保住零点击自动动）。
+    const retryStart = performance.now();
+    let bridgeTried = false;
+    let notAllowedCount = 0;
+    const autoRetry = window.setInterval(() => {
+      if (!v.paused) {
+        notAllowedCount = 0;
+        window.clearInterval(autoRetry);
+        return;
+      }
+      if ((performance.now() - retryStart) / 1000 > 12) {
+        window.clearInterval(autoRetry);
+        // 窗口耗尽仍没播起来且数据已就绪 → 无论拒绝错误是否带标准名
+        // （XWeb 可能抛无名错误，NotAllowedError 计数漏判），一律判硬拒绝切 WebP
+        if (v.paused && v.readyState >= 3) {
+          setVideoBlocked(true);
+        }
+        return;
+      }
+      v.play().catch((e: unknown) => {
+        if ((e as { name?: string } | undefined)?.name === 'NotAllowedError') {
+          notAllowedCount += 1;
+        }
+      });
+      if (notAllowedCount >= 4) {
+        setVideoBlocked(true);
+        window.clearInterval(autoRetry);
+        return;
+      }
+      const wxGlobal = (
+        window as unknown as { WeixinJSBridge?: { invoke: (a: string, b: object, cb: () => void) => void } }
+      ).WeixinJSBridge;
+      if (!bridgeTried && typeof wxGlobal !== 'undefined') {
+        bridgeTried = true;
+        wxGlobal.invoke('getNetworkType', {}, () => tryPlay());
+      }
+    }, 1500);
 
     const onError = () => {
       const e = v.error;
@@ -123,6 +254,7 @@ const LandingPage: React.FC = () => {
       document.removeEventListener('touchend', onGesture, true);
       document.removeEventListener('click', onGesture, true);
       v.removeEventListener('error', onError);
+      window.clearInterval(autoRetry);
       if (timer) window.clearInterval(timer);
     };
   }, []);
@@ -207,30 +339,51 @@ const LandingPage: React.FC = () => {
 
       {/* ---------- Hero：全屏视频背景 + 标语 ---------- */}
       <section className="fh-hero">
-        <div className="fh-hero-bg" aria-hidden="true">
+        {/* 海报兜底层：内联注入背景图，视频自动播放被拒/弱网卡加载时帆船图必显
+            （iOS Safari 的 poster 属性在该场景下可能整幅不绘制） */}
+        <div
+          className="fh-hero-bg"
+          aria-hidden="true"
+          style={{ backgroundImage: `url(${MEDIA_BASE}/hero-poster.jpg?v=20261116b)` }}
+        >
           <div className="fh-hero-glow fh-glow-a" />
           <div className="fh-hero-glow fh-glow-b" />
-          <video
-            className="fh-hero-video"
-            ref={videoRef}
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="auto"
-            poster={`${MEDIA_BASE}/hero-poster.jpg?v=20261114e`}
-            src={HERO_VIDEO_URL}
+          {videoBlocked ? (
+            /* 动画 WebP 兜底：<img> 不受媒体自动播放策略限制（微信硬拒绝时保住
+               「自动动起来」）；与视频同 class 复用铺满裁切样式 */
+            <img
+              className="fh-hero-video"
+              src={`${MEDIA_BASE}/hero-guanhe-ambience.webp?v=20261116`}
+              alt=""
+              aria-hidden="true"
+            />
+          ) : (
+            <video
+              className="fh-hero-video"
+              ref={videoRef}
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="auto"
+              poster={`${MEDIA_BASE}/hero-poster.jpg?v=20261116b`}
+            src={videoTier === 'hd' ? HERO_URL_HD : HERO_URL_LITE}
             // X5（微信安卓老内核）H5 同层播放，避免被系统播放器接管/黑屏；
-            // 非标准属性，绕过 TS 的已知属性检查
+            // webkit-playsinline/x5-playsinline：老 WebView 的内联播放前缀属性；
+            // 均为非标准属性，绕过 TS 的已知属性检查
             {...({
               'x5-video-player-type': 'h5',
               'x5-video-player-fullscreen': 'true',
+              'x5-playsinline': 'true',
+              'webkit-playsinline': 'true',
+              'x-webkit-airplay': 'allow',
             } as React.VideoHTMLAttributes<HTMLVideoElement>)}
           />
+          )}
         </div>
         {vdebug && (
           <pre className="fh-vdebug">
-            {`[src] ${vdebug.src}\n[net] ${vdebug.net}  [ready] ${vdebug.ready}  [t] ${vdebug.t}s  [paused] ${vdebug.paused}\n[err] ${vdebug.err}\n[ua] ${navigator.userAgent}`}
+            {`[src] ${videoBlocked ? 'webp-fallback' : vdebug.src}\n[net] ${vdebug.net}  [ready] ${vdebug.ready}  [t] ${vdebug.t}s  [paused] ${vdebug.paused}\n[err] ${vdebug.err}\n[ua] ${navigator.userAgent}`}
           </pre>
         )}
         <h1 className="fh-hero-title" ref={sloganRef}>
@@ -262,10 +415,11 @@ const LandingPage: React.FC = () => {
           aria-hidden="true"
         />
         <div className="fh-philosophy-inner reveal">
-          {/* 品牌名横排：观 (Guan) 合 (He) —— 参照 FengHe 页脚 风(Feng)和(He) 排版 */}
+          {/* 品牌名横排：觀 (Guan) 合 (He)（繁体「觀」，佑字书法体 GuanHeYuji——
+              见 LandingPage.css @font-face；拼音仍为思源黑体，参照 FengHe 页脚 风(Feng)和(He) 排版） */}
           <div className="fh-philosophy-name">
             <span className="fh-name-pair">
-              <span className="fh-name-char">观</span>
+              <span className="fh-name-char">觀</span>
               <span className="fh-name-roman">(Guan)</span>
             </span>
             <span className="fh-name-pair">
