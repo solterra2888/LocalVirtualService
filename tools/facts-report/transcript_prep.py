@@ -188,7 +188,12 @@ def fetch_closing_bell(conn: Any,
                     19, tzinfo=timezone.utc)
     with conn.cursor() as cur:
         rows = _row(cur, "podcast", day0, day0 + timedelta(hours=5))
-    rows = [r for r in rows if _cb_title_has_date(r["title"], session_date)]
+    # 2026-11-12 起 CNBC 单集标题频繁退化为纯编辑标题(无日期后缀;11-16 两集
+    # 全无日期,旧过滤直接全丢)。晚间窗口内本 feed 只有 Closing Bell 两集,
+    # 日间节目挂在别的 feed —— feed 兜底安全,日期后缀仍是首选判据。
+    rows = [r for r in rows
+            if _cb_title_has_date(r["title"], session_date)
+            or CB_FEED_FALLBACK in (r.get("feed_url") or "")]
     if len(rows) > 2:  # 罕见:同日多行时优先规范标题
         ranked = sorted(rows, key=lambda r: 0 if "closing bell" in r["title"].lower() else 1)
         rows = ranked[:2]

@@ -72,8 +72,6 @@ const LandingPage: React.FC = () => {
   const [modal, setModal] = useState<LoginModal>(null);
   const sloganRef = useRef<HTMLHeadingElement>(null);
   const taglineRef = useRef<HTMLParagraphElement>(null);
-  // 品牌名「观/合」竖排：随视口进出 toggle .is-in，入场动效每次滑入重播
-  const brandNameRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [vdebug, setVdebug] = useState<VdebugInfo | null>(null);
   // 视频档位：移动端恒轻量，桌面恒默认高清——降级只由运行时看门狗基于
@@ -273,11 +271,9 @@ const LandingPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const els = [
-      sloganRef.current,
-      taglineRef.current,
-      brandNameRef.current,
-    ].filter((el): el is NonNullable<typeof el> => el !== null);
+    const els = [sloganRef.current, taglineRef.current].filter(
+      (el): el is NonNullable<typeof el> => el !== null
+    );
     if (els.length === 0) return;
     if (!('IntersectionObserver' in window)) {
       els.forEach((el) => el.classList.add('is-in'));
@@ -419,19 +415,12 @@ const LandingPage: React.FC = () => {
           aria-hidden="true"
         />
         <div className="fh-philosophy-inner reveal">
-          {/* 品牌名竖排：观（Guan）/ 合（He）—— 志莽行书（GuanHeZhiMang，OFL 免费商用），
-              汉字 200px 竖叠，拼音（ASCII 括号）同字体 70px 绝对定位于各字右侧（不入占宽，
-              保证观/合严格同轴竖叠）。该字体仅含简体「观」（无繁体「觀」），故用简体；
-              见 LandingPage.css @font-face */}
-          <div className="fh-philosophy-name" ref={brandNameRef}>
-            <span className="fh-name-pair">
-              <span className="fh-name-char">观</span>
-              <span className="fh-name-pinyin">(Guan)</span>
-            </span>
-            <span className="fh-name-pair">
-              <span className="fh-name-char">合</span>
-              <span className="fh-name-pinyin">(He)</span>
-            </span>
+          {/* 品牌名竖排：观（上）/ 合（下），无拼音、静态常显（动效按需求移除）——
+              志莽行书（GuanHeZhiMang，OFL 免费商用）。该字体仅含简体「观」（无繁体「觀」），
+              故用简体；见 LandingPage.css @font-face */}
+          <div className="fh-philosophy-name">
+            <span className="fh-name-char">观</span>
+            <span className="fh-name-char">合</span>
           </div>
           <p className="fh-tagline" ref={taglineRef}>
             <span className="fh-tagline-row">Do the right things.</span>
