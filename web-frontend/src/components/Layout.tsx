@@ -23,7 +23,6 @@ import {
   SunOutlined,
   MoonOutlined,
   ReadOutlined,
-  AppstoreOutlined,
   EditOutlined,
   KeyOutlined,
   ProfileOutlined,
@@ -62,7 +61,6 @@ const NAV_DESCRIPTIONS: Record<string, string> = {
   '/daily': 'Overview & monitoring',
   '/files': 'Sources & documents',
   '/feeds': 'Subscriptions & feeds',
-  '/feeds-dashboard': 'Topics & highlights from feeds',
   '/dashboard': 'Markets & watchlist',
   '/reports': 'Daily & Weekly Reports',
   '/agent-integration': 'MCP & integrations',
@@ -76,8 +74,6 @@ function getSelectedNavKey(pathname: string): string {
   if (pathname.startsWith('/agent-integration')) return '/agent-integration';
   if (pathname.startsWith('/daily')) return '/daily';
   if (pathname.startsWith('/files')) return '/files';
-  // ⚠ 必须在 '/feeds' 之前判断, 否则 /feeds-dashboard 会被 startsWith('/feeds') 吞掉
-  if (pathname.startsWith('/feeds-dashboard')) return '/feeds-dashboard';
   if (pathname.startsWith('/feeds')) return '/feeds';
   if (pathname.startsWith('/dashboard')) return '/dashboard';
   if (pathname.startsWith('/investment-themes')) return '/investment-themes';
@@ -124,22 +120,17 @@ const Layout: React.FC = () => {
 
 
 
-  // 主导航：Feeds Dashboard 首位（登录后默认页，按主题聚合视图），Sources 第二，Feeds 第三
+  // 主导航：Feeds 首位（登录后默认页），Sources 第二
   const menuItems = [
     {
-      key: '/feeds-dashboard',
-      icon: <AppstoreOutlined />,
-      label: 'Feeds Dashboard',
+      key: '/feeds',
+      icon: <ReadOutlined />,
+      label: 'Feeds',
     },
     {
       key: '/files',
       icon: <FileTextOutlined />,
       label: 'Sources',
-    },
-    {
-      key: '/feeds',
-      icon: <ReadOutlined />,
-      label: 'Feeds',
     },
     {
       key: '/dashboard',
@@ -202,7 +193,7 @@ const Layout: React.FC = () => {
     if (item.key === '/projects') return false;
     // 暂时屏蔽 UG Data：功能未成熟；路由与页面代码保留
     if (item.key === 'ug-data') return false;
-    // 暂时屏蔽 Daily：使用人数不多，默认落地页已改为 Feeds Dashboard；路由与页面代码保留
+    // 暂时屏蔽 Daily：使用人数不多，默认落地页已改为 /feeds；路由与页面代码保留
     if (item.key === '/daily') return false;
     if (item.children) return item.children.length > 0;
     return true;

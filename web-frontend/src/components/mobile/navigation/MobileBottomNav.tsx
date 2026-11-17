@@ -2,7 +2,6 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ApiOutlined,
-  AppstoreOutlined,
   FileTextOutlined,
   ProfileOutlined,
   ReadOutlined,
@@ -11,7 +10,7 @@ import {
 import './MobileBottomNav.css';
 
 /**
- * 移动端底部导航栏：Feeds Dashboard（登录默认页, 主题聚合视图）、Sources、Feeds、Reports
+ * 移动端底部导航栏：Feeds（登录默认页）、Sources、Reports
  * Watchlist 与 PC 顶栏一致，指向 /dashboard
  * Daily 暂时从导航隐藏 (使用人数不多; 路由保留), 与桌面侧栏口径一致
  */
@@ -21,19 +20,14 @@ const MobileBottomNav: React.FC = () => {
 
   const navItems = [
     {
-      key: '/feeds-dashboard',
-      icon: <AppstoreOutlined />,
-      label: 'Dashboard',
+      key: '/feeds',
+      icon: <ReadOutlined />,
+      label: 'Feeds',
     },
     {
       key: '/files',
       icon: <FileTextOutlined />,
       label: 'Sources',
-    },
-    {
-      key: '/feeds',
-      icon: <ReadOutlined />,
-      label: 'Feeds',
     },
     {
       key: '/reports',

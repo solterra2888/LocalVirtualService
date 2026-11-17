@@ -301,7 +301,7 @@ const LandingPage: React.FC = () => {
   const chooseStaff = () => {
     setModal(null);
     window.open(
-      isAuthenticated ? '/feeds-dashboard' : '/login',
+      isAuthenticated ? '/feeds' : '/login',
       '_blank',
       'width=1280,height=900,menubar,toolbar,location,status,resizable,scrollbars'
     );

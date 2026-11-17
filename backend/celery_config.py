@@ -87,9 +87,6 @@ task_routes = {
     'fetch_substack_subscription': {'queue': 'data_fetching'},  # Substack 订阅抓取（文章 + 动态）
     'fetch_weibo_subscription': {'queue': 'data_fetching'},  # 微博订阅抓取
     'backfill_podcast_transcripts_task': {'queue': 'data_fetching'},  # Podcast 历史 (>48h) 剧集回填转写
-    # Feeds Dashboard 主题聚合 (P0 零 LLM; 由 task_scheduling feeds_topic_summary 触发)
-    'aggregate_feed_topics': {'queue': 'data_fetching'},
-    'aggregate_feed_topics_single': {'queue': 'data_fetching'},
     'add_user_to_existing_twitter_content': {'queue': 'data_fetching'},
     'smart_wait_and_add_user': {'queue': 'data_fetching'},
     'generate_author_summary': {'queue': 'ai_processing'},

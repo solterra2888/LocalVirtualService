@@ -86,8 +86,7 @@ export interface DailyPreviewDrawerProps {
   onNavigate?: (next: DailyFeedItem) => void;
   /**
    * 自定义详情拉取 (默认 getDailyItemDetail → /api/daily/items/{id})。
-   * Feeds Dashboard 全站视图传此 prop: 订阅外条目走 /api/feeds-dashboard/items/{id}/detail
-   * (Daily 端点有用户范围鉴权, 订阅外内容会 404)。
+   * 需要绕过 Daily 端点用户范围鉴权拉订阅外条目时传此 prop。
    */
   fetchDetail?: (item: DailyFeedItem) => Promise<DailyItemDetail>;
 }

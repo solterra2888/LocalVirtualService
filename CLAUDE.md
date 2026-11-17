@@ -159,7 +159,6 @@ All config via `.env` file (see `example.env`). Key variables:
 - `docs/instructions/SCHEDULER_DEVELOPMENT_GUIDE.md`: Scheduler service internals
 - `docs/instructions/SUMMARY_SCHEDULER_DEVELOPMENT_GUIDE.md`: Periodic Summarize schedulers (YouTube/Twitter/Zhishixingqiu/The Close/CNBC) unified contract
 - `docs/instructions/FEEDS_MODULE.md`: Twitter/YouTube subscription system
-- `docs/instructions/FEEDS_DASHBOARD_MODULE.md`: Feeds Dashboard — topic × importance aggregation over subscription_content_tags (P0 rule-based; P1 planned topic summaries)
 - `docs/instructions/VECTOR_RAG_SYSTEM.md`: Semantic search implementation
 - `docs/instructions/FORM_13F_MODULE.md`: SEC quarterly 13F holdings pipeline (datasets → holdings → snapshots)
 - `deployment/DEPLOY_GUIDE.md`: Production deployment guide

@@ -13,8 +13,7 @@
 -- 设计决策 (列 vs JSONB): L/E 是固定枚举 + 核心用途是 SQL 过滤/聚合
 -- (如 morning-brief 选材 WHERE evidence_level != 'E3', Dashboard WHERE info_level IN ('L1','L2')),
 -- 故放独立列; additional_tags 仍保留给开放载荷 (ai_metadata / tweet_signal 等).
--- 反例教训: tweet_signal.importance 放 JSONB 导致 feed_topic_aggregation_service
--- 只能 Python 侧解包、SQL 无法过滤.
+-- 反例教训: tweet_signal.importance 放 JSONB 只能 Python 侧解包、SQL 无法过滤.
 --
 -- NULL 语义: 存量行与未升级模板产物为 NULL = "未评级", 无需回填.
 -- 索引暂不建 (表 ~2-3 万行顺序扫足够), 待 Dashboard 上 L/E 筛选再补

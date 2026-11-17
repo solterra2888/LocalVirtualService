@@ -1589,9 +1589,8 @@ def _fetch_feed_detail(
 ) -> DailyItemDetail:
     """根据 subscription_content.id 装配 Feed 卡片完整详情.
 
-    鉴权: enforce_scope=True (默认) 时 user_id = ANY(sc.user_ids) (与列表口径 + Feeds 模块一致);
-    enforce_scope=False 供 Feeds Dashboard 全站视图复用 (跳过用户范围检查, 由调用方
-    自行做 FEEDS_DASHBOARD_SERVER_SCOPE_ENABLED 门控)。
+    鉴权: enforce_scope=True (默认) 时 user_id = ANY(sc.content_user_ids) (与列表口径 + Feeds 模块一致);
+    enforce_scope=False 跳过用户范围检查 (调用方需自行做好权限门控)。
     单查询 LEFT JOIN subscription_content_tags 取 AI 打标轻量结构;
     LEFT JOIN subscription_content_user_summaries (PR-D1) 取 per-user 个性化摘要,
     抽屉前端 "AI 深度分析" 段消费.

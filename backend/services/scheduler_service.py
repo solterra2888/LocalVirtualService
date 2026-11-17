@@ -65,7 +65,6 @@ class SchedulerService:
             'earnings_calendar': self._execute_earnings_calendar_task,
             'ipo_calendar': self._execute_ipo_calendar_task,
             'news_feed': self._execute_news_feed_task,  # EODHD + CCTV Feed 订阅任务
-            'feeds_topic_summary': self._execute_feeds_topic_summary_task,
             'zhishixingqiu_subscription': self._execute_zhishixingqiu_subscription_task,
             'zsxq_file_dispatch': self._execute_zsxq_file_dispatch_task,
             'substack_subscription': self._execute_substack_subscription_task,
@@ -1322,40 +1321,6 @@ class SchedulerService:
                 record_fetch_outcome_for_channel('news', status='failed', error=str(e))
             except Exception:
                 pass
-            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
-
-    async def _execute_feeds_topic_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行 Feeds Dashboard 主题聚合任务 — 通过 Celery 异步分发给 data-worker。
-
-        P0: 零 LLM 聚合 (concepts 归一化 + importance 规则评分 → feed_topic_daily_items)。
-        P1: 将在同一 Celery 任务内追加 Phase A 主题日摘要 (feed_topic_daily_summaries)。
-
-        Args:
-            params:
-                - days: 聚合最近 N 天 (默认 7, 覆盖 Dashboard「近一周」范围查询; 聚合零 LLM 成本低)
-                - force: P1 预留 (跳过摘要缓存强制重生成)
-        """
-        try:
-            logger.info("分发 Feeds Dashboard 主题聚合 Celery 任务", params=params)
-
-            from backend.tasks.feed_topic_tasks import aggregate_feed_topics_task
-
-            days = int(params.get('days', 7) or 7)
-            force = params.get('force', False)
-
-            task = aggregate_feed_topics_task.delay(days=days, force=force)
-
-            message = (
-                f"✅ Feeds Dashboard 主题聚合任务已提交 Celery 异步执行，"
-                f"task_id={task.id}"
-            )
-            logger.info("Feeds Dashboard 主题聚合任务已提交", celery_task_id=task.id)
-            return {'success': True, 'message': message, 'celery_task_id': task.id}
-
-        except Exception as e:
-            error_msg = f"Feeds Dashboard 主题聚合任务分发异常: {str(e)}"
-            logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 
     async def _execute_twitter_author_summary_task(self, params: Dict[str, Any]) -> Dict[str, Any]:

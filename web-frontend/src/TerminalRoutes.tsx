@@ -46,8 +46,6 @@ const MobileSourcesPage = lazyWithRetry(() => import('./pages/MobileSourcesPage'
 
 // 订阅信息
 const FeedReaderPage = lazyWithRetry(() => import('./pages/FeedReaderPage'));
-const FeedsDashboardPage = lazyWithRetry(() => import('./pages/FeedsDashboardPage'));
-const MobileFeedsDashboardPage = lazyWithRetry(() => import('./pages/MobileFeedsDashboardPage'));
 const MobileFeedsPage = lazyWithRetry(() => import('./pages/MobileFeedsPage'));
 const MobileFeedsListView = lazyWithRetry(() => import('./pages/MobileFeedsListView'));
 const MobileFeedArticlePage = lazyWithRetry(() => import('./pages/MobileFeedArticlePage'));
@@ -135,7 +133,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   }
 
   if (!adminUser?.is_admin) {
-    return <Navigate to="/feeds-dashboard" replace />;
+    return <Navigate to="/feeds" replace />;
   }
 
   return <>{children}</>;
@@ -164,7 +162,6 @@ const TerminalContent: React.FC = () => {
   const DashboardComponent = isMobile ? MobileDashboardPage : DashboardPage;
   const FilesComponent = isMobile ? MobileSourcesPage : FilesPage;
   // const DailyComponent = isMobile ? MobileDailyPage : DailyPage;  // 暂时下线 Daily
-  const FeedsDashboardComponent = isMobile ? MobileFeedsDashboardPage : FeedsDashboardPage;
 
   return (
     <div className="App">
@@ -182,9 +179,9 @@ const TerminalContent: React.FC = () => {
               </PrivateRoute>
             }
           >
-            {/* Daily 聚合视图暂时下线 (桌面+手机): 路由重定向到 Feeds Dashboard, 页面代码保留
+            {/* Daily 聚合视图暂时下线 (桌面+手机): 路由重定向到订阅阅读器, 页面代码保留
                 (见 Layout.tsx 侧栏 / MobileBottomNav 同口径屏蔽; 恢复时还原本路由与上方 import) */}
-            <Route path="daily" element={<Navigate to="/feeds-dashboard" replace />} />
+            <Route path="daily" element={<Navigate to="/feeds" replace />} />
             <Route path="dashboard" element={<DashboardComponent />} />
             <Route path="markets" element={<MarketsPage />} />
             <Route path="markets/earnings-calendar" element={<EarningsCalendarPage />} />
@@ -213,8 +210,8 @@ const TerminalContent: React.FC = () => {
             ) : (
               <Route path="feeds" element={<FeedReaderPage />} />
             )}
-            {/* Feeds Dashboard: 按主题 × 重要性聚合的订阅重要信息视图 (桌面/移动独立页面, isMobile 切换) */}
-            <Route path="feeds-dashboard" element={<FeedsDashboardComponent />} />
+            {/* Feeds Dashboard 已下线: 旧路径重定向到订阅阅读器 */}
+            <Route path="feeds-dashboard" element={<Navigate to="/feeds" replace />} />
             {/* Reports 路由 */}
             {isMobile ? (
               <>

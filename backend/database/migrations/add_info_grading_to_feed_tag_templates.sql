@@ -10,7 +10,7 @@
 --       并新增 author_context 变量 (作者标识, E 级来源判断线索).
 --
 -- 兼容性 (方案 A, 渐进):
---   - tweet_signal_v1 保留 importance 字段 (feed_topic_aggregation_service 在消费),
+--   - tweet_signal_v1 保留 importance 字段 (FEEDS 模块自有产物),
 --     prompt 中定义映射 L1→high / L2→medium / L3,L4→low 保证两者一致
 --   - output_format 的 json_schema 仅把新字段加入 properties, 不加入 required,
 --     LLM 偶发缺失时由 FeedContentTaggingService._normalize_tag_data 容错为 NULL

@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.api import auth, files, tasks, users, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, market_weekly, market_weekly_report, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search, theme_report, chat_group_messages, zsxq_admin, weibo_admin, substack_admin, substack_summary, daily_market_report, the_close_summary, close_brief_report, cnbc_closing_bell, closing_bell_report, morning_brief_report, bloomberg_surveillance, surveillance_report, zhishixingqiu_summary, fomc, form13f, feeds_dashboard
+from backend.api import auth, files, tasks, users, markets, dashboard, screener, scheduler_proxy, llm_config, llm_prompt_templates, market_weekly, market_weekly_report, file_tags, file_folders, logs, monitoring, subscriptions, subscription_content_tags, twitter_daily_reports, youtube_daily_reports, daily, feed_summary_settings, personal_tokens, agent_v1, agent_v2_search, theme_report, chat_group_messages, zsxq_admin, weibo_admin, substack_admin, substack_summary, daily_market_report, the_close_summary, close_brief_report, cnbc_closing_bell, closing_bell_report, morning_brief_report, bloomberg_surveillance, surveillance_report, zhishixingqiu_summary, fomc, form13f
 from backend.database.db_manager import DatabaseManager
 from backend.auth.jwt_utils import get_current_user
 from backend.utils.logger import init_logging, info, error, warning, shutdown_logging
@@ -195,14 +195,11 @@ app.include_router(subscription_content_tags.router, prefix="/api/subscriptions"
 app.include_router(feed_summary_settings.router, prefix="/api/feeds", tags=["Feed 摘要设置"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["仪表板"])
 # Daily 聚合视图: 把 Upload Files + Feeds 订阅合并成时间轴信息流。
-# ⚠️ 前端 /daily 页面已暂时下线 (App.tsx 路由重定向到 /feeds-dashboard), 但本路由必须保留:
+# ⚠️ 前端 /daily 页面已暂时下线 (路由重定向到 /feeds), 但本路由必须保留:
 #   /api/daily/feed?tickers= 是 Dashboard(FinvizDashboard) 与手机端个股详情的相关新闻数据源,
-#   /api/daily/items/{id} 是 Feeds Dashboard 预览抽屉的条目详情端点 (feeds_dashboard.py 也复用其装配逻辑)
+#   /api/daily/items/{id} 是预览抽屉的条目详情端点
 # 详见 backend/api/daily.py 与 docs/instructions/UPLOAD_FILES_AND_LLM_ANALYSIS_FLOW.md
 app.include_router(daily.router, prefix="/api/daily", tags=["Daily 聚合视图"])
-# Feeds Dashboard: 把订阅内容按「主题 × 重要性」重组 (/feeds-dashboard), 读路径零 LLM
-# 详见 backend/services/feed_topic_aggregation_service.py
-app.include_router(feeds_dashboard.router, prefix="/api/feeds-dashboard", tags=["Feeds Dashboard"])
 # Agent / MCP readonly API (Bearer JWT or PAT ght_...)
 app.include_router(agent_v1.router)
 app.include_router(agent_v2_search.router)
