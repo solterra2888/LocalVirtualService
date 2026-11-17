@@ -90,6 +90,39 @@ def _alert(title: str, lines: List[str], enabled: bool) -> None:
         print(f"[gate] lark suppressed({title})")
 
 
+def _probe_stuck(snap: Dict, missing: List[str]) -> List[str]:
+    """窗口内已有候选行但快照仍缺 → 匹配器缺口描述行;空列表=数据未到,正常等。
+
+    2026-11-16 事故:Closing Bell 两集 06:37 已入库、因标题退化被过滤,
+    门空等到 09:40 —— "到了但没匹配上"等下去不会自愈,应立即暴露。
+    诊断自身失败不影响等待逻辑(按"未到"处理)。
+    """
+    if not missing:
+        return []
+    import transcript_prep
+    from datetime import date as _date
+    try:
+        probe = transcript_prep.window_probe(
+            _date.fromisoformat(snap["report_date"]))
+    except Exception as e:  # noqa: BLE001
+        print(f"[gate] window_probe error (treated as not-arrived): {e}")
+        return []
+    out: List[str] = []
+    if "the_close" in missing:
+        p = probe.get("the_close") or {}
+        if p.get("candidate_rows"):
+            out.append(
+                f"The Close: 窗口内已有 {p['candidate_rows']} 条 ≥50k 转录但零自识别"
+                f"({'; '.join(p.get('titles') or [])})")
+    if "cnbc_closing_bell" in missing:
+        p = probe.get("cnbc_closing_bell") or {}
+        if p.get("cb_feed_rows"):
+            out.append(
+                f"Closing Bell: 官方 feed 已入库 {p['cb_feed_rows']} 行但零匹配"
+                f"({'; '.join(p.get('titles') or [])})")
+    return out
+
+
 def run(ws: Path, deadline: datetime, poll: int, do_notify: bool) -> int:
     snap_path = ws / "snapshot.json"
     started = _now_bj()
@@ -130,6 +163,22 @@ def run(ws: Path, deadline: datetime, poll: int, do_notify: bool) -> int:
         print(f"[gate] {now:%H:%M:%S} missing={missing}, "
               f"deadline={deadline:%H:%M}")
 
+        # 已入库但零匹配 → 匹配器缺口:等下去不会自愈,立即 🔴 放行把缺口
+        # 暴露在人工窗口(2026-11-17 加;此前会空等到截止)
+        stuck = _probe_stuck(snap, missing)
+        if stuck:
+            _alert(
+                f"【facts-report 🔴】{snap.get('report_date', '?')} "
+                f"节目行已在库但零匹配(匹配器缺口)",
+                [f"时间: 北京 {now:%m-%d %H:%M}"]
+                + [f"缺口: {s}" for s in stuck]
+                + ["处置: 数据已入库,是 transcript_prep 匹配逻辑没认出来;",
+                   "修复后可手动 `python transcript_prep.py --ws " + str(ws)
+                   + "` 补挂重跑;",
+                   "报告现在放行,如实缺源生成"],
+                do_notify)
+            return 0  # 放行,不阻断
+
         if now >= deadline:
             _alert(
                 f"【facts-report 🔴】{snap.get('report_date', '?')} 超截止仍缺节目",
@@ -154,8 +203,8 @@ def run(ws: Path, deadline: datetime, poll: int, do_notify: bool) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("workspace", help="管线工作区目录(含 snapshot.json)")
-    ap.add_argument("--deadline", default="09:40",
-                    help="北京时刻 HH:MM,到点仍缺则告警放行(默认 09:40)")
+    ap.add_argument("--deadline", default="08:25",
+                    help="北京时刻 HH:MM,到点仍缺则告警放行(默认 08:25,8:30 开工 SLA)")
     ap.add_argument("--poll", type=int, default=300,
                     help="轮询间隔秒(默认 300)")
     ap.add_argument("--no-notify", action="store_true",

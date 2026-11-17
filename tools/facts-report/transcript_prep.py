@@ -217,6 +217,50 @@ def fetch_closing_bell(conn: Any,
     return {"main": main, "overtime": ot}
 
 
+def window_probe(session_date: date) -> Dict[str, Dict[str, Any]]:
+    """就绪门诊断(2026-11-17):区分"数据未入库"与"已入库但零匹配"。
+
+    show_gate 等待期每轮调用:某节目窗口内已有候选行但快照仍缺 → 匹配器
+    缺口,继续等不会自愈 → 门应立即 🔴 告警放行,而不是耗到截止。背景:
+    2026-11-16 Closing Bell 两集 06:37 入库、因标题退化被过滤,门空等到
+    09:40。自管连接供 show_gate 无 conn 调用;DB 抖动抛出由调用方容忍。
+    """
+    day0 = datetime(session_date.year, session_date.month, session_date.day,
+                    tzinfo=timezone.utc)
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            # The Close:三档窗口内 ≥50k 的 youtube 行(≈整期体量;youtube 行
+            # 无 feed 标识,只能按体量计;可能混入别频道的整期,标题一并带出)
+            tc_rows: List[Dict[str, Any]] = []
+            seen: set = set()
+            for t0h, t1h in ((21, 23), (20.5, 24.0), (20.5, 25.0)):
+                for r in _row(cur, "youtube",
+                              day0 + timedelta(hours=t0h),
+                              day0 + timedelta(hours=t1h), min_len=50000):
+                    if r["content_id"] not in seen:
+                        seen.add(r["content_id"])
+                        tc_rows.append(r)
+            # Closing Bell:晚间窗口 podcast 行,其中官方 feed 行是强信号
+            # (日间节目挂另一 feed,不会误入)
+            cb_rows = _row(cur, "podcast", day0 + timedelta(hours=19),
+                           day0 + timedelta(hours=24))
+    finally:
+        conn.close()
+    cb_feed = [r for r in cb_rows if CB_FEED_FALLBACK in (r.get("feed_url") or "")]
+    return {
+        "the_close": {
+            "candidate_rows": len(tc_rows),
+            "titles": [r["title"][:60] for r in tc_rows[:3]],
+        },
+        "cnbc_closing_bell": {
+            "window_rows": len(cb_rows),
+            "cb_feed_rows": len(cb_feed),
+            "titles": [r["title"][:60] for r in cb_feed[:4]],
+        },
+    }
+
+
 # ── Layer 1: 清洗 ──────────────────────────────────────────────────────
 
 def detect_format(text: str) -> str:

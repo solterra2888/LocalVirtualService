@@ -320,7 +320,7 @@ def _cross_asset_snapshot(report_date: date) -> List[Dict[str, Any]]:
 # 缺 T 日收盘,横幅出街;数据 11:20 才入库)。此处把"一次查询"升级为
 # 「兜底重拉 + 轮询到截止」:复用 MarketDataService 既有 EOD 拉取与
 # ON CONFLICT (code,date) 幂等 upsert,语义与转录就绪门(show_gate)一致。
-QUOTES_WAIT_DEADLINE_DEFAULT = "09:30"   # 北京时刻;≤ show_gate 09:40,不推高总最坏时延
+QUOTES_WAIT_DEADLINE_DEFAULT = "08:15"   # 北京时刻;2026-11-17 起 8:30 开工 SLA —— 行情门只留 2 轮自愈(15 分钟),≤ show_gate 08:25
 QUOTES_WAIT_POLL_DEFAULT = 300           # 轮询间隔秒
 # parse_eod_data 需要 asset_type;按 code 后缀归类(与 MarketDataService 各 *_MAP 同值域)
 _CODE_SUFFIX_ASSET_TYPE = ((".COMMODITY", "commodity"), (".FOREX", "forex"), (".INDX", "index"))

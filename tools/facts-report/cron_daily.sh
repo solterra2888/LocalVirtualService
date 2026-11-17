@@ -6,7 +6,10 @@
 #       >> /opt/guanhetech/backend/reports/facts-report/cron.log 2>&1
 #
 # 流程: build_snapshot(--no-triage) → show_gate 就绪门(节目转录缺失时轮询至
-#   09:40,期间/截止 Lark 告警) → run_pipeline(--max-parallel 3)。
+#   08:25,期间/截止 Lark 告警) → run_pipeline(--max-parallel 2)。
+#   2026-11-17 起 8:30 开工 SLA:行情门 08:15、就绪门 08:25 —— 写稿硬保证
+#   08:30 内开跑(旧行情 09:30/门 09:40 串行最坏 09:40 才开工,白耗 100 分钟;
+#   行情缺 1 条只影响横幅,等待性价比远低于节目转录,故行情门截得更早)。
 # 失败告警: build_snapshot / run_pipeline 非 0 → lark_alert.py 推服务状态监测群。
 #
 # cron 的极简 env 没有 zcode provider 配置 —— 交互 shell 由 harness 注入以下变量,
@@ -34,16 +37,23 @@ export PATH="$PY_BIN_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin
 
 echo "==== $(date '+%F %T %Z') facts-report cron start ===="
 
-# 锁与日报不同 —— 两条管线独立,互不阻塞
+# 锁与日报不同 —— 两条管线独立,互不阻塞。挂死导致当天静默跳过是 8:30 SLA
+# 的隐形破坏者(2026-11-17 加告警):skip 必须 reaching 人,不能只写日志。
 exec 9>/tmp/facts_report_cron.lock
-flock -n 9 || { echo "[cron] previous run still active, skip"; exit 0; }
+flock -n 9 || {
+    echo "[cron] previous run still active, skip"
+    "$PY" lark_alert.py --title "【facts-report 🔴】前次运行未退出,今日跳过" \
+        --line "时间: $(date '+%F %T %Z')" \
+        --line "处置: ps 查 build_snapshot/run_pipeline 残留进程;kill 后可手动补跑" || true
+    exit 0
+}
 
 cd "$PIPE" || exit 1
 mkdir -p "$OUT"
 
 # 两条管线独立(2026-11-10 定):facts-report 不借用日报快照,每天自建。
-# 测试期(2026-11-10 起)日报 cron 暂停,本管线独占早晨窗口,放 3 路并发。
-if ! "$PY" build_snapshot.py --no-triage; then
+# 行情门 08:15 截止(8:30 SLA):留 2 轮 5min 自愈重拉,过点带 stale 横幅放行。
+if ! "$PY" build_snapshot.py --no-triage --quotes-deadline 08:15; then
     "$PY" lark_alert.py --title "【facts-report 🔴】build_snapshot 失败" \
         --line "时间: $(date '+%F %T %Z')" \
         --line "处置: 查看 cron.log 定位(DB/网络/代码)" || true
@@ -56,13 +66,15 @@ echo "[cron] self-built snapshot for $DATE"
 
 # 就绪门(2026-11-10):08:00 启动时 The Close/Closing Bell 转录常未入库
 # (实测就绪带北京 07:30-08:41)。缺失时每 5min 轮询补查,期间 Lark ⚠️ 预警;
-# 09:40 仍缺则 🔴 告警后放行(报告如实缺源)。Overtime 段不阻塞。
-"$PY" show_gate.py "$OUT/$DATE" --deadline 09:40 --poll 300 || true
+# 08:25 仍缺则 🔴 告警后放行(报告如实缺源;行已在库但零匹配则秒放,11-17 加)。
+# 08:25 = 8:30 开工 SLA 的门限;代价是 08:25 后才到库的转录当天缺源降级。
+"$PY" show_gate.py "$OUT/$DATE" --deadline 08:25 --poll 300 || true
 
 echo "[cron] running pipeline for $DATE (style=$STYLE)"
 
-# 限 3 路(日报暂停期独占窗口;恢复日报并行时建议降回 2)。
-"$PY" run_pipeline.py "$DATE" --style "$STYLE" --max-parallel 3
+# 限 2 路:2026-11-17 实测 3 路在 7GB 机器上 OOM(内核击杀,整线报废);
+# 已加 4G swap 兜底,并发仍保持 2 —— 写稿变慢 ~10 分钟,换整线存活。
+"$PY" run_pipeline.py "$DATE" --style "$STYLE" --max-parallel 2
 rc=$?
 if [ $rc -ne 0 ]; then
     "$PY" lark_alert.py --title "【facts-report 🔴】run_pipeline 失败" \
