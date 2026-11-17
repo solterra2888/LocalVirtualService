@@ -136,7 +136,7 @@ type SchedulerCategory = 'data_fetch' | 'report_generation';
 interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'earnings_active_fundamentals' | 'fundamentals_rotation' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'earnings_active_fundamentals' | 'fundamentals_rotation' | 'twitter_subscription' | 'youtube_subscription' | 'youtube_subscription_morning' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'other';
   category: SchedulerCategory;
   description: string;
   enabled: boolean;
@@ -222,6 +222,26 @@ const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
           name: 'Configure YouTube Fetch Schedule',
           description: 'Set up periodic YouTube subscription fetching (default: every 60 minutes)',
           endpoint: '/scheduler/tasks/youtube-subscription',
+          params: {},
+          icon: <ScheduleOutlined />
+        }
+      ]
+    },
+    {
+      id: 'youtube_subscription_morning',
+      name: 'YouTube Bloomberg 早间加密抓取',
+      type: 'youtube_subscription_morning',
+      category: 'data_fetch',
+      sortOrder: 25,
+      description: 'The Close 8:30 SLA:北京 06:05-08:55 每 10 分钟定向抓取 Bloomberg Television(订阅 41),补全量任务整点间隙',
+      enabled: true,
+      status: 'idle',
+      quickActions: [
+        {
+          id: 'configure_youtube_morning_schedule',
+          name: 'Configure Morning Dense Fetch Schedule',
+          description: 'Adjust the dense morning fetch window (default: every 10 minutes, 06:05-08:55 Beijing)',
+          endpoint: '/scheduler/tasks/youtube-subscription-morning',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -929,6 +949,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'ipo_calendar' && taskType === 'ipo_calendar') ||
           (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
           (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+          (sourceIdLower === 'youtube_subscription_morning' && taskType === 'youtube_subscription_morning') ||
           (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
           (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
           (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
@@ -1236,6 +1257,7 @@ const SchedulerPage: React.FC = () => {
           (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
           (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
           (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+          (sourceIdLower === 'youtube_subscription_morning' && taskType === 'youtube_subscription_morning') ||
           (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
           (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
           (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
@@ -1373,7 +1395,7 @@ const SchedulerPage: React.FC = () => {
     // If it's Cron scheduling configuration or fundamentals data update, decide which config component to use based on data source type
     if ((action.id.includes('configure') && action.id.includes('schedule')) || action.id === 'update_fundamentals_data') {
       // For EODHD related data sources, use dedicated configuration modal
-      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'podcast_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'weibo_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'daily_market_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'cnbc_closing_bell' || dataSource.id === 'bloomberg_surveillance' || dataSource.id === 'bloomberg_surveillance_flash' || dataSource.id === 'zhishixingqiu_summary' || dataSource.id === 'substack_subscription' || dataSource.id === 'substack_summary' || dataSource.id === 'fed_dashboard' || dataSource.id === 'form13f' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
+      if (dataSource.id === 'twitter_subscription' || dataSource.id === 'youtube_subscription' || dataSource.id === 'youtube_subscription_morning' || dataSource.id === 'podcast_subscription' || dataSource.id === 'news_feed' || dataSource.id === 'zhishixingqiu_subscription' || dataSource.id === 'weibo_subscription' || dataSource.id === 'twitter_author_summary' || dataSource.id === 'youtube_author_summary' || dataSource.id === 'theme_report' || dataSource.id === 'market_weekly_report' || dataSource.id === 'daily_market_report' || dataSource.id === 'the_close_summary' || dataSource.id === 'cnbc_closing_bell' || dataSource.id === 'bloomberg_surveillance' || dataSource.id === 'bloomberg_surveillance_flash' || dataSource.id === 'zhishixingqiu_summary' || dataSource.id === 'substack_subscription' || dataSource.id === 'substack_summary' || dataSource.id === 'fed_dashboard' || dataSource.id === 'form13f' || dataSource.id === 'eodhd_events' || dataSource.id === 'eodhd_macro' || dataSource.id === 'eodhd_fundamentals' || dataSource.id === 'finviz_screener' || dataSource.id === 'eodhd_stock_prices' || dataSource.id === 'eodhd_eod_stock_prices' || dataSource.id === 'market_data' || dataSource.id === 'earnings_calendar' || dataSource.id === 'ipo_calendar' || dataSource.id === 'watchlist_fundamentals') {
         setSelectedDataSource(dataSource);
         setDataSourceConfigVisible(true);
       } else {
@@ -1723,6 +1745,7 @@ const SchedulerPage: React.FC = () => {
                         (sourceIdLower === 'cctv_news' && taskType === 'cctv_news') ||
                         (sourceIdLower === 'twitter_subscription' && taskType === 'twitter_subscription') ||
                         (sourceIdLower === 'youtube_subscription' && taskType === 'youtube_subscription') ||
+          (sourceIdLower === 'youtube_subscription_morning' && taskType === 'youtube_subscription_morning') ||
                         (sourceIdLower === 'podcast_subscription' && taskType === 'podcast_subscription') ||
                         (sourceIdLower === 'news_feed' && taskType === 'news_feed') ||
                         (sourceIdLower === 'zhishixingqiu_subscription' && taskType === 'zhishixingqiu_subscription') ||
@@ -2028,7 +2051,7 @@ const SchedulerPage: React.FC = () => {
               setSelectedDataSource(null);
             }}
             onSuccess={handleDataSourceConfigSuccess}
-            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f'}
+            dataSourceType={selectedDataSource.id as 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'youtube_subscription_morning' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f'}
             dataSourceName={selectedDataSource.name}
             initialCronExpression={existingTask?.cron_expression}
             initialTimezone={existingTask?.timezone}

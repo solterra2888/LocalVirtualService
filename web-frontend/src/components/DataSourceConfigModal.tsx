@@ -64,7 +64,7 @@ interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'youtube_subscription_morning' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
@@ -138,6 +138,13 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 * * * *',
       defaultName: 'YouTube Subscription Feed',
       description: 'Automatically fetch videos from all subscribed YouTube channels every hour (via RSS)'
+    },
+    youtube_subscription_morning: {
+      icon: <YoutubeOutlined style={{ color: '#FF0000' }} />,
+      params: [],  // subscription_id 已在现有任务行中配置(定向 Bloomberg TV)
+      defaultSchedule: '5,15,25,35,45,55 6-8 * * *',
+      defaultName: 'YouTube Bloomberg 早间加密抓取',
+      description: 'The Close 8:30 SLA:北京 06:05-08:55 每 10 分钟定向抓取 Bloomberg Television(订阅 41)'
     },
     podcast_subscription: {
       icon: <CustomerServiceOutlined style={{ color: '#722ed1' }} />,
@@ -669,6 +676,7 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
                           dataSourceType === 'eodhd_macro' ? 'macro_indicators' :
                           dataSourceType === 'twitter_subscription' ? 'twitter_subscription' :
                           dataSourceType === 'youtube_subscription' ? 'youtube_subscription' :
+                          dataSourceType === 'youtube_subscription_morning' ? 'youtube_subscription_morning' :
                           dataSourceType === 'podcast_subscription' ? 'podcast_subscription' :
                           dataSourceType === 'zhishixingqiu_subscription' ? 'zhishixingqiu_subscription' :
                           dataSourceType === 'weibo_subscription' ? 'weibo_subscription' :
@@ -1122,6 +1130,9 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
           );
 
         case 'youtube_subscription':
+          return null;
+
+        case 'youtube_subscription_morning':
           return null;
 
         case 'podcast_subscription':

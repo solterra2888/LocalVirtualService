@@ -48,6 +48,10 @@ class SchedulerService:
         self.task_handlers = {
             'twitter_subscription': self._execute_twitter_subscription_task,
             'youtube_subscription': self._execute_youtube_subscription_task,
+            # 早间加密抓取(2026-11-17,The Close 8:30 SLA):复用同 handler、独立
+            # cron 行 —— 调度器按 type 去重(同类型只注册最新一条),故必须独立
+            # type;params 带 subscription_id 定向单频道,避免全量扫。
+            'youtube_subscription_morning': self._execute_youtube_subscription_task,
             'economic_events': self._execute_economic_events_task,
             'macro_indicators': self._execute_macro_indicators_task,
             'eodhd_fundamentals': self._execute_fundamentals_task,

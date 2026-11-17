@@ -993,6 +993,7 @@ class DatabaseManager:
             all_task_types = [
                 'twitter_subscription',
                 'youtube_subscription',
+                'youtube_subscription_morning',
                 'economic_events',
                 'macro_indicators',
                 'eodhd_fundamentals',
