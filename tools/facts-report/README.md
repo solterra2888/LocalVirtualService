@@ -122,11 +122,22 @@ code 缺 T 日收盘,横幅出街,数据 11:20 才入库)。三层防护:
 - FT 弹窗补当日 bar(2026-11-13):/quotes 行新增 o/h/l/dt(EODHD 实时或 Yahoo
   日线末根),点击 FT 行时若行情日期晚于冻结历史,弹窗历史追加当日蜡烛
   (无 OHLC 资产追加收盘点),与涨跌榜点击蜡烛同观感;美股收盘后 dt=T 不追加。
-- FT 表加密货币组(2026-11-18):商品之后新增「加密货币」组(BTC/ETH/BNB,
-  英文行名)。DB 无加密数据,走 DXY 同款直连:历史 Yahoo 优先(bar 实时累积,
-  UTC 日切 —— T bar 在北京 08:00 构建时刻恰为终值,as_of=T 恒成立不触发
-  新鲜度横幅)、EODHD .CC 回退(两源 382 日逐日对账偏差 <0.0001%,数值等价);
-  实时刷新 code 用 EODHD realtime 码(BTC-USD.CC 等,24/7 恒数值,prev 与
-  EOD T 收盘逐位一致)。1D = vs 前一 UTC 日收盘(24h 口径,Yahoo 币页同款)。
-  md2html TV_INDEX 加 BITSTAMP:BTCUSD/ETHUSD、BINANCE:BNBUSDT 链接;
-  组内行两源皆失时省略并在 PNG 脚注记缺失个数。
+- FT 表加密货币组(2026-11-18):商品之后新增「加密货币」组,顺序 BTC/ETH/
+  SOL/USDC/USD1/BNB/DOGE(英文行名)。DB 无加密数据,走 DXY 同款直连:历史
+  Yahoo 优先(bar 实时累积,UTC 日切 —— T bar 在北京 08:00 构建时刻恰为终值,
+  as_of=T 恒成立不触发新鲜度横幅)、EODHD .CC 回退(主流币两源逐日偏差
+  <0.001%)。实时刷新 code 用 EODHD realtime 码(24/7 恒数值,prev 与 EOD
+  收盘一致),并入 /quotes 现有批量 chunk。USD1 无常规代码,两源均以合成码
+  USD136148-USD 提供(EODHD 加 .CC 后缀;两源收盘偏差 ~0.03%,稳定币正常)。
+  <10 美元币种收盘 4 位小数且带行级 dp 属性(fmtLast/FT_HIST 透传,实时刷新
+  同精度;2dp 对 0.06 美元的 DOGE 会丢失全部信息)。md2html TV_INDEX:
+  BITSTAMP:BTCUSD/ETHUSD + BINANCE:SOLUSDT/USDCUSDT/USD1USDT/BNBUSDT/
+  DOGEUSDT。组内行两源皆失时省略并在 PNG 脚注记缺失个数。1D = vs 前一 UTC
+  日收盘(24h 口径,Yahoo 币页同款)。
+- FT 表组内排序 + 移动端涨跌榜卡片走势图(2026-11-18):FT「当日/5日/1月/
+  YTD」列头可点排序(交互同涨跌榜:▼/▲ 切换、空值垫底、**组内排序**不动
+  分组);移动端卡片区顶部同款 chips。行预埋 data-g/w/m/y 数值属性为排序键,
+  实时覆盖时同步更新属性但不重排已排序视图(按 data-ri 就地改格,与行序
+  无关);排序改表格 DOM 行序后 __ftSyncCards() 同序重建移动端卡片。涨跌榜
+  移动端 rkcard 行 1 右缘加 rc-spark 走势图(64×22,数据=桌面表 r.sv,
+  实时刷新随 render() 重建自动重绘)。

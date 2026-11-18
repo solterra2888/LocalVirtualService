@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
@@ -444,23 +444,31 @@ const TerminalContent: React.FC = () => {
  * 由 App.tsx 以 React.lazy 挂载在 "/" 之外的 catch-all 上——
  * 本组件及其依赖（antd、布局、全部页面）全部落入异步分包，官网访客零下载。
  */
-const TerminalRoutes: React.FC = () => (
-  <ConfigProvider
-    locale={zhCN}
-    theme={{
-      algorithm: theme.defaultAlgorithm,
-      token: {
-        colorPrimary: '#1890ff',
-        borderRadius: 6,
-      },
-    }}
-  >
-    <DashboardSettingsProvider>
-      <FileProcessingProvider>
-        <TerminalContent />
-      </FileProcessingProvider>
-    </DashboardSettingsProvider>
-  </ConfigProvider>
-);
+const TerminalRoutes: React.FC = () => {
+  // 浏览器标签页标题：进入终端（含登录页）即「GuanHe Terminal」，
+  // 与官网（/ 落地页，Home | GuanHe Capital）区分开
+  useEffect(() => {
+    document.title = 'GuanHe Terminal';
+  }, []);
+
+  return (
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        algorithm: theme.defaultAlgorithm,
+        token: {
+          colorPrimary: '#1890ff',
+          borderRadius: 6,
+        },
+      }}
+    >
+      <DashboardSettingsProvider>
+        <FileProcessingProvider>
+          <TerminalContent />
+        </FileProcessingProvider>
+      </DashboardSettingsProvider>
+    </ConfigProvider>
+  );
+};
 
 export default TerminalRoutes;

@@ -153,6 +153,8 @@ if ftp.exists():
         'FTSE': 'TVC:UKX', 'DAX': 'XETR:DAX',
         '2Y': 'TVC:US02Y', '10Y': 'TVC:US10Y', '30Y': 'TVC:US30Y',  # 美债收益率(DMR 同款)
         'BTC': 'BITSTAMP:BTCUSD', 'ETH': 'BITSTAMP:ETHUSD',   # 加密货币(2026-11-18)
+        'SOL': 'BINANCE:SOLUSDT', 'USDC': 'BINANCE:USDCUSDT',
+        'USD1': 'BINANCE:USD1USDT', 'DOGE': 'BINANCE:DOGEUSDT',
         'BNB': 'BINANCE:BNBUSDT',                             # BNB 主要在币所现货
     }
     def _tk_html(tk):
@@ -188,7 +190,8 @@ if ftp.exists():
                 f'stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>'
                 f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="1.8" fill="currentColor"/></svg></span>')
     ft_rows = ''
-    FT_HIST = []   # 点击行放大的交互图数据(ECharts),与 tr[data-ri] 索引对齐;s=组条形刻度(实时刷新重建条形用)
+    FT_HIST = []   # 点击行放大的交互图数据(ECharts),与 tr[data-ri] 索引对齐;s=组条形刻度(实时刷新重建条形需)
+    _sv = lambda v: '' if v is None else f'{v:.4f}'   # 排序键预埋(快照值;实时覆盖时 JS 同步改)
     for sec in D['sections']:
         ft_rows += (f'<tr class="ftgrp"><td colspan="7" title="条形刻度: {sec["scale_lbl"]}">{sec["title"]}</td></tr>')
         for r in sec['rows']:
@@ -197,9 +200,12 @@ if ftp.exists():
             d1 = r.get('m1d')
             ri = len(FT_HIST)
             FT_HIST.append({'n': r['name'], 'u': u, 'a': r.get('as_of'),
-                            'h': r.get('hist') or [], 's': sec['scale']})
+                            'h': r.get('hist') or [], 's': sec['scale'],
+                            'p': r.get('dp') or 2})   # p=收盘小数位(低市值币 4dp)
             ft_rows += (
-                f'<tr data-ri="{ri}"><td class="ftasset"><b>{r["name"]}</b>' + _tk_html(r.get('ticker'))
+                f'<tr data-ri="{ri}" data-g="{_sv(r.get("m1d"))}" data-w="{_sv(r.get("m1w"))}" '
+                f'data-m="{_sv(r.get("m1m"))}" data-y="{_sv(r.get("ytd"))}">'
+                f'<td class="ftasset"><b>{r["name"]}</b>' + _tk_html(r.get('ticker'))
                 + f'</td><td class="num">{r.get("last_str") or "—"}<span class="ftunit">{"" if u in ("%", "bp") else " " + u}</span></td>'
                 + f'<td class="sparkcell">{_spark_svg(r.get("hist"), r.get("m1d"))}</td>'
                 + f'<td class="barcell">{_barcell(d1, sec["scale"], u)}</td>'
@@ -211,8 +217,11 @@ if ftp.exists():
                 '<col style="width:11%"><col style="width:9.5%"><col style="width:23%">'
                 '<col style="width:12.5%"><col style="width:12.5%">'
                 '<col style="width:12.5%"></colgroup>'
-                '<thead><tr><th>资产</th><th class="num">收盘</th><th>走势</th><th class="ftday">当日</th>'
-                '<th class="num">5日</th><th class="num">1月</th><th class="num">YTD</th></tr></thead>'
+                '<thead><tr><th>资产</th><th class="num">收盘</th><th>走势</th>'
+                '<th class="ftday rk-sort" data-k="g">当日</th>'
+                '<th class="num rk-sort" data-k="w">5日</th>'
+                '<th class="num rk-sort" data-k="m">1月</th>'
+                '<th class="num rk-sort" data-k="y">YTD</th></tr></thead>'
                 f'<tbody>{ft_rows}</tbody></table>')
     # 新鲜度横幅:上游行情缺 T 日收盘时显著提示,绝不静默展示旧数据
     if FT_STALE:
@@ -447,6 +456,8 @@ body.has-ftcards .ftwrap{display:none}
 .rc-r1 b{flex:none}
 .rc-n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)}
 .rc-t{flex:none;color:var(--text-secondary)}
+.rc-spark{flex:none}   /* 移动端卡片走势图(FT 卡片 .fc-spark 同款 64×22;数据=桌面表 r.sv,实时刷新随 render() 重建) */
+.rc-spark .spspark{width:64px;height:22px}
 .rc-r2{display:flex;align-items:center;gap:9px;margin-top:5px;font-size:12px}
 .rc-p{font-weight:600}
 .rc-g{font-weight:600}
@@ -751,10 +762,11 @@ function ftBarHTML(v, scale, unit){
    + '<polyline points="' + line + '" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>'
    + '<circle cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) + '" r="1.8" fill="currentColor"/></svg></span>';
  };
- function fmtLast(v, u){
+ function fmtLast(v, u, dp){
   if(v == null) return null;
-  return u === 'bp' ? v.toFixed(2) + '%' :
-   v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  if(u === 'bp') return v.toFixed(2) + '%';
+  dp = dp || 2;   // 行级精度:低市值加密币(<10 美元)4dp,其余 2dp(DOGE 0.06 用 2dp 会丢信息)
+  return v.toLocaleString('en-US', {minimumFractionDigits: dp, maximumFractionDigits: dp});
  }
  function sign(v, dp, suf){ return (v >= 0 ? '+' : '') + v.toFixed(dp) + suf; }
  function apply(rows, meta){
@@ -766,7 +778,7 @@ function ftBarHTML(v, scale, unit){
    if(!q) return;
    var tds = tr.children, u = d.u || '%';
    if(q.last != null && tds[1].childNodes.length)
-    tds[1].childNodes[0].nodeValue = fmtLast(q.last, u);   // 保留 <span class="ftunit">
+    tds[1].childNodes[0].nodeValue = fmtLast(q.last, u, d.p);   // 保留 <span class="ftunit">
    if(q.m1d != null){
     tds[3].innerHTML = ftBarHTML(q.m1d, d.s || 5, u);
    }
@@ -782,6 +794,11 @@ function ftBarHTML(v, scale, unit){
     tds[x[0]].textContent = u === '%' ? sign(v, 1, '%') : sign(v, 0, 'bp');
     tds[x[0]].className = 'num ' + (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
    });
+   // 排序键同步(FT 组内排序读 data-*;实时无值保留快照键,不重排已排序视图)
+   if(q.m1d != null) tr.setAttribute('data-g', q.m1d);
+   if(q.m1w != null) tr.setAttribute('data-w', q.m1w);
+   if(q.m1m != null) tr.setAttribute('data-m', q.m1m);
+   if(q.ytd != null) tr.setAttribute('data-y', q.ytd);
   });
   badge(meta);
   if(window.__ftSyncCards) window.__ftSyncCards();   // 移动端卡片与表格同源同步
@@ -829,6 +846,63 @@ function ftBarHTML(v, scale, unit){
  setInterval(refresh, 60000);
  document.addEventListener('visibilitychange', function(){ if(!document.hidden) refresh(); });
 })();
+// ── FT 表排序(交互同涨跌榜):桌面点「当日/5日/1月/YTD」列头,移动端卡片区顶部
+//    chips;**组内排序**(分组结构不动,利率组 bp 与 % 组各自比较),空值(—)恒垫底,
+//    再点同键切换升降序。排序只改表格 DOM 行序 → 移动端卡片随 __ftSyncCards()
+//    同序重建;实时覆盖按 data-ri 就地改格、不动行序,排序态不被刷新打乱 ──
+(function(){
+ var KS = {g:'当日', w:'5日', m:'1月', y:'YTD'};
+ var st = {key: null, dir: -1};
+ function arr(k){ return st.key === k ? (st.dir < 0 ? ' ▼' : ' ▲') : ''; }
+ function val(tr, k){ var v = parseFloat(tr.getAttribute('data-' + k)); return isNaN(v) ? null : v; }
+ window.__ftChipHTML = function(){   // 移动端排序 chips(嵌入 #ftcards 顶;桌面随容器隐藏)
+  var h = '<div class="rk-chips ft-chips">';
+  for(var k in KS) h += '<button class="rk-chip ft-chip' + (st.key === k ? ' on' : '')
+   + '" data-k="' + k + '">' + KS[k] + arr(k) + '</button>';
+  return h + '<span class="rk-chipinfo">组内排序</span></div>';
+ };
+ function heads(){
+  document.querySelectorAll('.fttbl th.rk-sort[data-k]').forEach(function(th){
+   var k = th.getAttribute('data-k');
+   th.textContent = KS[k] + arr(k);
+  });
+ }
+ function sort(){
+  var tb = document.querySelector('.fttbl tbody');
+  if(!tb || !st.key) return;
+  tb.querySelectorAll('tr.ftgrp').forEach(function(gr){
+   var rows = [], n = gr.nextElementSibling;
+   while(n && !n.classList.contains('ftgrp')){
+    if(n.hasAttribute('data-ri')) rows.push(n);
+    n = n.nextElementSibling;
+   }
+   rows.sort(function(a, b){
+    var x = val(a, st.key), y = val(b, st.key);
+    if(x == null) return 1; if(y == null) return -1;   // 空值恒垫底
+    return (x - y) * st.dir;
+   });
+   var anchor = gr;
+   rows.forEach(function(r){ tb.insertBefore(r, anchor.nextSibling); anchor = r; });
+  });
+  heads();
+  if(window.__ftSyncCards) window.__ftSyncCards();
+ }
+ document.addEventListener('click', function(ev){
+  var t = ev.target instanceof Element ? ev.target : null;
+  var th = t && t.closest('.fttbl th.rk-sort[data-k]');
+  if(th){
+   var k1 = th.getAttribute('data-k');
+   if(st.key === k1){ st.dir = -st.dir; } else { st.key = k1; st.dir = -1; }
+   sort(); return;
+  }
+  var ch = t && t.closest('.ft-chip[data-k]');
+  if(ch){
+   var k2 = ch.getAttribute('data-k');
+   if(st.key === k2){ st.dir = -st.dir; } else { st.key = k2; st.dir = -1; }
+   sort();
+  }
+ });
+})();
 // ── 移动端 FT 卡片化:≤768px 把 7 列表格转写为卡片(名称+走势/收盘+当日条+周期);
 // 单元格 HTML 从表格行拷贝(着色类随行),实时覆盖后 __ftSyncCards 全量重建;
 // 点击卡片复用 FT 蜡烛弹窗;桌面端 #ftcards 恒隐藏、表格如常 ──
@@ -837,7 +911,7 @@ function ftBarHTML(v, scale, unit){
  function cardsHTML(){
   var tbl = document.querySelector('.fttbl');
   if(!tbl) return '';
-  var h = '';
+  var h = window.__ftChipHTML ? window.__ftChipHTML() : '';   // 排序 chips(见 FT 排序 IIFE)
   tbl.querySelectorAll('tbody tr').forEach(function(tr){
    if(tr.classList.contains('ftgrp')){
     h += '<div class="ftc-grp">' + tr.textContent + '</div>';
@@ -1040,7 +1114,8 @@ function decorate(root){
       pg.forEach(function(r){
        h += '<div class="rkcard" data-i="' + (r._i != null ? r._i : '') + '">'
         + '<div class="rc-r1"><b>' + esc(r.c) + '</b><span class="rc-n">' + esc(r.n) + '</span>'
-        + '<span class="rc-t">' + (r.t == null ? '—' : (r.t / 1e8).toFixed(1) + D.unit) + '</span></div>'
+        + '<span class="rc-t">' + (r.t == null ? '—' : (r.t / 1e8).toFixed(1) + D.unit) + '</span>'
+        + '<span class="rc-spark">' + (r.sv || '<span class="spna">—</span>') + '</span></div>'
         + '<div class="rc-r2"><span class="rc-p">' + (r.p == null ? '—' : Number(r.p).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})) + '</span>'
         + '<span class="rc-g ' + (r.g > 0 ? 'pos' : r.g < 0 ? 'neg' : '') + '">' + (r.g == null ? '—' : (r.g > 0 ? '+' : '') + r.g.toFixed(2) + '%') + '</span>'
         + '<span class="rc-ps"><i>5日</i>' + pv(r.w) + '<i>1月</i>' + pv(r.m) + '<i>YTD</i>' + pv(r.y) + '</span></div></div>';

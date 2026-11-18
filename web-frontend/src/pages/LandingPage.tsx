@@ -84,6 +84,12 @@ const LandingPage: React.FC = () => {
   // 安卓微信开局即 true（零等待，见 IS_ANDROID_WECHAT 注释）
   const [videoBlocked, setVideoBlocked] = useState<boolean>(IS_ANDROID_WECHAT);
 
+  // 浏览器标签页标题：官网固定「Home | GuanHe Capital」。index.html 的静态标题
+  // 即此值（首载即本页）；从终端路由返回官网时由这里把标题改回来
+  useEffect(() => {
+    document.title = 'Home | GuanHe Capital';
+  }, []);
+
   // 桌面高清版看门狗：按 1080p/2.5Mbps（≈0.31MB/s）校准阈值。
   // 每 4 秒采样一次 buffered 末端的增长量——增长 <1.2 秒内容（下载速率不足码率
   // 30%，物理上永远追不平）即判链路带不动，热切轻量版；

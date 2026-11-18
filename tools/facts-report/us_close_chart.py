@@ -540,14 +540,19 @@ def build_sections(conn: Any, t: date,
     comm = [r for r in (etf_row("Crude Oil", "USO"), etf_row("Gold", "GLD"),
                         etf_row("Silver", "SLV"), etf_row("Copper", "CPER")) if r]
 
-    # ---- CRYPTO (2026-11-18): BTC/ETH/BNB 现货(USD 计价)。加密货币日切=UTC 日,
-    # bar T 在北京 08:00(=UTC 00:00 T+1)恰好收盘 → as_of=T 恒成立,不触发新鲜度
-    # 横幅;1D = vs 前一 UTC 日收盘(24h 变动,与 Yahoo 币页同口径),美股 T 时段
-    # 完整落在 UTC 日 T 内,与报告日期口径对齐。历史取 Yahoo 优先(bar 实时累积,
-    # 构建时刻 T bar 已为终值;EODHD 的 T bar 发布时点不保证),EODHD EOD 回退。
-    # 实时刷新 code 用 EODHD realtime 码(.CC 24/7 恒数值,close/previousClose 与
-    # EOD 一致),并入 /quotes 现有批量 chunk。DB 无加密数据,不进 market_data
-    # 摄入(与 DXY 同款直连模式)。
+    # ---- CRYPTO (2026-11-18,7 币种): BTC/ETH/SOL/USDC/USD1/BNB/DOGE 现货(USD
+    # 计价)。加密货币日切=UTC 日,bar T 在北京 08:00(=UTC 00:00 T+1)恰好收盘 →
+    # as_of=T 恒成立,不触发新鲜度横幅;1D = vs 前一 UTC 日收盘(24h 变动,与
+    # Yahoo 币页同口径),美股 T 时段完整落在 UTC 日 T 内,与报告日期口径对齐。
+    # 历史取 Yahoo 优先(bar 实时累积,构建时刻 T bar 已为终值;EODHD 的 T bar
+    # 发布时点不保证),EODHD EOD 回退 —— 主流币两源逐日偏差 <0.001%。实时刷新
+    # code 用 EODHD realtime 码(.CC 24/7 恒数值,close/previousClose 与 EOD
+    # 一致),并入 /quotes 现有批量 chunk。DB 无加密数据,不进 market_data 摄入
+    # (与 DXY 同款直连模式)。USD1(World Liberty Financial)无常规代码,两源均
+    # 以合成代码 USD136148-USD 提供(2026-11-18 实测:EODHD 535 根/Yahoo 366 根,
+    # realtime prev 与 EOD 一致;两源收盘偏差 ~0.03%,稳定币正常水平)。
+    # <10 美元币种(DOGE/USDC/USD1)收盘展示 4 位小数,并带 dp 属性供实时刷新
+    # 的 fmtLast 按行取精度(2dp 对 0.06 美元的 DOGE 会丢掉全部信息)。
     def crypto_row(name: str, eodhd_code: str, yahoo_sym: str,
                    ticker: str) -> Optional[Dict[str, Any]]:
         s = _yahoo_series(yahoo_sym, t, adjusted=False)
@@ -558,15 +563,24 @@ def build_sections(conn: Any, t: date,
                 s, ohlc = s2, ohlc2 or ohlc
         if not s:
             return None
-        return _row(name, ticker, _minus(f"{s[0][1]:,.2f}"), "%",
-                    _changes(s), s[0][1], as_of=s[0][0], hist=ohlc or s,
-                    code=eodhd_code, refs=_refs(s))
+        last = s[0][1]
+        dp = 4 if last < 10 else 2
+        row = _row(name, ticker, _minus(f"{last:,.{dp}f}"), "%",
+                   _changes(s), last, as_of=s[0][0], hist=ohlc or s,
+                   code=eodhd_code, refs=_refs(s))
+        if dp == 4:
+            row["dp"] = 4   # 实时刷新按行精度(ft_live/FT_HIST 透传)
+        return row
 
     crypto = [r for r in (crypto_row("Bitcoin", "BTC-USD.CC", "BTC-USD", "BTC"),
                           crypto_row("Ethereum", "ETH-USD.CC", "ETH-USD", "ETH"),
-                          crypto_row("BNB", "BNB-USD.CC", "BNB-USD", "BNB")) if r]
-    if len(crypto) < 3:
-        FOOTER_NOTES.append(f"加密货币行缺失 {3 - len(crypto)} 个(数据源不可用)")
+                          crypto_row("Solana", "SOL-USD.CC", "SOL-USD", "SOL"),
+                          crypto_row("USD Coin", "USDC-USD.CC", "USDC-USD", "USDC"),
+                          crypto_row("USD1", "USD136148-USD.CC", "USD136148-USD", "USD1"),
+                          crypto_row("BNB", "BNB-USD.CC", "BNB-USD", "BNB"),
+                          crypto_row("Dogecoin", "DOGE-USD.CC", "DOGE-USD", "DOGE")) if r]
+    if len(crypto) < 7:
+        FOOTER_NOTES.append(f"加密货币行缺失 {7 - len(crypto)} 个(数据源不可用)")
 
     # ---- FX (DXY: EODHD DXY.INDX 优先,Yahoo 回退; EUR/USD & USD/JPY from EODHD)
     fx: List[Dict[str, Any]] = []
