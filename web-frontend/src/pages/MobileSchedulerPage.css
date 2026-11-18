@@ -1,0 +1,178 @@
+/* 移动版 Scheduler Management（MobileSchedulerPage）结构性样式；颜色随主题内联注入 */
+
+.msp-page {
+  padding: 12px 12px 24px;
+}
+
+.msp-header {
+  border-radius: 12px;
+  padding: 14px 14px 12px;
+  margin-bottom: 12px;
+}
+
+.msp-header-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.msp-header-btns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.msp-stats {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 12px;
+}
+
+.msp-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.msp-stat-num {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.msp-stat-label {
+  font-size: 12px;
+}
+
+.msp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msp-loading {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.msp-card {
+  border-radius: 12px;
+  border: 1px solid transparent;
+  overflow: hidden;
+}
+
+.msp-card-head {
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.msp-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.msp-card-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.msp-card-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.msp-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin-top: 8px;
+}
+
+.msp-cron-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  margin-right: 8px;
+}
+
+.msp-card-body {
+  padding: 10px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.msp-empty {
+  font-size: 12px;
+  padding: 6px 0;
+}
+
+.msp-task-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 10px;
+  padding: 9px 10px;
+}
+
+.msp-task-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.msp-task-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msp-task-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 5px;
+  font-size: 11px;
+}
+
+.msp-task-chip {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.msp-count-ok {
+  color: #52c41a;
+}
+
+.msp-count-fail {
+  color: #faad14;
+}
+
+.msp-task-ops {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.msp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+}

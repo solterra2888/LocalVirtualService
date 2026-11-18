@@ -8,6 +8,7 @@ import {
   SunOutlined,
   MoonOutlined,
   LineChartOutlined,
+  ControlOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -67,7 +68,8 @@ const MobileLayout: React.FC = () => {
     navigate('/login');
   };
 
-  // 移动端头像菜单：不提供 PC 端那套配置入口；管理员可进入 Monitoring（路由仍由 AdminRoute 校验）
+  // 移动端头像菜单：不提供 PC 端那套配置入口；管理员可进入 Scheduler Management /
+  // Monitoring（路由仍由 AdminRoute 校验）
   const userMenuItems = [
     {
       key: 'theme',
@@ -100,6 +102,17 @@ const MobileLayout: React.FC = () => {
       label: 'API Keys',
       onClick: () => navigate('/settings/api-keys'),
     },
+    // Scheduler Management：紧随 API Keys 下方，仅 admin 可见（路由由 AdminRoute 二次校验）
+    ...(user?.is_admin
+      ? [
+          {
+            key: '/scheduler',
+            icon: <ControlOutlined />,
+            label: 'Scheduler Management',
+            onClick: () => navigate('/scheduler'),
+          },
+        ]
+      : []),
     ...(user?.is_admin
       ? [{ key: '/monitoring', icon: <LineChartOutlined />, label: 'Monitoring', onClick: () => navigate('/monitoring') }]
       : []),

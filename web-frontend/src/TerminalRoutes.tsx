@@ -80,6 +80,7 @@ const PromptTemplatesPage = lazyWithRetry(() => import('./pages/PromptTemplatesP
 // 管理
 const UsersPage = lazyWithRetry(() => import('./pages/UsersPage'));
 const SchedulerPage = lazyWithRetry(() => import('./pages/SchedulerPage'));
+const MobileSchedulerPage = lazyWithRetry(() => import('./pages/MobileSchedulerPage'));
 const MonitoringPage = lazyWithRetry(() => import('./pages/MonitoringPage'));
 const LLMConfigPage = lazyWithRetry(() => import('./pages/LLMConfigPage'));
 const ZsxqAdminPage = lazyWithRetry(() => import('./pages/ZsxqAdminPage'));
@@ -161,6 +162,7 @@ const TerminalContent: React.FC = () => {
   const LayoutComponent = isMobile ? MobileLayout : Layout;
   const DashboardComponent = isMobile ? MobileDashboardPage : DashboardPage;
   const FilesComponent = isMobile ? MobileSourcesPage : FilesPage;
+  const SchedulerComponent = isMobile ? MobileSchedulerPage : SchedulerPage;
   // const DailyComponent = isMobile ? MobileDailyPage : DailyPage;  // 暂时下线 Daily
 
   return (
@@ -197,7 +199,7 @@ const TerminalContent: React.FC = () => {
               path="scheduler"
               element={
                 <AdminRoute>
-                  <SchedulerPage />
+                  <SchedulerComponent />
                 </AdminRoute>
               }
             />

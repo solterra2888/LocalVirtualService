@@ -60,11 +60,49 @@ const THEME_COLORS = {
 } as const;
 const { Option } = Select;
 
+/** 可配置调度的数据源类型（SchedulerPage / MobileSchedulerPage 传入 source.id） */
+export type DataSourceConfigType =
+  | 'eodhd_news'
+  | 'watchlist_news'
+  | 'cctv_news'
+  | 'twitter_subscription'
+  | 'youtube_subscription'
+  | 'youtube_subscription_morning'
+  | 'podcast_subscription'
+  | 'news_feed'
+  | 'zhishixingqiu_subscription'
+  | 'substack_subscription'
+  | 'weibo_subscription'
+  | 'twitter_author_summary'
+  | 'youtube_author_summary'
+  | 'theme_report'
+  | 'market_weekly_report'
+  | 'daily_market_report'
+  | 'the_close_summary'
+  | 'cnbc_closing_bell'
+  | 'bloomberg_surveillance'
+  | 'bloomberg_surveillance_flash'
+  | 'zhishixingqiu_summary'
+  | 'substack_summary'
+  | 'fed_dashboard'
+  | 'form13f'
+  | 'eodhd_events'
+  | 'eodhd_macro'
+  | 'eodhd_fundamentals'
+  | 'finviz_screener'
+  | 'eodhd_stock_prices'
+  | 'eodhd_eod_stock_prices'
+  | 'futu_themes'
+  | 'market_data'
+  | 'earnings_calendar'
+  | 'ipo_calendar'
+  | 'watchlist_fundamentals';
+
 interface DataSourceConfigModalProps {
   open: boolean;
   onCancel: () => void;
   onSuccess: (taskId: string) => void;
-  dataSourceType: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'twitter_subscription' | 'youtube_subscription' | 'youtube_subscription_morning' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals';
+  dataSourceType: DataSourceConfigType;
   dataSourceName: string;
   /** 已有定时任务的 Cron，打开弹窗时预填 */
   initialCronExpression?: string;
