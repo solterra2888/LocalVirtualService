@@ -122,3 +122,11 @@ code 缺 T 日收盘,横幅出街,数据 11:20 才入库)。三层防护:
 - FT 弹窗补当日 bar(2026-11-13):/quotes 行新增 o/h/l/dt(EODHD 实时或 Yahoo
   日线末根),点击 FT 行时若行情日期晚于冻结历史,弹窗历史追加当日蜡烛
   (无 OHLC 资产追加收盘点),与涨跌榜点击蜡烛同观感;美股收盘后 dt=T 不追加。
+- FT 表加密货币组(2026-11-18):商品之后新增「加密货币」组(BTC/ETH/BNB,
+  英文行名)。DB 无加密数据,走 DXY 同款直连:历史 Yahoo 优先(bar 实时累积,
+  UTC 日切 —— T bar 在北京 08:00 构建时刻恰为终值,as_of=T 恒成立不触发
+  新鲜度横幅)、EODHD .CC 回退(两源 382 日逐日对账偏差 <0.0001%,数值等价);
+  实时刷新 code 用 EODHD realtime 码(BTC-USD.CC 等,24/7 恒数值,prev 与
+  EOD T 收盘逐位一致)。1D = vs 前一 UTC 日收盘(24h 口径,Yahoo 币页同款)。
+  md2html TV_INDEX 加 BITSTAMP:BTCUSD/ETHUSD、BINANCE:BNBUSDT 链接;
+  组内行两源皆失时省略并在 PNG 脚注记缺失个数。

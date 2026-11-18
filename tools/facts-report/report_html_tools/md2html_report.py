@@ -152,6 +152,8 @@ if ftp.exists():
         'N225': 'TVC:NI225', 'KOSPI': 'KRX:KOSPI',               # 国际(DMR 同款)
         'FTSE': 'TVC:UKX', 'DAX': 'XETR:DAX',
         '2Y': 'TVC:US02Y', '10Y': 'TVC:US10Y', '30Y': 'TVC:US30Y',  # 美债收益率(DMR 同款)
+        'BTC': 'BITSTAMP:BTCUSD', 'ETH': 'BITSTAMP:ETHUSD',   # 加密货币(2026-11-18)
+        'BNB': 'BINANCE:BNBUSDT',                             # BNB 主要在币所现货
     }
     def _tk_html(tk):
         if not tk:

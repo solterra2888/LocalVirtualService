@@ -20,6 +20,9 @@ Methodology (reverse-engineered from GuanHe 2026-10-30 chart, verified numerical
   - indices/yields/FX/VIX -> market_data_eod close history (EODHD); yields and
                              yields quoted in bp
   - DXY                   -> EODHD DXY.INDX EOD (直接 API),Yahoo 回退;MOVE 无源(页脚注明)
+  - CRYPTO (BTC/ETH/BNB)  -> Yahoo daily (UTC 日切) 优先,EODHD .CC 回退;实时刷新
+                             走 EODHD real-time(.CC 24/7 恒数值)。两源 382 日逐日
+                             对账偏差 <0.0001%(2026-11-18 实测,数值等价)
   - CHINA / ASIA & EUROPE -> cash-index EODHD history (market_data_eod)
 
 Usage:
@@ -537,6 +540,34 @@ def build_sections(conn: Any, t: date,
     comm = [r for r in (etf_row("Crude Oil", "USO"), etf_row("Gold", "GLD"),
                         etf_row("Silver", "SLV"), etf_row("Copper", "CPER")) if r]
 
+    # ---- CRYPTO (2026-11-18): BTC/ETH/BNB 现货(USD 计价)。加密货币日切=UTC 日,
+    # bar T 在北京 08:00(=UTC 00:00 T+1)恰好收盘 → as_of=T 恒成立,不触发新鲜度
+    # 横幅;1D = vs 前一 UTC 日收盘(24h 变动,与 Yahoo 币页同口径),美股 T 时段
+    # 完整落在 UTC 日 T 内,与报告日期口径对齐。历史取 Yahoo 优先(bar 实时累积,
+    # 构建时刻 T bar 已为终值;EODHD 的 T bar 发布时点不保证),EODHD EOD 回退。
+    # 实时刷新 code 用 EODHD realtime 码(.CC 24/7 恒数值,close/previousClose 与
+    # EOD 一致),并入 /quotes 现有批量 chunk。DB 无加密数据,不进 market_data
+    # 摄入(与 DXY 同款直连模式)。
+    def crypto_row(name: str, eodhd_code: str, yahoo_sym: str,
+                   ticker: str) -> Optional[Dict[str, Any]]:
+        s = _yahoo_series(yahoo_sym, t, adjusted=False)
+        ohlc = _yahoo_ohlc(yahoo_sym, t) if s else None
+        if not s or s[0][0] != t:   # Yahoo 缺 T(偶发缓存滞后)→ EODHD 回退
+            s2, ohlc2 = _eodhd_eod(eodhd_code, t)
+            if s2 and (not s or s2[0][0] > s[0][0]):
+                s, ohlc = s2, ohlc2 or ohlc
+        if not s:
+            return None
+        return _row(name, ticker, _minus(f"{s[0][1]:,.2f}"), "%",
+                    _changes(s), s[0][1], as_of=s[0][0], hist=ohlc or s,
+                    code=eodhd_code, refs=_refs(s))
+
+    crypto = [r for r in (crypto_row("Bitcoin", "BTC-USD.CC", "BTC-USD", "BTC"),
+                          crypto_row("Ethereum", "ETH-USD.CC", "ETH-USD", "ETH"),
+                          crypto_row("BNB", "BNB-USD.CC", "BNB-USD", "BNB")) if r]
+    if len(crypto) < 3:
+        FOOTER_NOTES.append(f"加密货币行缺失 {3 - len(crypto)} 个(数据源不可用)")
+
     # ---- FX (DXY: EODHD DXY.INDX 优先,Yahoo 回退; EUR/USD & USD/JPY from EODHD)
     fx: List[Dict[str, Any]] = []
     dxy, dohlc = _eodhd_eod("DXY.INDX", t)
@@ -587,6 +618,7 @@ def build_sections(conn: Any, t: date,
         {"title": "亚洲与欧洲", "scale": 5.0, "scale_lbl": "\u22125% / +5%", "unit": "%", "rows": intl},
         {"title": "利率", "scale": 10.0, "scale_lbl": "\u221210bp / +10bp", "unit": "bp", "rows": rates},
         {"title": "商品", "scale": 5.0, "scale_lbl": "\u22125% / +5%", "unit": "%", "rows": comm},
+        {"title": "加密货币", "scale": 5.0, "scale_lbl": "\u22125% / +5%", "unit": "%", "rows": crypto},
         {"title": "外汇", "scale": 5.0, "scale_lbl": "\u22125% / +5%", "unit": "%", "rows": fx},
         {"title": "波动率", "scale": 15.0, "scale_lbl": "\u221215% / +15%", "unit": "%", "rows": vol},
         {"title": "标普500板块", "scale": 5.0, "scale_lbl": "\u22125% / +5%", "unit": "%", "rows": sectors},
@@ -687,10 +719,12 @@ def render(sections: List[Dict[str, Any]], t: date, out: Path) -> Path:
             txt(t_obj.get_window_extent(renderer).x1 / DPI + 9, ry, ticker, 9, GRAY_LT)
 
     rates_note = f" ({'; '.join(FOOTER_NOTES)})" if FOOTER_NOTES else ""
+    crypto_note = (" · Crypto: Yahoo Finance/EODHD."
+                   if any(s["title"] == "加密货币" for s in sections) else "")
     ax.plot([M_L, M_R], [Y(H - 70)] * 2, color=RULE, lw=0.9)
     txt(NAME_X, H - 52,
         f"来源: Finviz(延迟行情) · EODHD(指数/外汇/VIX/ETF 复权价){rates_note}"
-        " · DXY: Yahoo Finance.",
+        f" · DXY: Yahoo Finance.{crypto_note}",
         8, GRAY_LT, style="italic")
     txt(NAME_X, H - 32,
         f"MOVE index unavailable. Last updated {t:%A, %B %d, %Y} \u00b7 "
