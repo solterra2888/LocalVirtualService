@@ -10,7 +10,7 @@ Form 13F 数据服务 — 按预设机构 CIK 从 EDGAR 拉取 13F-HR
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import psycopg2
@@ -67,6 +67,34 @@ def normalize_cik(cik) -> str:
 def filer_key_of(cik) -> str:
     """机构唯一键 = 10 位 CIK（不再用申报名哈希）。"""
     return normalize_cik(cik)
+
+
+# ── 数据新鲜度（scheduler 每日兜底检查用；纯函数便于单测）──────────────────
+# SEC 规定 13F-HR 季末后 45 天内申报；机构申报有早晚，再给宽限期。
+QUARTER_ENDS = {1: (3, 31), 2: (6, 30), 3: (9, 30), 4: (12, 31)}
+FILING_DEADLINE_DAYS = 45
+FRESHNESS_GRACE_DAYS = 7
+
+
+def expected_quarter(today: date, grace_days: int = FRESHNESS_GRACE_DAYS) -> str:
+    """按今天推算「应已入库」的最新季度 = 季末+45 天截止(+宽限)已过的最新季。"""
+    for year in (today.year, today.year - 1):
+        for q in (4, 3, 2, 1):
+            m, d = QUARTER_ENDS[q]
+            deadline = date(year, m, d) + timedelta(
+                days=FILING_DEADLINE_DAYS + grace_days)
+            if deadline <= today:
+                return f"{year}Q{q}"
+    return ''
+
+
+def quarter_is_stale(latest_db_quarter: Optional[str], today: date,
+                     grace_days: int = FRESHNESS_GRACE_DAYS) -> bool:
+    """库里最新季度落后于应入库季度 → 停摆/断流信号（含完全无数据）。"""
+    if not latest_db_quarter:
+        return True
+    expect = expected_quarter(today, grace_days)
+    return bool(expect) and str(latest_db_quarter).strip() < expect
 
 
 def normalize_filer_name(name: str) -> str:

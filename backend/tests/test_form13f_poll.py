@@ -213,3 +213,35 @@ class TestTop5ByWeightChange:
         assert [x['cusip'] for x in sells[1]] == ['CBL', 'PBR', 'TRMD']
         assert 'SPY' not in [x['cusip'] for x in sells[1]]
         assert 'KEEP' not in [x['cusip'] for x in sells[1]]
+
+
+class TestFreshness:
+    """expected_quarter / quarter_is_stale：SEC 45 天申报窗 + 7 天宽限。"""
+
+    def test_before_q3_deadline_grace_expects_q2(self):
+        # 2026Q3 截止 11-14，宽限到 11-21；11-18 还只应见到 2026Q2
+        from backend.services.form13f_service import expected_quarter
+        assert expected_quarter(__import__('datetime').date(2026, 11, 18)) == '2026Q2'
+
+    def test_after_grace_expects_q3(self):
+        from backend.services.form13f_service import expected_quarter
+        assert expected_quarter(__import__('datetime').date(2026, 11, 25)) == '2026Q3'
+
+    def test_january_expects_prior_q3(self):
+        # 2026Q4 截止 2027-02-14；2 月初仍只应见到 2025Q3 式的上一成熟季
+        from backend.services.form13f_service import expected_quarter
+        assert expected_quarter(__import__('datetime').date(2027, 1, 10)) == '2026Q3'
+
+    def test_q4_deadline_plus_grace(self):
+        from backend.services.form13f_service import expected_quarter
+        assert expected_quarter(__import__('datetime').date(2027, 2, 22)) == '2026Q4'
+
+    def test_stale_detection(self):
+        from datetime import date
+        from backend.services.form13f_service import quarter_is_stale
+        today = date(2026, 11, 25)   # 应有 2026Q3
+        assert quarter_is_stale('2026Q2', today) is True    # 停摆场景
+        assert quarter_is_stale('2026Q3', today) is False   # 正常
+        assert quarter_is_stale(None, today) is True        # 完全无数据
+        # 宽限期内不误报：11-18 只要求 2026Q2
+        assert quarter_is_stale('2026Q2', date(2026, 11, 18)) is False

@@ -1,0 +1,134 @@
+/* 移动版 Form 13F（MobileForm13FPage）结构性样式；颜色随主题内联注入 */
+
+.m13f-page {
+  padding: 12px 12px 24px;
+}
+
+/* ── 机构切换：单行横向滑动胶囊条（20 家预设，触屏左右滑）── */
+.m13f-pill-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0 6px;
+  margin-bottom: 10px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; /* Firefox */
+  touch-action: pan-x;
+}
+
+.m13f-pill-strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* 胶囊不换行、不收缩，保证滑动而非挤压 */
+.m13f-pill-strip .ant-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* ── 摘要卡 + 行业分布卡 ── */
+.m13f-card {
+  border-radius: 12px;
+  padding: 12px 12px 10px;
+  margin-bottom: 12px;
+}
+
+.m13f-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 2px;
+}
+
+/* ── 季度选择行 ── */
+.m13f-quarter-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+/* ── Top 20 持仓列表：两行布局承载桌面 6 列信息 ── */
+.m13f-holding-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.m13f-holding-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 2px;
+}
+
+.m13f-holding-row + .m13f-holding-row {
+  border-top: 1px solid transparent; /* 颜色随主题内联注入（borderTopColor） */
+}
+
+/* 第一行：序号 + Issuer(+胶囊) … 市值右对齐 */
+.m13f-holding-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.m13f-holding-issuer-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.m13f-holding-issuer {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.m13f-holding-value {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 第二行：% 背景条 … 股数 + Δ Shares 右对齐 */
+.m13f-holding-sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.m13f-holding-pct {
+  position: relative;
+  flex: 1;
+  min-width: 96px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.m13f-holding-shares {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ── 页脚免责声明 ── */
+.m13f-footer {
+  text-align: center;
+  margin-top: 16px;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.m13f-loading {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+}

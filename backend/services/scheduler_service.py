@@ -959,10 +959,10 @@ class SchedulerService:
         2026-11-13 事故:market_data 收盘后首抓失败只落库/日志,无人感知,
         晨报只能带 stale 横幅出街。旁路告警绝不影响任务主流程:
         类型不在名单 / 发送失败均静默。名单由 SCHEDULER_LARK_FAIL_ALERT_TYPES
-        覆盖(逗号分隔 task_type,默认 "market_data")。
+        覆盖(逗号分隔 task_type,默认 "market_data,form13f")。
         """
         wanted = {t.strip() for t in os.getenv(
-            "SCHEDULER_LARK_FAIL_ALERT_TYPES", "market_data").split(",") if t.strip()}
+            "SCHEDULER_LARK_FAIL_ALERT_TYPES", "market_data,form13f").split(",") if t.strip()}
         if task_type not in wanted:
             return
         try:
@@ -1706,6 +1706,11 @@ class SchedulerService:
                 form13f_poll_task, form13f_retry_task,
             )
 
+            # 数据新鲜度兜底：派发前查快照最新季度。哪怕 Celery 任务已死
+            # （2026-09~11 停摆的教训：任务连挂两月而派发侧永远"成功"），
+            # 该检查仍在调度器每日 tick 中存活并告警。
+            await self._check_form13f_freshness_lark()
+
             mode = params.get('mode', 'poll')
             if mode == 'retry':
                 task = form13f_retry_task.delay()
@@ -1720,6 +1725,41 @@ class SchedulerService:
             error_msg = f"Form 13F 任务分发异常: {str(e)}"
             logger.error(error_msg)
             return {'success': False, 'message': error_msg}
+
+    async def _check_form13f_freshness_lark(self) -> bool:
+        """13F 快照新鲜度检查（每日派发时跑一次）。
+
+        库里最新季度落后于「应入库季度」（季末+45 天截止+7 天宽限）→ Lark 告警。
+        返回是否新鲜；告警是旁路，发送失败静默，不影响派发主流程。
+        """
+        try:
+            from datetime import date as _date
+
+            from backend.services.form13f_service import quarter_is_stale
+            from backend.utils.lark_notifier import send_text
+
+            row = self.db_manager.fetch_one(
+                "SELECT MAX(quarter) FROM form13f_snapshots")
+            latest = row[0] if row else None
+            today = _date.today()
+            if not quarter_is_stale(latest, today):
+                return True
+
+            def _send() -> bool:
+                return send_text(
+                    "【form13f 🟡】数据新鲜度告警",
+                    [f"时间: {datetime.now(tz=timezone.utc).isoformat(timespec='seconds')}",
+                     f"快照最新季度: {latest or '（无数据）'}，落后于应入库季度。",
+                     "处置: 派发看似成功但数据未更新 → 大概率 Celery 任务在失败，"
+                     "查看 logs/celery_data_worker.log 搜 form13f_poll；"
+                     "再查 form13f_snapshots / task_execution_logs。"])
+            await asyncio.get_event_loop().run_in_executor(None, _send)
+            logger.error(
+                f"[13F] 新鲜度告警: 快照最新季度 {latest or '无'} 落后于应入库季度")
+            return False
+        except Exception as e:  # noqa: BLE001 — 兜底检查绝不影响派发主流程
+            logger.warning(f"[13F] 新鲜度检查异常(忽略): {e}")
+            return True
 
     async def _execute_cnbc_closing_bell_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """

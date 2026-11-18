@@ -36,6 +36,7 @@ const EarningsCalendarPage = lazyWithRetry(() => import('./pages/EarningsCalenda
 const MacroIndicatorsPage = lazyWithRetry(() => import('./pages/MacroIndicatorsPage'));
 const CentralBankDashboardPage = lazyWithRetry(() => import('./pages/CentralBankDashboardPage'));
 const Form13FPage = lazyWithRetry(() => import('./pages/Form13FPage'));
+const MobileForm13FPage = lazyWithRetry(() => import('./pages/MobileForm13FPage'));
 const FundamentalsPage = lazyWithRetry(() => import('./pages/FundamentalsPage'));
 const EODFetchPage = lazyWithRetry(() => import('./pages/EODFetchPage'));
 const CandlestickDemoPage = lazyWithRetry(() => import('./pages/CandlestickDemoPage'));
@@ -163,6 +164,7 @@ const TerminalContent: React.FC = () => {
   const DashboardComponent = isMobile ? MobileDashboardPage : DashboardPage;
   const FilesComponent = isMobile ? MobileSourcesPage : FilesPage;
   const SchedulerComponent = isMobile ? MobileSchedulerPage : SchedulerPage;
+  const Form13fComponent = isMobile ? MobileForm13FPage : Form13FPage;
   // const DailyComponent = isMobile ? MobileDailyPage : DailyPage;  // 暂时下线 Daily
 
   return (
@@ -191,7 +193,7 @@ const TerminalContent: React.FC = () => {
             <Route path="markets/macro-indicators" element={<MacroIndicatorsPage />} />
             <Route path="central-bank" element={<CentralBankDashboardPage />} />
             <Route path="central-bank/:bank" element={<Navigate to="/central-bank" replace />} />
-            <Route path="form13f" element={<Form13FPage />} />
+            <Route path="form13f" element={<Form13fComponent />} />
             <Route path="files" element={<FilesComponent />} />
             <Route path="fundamentals" element={<FundamentalsPage />} />
             <Route path="eod-fetch" element={<EODFetchPage />} />

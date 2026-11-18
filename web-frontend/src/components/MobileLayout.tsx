@@ -9,6 +9,7 @@ import {
   MoonOutlined,
   LineChartOutlined,
   ControlOutlined,
+  FundViewOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
@@ -68,8 +69,8 @@ const MobileLayout: React.FC = () => {
     navigate('/login');
   };
 
-  // 移动端头像菜单：不提供 PC 端那套配置入口；管理员可进入 Scheduler Management /
-  // Monitoring（路由仍由 AdminRoute 校验）
+  // 移动端头像菜单：不提供 PC 端那套配置入口；数据页仅 13F Filings；
+  // 管理员可进入 Scheduler Management / Monitoring（路由仍由 AdminRoute 校验）
   const userMenuItems = [
     {
       key: 'theme',
@@ -96,6 +97,12 @@ const MobileLayout: React.FC = () => {
       onClick: (info: Parameters<NonNullable<MenuProps['onClick']>>[0]) => info.domEvent.stopPropagation(),
     },
     { type: 'divider' as const },
+    {
+      key: '/form13f',
+      icon: <FundViewOutlined />,
+      label: '13F Filings',
+      onClick: () => navigate('/form13f'),
+    },
     {
       key: '/settings/api-keys',
       icon: <KeyOutlined />,

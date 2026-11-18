@@ -11,81 +11,13 @@ import {
 import { useAuthStore } from '../store/authStore';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import Form13FSectorChart from '../components/form13f/Form13FSectorChart';
-import { aiTagChipStyle, type AiTagChipVariant } from '../components/shared/aiTagChipStyles';
+import { aiTagChipStyle } from '../components/shared/aiTagChipStyles';
+import {
+  THEME_COLORS, fmtMoney, fmtFull, fmtQuarter,
+  StatusLabel, isPut, isCall,
+} from '../components/form13f/form13fShared';
 
 const { Text } = Typography;
-
-// ===== 行业/资产类别（与后端 form13f_sector_map 分类一致）=====
-// 图表配色与交互见 Form13FSectorChart.tsx
-
-const THEME_COLORS = {
-  light: {
-    pageBg: '#f5f5f5',
-    cardBg: '#fff',
-    cardBorder: '#f0f0f0',
-    text: 'rgba(0, 0, 0, 0.88)',
-    textSecondary: 'rgba(0, 0, 0, 0.45)',
-    barBg: 'rgba(22, 119, 255, 0.08)',
-    posColor: '#cf1322',
-    negColor: '#389e0d',
-  },
-  dark: {
-    pageBg: '#1a202c',
-    cardBg: '#1a2234',
-    cardBorder: '#364152',
-    text: '#e0e6f1',
-    textSecondary: 'rgba(255, 255, 255, 0.5)',
-    barBg: 'rgba(22, 119, 255, 0.15)',
-    posColor: '#ff7875',
-    negColor: '#95de64',
-  },
-} as const;
-
-// ===== 格式化 =====
-
-const fmtMoney = (v?: number | null): string => {
-  if (v === null || v === undefined) return '—';
-  const a = Math.abs(v);
-  if (a >= 1e9) return (v / 1e9).toFixed(2) + 'B';
-  if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M';
-  if (a >= 1e3) return (v / 1e3).toFixed(0) + 'K';
-  return String(v);
-};
-
-const fmtFull = (v?: number | null): string =>
-  v === null || v === undefined ? '—' : v.toLocaleString('en-US');
-
-const fmtQuarter = (q: string): string =>
-  q.replace(/^(\d{4})Q(\d)$/, '$1 Q$2');
-
-/** 持仓行内 New/Put/Call 标签：全站标签胶囊规范（aiTagChipStyle，见 UI_STYLE_SPEC.md 二） */
-type StatusKind = 'new' | 'put' | 'call';
-
-const STATUS_COPY: Record<StatusKind, string> = {
-  new: 'New',
-  put: 'Put',
-  call: 'Call',
-};
-
-const STATUS_VARIANT: Record<StatusKind, AiTagChipVariant> = {
-  new: 'signal-neutral',   // 新建持仓 = 中性状态高亮
-  put: 'signal-bearish',   // Put = 看跌工具
-  call: 'signal-bullish',  // Call = 看涨工具
-};
-
-const StatusLabel: React.FC<{
-  kind: StatusKind;
-  themeMode: 'light' | 'dark';
-}> = ({ kind, themeMode }) => (
-  <Tag bordered={false} style={aiTagChipStyle(STATUS_VARIANT[kind], themeMode)}>
-    {STATUS_COPY[kind]}
-  </Tag>
-);
-
-const isPut = (putcall?: string | null) =>
-  putcall === 'Put' || putcall === 'P';
-const isCall = (putcall?: string | null) =>
-  putcall === 'Call' || putcall === 'C';
 
 const TIP_BOX: CSSProperties = { maxWidth: 360, fontSize: 12, lineHeight: 1.65 };
 

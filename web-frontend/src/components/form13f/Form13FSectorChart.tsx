@@ -61,12 +61,18 @@ interface Form13FSectorChartProps {
   quarters: QuarterSnapshot[];
   themeMode: 'light' | 'dark';
   onQuarterClick?: (quarter: string) => void;
+  /** 图表高度（默认 420，桌面口径）；移动端 compact 建议 300 */
+  height?: number;
+  /** 紧凑模式（移动端）：legend 改横向滚动、下边距收窄，避免 21 个图例在窄屏挤成多行 */
+  compact?: boolean;
 }
 
 const Form13FSectorChart: React.FC<Form13FSectorChartProps> = ({
   quarters,
   themeMode,
   onQuarterClick,
+  height = 420,
+  compact = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
@@ -110,9 +116,9 @@ const Form13FSectorChart: React.FC<Form13FSectorChartProps> = ({
 
     return {
       animationDuration: 300,
-      grid: { left: 44, right: 16, top: 16, bottom: 128 },
+      grid: { left: 44, right: 16, top: 16, bottom: compact ? 60 : 128 },
       legend: {
-        type: 'plain',
+        type: compact ? 'scroll' : 'plain',
         bottom: 0,
         left: 10,
         right: 10,
@@ -122,6 +128,14 @@ const Form13FSectorChart: React.FC<Form13FSectorChartProps> = ({
         textStyle: { fontSize: 10.5, color: textSecondary },
         formatter: (name: string) => LEGEND_SHORT[name] || name,
         data: chartData.sectors,
+        ...(compact
+          ? {
+              pageIconSize: 8,
+              pageIconInactiveColor: '#b5b5b5',
+              pageTextStyle: { fontSize: 10, color: textSecondary },
+              pageButtonItemGap: 2,
+            }
+          : {}),
       },
       tooltip: {
         trigger: 'item',
@@ -155,7 +169,7 @@ const Form13FSectorChart: React.FC<Form13FSectorChartProps> = ({
       },
       series,
     };
-  }, [chartData, quarters, themeMode]);
+  }, [chartData, quarters, themeMode, compact]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -194,7 +208,7 @@ const Form13FSectorChart: React.FC<Form13FSectorChartProps> = ({
 
   if (!quarters.length) return null;
 
-  return <div ref={containerRef} style={{ width: '100%', height: 420 }} />;
+  return <div ref={containerRef} style={{ width: '100%', height }} />;
 };
 
 export default Form13FSectorChart;
