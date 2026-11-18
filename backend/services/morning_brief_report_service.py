@@ -619,10 +619,22 @@ class MorningBriefReportService:
             for i in range(min(len(ts), len(o), len(h), len(lo), len(c))):
                 if None in (o[i], h[i], lo[i], c[i]):
                     continue
+                bo, bh = float(o[i]), float(h[i])
+                bl, bc = float(lo[i]), float(c[i])
+                # 自洽校验(2026-11-18):Yahoo 当日未收盘 bar 的 open 会回填成
+                # 数日前旧值(300308/300502 同日均拿到 11-13 开盘价),出现
+                # open>high 的物理不可能蜡烛;坏 bar 整根丢弃,弹窗回退到
+                # 最后一根有效 bar(历史收盘 bar 实测与交易所口径精确一致)
+                if (min(bo, bh, bl, bc) <= 0
+                        or bh < max(bo, bc) - 1e-6 or bl > min(bo, bc) + 1e-6):
+                    logger.warning(
+                        f"MB kline Yahoo {sym}: drop inconsistent bar "
+                        f"ts={ts[i]} o={bo} h={bh} l={bl} c={bc}")
+                    continue
                 # 服务器时区为北京:US/HK/CN 日线 bar 时间戳换算后恰为交易日历日
                 d = datetime.fromtimestamp(ts[i]).date().isoformat()
-                bars.append([d, round(float(o[i]), 4), round(float(h[i]), 4),
-                             round(float(lo[i]), 4), round(float(c[i]), 4)])
+                bars.append([d, round(bo, 4), round(bh, 4),
+                             round(bl, 4), round(bc, 4)])
             if not bars:
                 return None
             return {"h": bars[-260:], "a": bars[-1][0]}
