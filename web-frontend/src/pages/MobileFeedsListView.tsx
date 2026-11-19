@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  Alert,
   App,
   Avatar,
   Button,
@@ -214,6 +215,20 @@ const MobileFeedsListView: React.FC = () => {
           };
 
           setTimeout(pollForContent, 2000);
+        } else if (newSubscription.channel_type === 'podcast') {
+          message.info({
+            content: (
+              <div>
+                <div>Podcast subscription created!</div>
+                <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.85 }}>
+                  Episodes are fetched and transcribed in the background. Each episode may take
+                  10–20+ minutes — please be patient. Transcripts will appear in the feed when ready.
+                </div>
+              </div>
+            ),
+            duration: 8,
+          });
+          await loadContents(newSubscription.id);
         } else {
           message.info({
             content: `Auto-fetch for ${newSubscription.channel_type} is coming soon`,
@@ -1010,40 +1025,88 @@ const MobileFeedsListView: React.FC = () => {
                   <Form.Item noStyle shouldUpdate={(prev, cur) => prev.channel_type !== cur.channel_type}>
                     {({ getFieldValue }) => {
                       const rawChannelType = getFieldValue('channel_type') || '';
-                      if (rawChannelType !== 'twitter' && rawChannelType !== 'youtube') {
+                      if (
+                        rawChannelType !== 'twitter' &&
+                        rawChannelType !== 'youtube' &&
+                        rawChannelType !== 'podcast' &&
+                        rawChannelType !== 'weibo'
+                      ) {
                         return null;
                       }
                       const channelType = rawChannelType;
-                      return (
-                        <Form.Item
-                          name="channel_identifier"
-                          label={channelType === 'twitter' ? 'Twitter username' : 'YouTube channel'}
-                          rules={
-                            channelType === 'twitter'
-                              ? [
-                                  { required: true, message: 'Required' },
-                                  {
-                                    validator: (_: unknown, value: string) => {
-                                      const n = normalizeTwitterUsername(value || '');
-                                      if (!n) {
-                                        return Promise.reject(new Error('Enter a username'));
-                                      }
-                                      return Promise.resolve();
-                                    },
+                      const label = channelType === 'twitter'
+                        ? 'Twitter username'
+                        : channelType === 'podcast'
+                          ? 'Podcast RSS Feed URL'
+                          : channelType === 'weibo'
+                            ? '微博 UID 或主页链接'
+                            : 'YouTube channel';
+                      const placeholder = channelType === 'twitter'
+                        ? '@elonmusk or elonmusk'
+                        : channelType === 'podcast'
+                          ? 'https://feeds.simplecast.com/Nh1wIaXT'
+                          : channelType === 'weibo'
+                            ? '1234567890 或 https://weibo.com/u/1234567890'
+                            : 'channel';
+                      const extra = channelType === 'twitter'
+                        ? 'With or without @ (e.g. @elonmusk or elonmusk)'
+                        : channelType === 'podcast'
+                          ? 'Paste the RSS Feed URL of the podcast (e.g. from Apple Podcasts or Spotify)'
+                          : channelType === 'weibo'
+                            ? '粘贴博主 UID 或主页链接（支持 weibo.com/u/xxx、m.weibo.cn/u/xxx、纯数字 UID）'
+                            : 'YouTube channel handle or name';
+                      const rules =
+                        channelType === 'twitter'
+                          ? [
+                              { required: true, message: 'Required' },
+                              {
+                                validator: (_: unknown, value: string) => {
+                                  const n = normalizeTwitterUsername(value || '');
+                                  if (!n) {
+                                    return Promise.reject(new Error('Enter a username'));
+                                  }
+                                  return Promise.resolve();
+                                },
+                              },
+                            ]
+                          : channelType === 'podcast'
+                            ? [
+                                { required: true, message: 'Please input RSS Feed URL' },
+                                {
+                                  validator: (_: unknown, value: string) => {
+                                    const v = (value || '').trim();
+                                    if (v && !v.startsWith('http://') && !v.startsWith('https://')) {
+                                      return Promise.reject(
+                                        new Error('Must be a valid URL starting with http:// or https://')
+                                      );
+                                    }
+                                    return Promise.resolve();
                                   },
-                                ]
-                              : [{ required: true, message: 'Required' }]
-                          }
-                          extra={
-                            channelType === 'twitter'
-                              ? 'With or without @ (e.g. @elonmusk or elonmusk)'
-                              : 'YouTube channel handle or name'
-                          }
-                        >
-                          <Input
-                            placeholder={channelType === 'twitter' ? '@elonmusk or elonmusk' : 'channel'}
-                          />
-                        </Form.Item>
+                                },
+                              ]
+                            : channelType === 'weibo'
+                              ? [{ required: true, message: '请输入微博 UID 或主页链接' }]
+                              : [{ required: true, message: 'Required' }];
+                      return (
+                        <>
+                          {channelType === 'podcast' && (
+                            <Alert
+                              type="warning"
+                              showIcon
+                              message="Transcription takes time"
+                              description="New episodes are transcribed automatically in the background. Each episode typically takes 10–20+ minutes depending on length. Transcripts will appear in the feed when ready — please be patient."
+                              style={{ marginBottom: 16 }}
+                            />
+                          )}
+                          <Form.Item
+                            name="channel_identifier"
+                            label={label}
+                            rules={rules}
+                            extra={extra}
+                          >
+                            <Input placeholder={placeholder} />
+                          </Form.Item>
+                        </>
                       );
                     }}
                   </Form.Item>

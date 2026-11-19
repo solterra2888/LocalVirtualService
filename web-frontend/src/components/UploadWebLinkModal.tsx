@@ -394,7 +394,7 @@ const UploadWebLinkModal: React.FC<UploadWebLinkModalProps> = ({ visible, onCanc
               color: isDark ? '#91d5ff' : 'rgba(0, 0, 0, 0.85)',
             }}
             message="Try using Web Clipper instead"
-            description="Install the GuanHe Daily Web Clipper Chrome extension. It runs in your browser where you're already logged in, and can capture pages that the server cannot access."
+            description="Install the GuanHe Terminal Web Clipper Chrome extension. It runs in your browser where you're already logged in, and can capture pages that the server cannot access."
           />
         </div>
       </Modal>

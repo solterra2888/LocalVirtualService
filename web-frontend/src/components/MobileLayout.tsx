@@ -168,7 +168,7 @@ const MobileLayout: React.FC = () => {
             lineHeight: '56px',
           }}
         >
-          GuanHe Daily
+          GuanHe Terminal
         </span>
 
         <Dropdown

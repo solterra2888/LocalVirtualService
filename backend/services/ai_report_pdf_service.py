@@ -326,9 +326,9 @@ def render_pdf_bytes(
     doc = pymupdf.open('pdf', buffer.getvalue())
     doc.set_metadata({
         'title': title or 'AI Analysis Report',
-        'author': author or 'GuanHe Daily',
+        'author': author or 'GuanHe Terminal',
         'subject': subject or 'AI Analysis Report',
-        'creator': 'GuanHe Daily AI Analysis Tool',
+        'creator': 'GuanHe Terminal AI Analysis Tool',
     })
     # 只内嵌实际用到的字形：中文回退字体从 ~3.7MB 缩到几十 KB
     doc.subset_fonts()
