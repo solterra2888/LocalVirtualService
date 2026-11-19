@@ -58,7 +58,7 @@ check("prompt carries DONE marker rule", fb.DONE_MARKER in prompt)
 check("prompt has snapshot tags", "<snapshot>" in prompt and "</snapshot>" in prompt)
 
 # ── 4. run_single_shot_files 白名单(monkeypatch chat_completion) ────────
-def fake_gateway(messages, max_tokens=16384):
+def fake_gateway(messages, max_tokens=16384, model_spec=""):
     body = messages[0]["content"]
     if "ESCAPE_TEST" in body:  # 模拟返回越界路径
         content = json.dumps({"files": {"../../etc/passwd": "x"}})
@@ -153,6 +153,41 @@ with tempfile.TemporaryDirectory() as td:
     check("classify no trace no marker false",
           not fb.classify_zcode_failure("plain failure"))
 fb._ZCODE_LOG_DIR = Path.home() / ".zcode" / "cli" / "log"
+
+# ── 9. agent_provider_override(MB_AGENT_PROVIDER 路由) ─────────────────
+os.environ["MB_AGENT_PROVIDER"] = "outlook:anthropic/claude-sonnet-5.5"
+check("route match", fb.agent_provider_override("outlook")
+      == "anthropic/claude-sonnet-5.5")
+check("route no match", fb.agent_provider_override("fomc") == "")
+os.environ["MB_AGENT_PROVIDER"] = ("outlook:anthropic/claude-sonnet-5.5,"
+                                   "geopolitics:google/gemini-3.1-pro-preview")
+check("route multi", fb.agent_provider_override("geopolitics")
+      == "google/gemini-3.1-pro-preview")
+os.environ["MB_AGENT_PROVIDER"] = "garbage-without-colon"
+check("route malformed tolerated", fb.agent_provider_override("outlook") == "")
+del os.environ["MB_AGENT_PROVIDER"]
+
+# ── 10. resolve_model_config(前缀 → DB provider 行) ───────────────────
+fb._db_provider_row = lambda pid: {
+    "claude": {"base_url": "https://x.claude", "model": "m", "api_key": "K1"},
+    "gemini": {"base_url": "https://x.gemini", "model": "m", "api_key": "K2"},
+}.get(pid, {})
+cfg = fb.resolve_model_config("anthropic/claude-sonnet-5.5")
+check("resolve claude row", cfg["base_url"] == "https://x.claude"
+      and cfg["api_key"] == "K1" and cfg["model"] == "anthropic/claude-sonnet-5.5")
+cfg = fb.resolve_model_config("google/gemini-3.5-flash")
+check("resolve gemini row", cfg["base_url"] == "https://x.gemini"
+      and cfg["api_key"] == "K2")
+os.environ["MB_FALLBACK_BASE_URL"] = "https://override"
+cfg = fb.resolve_model_config("anthropic/claude-sonnet-5.5")
+check("resolve env override", cfg["base_url"] == "https://override")
+del os.environ["MB_FALLBACK_BASE_URL"]
+
+# ── 11. build_single_shot_prompt extra_context ────────────────────────
+p = fb.build_single_shot_prompt("TASK", "SNAP", extra_context="EXTRA-CTX")
+i_task, i_extra, i_snap = p.index("TASK"), p.index("EXTRA-CTX"), p.index("SNAP")
+check("extra context between task and snapshot",
+      i_task < i_extra < i_snap)
 
 print()
 if FAILURES:

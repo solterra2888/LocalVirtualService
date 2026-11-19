@@ -107,6 +107,24 @@ MB_FALLBACK_FORCE=geopolitics $PY run_pipeline.py 2026-11-18 --style cn
 ```
 
 单测:`python -I test_llm_fallback.py`(离线,不联网)。
+
+## 按 agent 路由(2026-11-19 起:outlook 常驻 Claude sonnet-5.5)
+
+`MB_AGENT_PROVIDER=outlook:anthropic/claude-sonnet-5.5`(已写入 .env;格式
+`agent:model[,agent:model…]`,模型前缀 anthropic/… google/… 决定取 DB 哪行
+凭据)。命中的 agent 单发直连为**主路径**,优先级变为三级:
+
+```
+sonnet-5.5 单发(主) → GLM-5.3 agent(报错/解析失败回落) → Gemini 单发(GLM 撞 1301 兜底)
+```
+
+- 写作与修订(`revise_sections`)同模型同路由,风格/口径一致;
+- outlook 单发输出长,**max_tokens 固定 32000**(16384 实测截断 JSON 信封);
+- 第二段合成需要的第一段成品由 `_routed_section_context` 自动内联
+  (清单与 OUTLOOK_TASK 一致);
+- state 记 `mode: "routed:<model>"`。CherryIN 价目:sonnet-5.5 $2/$10 per
+  1M,outlook 单发实测 ~157K in / 11K out ≈ $0.42/次(89-156s)。
+- 撤销路由:删 .env 中该行即回 GLM 全管线路径,无其它残留。
 ## 同步日报的改动
 
 本目录是 2026-11-07 从 GuanHe-Daily-Report 复制的。日报后续的修复如需带过来,

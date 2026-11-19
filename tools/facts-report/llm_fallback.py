@@ -105,7 +105,54 @@ def extract_root_cause(stderr: str, tail_chars: int = 400) -> str:
     return text[-tail_chars:]
 
 
-# ── 配置加载(env > DB;进程内缓存) ──────────────────────────────────────
+# ── 按 agent 路由(MB_AGENT_PROVIDER;2026-11-19 outlook 常驻 sonnet-5.5) ──
+# 格式: "agent1:model_spec[,agent2:model_spec...]",model_spec 带厂商前缀
+# (anthropic/… → DB claude 行;google/… → gemini 行)。命中的 agent 单发
+# 直连为"主路径",失败回落管线原 GLM agent 路径(run_pipeline._run_one_agent)。
+def agent_provider_override(agent: str) -> str:
+    val = (os.environ.get("MB_AGENT_PROVIDER")
+           or _env_file_lookup("MB_AGENT_PROVIDER") or "").strip()
+    for pair in val.split(","):
+        pair = pair.strip()
+        if not pair or ":" not in pair:
+            continue
+        name, _, spec = pair.partition(":")
+        if name.strip() == agent:
+            return spec.strip()
+    return ""
+
+
+# 模型前缀 → DB provider_id(决定用哪行的 base_url/api_key)
+_PROVIDER_PREFIXES = {"anthropic/": "claude", "google/": "gemini",
+                      "openai/": "claude"}  # openai/* 走 cherryin claude 行同网关
+
+
+def resolve_model_config(model_spec: str) -> Dict[str, str]:
+    """model_spec(如 anthropic/claude-sonnet-5.5)→ {base_url, api_key, model}。
+
+    前缀找不到映射时回退全局兜底配置(gemini 行);env 的 BASE_URL/API_KEY
+    覆盖仍生效(测试/演练用)。
+    """
+    provider = ""
+    for prefix, pid in _PROVIDER_PREFIXES.items():
+        if model_spec.startswith(prefix):
+            provider = pid
+            break
+    if provider:
+        cfg = dict(_db_provider_row(provider))
+    else:
+        cfg = {}
+    cfg["model"] = model_spec
+    cfg.setdefault("base_url", "")
+    cfg.setdefault("api_key", "")
+    if os.environ.get("MB_FALLBACK_BASE_URL"):
+        cfg["base_url"] = os.environ["MB_FALLBACK_BASE_URL"]
+    if os.environ.get("MB_FALLBACK_API_KEY"):
+        cfg["api_key"] = os.environ["MB_FALLBACK_API_KEY"]
+    return cfg
+
+
+
 
 _Config = Dict[str, str]
 _cached: Optional[_Config] = None
@@ -209,12 +256,22 @@ def force_fallback(agent: str) -> bool:
 # ── OpenAI 兼容单发调用 ────────────────────────────────────────────────
 
 def chat_completion(messages: List[Dict[str, str]],
-                    max_tokens: int = 16384) -> Tuple[str, Dict[str, Any]]:
-    """一次网关调用,返回 (正文, usage)。失败抛 FallbackUnavailableError。"""
-    cfg = _load_config()
-    if not (cfg["model"] and cfg["base_url"] and cfg["api_key"]):
+                    max_tokens: int = 16384,
+                    model_spec: str = "") -> Tuple[str, Dict[str, Any]]:
+    """一次网关调用,返回 (正文, usage)。失败抛 FallbackUnavailableError。
+
+    model_spec 非空 = 按 agent 路由的定向调用(如 anthropic/claude-sonnet-5.5,
+    凭据按前缀解析);为空 = 全局兜底配置(MB_FALLBACK_*,默认 gemini)。
+    """
+    cfg = (resolve_model_config(model_spec) if model_spec
+           else _load_config())
+    timeout = (os.environ.get("MB_FALLBACK_TIMEOUT")
+               or _env_file_lookup("MB_FALLBACK_TIMEOUT") or "600")
+    if not (cfg.get("model") and cfg.get("base_url") and cfg.get("api_key")):
         raise FallbackUnavailableError(
-            f"fallback not configured (provider={cfg['provider']})")
+            f"gateway not configured (model_spec={model_spec or '-'}, "
+            f"base_url={'set' if cfg.get('base_url') else 'missing'}, "
+            f"key={'set' if cfg.get('api_key') else 'missing'})")
     req = urllib.request.Request(
         cfg["base_url"].rstrip("/") + "/v1/chat/completions",
         data=json.dumps({
@@ -226,7 +283,7 @@ def chat_completion(messages: List[Dict[str, str]],
                  "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(
-                req, timeout=int(cfg["timeout"])) as resp:
+                req, timeout=int(timeout)) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body = ""
@@ -307,21 +364,32 @@ string). Write the JSON with standard escaping; do not truncate.
 """
 
 
-def build_single_shot_prompt(agent_prompt: str, snapshot_text: str) -> str:
-    return agent_prompt + FALLBACK_DELIVERY.replace(
-        "{done_marker}", DONE_MARKER).replace("{snapshot}", snapshot_text)
+def build_single_shot_prompt(agent_prompt: str, snapshot_text: str,
+                             extra_context: str = "") -> str:
+    """extra_context 插在任务书与快照之间(如 outlook 需内联的第一段成品)。"""
+    return (agent_prompt + extra_context
+            + FALLBACK_DELIVERY.replace(
+                "{done_marker}", DONE_MARKER).replace(
+                "{snapshot}", snapshot_text))
 
 
 def run_single_shot_files(agent_prompt: str, snapshot_text: str,
-                          expected_files: List[str]
+                          expected_files: List[str],
+                          model_spec: str = "",
+                          max_tokens: int = 16384,
+                          extra_context: str = ""
                           ) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """单发让兜底模型一次产出全部交付文件,返回 ({相对路径: 内容}, usage)。
+    """单发让模型一次产出全部交付文件,返回 ({相对路径: 内容}, usage)。
 
     expected_files 用于落盘前的白名单校验(防路径逃逸/漏交付由调用方判)。
+    model_spec 非空 = 按 agent 路由的定向模型;max_tokens:outlook 这类
+    长输出节用 32000(16384 实测会截断 JSON 信封)。
     """
-    prompt = build_single_shot_prompt(agent_prompt, snapshot_text)
+    prompt = build_single_shot_prompt(agent_prompt, snapshot_text,
+                                      extra_context)
     content, usage = chat_completion(
-        [{"role": "user", "content": prompt}])
+        [{"role": "user", "content": prompt}], max_tokens=max_tokens,
+        model_spec=model_spec)
     obj = parse_json_payload(content)
     files = obj.get("files")
     if not isinstance(files, dict) or not files:

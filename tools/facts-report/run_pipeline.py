@@ -78,6 +78,7 @@ from provenance import item_index, render_section  # noqa: E402
 from llm_fallback import (  # noqa: E402
     FallbackUnavailableError,
     ModerationBlockedError,
+    agent_provider_override,
     chat_completion,
     classify_zcode_failure,
     describe_fallback,
@@ -1165,20 +1166,28 @@ def _sliced_snapshot(ws: Path, snapshot: Path, agent: str) -> Path:
 
 def _fallback_sections(ws: Path, agent: str, style: str,
                        blocks: Dict[str, Any], plan: Optional[Dict[str, Any]],
-                       sliced: Path, names: List[str]
+                       sliced: Path, names: List[str],
+                       model_spec: str = "",
+                       max_tokens: int = 16384,
+                       mode: str = "gemini-fallback",
+                       note: str = "GLM 1301 → single-shot fallback",
                        ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
-    """1301 审核拦截后的 Gemini 单发兜底(2026-11-19):返回 sections 信封+usage。
+    """1301 审核拦截后的单发兜底(2026-11-19):返回 sections 信封+usage。
 
     任务书原样复用(build_agent_prompt,内容规则/台账契约不变),交付契约由
     llm_fallback 改写为"无工具、快照内联、单 JSON 输出全文件";落盘后仍走
     section_done 文件契约校验 —— 产物有效性以文件为准,与超时路径同判。
+    model_spec 非空 = 按 agent 路由(MB_AGENT_PROVIDER)的主路径调用。
     """
     prompt = build_agent_prompt(agent, style=style, blocks=blocks, plan=plan)
     snapshot_text = sliced.read_text(encoding="utf-8")
     section_files = [SECTION_SPECS[n]["output_file"] for n in names]
     expected = section_files + [
         re.sub(r"\.md$", ".claims.json", f) for f in section_files]
-    files, usage = run_single_shot_files(prompt, snapshot_text, expected)
+    files, usage = run_single_shot_files(
+        prompt, snapshot_text, expected, model_spec=model_spec,
+        max_tokens=max_tokens,
+        extra_context=_routed_section_context(ws, agent))
     write_fallback_files(ws, files, section_files)
     missing = [f for f in expected if f not in files]
     if missing:
@@ -1189,14 +1198,39 @@ def _fallback_sections(ws: Path, agent: str, style: str,
     for n in names:
         sections[n] = {
             "status": "done" if section_done(ws, n) else "missing_output",
-            "mode": "gemini-fallback",
-            "note": "GLM 1301 → single-shot fallback",
+            "mode": mode,
+            "note": note,
         }
     bad = [n for n in names if sections[n]["status"] != "done"]
     if bad:
         raise FallbackUnavailableError(
             f"fallback output incomplete for {bad}")
     return sections, usage
+
+
+# outlook(二段合成节)的任务书要求先读第一段成品 —— 单发模式无文件访问,
+# 由 _fallback_sections 统一内联(清单与 OUTLOOK_TASK 保持一致)
+_OUTLOOK_INPUT_SECTIONS = [
+    "sections/01_narrative.md", "sections/02_drivers.md",
+    "sections/04_sector_action.md", "sections/07_macro_dashboard.md",
+    "sections/08_macro_review.md", "sections/09_geopolitics.md",
+    "sections/10_fomc.md",
+]
+
+
+def _routed_section_context(ws: Path, agent: str) -> str:
+    """按 agent 返回需要内联的成品章节文本(outlook 专属,其余为空)。"""
+    if agent != "outlook":
+        return ""
+    parts = ["\nThe finished first-stage section files are inlined below "
+             "(already written and verified; treat their facts as "
+             "established — reuse as-is, do not re-derive):\n"]
+    for f in _OUTLOOK_INPUT_SECTIONS:
+        p = ws / f
+        if p.exists():
+            parts.append(f"=== FILE: {f} ===\n"
+                         f"{p.read_text(encoding='utf-8')}\n")
+    return "".join(parts)
 
 
 def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
@@ -1236,6 +1270,29 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
             _fake_section(ws, n, blocks=blocks, style=args.style)
         sections = {n: {"status": "done"} for n in names}
     else:
+        routed = agent_provider_override(agent)
+        if routed and not args.fake_zcode:
+            # v8.10(2026-11-19):按 agent 路由的主路径(outlook → sonnet-5.5
+            # 单发,MB_AGENT_PROVIDER);失败回落 GLM agent 原路径,再被 1301
+            # 拦则走既有 Gemini 兜底 —— 三级:sonnet → GLM → gemini
+            t_r = time.time()
+            print(f"[routed] agent {agent} → {routed} single-shot", flush=True)
+            try:
+                sections, usage = _fallback_sections(
+                    ws, agent, args.style, blocks, plan,
+                    _sliced_snapshot(ws, snapshot, agent), names,
+                    model_spec=routed, max_tokens=32000,
+                    mode=f"routed:{routed}",
+                    note=f"primary via MB_AGENT_PROVIDER ({routed})")
+                elapsed = round(time.time() - t_r, 1)
+                for n in names:
+                    print(f"[section] {n} done in {elapsed}s "
+                          f"(routed {routed})", flush=True)
+                return {"sections": sections, "elapsed": elapsed,
+                        "names": names, "usage": usage}
+            except FallbackUnavailableError as fe:
+                print(f"[routed] agent {agent}: {routed} failed ({fe}) — "
+                      f"falling back to GLM agent path", flush=True)
         try:
             if force_fallback(agent):
                 # 演练开关:不烧 GLM 调用,直接走兜底路径(MB_FALLBACK_FORCE)
@@ -1851,8 +1908,10 @@ def _revisable(ws: Path, name: str, issue: Dict[str, Any], style: str,
 
 
 def _fallback_revise(ws: Path, agent: str, names: List[str],
-                     revise_prompt: str, snapshot: Path) -> None:
-    """修订路径的 1301 兜底:当前文件 + 问题清单内联,单发整文件替换。
+                     revise_prompt: str, snapshot: Path,
+                     model_spec: str = "") -> None:
+    """修订路径的 1301 兜底/按 agent 路由修订:当前文件 + 问题清单内联,
+    单发整文件替换。
 
     原 zcode 路径 --resume 续接原会话(有写作上下文);单发模式没有该上下文,
     故把当前成品全文一并内联,要求按 issues 定向修订、其余保持原样。
@@ -1872,7 +1931,10 @@ def _fallback_revise(ws: Path, agent: str, names: List[str],
         f"verbatim.\n\n{current}")
     snapshot_text = _sliced_snapshot(ws, snapshot, agent).read_text(
         encoding="utf-8")
-    files, usage = run_single_shot_files(prompt, snapshot_text, expected)
+    files, usage = run_single_shot_files(
+        prompt, snapshot_text, expected, model_spec=model_spec,
+        max_tokens=32000,
+        extra_context=_routed_section_context(ws, agent))
     write_fallback_files(ws, files, section_files)
     bad = [n for n in names if not section_done(ws, n)]
     if bad:
@@ -1926,6 +1988,21 @@ def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
             f"Issues:\n{feedback}"
         )
         session_id = state["sections"].get(names[0], {}).get("session_id")
+        routed = agent_provider_override(agent)
+        if routed and not args.fake_zcode:
+            # 路由 agent 的修订同模型走单发(写作与修订同源,风格/口径一致);
+            # 失败回落下方 GLM --resume 路径
+            print(f"[routed] revise {agent} → {routed} single-shot",
+                  flush=True)
+            try:
+                fb_usage = _fallback_revise(ws, agent, names, prompt,
+                                            snapshot, model_spec=routed)
+                _add_usage(state, fb_usage, "revise")
+                _record_timing(state, f"revise:{agent}", time.time() - t0)
+                continue
+            except FallbackUnavailableError as fe:
+                print(f"[routed] revise {agent}: {routed} failed ({fe}) — "
+                      f"falling back to GLM agent path", flush=True)
         try:
             result = run_agent(args.zcode_bin, ws, prompt,
                                _sliced_snapshot(ws, snapshot, agent), args.timeout,
