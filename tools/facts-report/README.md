@@ -74,6 +74,39 @@ code 缺 T 日收盘,横幅出街,数据 11:20 才入库)。三层防护:
     >> /opt/guanhetech/backend/reports/facts-report/cron.log 2>&1
 ```
 
+## GLM 内容审核 1301 → Gemini 单发兜底(2026-11-19 事故)
+
+事故链:geopolitics 章节素材(俄乌/美伊/制裁/APEC 三边会晤中文快讯原文)
+触发 GLM 内容审核 `[1301]`,zcode CLI 只以 "Turn execution failed (traceId:…)"
+退出(1301 详情仅在 `~/.zcode/cli/log/zcode-<日期>.jsonl`);当日 plan 与
+geopolitics 三次重跑全灭,单章节失败放倒整条 40-60 分钟管线。实测 CherryIN
+网关(backend `llm_provider_configs` 表已启用的 gemini/claude)对同一批素材
+不拦截 —— `llm_fallback.py` 据此提供四层防护:
+
+1. **失败分类**(`classify_zcode_failure`):stderr 直接匹配 1301/sensitive,
+   未命中再按 traceId 追查当日 zcode CLI jsonl 日志。审核拦截不再走无意义
+   的同 payload 20s 重试;根因提取(`extract_root_cause`)过滤 node warning,
+   真实报错进 cron.log 与 Lark 告警。
+2. **写作/修订兜底**(`_run_one_agent`/`revise_sections`):被拦(或分类漏判
+   但重试后仍持久失败)的 agent 改由 Gemini 单发完成 —— 原任务书不变,交付
+   契约改写为"无工具、快照内联、单 JSON 输出全文件",落盘后照走
+   `section_done` 文件契约 + 确定性核验,产物不合格则整线失败转人工(不静默
+   丢章节)。state 记 `mode: "gemini-fallback"`。
+3. **plan 兜底**(`_plan_once`):plan digest 内联地缘主题标题同样会撞 1301,
+   直接同 prompt Gemini 单发;失败仍走 unavailable 降级(不阻断)。
+4. **核验降级**(`run_verifier`):LLM 叙事核验被拦 → 跳过(确定性台账核验
+   照常),verdict 只含确定性结论 —— 意见本就是 annotate 语义,不拦发布。
+
+配置(env 覆盖 > DB `llm_provider_configs`):`MB_FALLBACK_PROVIDER`(默认
+gemini;claude 亦实测可用)、`MB_FALLBACK_MODEL/BASE_URL/API_KEY/TIMEOUT`;
+DB 读不到则兜底禁用、行为与旧版一致。演练开关 `MB_FALLBACK_FORCE=<agent>`
+(如 geopolitics;`1`=全部)强制走兜底路径,不烧 GLM 调用即可端到端演练:
+
+```bash
+MB_FALLBACK_FORCE=geopolitics $PY run_pipeline.py 2026-11-18 --style cn
+```
+
+单测:`python -I test_llm_fallback.py`(离线,不联网)。
 ## 同步日报的改动
 
 本目录是 2026-11-07 从 GuanHe-Daily-Report 复制的。日报后续的修复如需带过来,

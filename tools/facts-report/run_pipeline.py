@@ -48,7 +48,7 @@ except AttributeError:
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -75,6 +75,17 @@ from prompts import (  # noqa: E402
 )
 from verify_checks import claims_path, run_checks, verified_canonicals  # noqa: E402
 from provenance import item_index, render_section  # noqa: E402
+from llm_fallback import (  # noqa: E402
+    FallbackUnavailableError,
+    ModerationBlockedError,
+    chat_completion,
+    classify_zcode_failure,
+    describe_fallback,
+    extract_root_cause,
+    force_fallback,
+    run_single_shot_files,
+    write_fallback_files,
+)
 
 DEFAULT_ZCODE_BIN = "/root/.zcode/server/bin/zcode"
 DEFAULT_TIMEOUT_SEC = 1800  # v7 任务书更重:company_desk 连续两次撞 1200s 线(1169/1200.1s),留余量
@@ -167,14 +178,22 @@ def run_agent(
         cmd += ["--resume", resume_session]
     # v8.5-fix(P8/P23):非零退出重试 1 次、20s 退避 —— provider/SQLite 锁类
     # 瞬时故障一天可放倒 2-3 次调用;TimeoutExpired 不重试(文件契约由调用方判定)
+    # v8.9(2026-11-19):先分类 —— 内容审核(1301 等)是确定性拒绝,同 payload
+    # 重试必然再挂(当日 geopolitics 三次同因全灭),立即抛 ModerationBlockedError
+    # 交调用方走 Gemini 单发兜底;错误文案提取 stderr 真实 provider 行(原
+    # [-500:] 被 node SQLite warning 吃掉,根因进不了 cron.log/Lark)。审核
+    # 详情常不在 stderr、只在 zcode CLI jsonl 日志 —— classify 会按 traceId 追查
     last_err: Optional[Exception] = None
     for attempt in (1, 2):
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=timeout)
         if proc.returncode == 0:
             return _parse_zcode_json(proc.stdout)
+        cause = extract_root_cause(proc.stderr)
+        if classify_zcode_failure(proc.stderr):
+            raise ModerationBlockedError(f"GLM moderation: {cause}")
         last_err = RuntimeError(
-            f"zcode exited {proc.returncode}: {proc.stderr[-500:]}")
+            f"zcode exited {proc.returncode}: {cause}")
         if attempt == 1:
             print(f"[agent] transient failure, retrying once in 20s "
                   f"({str(last_err)[:120]})", flush=True)
@@ -1144,6 +1163,42 @@ def _sliced_snapshot(ws: Path, snapshot: Path, agent: str) -> Path:
     return out
 
 
+def _fallback_sections(ws: Path, agent: str, style: str,
+                       blocks: Dict[str, Any], plan: Optional[Dict[str, Any]],
+                       sliced: Path, names: List[str]
+                       ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """1301 审核拦截后的 Gemini 单发兜底(2026-11-19):返回 sections 信封+usage。
+
+    任务书原样复用(build_agent_prompt,内容规则/台账契约不变),交付契约由
+    llm_fallback 改写为"无工具、快照内联、单 JSON 输出全文件";落盘后仍走
+    section_done 文件契约校验 —— 产物有效性以文件为准,与超时路径同判。
+    """
+    prompt = build_agent_prompt(agent, style=style, blocks=blocks, plan=plan)
+    snapshot_text = sliced.read_text(encoding="utf-8")
+    section_files = [SECTION_SPECS[n]["output_file"] for n in names]
+    expected = section_files + [
+        re.sub(r"\.md$", ".claims.json", f) for f in section_files]
+    files, usage = run_single_shot_files(prompt, snapshot_text, expected)
+    write_fallback_files(ws, files, section_files)
+    missing = [f for f in expected if f not in files]
+    if missing:
+        # 台账/章节缺一即不完整 —— 与 zcode 路径的 missing_output 同判
+        raise FallbackUnavailableError(
+            f"fallback did not deliver all files: {missing}")
+    sections: Dict[str, Any] = {}
+    for n in names:
+        sections[n] = {
+            "status": "done" if section_done(ws, n) else "missing_output",
+            "mode": "gemini-fallback",
+            "note": "GLM 1301 → single-shot fallback",
+        }
+    bad = [n for n in names if sections[n]["status"] != "done"]
+    if bad:
+        raise FallbackUnavailableError(
+            f"fallback output incomplete for {bad}")
+    return sections, usage
+
+
 def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
                    snapshot_data: Dict[str, Any], blocks: Dict[str, Any],
                    agent: str,
@@ -1182,6 +1237,9 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
         sections = {n: {"status": "done"} for n in names}
     else:
         try:
+            if force_fallback(agent):
+                # 演练开关:不烧 GLM 调用,直接走兜底路径(MB_FALLBACK_FORCE)
+                raise ModerationBlockedError("MB_FALLBACK_FORCE drill mode")
             result = run_agent(
                 args.zcode_bin, ws,
                 build_agent_prompt(agent, style=args.style, blocks=blocks, plan=plan),
@@ -1199,6 +1257,33 @@ def _run_one_agent(args: argparse.Namespace, ws: Path, snapshot: Path,
             sections = {n: {"status": "done",
                             "note": "agent timed out but output file complete"}
                         for n in names}
+        except ModerationBlockedError as mb:
+            # 1301 确定性拦截 → Gemini 单发兜底;兜底不可用/不合格则原样上抛
+            # (整线失败转人工,不静默丢章节)
+            print(f"[fallback] agent {agent}: {mb} → single-shot "
+                  f"via {describe_fallback()}", flush=True)
+            try:
+                sections, usage = _fallback_sections(
+                    ws, agent, args.style, blocks, plan,
+                    _sliced_snapshot(ws, snapshot, agent), names)
+            except FallbackUnavailableError as fe:
+                raise ModerationBlockedError(
+                    f"{mb}; fallback failed: {fe}") from fe
+        except RuntimeError as re_err:
+            # 分类漏判的持久失败(如审核变体 stderr 不含 1301 且 trace 未落
+            # 日志、provider 长故障):run_agent 内部已重试过一次,仍非零退出
+            # → 兜底可用则同样升级单发;兜底失败原样上抛,行为与旧版一致
+            if not all(section_done(ws, n) for n in names):
+                print(f"[fallback] agent {agent} persistent failure "
+                      f"({str(re_err)[:120]}) → escalate to single-shot "
+                      f"via {describe_fallback()}", flush=True)
+                try:
+                    sections, usage = _fallback_sections(
+                        ws, agent, args.style, blocks, plan,
+                        _sliced_snapshot(ws, snapshot, agent), names)
+                except FallbackUnavailableError as fe:
+                    raise RuntimeError(
+                        f"{re_err}; fallback failed: {fe}") from re_err
         for n in names:
             if sections[n]["status"] != "done":
                 raise RuntimeError(
@@ -1388,9 +1473,21 @@ def _plan_once(zcode_bin: str, prompt: str,
             proc = subprocess.run(cmd, capture_output=True, text=True,
                                   timeout=timeout)
             if proc.returncode != 0:
+                cause = extract_root_cause(proc.stderr, tail_chars=300)
+                if classify_zcode_failure(proc.stderr):
+                    raise ModerationBlockedError(f"GLM moderation: {cause}")
                 raise RuntimeError(
-                    f"zcode exited {proc.returncode}: {proc.stderr[-300:]}")
+                    f"zcode exited {proc.returncode}: {cause}")
             return _parse_zcode_json(proc.stdout)
+        except ModerationBlockedError:
+            # 1301 确定性拒绝(plan digest 内联地缘主题标题,重试必挂)——
+            # plan 本就是单发 JSON,直接 Gemini 单发同 prompt 兜底
+            print("[plan] GLM 1301 → fallback single-shot", flush=True)
+            content, usage = chat_completion(
+                [{"role": "user", "content":
+                  prompt + "\n\nOutput ONLY the JSON object — no code fence, "
+                  "no prose around it."}], max_tokens=8192)
+            return {"response": content, "usage": usage, "sessionId": None}
         except Exception as e:  # noqa: BLE001 — 与 _triage_chunk 同语义
             last_err = e
             if attempt == 1:
@@ -1652,6 +1749,19 @@ def run_verifier(args: argparse.Namespace, ws: Path, snapshot: Path,
                 raise
             print("[verify] agent timed out but verdict.json was written — "
                   "accepting file contract", flush=True)
+        except ModerationBlockedError as mb:
+            # 核验器也读全文(含地缘章节正文),同样可能撞 1301 —— 确定性台账
+            # 核验已通过(本分支前提 high_fails 为空),LLM 叙事核验跳过,
+            # verdict 只含确定性结论;意见本就是 annotate 语义,不拦发布
+            print(f"[verify] LLM verifier skipped: {mb}", flush=True)
+            state["verify"][f"llm_attempt_{attempt}"] = \
+                "skipped: GLM 1301 moderation"
+            verdict_file.write_text(json.dumps({
+                "verdict": "pass",
+                "summary": "deterministic checks passed; LLM review skipped "
+                           "(provider moderation block)",
+                "issues": [], "quality_notes": [], "source": "deterministic",
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
     _record_timing(state, f"verify:attempt_{attempt}", time.time() - t0)
     print(f"[verify] attempt {attempt} done in "
           f"{state['timings'][f'verify:attempt_{attempt}'][-1]}s", flush=True)
@@ -1740,6 +1850,36 @@ def _revisable(ws: Path, name: str, issue: Dict[str, Any], style: str,
     return True
 
 
+def _fallback_revise(ws: Path, agent: str, names: List[str],
+                     revise_prompt: str, snapshot: Path) -> None:
+    """修订路径的 1301 兜底:当前文件 + 问题清单内联,单发整文件替换。
+
+    原 zcode 路径 --resume 续接原会话(有写作上下文);单发模式没有该上下文,
+    故把当前成品全文一并内联,要求按 issues 定向修订、其余保持原样。
+    """
+    section_files = [SECTION_SPECS[n]["output_file"] for n in names]
+    expected = section_files + [
+        re.sub(r"\.md$", ".claims.json", f) for f in section_files]
+    current = "\n\n".join(
+        f"=== FILE: {f} (current content) ===\n"
+        f"{(ws / f).read_text(encoding='utf-8')}"
+        for f in expected if (ws / f).exists())
+    prompt = (
+        f"{revise_prompt}\n\nYou have NO tools (single-shot revision). The "
+        f"current file contents are inlined below; the permitted snapshot is "
+        f"inlined after them. Return the COMPLETE new content of every file "
+        f"you change (and of its .claims.json), keeping unchanged parts "
+        f"verbatim.\n\n{current}")
+    snapshot_text = _sliced_snapshot(ws, snapshot, agent).read_text(
+        encoding="utf-8")
+    files, usage = run_single_shot_files(prompt, snapshot_text, expected)
+    write_fallback_files(ws, files, section_files)
+    bad = [n for n in names if not section_done(ws, n)]
+    if bad:
+        raise FallbackUnavailableError(f"fallback revision incomplete: {bad}")
+    return usage
+
+
 def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
                     state: Dict[str, Any], issues: List[Dict[str, Any]]) -> int:
     """按核验问题清单定向修订(--resume 续接原会话)。返回实际修订的组数。
@@ -1796,6 +1936,19 @@ def revise_sections(args: argparse.Namespace, ws: Path, snapshot: Path,
                 raise
             print(f"[revise] {agent}: agent timed out but revised files complete",
                   flush=True)
+        except ModerationBlockedError as mb:
+            # 修订路径同样可能撞 1301(修订对象常是地缘章节)—— 单发整文件
+            # 替换兜底;兜底失败则跳过该组修订,v8.7 语义下带标注发布
+            print(f"[fallback] revise {agent}: {mb} → single-shot "
+                  f"via {describe_fallback()}", flush=True)
+            try:
+                fb_usage = _fallback_revise(ws, agent, names, prompt, snapshot)
+                _add_usage(state, fb_usage, "revise")
+            except FallbackUnavailableError as fe:
+                print(f"[revise] {agent}: fallback failed ({fe}) — "
+                      f"skipping this revision", flush=True)
+                _record_timing(state, f"revise:{agent}", time.time() - t0)
+                continue
         _record_timing(state, f"revise:{agent}", time.time() - t0)
         for n in names:
             if not section_done(ws, n):
