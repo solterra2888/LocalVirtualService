@@ -1187,7 +1187,9 @@ def _fallback_sections(ws: Path, agent: str, style: str,
     files, usage = run_single_shot_files(
         prompt, snapshot_text, expected, model_spec=model_spec,
         max_tokens=max_tokens,
-        extra_context=_routed_section_context(ws, agent))
+        extra_context=_routed_section_context(ws, agent),
+        debug_path=(ws / "fallback_raw" / (
+            f"{agent}_write_{time.strftime('%H%M%S')}.txt")))
     write_fallback_files(ws, files, section_files)
     missing = [f for f in expected if f not in files]
     if missing:
@@ -1934,7 +1936,9 @@ def _fallback_revise(ws: Path, agent: str, names: List[str],
     files, usage = run_single_shot_files(
         prompt, snapshot_text, expected, model_spec=model_spec,
         max_tokens=32000,
-        extra_context=_routed_section_context(ws, agent))
+        extra_context=_routed_section_context(ws, agent),
+        debug_path=(ws / "fallback_raw" / (
+            f"{agent}_revise_{time.strftime('%H%M%S')}.txt")))
     write_fallback_files(ws, files, section_files)
     bad = [n for n in names if not section_done(ws, n)]
     if bad:

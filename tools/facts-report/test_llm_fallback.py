@@ -189,6 +189,45 @@ i_task, i_extra, i_snap = p.index("TASK"), p.index("EXTRA-CTX"), p.index("SNAP")
 check("extra context between task and snapshot",
       i_task < i_extra < i_snap)
 
+# ── 12. 空内容原地重试(2026-11-20 生产事故:claims.json 空字符串) ───────
+calls = {"n": 0}
+def flaky_gateway(messages, max_tokens=16384, model_spec=""):
+    calls["n"] += 1
+    body = messages[0]["content"]
+    if calls["n"] == 1:
+        # 首跑:md 正常,claims 空字符串 —— 复刻今早生产失败形态
+        return json.dumps({"files": {
+            "sections/11.md": "## 正文\n- bullet",
+            "sections/11.claims.json": ""}}), {"inputTokens": 1}
+    # 重试:提示词里应带上缺陷说明
+    assert "previous attempt was rejected" in body and "11.claims.json" in body, \
+        f"retry prompt missing corrective hint (call {calls['n']})"
+    return json.dumps({"files": {
+        "sections/11.md": "## 正文\n- bullet",
+        "sections/11.claims.json": "[{\"value\":\"3%\"}]"}}), {"inputTokens": 2}
+
+fb.chat_completion = flaky_gateway
+with tempfile.TemporaryDirectory() as td:
+    dbg = Path(td) / "fallback_raw" / "outlook_write_080000.txt"
+    files2, usage2 = fb.run_single_shot_files(
+        "PROMPT", "{}", ["sections/11.md", "sections/11.claims.json"],
+        debug_path=dbg)
+    check("empty-claims retried once and recovered",
+          calls["n"] == 2 and files2["sections/11.claims.json"].strip() != "")
+    check("retry usage from 2nd call", usage2["inputTokens"] == 2)
+    check("raw response dumped for autopsy", dbg.exists()
+          and "files" in dbg.read_text(encoding="utf-8"))
+
+# ── 13. 两次都坏 → 仍然上抛 ───────────────────────────────────────────
+def always_bad(messages, max_tokens=16384, model_spec=""):
+    return json.dumps({"files": {"sections/11.md": ""}}), {"inputTokens": 1}
+fb.chat_completion = always_bad
+try:
+    fb.run_single_shot_files("PROMPT", "{}", ["sections/11.md"])
+    check("double failure still raises", False)
+except fb.FallbackUnavailableError:
+    check("double failure still raises", True)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

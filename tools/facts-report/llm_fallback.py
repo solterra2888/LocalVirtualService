@@ -377,36 +377,70 @@ def run_single_shot_files(agent_prompt: str, snapshot_text: str,
                           expected_files: List[str],
                           model_spec: str = "",
                           max_tokens: int = 16384,
-                          extra_context: str = ""
+                          extra_context: str = "",
+                          debug_path: Optional[Path] = None,
                           ) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """单发让模型一次产出全部交付文件,返回 ({相对路径: 内容}, usage)。
 
     expected_files 用于落盘前的白名单校验(防路径逃逸/漏交付由调用方判)。
     model_spec 非空 = 按 agent 路由的定向模型;max_tokens:outlook 这类
     长输出节用 32000(16384 实测会截断 JSON 信封)。
+
+    2026-11-20 修复:输出信封缺陷(空字段/漏文件/坏 JSON,长输出尾部的
+    采样波动,4 次实测 2 次)不再直接放弃 —— 带着具体缺陷提示原地重试
+    一次再抛;原始响应无论成败都写 debug_path 备查(此前失败无原文可尸检)。
     """
     prompt = build_single_shot_prompt(agent_prompt, snapshot_text,
                                       extra_context)
-    content, usage = chat_completion(
-        [{"role": "user", "content": prompt}], max_tokens=max_tokens,
-        model_spec=model_spec)
+    last_err: Optional[FallbackUnavailableError] = None
+    for attempt in (1, 2):
+        msg_prompt = prompt
+        if attempt > 1 and last_err is not None:
+            msg_prompt = (
+                f"{prompt}\n\nIMPORTANT — your previous attempt was rejected: "
+                f"{last_err}. Repeat the ENTIRE output, fixing exactly that: "
+                f"every files value must be non-empty, valid, and complete "
+                f"(claims ledgers are JSON arrays, not strings; do not "
+                f"truncate the tail).")
+        content, usage = chat_completion(
+            [{"role": "user", "content": msg_prompt}], max_tokens=max_tokens,
+            model_spec=model_spec)
+        if debug_path is not None:
+            try:
+                debug_path.parent.mkdir(parents=True, exist_ok=True)
+                debug_path.write_text(content, encoding="utf-8")
+            except OSError:
+                pass  # 落盘仅供排障,失败不影响主流程
+        try:
+            files = _validate_files_payload(content, expected_files)
+            return files, usage
+        except FallbackUnavailableError as e:
+            last_err = e
+            print(f"[fallback] single-shot attempt {attempt} rejected "
+                  f"({str(e)[:160]})", flush=True)
+    raise last_err  # type: ignore[misc]
+
+
+def _validate_files_payload(content: str,
+                            expected_files: List[str]) -> Dict[str, str]:
+    """校验单发返回的 files 信封;不合格抛 FallbackUnavailableError。"""
     obj = parse_json_payload(content)
     files = obj.get("files")
     if not isinstance(files, dict) or not files:
         raise FallbackUnavailableError(
-            f"fallback output has no files object: {str(obj)[:200]!r}")
+            f"output has no files object: {str(obj)[:200]!r}")
     out: Dict[str, str] = {}
     for path, body in files.items():
         path = str(path).strip().lstrip("./")
         if path not in expected_files:
             raise FallbackUnavailableError(
-                f"fallback returned unexpected path {path!r} "
+                f"returned unexpected path {path!r} "
                 f"(expected one of {expected_files})")
         if not isinstance(body, str) or not body.strip():
             raise FallbackUnavailableError(
-                f"fallback returned empty content for {path}")
+                f"returned empty content for {path}")
         out[path] = body
-    return out, usage
+    return out
 
 
 def write_fallback_files(ws: Path, files: Dict[str, str],

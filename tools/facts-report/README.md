@@ -120,6 +120,10 @@ sonnet-5.5 单发(主) → GLM-5.3 agent(报错/解析失败回落) → Gemini �
 
 - 写作与修订(`revise_sections`)同模型同路由,风格/口径一致;
 - outlook 单发输出长,**max_tokens 固定 32000**(16384 实测截断 JSON 信封);
+- **信封缺陷原地重试**(2026-11-20 生产首日实测:claims 字段空字符串):
+  校验失败(空内容/漏文件/坏 JSON)时带"上次错在哪"的提示重试一次,仍失败
+  才降级;原始响应(成败均)落盘 `<ws>/fallback_raw/<agent>_{write,revise}_*.txt`
+  备查;
 - 第二段合成需要的第一段成品由 `_routed_section_context` 自动内联
   (清单与 OUTLOOK_TASK 一致);
 - state 记 `mode: "routed:<model>"`。CherryIN 价目:sonnet-5.5 $2/$10 per
