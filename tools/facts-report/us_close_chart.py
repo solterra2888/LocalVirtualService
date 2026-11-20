@@ -172,6 +172,12 @@ def _refs(s: Optional[List[Tuple[date, float]]]) -> Optional[Dict[str, Optional[
             "s": [[d.isoformat(), round(c, 4)] for d, c in s[:45][::-1]]}
 
 
+# FX 直连 Yahoo 回退码(2026-11-20):fx_row 三级链 EODHD → Yahoo → DB 的第二级。
+# Yahoo 汇率对 T 日 bar 出数早(EODHD EURUSD 当日 05:20/07:20 两次单代码 402 时
+# Yahoo 已有),且无配额问题;仅 EURUSD/USDJPY 两行走此链。
+FX_YAHOO = {"EURUSD.FOREX": "EURUSD=X", "USDJPY.FOREX": "JPY=X"}
+
+
 # 实时行情代码覆盖(2026-11-13):EODHD realtime 对这些代码闭市恒 NA(沪市系
 # 指数/日经/富时/罗素),降级 market_data_eod 会拿到 14:00 盘中入库行而非收盘
 # 终值(上证实测 3642.63 vs 终值 3634.2)→ 改走 Yahoo chart(收盘后即终值;
@@ -544,8 +550,11 @@ def build_sections(conn: Any, t: date,
     # 计价)。加密货币日切=UTC 日,bar T 在北京 08:00(=UTC 00:00 T+1)恰好收盘 →
     # as_of=T 恒成立,不触发新鲜度横幅;1D = vs 前一 UTC 日收盘(24h 变动,与
     # Yahoo 币页同口径),美股 T 时段完整落在 UTC 日 T 内,与报告日期口径对齐。
-    # 历史取 Yahoo 优先(bar 实时累积,构建时刻 T bar 已为终值;EODHD 的 T bar
-    # 发布时点不保证),EODHD EOD 回退 —— 主流币两源逐日偏差 <0.001%。实时刷新
+    # 历史取 EODHD 优先(2026-11-20 调换:Yahoo 对"刚收盘的 UTC 日"bar 系统性
+    # 滞后 2h+ 甚至整日缺失,7 币 T bar 在冻结后 2h 仍缺;EODHD 主流币 T bar
+    # 出数更早且 hist 无缺口,次主流币 ~09:20-10:00(北京)发布后由
+    # _rescue_stale_rows/ft_refresh 兜底),Yahoo 回退 —— 主流币两源逐日偏差
+    # <0.001%。实时刷新
     # code 用 EODHD realtime 码(.CC 24/7 恒数值,close/previousClose 与 EOD
     # 一致),并入 /quotes 现有批量 chunk。DB 无加密数据,不进 market_data 摄入
     # (与 DXY 同款直连模式)。USD1(World Liberty Financial)无常规代码,两源均
@@ -555,12 +564,11 @@ def build_sections(conn: Any, t: date,
     # 的 fmtLast 按行取精度(2dp 对 0.06 美元的 DOGE 会丢掉全部信息)。
     def crypto_row(name: str, eodhd_code: str, yahoo_sym: str,
                    ticker: str) -> Optional[Dict[str, Any]]:
-        s = _yahoo_series(yahoo_sym, t, adjusted=False)
-        ohlc = _yahoo_ohlc(yahoo_sym, t) if s else None
-        if not s or s[0][0] != t:   # Yahoo 缺 T(偶发缓存滞后)→ EODHD 回退
-            s2, ohlc2 = _eodhd_eod(eodhd_code, t)
+        s, ohlc = _eodhd_eod(eodhd_code, t)
+        if not s or s[0][0] != t:   # EODHD 缺 T(次主流币发布滞后)→ Yahoo 回退
+            s2 = _yahoo_series(yahoo_sym, t, adjusted=False)
             if s2 and (not s or s2[0][0] > s[0][0]):
-                s, ohlc = s2, ohlc2 or ohlc
+                s, ohlc = s2, _yahoo_ohlc(yahoo_sym, t) or ohlc
         if not s:
             return None
         last = s[0][1]
@@ -603,8 +611,18 @@ def build_sections(conn: Any, t: date,
         print("[us_close] DXY unavailable via both EODHD and Yahoo — row skipped")
 
     def fx_row(name: str, ticker: str, code: str) -> Dict[str, Any]:
-        s = _series(conn, code, t)
-        ohlc = _series_ohlc(conn, code, t)
+        # 三级链(2026-11-20):EODHD 直连 → Yahoo chart → market_data_eod。
+        # 原来只读 DB,但 DB 摄入(scheduler 每日 4 次)遇单代码 402 静默失败时
+        # 渲染早已错过当日值(11-20 EURUSD 卡 11-18 即此因,直连当时已可得)。
+        s, ohlc = _eodhd_eod(code, t)
+        if not s or s[0][0] != t:
+            s2 = _yahoo_series(FX_YAHOO.get(code, ""), t, adjusted=False)
+            if s2 and (not s or s2[0][0] > s[0][0]):
+                s, ohlc = s2, _yahoo_ohlc(FX_YAHOO.get(code, ""), t) or ohlc
+        if not s or s[0][0] != t:
+            s3 = _series(conn, code, t)
+            if s3 and (not s or s3[0][0] > s[0][0]):
+                s, ohlc = s3, _series_ohlc(conn, code, t) or ohlc
         return _row(name, ticker, _minus(f"{s[0][1]:.2f}") if s else "\u2013", "%",
                     _changes(s), s[0][1] if s else None,
                     as_of=s[0][0] if s else None, hist=ohlc or s,
@@ -751,6 +769,44 @@ def render(sections: List[Dict[str, Any]], t: date, out: Path) -> Path:
     return out
 
 
+def _rescue_stale_rows(sections: List[Dict[str, Any]], t: date) -> int:
+    """冻结前临门重拉:strict 组 as_of != T 的行按行内 code 直连 EODHD 再取一次。
+
+    背景(2026-11-20):行情门 08:15 截止后到 ~09:18 冻结之间无人取数,而次主流
+    加密币的 EODHD 日 bar 与单代码 402 的 FX 恰在这段窗口内陆续发布 —— 临门
+    重拉一次即可救回;仍缺的行保持原样进 stale 台账,由 ft_refresh(10:30
+    cron)事后补齐。finviz 组(快照日期宽松判定)与无 code/Yahoo code 的行
+    跳过。返回修复行数。
+    """
+    fixed = 0
+    for sec in sections:
+        for i, r in enumerate(sec["rows"]):
+            if r.get("src") == "finviz" or r.get("as_of") == t.isoformat():
+                continue
+            code = r.get("code") or ""
+            if not code or code.startswith("YAHOO:"):
+                continue
+            s, ohlc = _eodhd_eod(code, t)
+            if not s or s[0][0] != t:
+                continue
+            last = s[0][1]
+            unit = r.get("unit") or "%"
+            dp = (4 if code.endswith(".CC") and last < 10
+                  else (r.get("dp") or 2))
+            last_str = (_minus(f"{last:.2f}%") if unit == "bp"
+                        else _minus(f"{last:,.{dp}f}"))
+            nr = _row(r["name"], r.get("ticker") or "", last_str, unit,
+                      _changes(s, pct=(unit != "bp")), last, as_of=t,
+                      hist=ohlc or s, code=code, refs=_refs(s))
+            if dp != 2:
+                nr["dp"] = dp   # 实时刷新按行精度(ft_live/FT_HIST 透传)
+            sec["rows"][i] = nr
+            fixed += 1
+            print(f"[us_close] rescue {r['name']}: {r.get('as_of')} -> {t}"
+                  f" via EODHD {code}")
+    return fixed
+
+
 def _dump_ft_json(ws: Path, t: date, sections: List[Dict[str, Any]]) -> Path:
     """FT 表格数据落盘 {ws}/final/charts/ft_sections.json,供 md2html_report
     生成网页版跨资产表 —— 与 01_markets.png 同源同批、随管线每日刷新。
@@ -800,6 +856,7 @@ def render_for_workspace(ws: Path, conn: Any = None) -> Optional[Path]:
     n = sum(len(s["rows"]) for s in sections)
     if n < 15:
         raise RuntimeError(f"only {n} rows assembled")
+    _rescue_stale_rows(sections, t)   # 冻结前临门重拉(2026-11-20)
     _dump_ft_json(ws, t, sections)   # 先落盘数据再画 PNG:PNG 渲染失败不丢表格数据
     return render(sections, t, out)
 

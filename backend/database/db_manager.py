@@ -1011,6 +1011,7 @@ class DatabaseManager:
                 'market_weekly_report',
                 'daily_market_report',
                 'morning_brief',
+                'morning_brief_ft_refresh',
                 'the_close_summary',
                 'cnbc_closing_bell',
                 'zhishixingqiu_summary',

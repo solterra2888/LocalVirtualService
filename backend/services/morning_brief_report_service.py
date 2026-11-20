@@ -99,7 +99,10 @@ class MorningBriefReportService:
         html_content: str,
         metadata: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """登记完成态。html 双存（DB + OSS 键名），每次换新 share_token。"""
+        """登记完成态。html 双存（DB + OSS 键名）。
+
+        share_token 仅 INSERT 生成；同日重注册（ft_refresh 补数重发布等）保持
+        原 token —— 换新会打断早间已分发的分享链接（2026-11-20 改）。"""
         share_token = uuid4().hex
         conn = self.db_manager.get_connection()
         cursor = conn.cursor()
@@ -114,21 +117,23 @@ class MorningBriefReportService:
                     oss_object_name = %s,
                     html_content = %s,
                     metadata = %s,
-                    share_token = %s,
                     error_message = NULL,
                     updated_at = NOW()
                 WHERE report_date = %s
+                RETURNING share_token
                 """,
                 (
                     file_path,
                     oss_object_name,
                     html_content,
                     Json(metadata) if metadata is not None else None,
-                    share_token,
                     report_date,
                 ),
             )
-            if cursor.rowcount == 0:  # mark_generating 未先行(手动补挂场景)
+            row = cursor.fetchone()
+            if row:  # 同日重注册:沿用既有 token,老链接不失效
+                share_token = row[0]
+            else:  # mark_generating 未先行(手动补挂场景)
                 cursor.execute(
                     """
                     INSERT INTO morning_brief_reports (
@@ -483,7 +488,8 @@ class MorningBriefReportService:
 
         refs.s = 生成时预埋的迷你收盘序列(升序 [[iso, close]×≤45]);
         无序列的旧 spec 回退 refs.w1/m1 标量(T 锚)。unit='bp' 行按价差
-        ×100 出 bp(不用百分比)。m1d 恒 = 最新价/昨收。
+        ×100 出 bp(不用百分比)。m1d 恒 = 最新价/昨收;refs.pv(=T 收盘)
+        在锚定日 > T 时优先作昨收(见函数体内注释)。
         """
         last, prev = q["last"], q.get("prev")
 
@@ -506,6 +512,13 @@ class MorningBriefReportService:
                     pass
         if fallback_anchor and anchor < fallback_anchor:
             anchor = fallback_anchor
+        # pv 锚(2026-11-20):refs.pv = 冻结时的 T 收盘。报价锚定日已过 T 时
+        # "当日"的法定昨收就是 T 收盘 —— EODHD realtime 的 previousClose
+        # 早晨不滚动一天(加密/FX 实测会错算成两日涨跌),spec 带 pv 一律优先;
+        # anchor == T 的 DB 降级行(最新收盘仍是 T)不用 pv,否则恒为 0%。
+        pv = refs.get("pv")
+        if pv not in (None, 0) and (not fallback_anchor or anchor > fallback_anchor):
+            prev = pv
 
         w_ref = m_ref = prev_ref = None
         hist = refs.get("s")

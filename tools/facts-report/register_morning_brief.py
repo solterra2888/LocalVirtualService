@@ -231,12 +231,20 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
                 f"{s['name']}(截至 {s.get('as_of') or '无数据'})"
                 for s in (_ftd.get("stale") or [])
             ]
-            _spec_rows = [
-                {"n": r.get("name"), "c": r.get("code"),
-                 "u": r.get("unit") or "%", "r": r.get("refs") or {}}
-                for _s in (_ftd.get("sections") or [])
-                for r in (_s.get("rows") or []) if r.get("code")
-            ]
+            _spec_rows = []
+            for _s in (_ftd.get("sections") or []):
+                for r in (_s.get("rows") or []):
+                    if not r.get("code"):
+                        continue
+                    _refs = dict(r.get("refs") or {})
+                    # pv = T 日收盘(实时层 m1d 的法定锚,2026-11-20):EODHD
+                    # realtime previousClose 早晨不滚动一天,加密/FX 的"当日"
+                    # 会错算成两日涨跌;仅冻结值确为 T 收盘的行才带 pv,
+                    # stale 行不写(锚不合法,服务端回退原逻辑)。
+                    if r.get("as_of") == _ftd.get("t") and r.get("last") is not None:
+                        _refs["pv"] = r["last"]
+                    _spec_rows.append({"n": r.get("name"), "c": r.get("code"),
+                                       "u": r.get("unit") or "%", "r": _refs})
             if _spec_rows:
                 ft_live = {"t": _ftd.get("t"), "rows": _spec_rows}
     except Exception as exc:  # noqa: BLE001 — 台账读取失败只降级为无告警

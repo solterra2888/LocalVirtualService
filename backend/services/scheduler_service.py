@@ -75,6 +75,7 @@ class SchedulerService:
             'market_weekly_report': self._execute_market_weekly_report_task,
             'daily_market_report': self._execute_daily_market_report_task,
             'morning_brief': self._execute_morning_brief_task,
+            'morning_brief_ft_refresh': self._execute_morning_brief_ft_refresh_task,
             'the_close_summary': self._execute_the_close_summary_task,
             'cnbc_closing_bell': self._execute_cnbc_closing_bell_task,
             'bloomberg_surveillance': self._execute_bloomberg_surveillance_task,
@@ -1590,6 +1591,41 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"Morning Brief 任务分发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_morning_brief_ft_refresh_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Morning Brief FT 行情补齐(2026-11-20):detached 启动 ft_refresh.sh。
+
+        FT 表冻结(~09:18)早于部分上游发布(次主流加密币 EODHD bar 北京
+        ~09:20-10:00、FX 单代码 402 需等 scheduler 补库),10:30 对今晨工作区
+        二拉重渲染重发布;stale 为空时脚本自幂等退出。脚本自带 flock/Lark,
+        本 handler 不等待完成、不轮询(与 morning_brief 派发同款哲学)。
+        走 asyncio 子进程而非 celery:轻任务(~2min),避免 worker 重启注册。
+        """
+        try:
+            import asyncio
+            from pathlib import Path
+
+            script = Path("/opt/guanhetech/tools/facts-report/ft_refresh.sh")
+            log_path = Path("/opt/guanhetech/backend/reports/facts-report/cron.log")
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_fh = open(log_path, "ab")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "/bin/bash", str(script),
+                    stdout=log_fh, stderr=log_fh,
+                    cwd=str(script.parent),
+                    start_new_session=True,  # detached:不随后端重启被杀
+                )
+            finally:
+                log_fh.close()
+            message = f"✅ Morning Brief FT 补齐已 detached 启动: pid={proc.pid}"
+            logger.info(message, params=params)
+            return {'success': True, 'message': message, 'pid': proc.pid}
+        except Exception as e:
+            error_msg = f"Morning Brief FT 补齐派发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 
