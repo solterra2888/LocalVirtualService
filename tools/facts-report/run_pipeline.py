@@ -224,9 +224,13 @@ def _fake_section(ws: Path, name: str, corrected: bool = False,
 
 from datetime import date as _date_cls, timedelta as _timedelta_cls
 
-# 边际变化选题(v8):四经济体 T 日有 actual 的一线事件,按族优先级每国 ≤2。
+# 边际变化选题(v8):五经济体 T 日有 actual 的一线事件,按族优先级每国 ≤2。
 # 事件名以 EODHD 日历为准;分项(Ex-*/Non-Defense)不作主行;yoy 优先于水平。
-REVIEW_COUNTRIES = ("US", "EU", "CN", "JP")
+# 2026-11-21 修复"宏观数据节空窗":族白名单补 claims/housing/sentiment
+# (此前 11-12 初请+成屋销售、11-20 密歇根信心+欧盟消费者信心全被漏掉),
+# 国家口径补 DE(11-11 当天唯一带 actual 的一线发布是德国 CPI);另见
+# select_country_releases 的兜底层。
+REVIEW_COUNTRIES = ("US", "EU", "DE", "CN", "JP")
 REVIEW_FAMILY_ORDER = (
     ("rate", r"fed\s+interest\s+rate|deposit\s+facility|boj\s+interest|loan\s+prime"),
     ("jobs", r"non[\s\-]?farm\s+payroll|unemployment\s+rate"),
@@ -237,8 +241,14 @@ REVIEW_FAMILY_ORDER = (
     ("pmi", r"\bpmi\b"),
     ("ppi", r"\bppi\b|producer\s+price"),
     ("retail", r"retail\s+sales"),
+    ("claims", r"jobless\s+claims"),
     ("ip", r"industrial\s+production"),
     ("trade", r"balance\s+of\s+trade"),
+    ("sentiment", r"michigan|consumer\s+(?:sentiment|confidence)"
+                  r"|business\s+(?:sentiment|confidence)|\bzew\b|\bifo\b"
+                  r"|economic\s+sentiment"),
+    ("housing", r"existing\s+home\s+sales|new\s+home\s+sales|pending\s+home\s+sales"
+                r"|housing\s+starts|building\s+permits"),
 )
 _REVIEW_FAMS = [(k, re.compile(m, re.I)) for k, m in REVIEW_FAMILY_ORDER]
 # 分项/子口径不作主行(Durable Goods Ex Transp / Ex Defense 等)
@@ -259,13 +269,57 @@ def _cmp_rank(e: Dict[str, Any]) -> int:
     return _COMPARISON_RANK.get((e.get("comparison") or "").lower() or None, 1)
 
 
+_RELEASE_KEYS = ("event", "comparison", "period", "date", "actual",
+                 "forecast", "previous", "time_et")
+
+
+def _release_row(e: Dict[str, Any], family: str) -> Dict[str, Any]:
+    row = {k: e[k] for k in _RELEASE_KEYS if e.get(k) not in (None, "")}
+    row["family"] = family
+    return row
+
+
+def _fallback_releases(tday: List[Dict[str, Any]],
+                       per_country: int = 2) -> Dict[str, List[Dict[str, Any]]]:
+    """兜底层:白名单整体选空、但 T 日确有带 actual 的一线发布时回退注入。
+
+    无族可排优先级,改用「有 forecast 优先(可比意外)、事件名短优先(主指标
+    先于长名分项)」,同国同名事件去重只留一行;family 记 "other"。
+    """
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for country in REVIEW_COUNTRIES:
+        cands = [e for e in tday
+                 if e.get("country") == country and _has_actual(e)
+                 and not _SUBCOMPONENT_RE.search(e.get("event") or "")]
+        cands.sort(key=lambda e: (e.get("forecast") in (None, ""),
+                                  len(e.get("event") or "")))
+        picked: List[Dict[str, Any]] = []
+        seen: set = set()
+        for e in cands:
+            name = (e.get("event") or "").strip().lower()
+            if name in seen:
+                continue
+            seen.add(name)
+            picked.append(_release_row(e, "other"))
+            if len(picked) >= per_country:
+                break
+        if picked:
+            out[country] = picked
+    return out
+
+
 def select_country_releases(snapshot: Dict[str, Any],
                             per_country: int = 2) -> Dict[str, List[Dict[str, Any]]]:
-    """边际变化选题:四经济体 T 日一线、含 actual 的发布,每国 ≤2 个事件族。
+    """边际变化选题:五经济体 T 日一线、含 actual 的发布,每国 ≤2 个事件族。
 
-    按族优先级取(利率决议 > 就业 > CPI > GDP > PMI > PPI > 零售 > 工业 >
-    贸易);每族只取一行主行(排除分项;yoy 优先)。返回 {country: [row…]},
-    供 08 任务书点名注入。
+    按族优先级取(利率决议 > 就业 > CPI > GDP > PMI > PPI > 零售 > 初请 >
+    工业 > 贸易 > 信心 > 地产,周度数据排在月度一线之后);每族只取一行主行
+    (排除分项;yoy 优先)。
+    返回 {country: [row…]},供 08 任务书点名注入。
+
+    白名单整体选空时走 _fallback_releases 兜底 —— 快照里 T 日 impact=3 且
+    带 actual 的发布还在(如 2026-11-20 的密歇根信心/欧盟消费者信心),
+    「今日无重点」只应留给真正没有一线数据的日子。
     """
     report_date = snapshot.get("report_date") or ""
     recent = ((snapshot.get("sources") or {}).get("economic_events") or {}).get(
@@ -285,17 +339,13 @@ def select_country_releases(snapshot: Dict[str, Any],
             if not mains:
                 continue
             mains.sort(key=lambda e: (_cmp_rank(e), len(e.get("event") or "")))
-            best = mains[0]
-            row = {k: best[k] for k in
-                   ("event", "comparison", "period", "date", "actual",
-                    "forecast", "previous", "time_et")
-                   if best.get(k) not in (None, "")}
-            row["family"] = key
-            picked.append(row)
+            picked.append(_release_row(mains[0], key))
             if len(picked) >= per_country:
                 break
         if picked:
             out[country] = picked
+    if not out:
+        out = _fallback_releases(tday, per_country)
     return out
 
 
@@ -368,7 +418,7 @@ def _geo_stats(snapshot: Dict[str, Any]) -> tuple:
 def macro_blocks(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """v8 Macros 块矩阵 —— 纯代码判定,对齐 xiao 式参考稿的回顾/当下/展望。
 
-    review_releases  四经济体 T 日边际变化选题(每国 ≤2 族)
+    review_releases  五经济体 T 日边际变化选题(每国 ≤2 族,白名单全空时兜底)
     geo_themes       地缘主题(快照 geo 层命中 ≥3 开块,附 top 条目)
     focal_events     焦点事件(选举等一次性政治事件,命中 ≥2 开块)
     fomc_deep        决议日在 [T-2, T] → 10 节开「决议深读」
