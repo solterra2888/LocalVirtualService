@@ -95,17 +95,27 @@ T=11-11/11-12/11-20 三期「回顾 · 宏观数据」出"今日无重点",但�
 
 `MB_LINK_LARK=1`(.env):`register_morning_brief.py` 首发注册成功(该
 report_date 首次落 completed)后,推一张**小卡片**到 lark_alert 同群
-(服务状态监测群):标题 `📰 Morning Brief <report_date>` + 正文一行
-美股交易日 + 「查看报告」按钮 open_url 打开分享链接
-`https://guanhecapital.hk/api/morning-brief-report/shared/{token}`。要点:
+(服务状态监测群):深蓝标题条 `📰 Morning Brief <report_date>` + 美股
+交易日 + 用法一句话(`_MB_USAGE`)+ 「查看报告」按钮 open_url 打开
+分享链接 `https://guanhecapital.hk/api/morning-brief-report/shared/{token}`。要点:
 
 - **为何用卡片**:webhook 机器人文本消息不做链接 unfurl(平台限制:
   链接预览是应用级能力,自定义机器人收不到消息事件),卡片按钮是
   webhook 下唯一能拿到"卡片观感"的形态(`lark_notifier.send_card`);
+- **色调对齐报告页**:标题条为自定色 `#1b4b7d`(报告 Header
+  `--bg-header` 渐变锚点,白字)。Lark 官方 header(1.0/2.0 均)只有
+  预设色板,深蓝满宽标题条由 **JSON 2.0** 自造(`_brief_link_card`):
+  column `background_style` 引用 `config.style.color` 自定 RGBA +
+  `padding` 内边距,标题白字走 2.0 富文本 `<font color=white>`(1.0
+  分栏无 padding、markdown 无字色,不够看;2.0 需客户端 ≥7.20,旧客户端
+  卡片标题可见但内容显示升级提示);
 - **首发才推**:先查 `get_report_by_date`,已有 completed 行则跳过 ——
   ft_refresh 10:30 补数重注册、手动补挂不会重复打扰(token 本就保持不变);
 - `--no-oss` 联调不推;推送在数据新鲜度 ⚠️ 告警之后发出,顺序不颠倒;
-- 推送失败只记日志,不影响注册;删掉 .env 该行即整体停推。
+- 推送失败只记日志,不影响注册;删掉 .env 该行即整体停推;
+- **追加目标群**:`MB_LINK_LARK_WEBHOOK=<webhook>`(.env,逗号分隔可多个)
+  —— 报告卡片在默认服务状态监测群之外加推;目标群需自建自定义机器人
+  (不要开签名校验);告警仍只进默认群。
 
 ## GLM 内容审核 1301 → Gemini 单发兜底(2026-11-19 事故)
 

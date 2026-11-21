@@ -20,6 +20,8 @@ OSS: reports/MorningBrief/report_<YYYYMMDD>.html(确定性键,重跑覆盖同键
 MB_LINK_LARK=1:首发注册成功(该 report_date 首次落 completed)后推一张
 小卡片(「查看报告」按钮打开分享链接)到 lark_alert 同群;同日重注册
 (ft_refresh 补数)不重推,--no-oss 联调不推。
+MB_LINK_LARK_WEBHOOK:逗号分隔的额外目标群 webhook —— 报告卡片在默认
+服务状态监测群之外追加推送(告警仍只进默认群)。
 """
 
 from __future__ import annotations
@@ -57,12 +59,54 @@ MD2HTML_TIMEOUT_SEC = 600
 # (服务状态监测群)。MB_LINK_LARK=1 开启(.env);同日重注册不重推;
 # --no-oss 联调不推。域名与 nginx server_name(web.conf)一致。
 LINK_LARK_ENV = "MB_LINK_LARK"
+# 额外推送目标群(逗号分隔 webhook;默认群恒发,这里只加不减)
+LINK_LARK_EXTRA_ENV = "MB_LINK_LARK_WEBHOOK"
 SHARE_BASE_URL = "https://guanhecapital.hk"
 
 
 def _link_lark_enabled() -> bool:
     """MB_LINK_LARK=1/true 时,注册成功后推分享链接(默认关)。"""
     return os.getenv(LINK_LARK_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# 报告页 Header 色调(md2html_report.py --bg-header 渐变锚点 #1b4b7d,亮暗主题同色),
+# 推送卡片用同一 RGB。Lark 官方卡片 header(JSON 1.0/2.0 均)只有预设色板,深蓝
+# 标题条由自定色分栏自造:JSON 2.0(schema 2.0,需客户端 ≥7.20)的 column 支持
+# background_style 引用 config.style.color 自定色 + padding 内边距,标题白字走
+# 2.0 富文本的 <font> HTML 语法(1.0 分栏无 padding、markdown 无字色,故用 2.0)。
+_MB_BLUE = {"light_mode": "rgba(27,75,125,1)", "dark_mode": "rgba(27,75,125,1)"}
+# 用法一句话(2026-11-21 用户选定"用法导向"表述),展示在日期行与按钮之间
+_MB_USAGE = "每天开盘前点开，3 分钟看完隔夜美股的要闻、涨跌与宏观动向。"
+
+
+def _brief_link_card(report_date: str, session_date: str, url: str) -> dict:
+    """发布推送卡片:满宽深蓝标题条(#1b4b7d,白字)+ 美股交易日 + 「查看报告」按钮。"""
+    return {
+        "schema": "2.0",
+        "config": {"update_multi": True,
+                   "style": {"color": {"mb-blue": _MB_BLUE}}},
+        "body": {
+            "padding": "0 0 12px 0",      # 标题条满宽贴卡片顶缘,同原图 header
+            "vertical_spacing": "6px",
+            "elements": [
+                {"tag": "column_set", "columns": [{
+                    "tag": "column", "width": "weighted", "weight": 1,
+                    "background_style": "mb-blue", "padding": "12px 16px",
+                    "elements": [{
+                        "tag": "markdown",
+                        "content": (f"<font color=white>📰 **Morning Brief "
+                                    f"{report_date}**</font>"),
+                    }],
+                }]},
+                {"tag": "markdown", "margin": "12px 16px 0 16px",
+                 "content": f"美股交易日 {session_date}<br>{_MB_USAGE}"},
+                {"tag": "button", "margin": "4px 16px 0 16px", "type": "primary",
+                 "width": "fill",
+                 "text": {"tag": "plain_text", "content": "查看报告"},
+                 "behaviors": [{"type": "open_url", "default_url": url}]},
+            ],
+        },
+    }
 
 
 def _report_date_for(session_date: str) -> date:
@@ -340,34 +384,20 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
         except Exception as exc:  # noqa: BLE001 — 告警失败不影响注册
             logger.warning(f"[mb] ⚠ 新鲜度 Lark 告警发送失败: {exc}")
 
-    # 发布链接推送(2026-11-21):首发注册成功后推一张小卡片(interactive,
-    # 「查看报告」按钮 open_url 分享链接)到群。webhook 文本消息不做链接
-    # unfurl(平台限制:链接预览是应用级能力,机器人收不到消息事件),故
-    # 用卡片承载;晚于上面的新鲜度告警发出,顺序不颠倒。
+    # 发布链接推送(2026-11-21):首发注册成功后推一张小卡片(深蓝标题条对齐
+    # 报告 Header 色调 #1b4b7d,「查看报告」按钮 open_url 分享链接)到群。
+    # webhook 文本消息不做链接 unfurl(平台限制:链接预览是应用级能力,机器
+    # 人收不到消息事件),故用卡片承载;晚于上面的新鲜度告警发出,顺序不颠倒。
     if do_oss and not already_registered and _link_lark_enabled():
         try:
             from lark_alert import notify_card
 
-            notify_card({
-                "config": {"wide_screen_mode": True},
-                "header": {
-                    "template": "turquoise",
-                    "title": {"tag": "plain_text",
-                              "content": f"📰 Morning Brief {result['report_date']}"},
-                },
-                "elements": [
-                    {"tag": "div", "text": {
-                        "tag": "lark_md",
-                        "content": f"美股交易日 {session_date},点击按钮查看报告"}},
-                    {"tag": "action", "actions": [{
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "查看报告"},
-                        "type": "primary",
-                        "url": (f"{SHARE_BASE_URL}/api/morning-brief-report/"
-                                f"shared/{result['share_token']}"),
-                    }]},
-                ],
-            })
+            notify_card(
+                _brief_link_card(
+                    result["report_date"], session_date,
+                    f"{SHARE_BASE_URL}/api/morning-brief-report/shared/"
+                    f"{result['share_token']}"),
+                extra_webhooks=os.getenv(LINK_LARK_EXTRA_ENV, "").strip())
         except Exception as exc:  # noqa: BLE001 — 推送失败不影响注册
             logger.warning(f"[mb] 发布链接 Lark 推送失败: {exc}")
     elif already_registered:

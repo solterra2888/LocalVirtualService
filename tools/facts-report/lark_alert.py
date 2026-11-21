@@ -45,12 +45,22 @@ def notify(title: str, lines: Optional[Sequence[str]] = None) -> bool:
     return send_text(title, lines, webhook_url=url)
 
 
-def notify_card(card: dict) -> bool:
-    """推送一张交互卡片(webhook 文本消息不做链接 unfurl,观感走卡片)。"""
+def notify_card(card: dict, extra_webhooks: Optional[str] = None) -> bool:
+    """推送一张交互卡片(webhook 文本消息不做链接 unfurl,观感走卡片)。
+
+    extra_webhooks: 逗号分隔的额外 webhook(如 MB_LINK_LARK_WEBHOOK 指定的
+    其它群);默认服务状态监测群始终发,额外目标逐一发送,任一失败只影响
+    该目标的返回位。
+    """
     if os.getenv(ENABLED_ENV, "true").strip().lower() != "true":
         return False
-    url = os.getenv(WEBHOOK_ENV, "").strip() or LARK_WEBHOOK_SERVICE_STATUS
-    return send_card(card, webhook_url=url)
+    urls = [os.getenv(WEBHOOK_ENV, "").strip() or LARK_WEBHOOK_SERVICE_STATUS]
+    urls += [u for u in (x.strip() for x in (extra_webhooks or "").split(","))
+             if u]
+    ok = True
+    for u in urls:
+        ok = send_card(card, webhook_url=u) and ok
+    return ok
 
 
 def main() -> int:
