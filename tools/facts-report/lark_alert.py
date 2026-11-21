@@ -29,6 +29,7 @@ import config.settings  # noqa: F401,E402
 
 from backend.utils.lark_notifier import (  # noqa: E402
     LARK_WEBHOOK_SERVICE_STATUS,
+    send_card,
     send_text,
 )
 
@@ -42,6 +43,14 @@ def notify(title: str, lines: Optional[Sequence[str]] = None) -> bool:
         return False
     url = os.getenv(WEBHOOK_ENV, "").strip() or LARK_WEBHOOK_SERVICE_STATUS
     return send_text(title, lines, webhook_url=url)
+
+
+def notify_card(card: dict) -> bool:
+    """推送一张交互卡片(webhook 文本消息不做链接 unfurl,观感走卡片)。"""
+    if os.getenv(ENABLED_ENV, "true").strip().lower() != "true":
+        return False
+    url = os.getenv(WEBHOOK_ENV, "").strip() or LARK_WEBHOOK_SERVICE_STATUS
+    return send_card(card, webhook_url=url)
 
 
 def main() -> int:

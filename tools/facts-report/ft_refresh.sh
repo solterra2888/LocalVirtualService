@@ -56,6 +56,7 @@ PYEOF
 )
 if [ "$STALE_N" = "0" ]; then
     echo "[ft_refresh] $DATE stale empty, nothing to do"
+    echo "==== $(date '+%F %T %Z') facts-report ft_refresh end (no-op) ===="
     exit 0
 fi
 echo "[ft_refresh] $DATE stale=$STALE_N — refetching FT rows"

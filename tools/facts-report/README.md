@@ -74,6 +74,22 @@ code 缺 T 日收盘,横幅出街,数据 11:20 才入库)。三层防护:
     >> /opt/guanhetech/backend/reports/facts-report/cron.log 2>&1
 ```
 
+## 发布链接推送到 Lark 群(2026-11-21)
+
+`MB_LINK_LARK=1`(.env):`register_morning_brief.py` 首发注册成功(该
+report_date 首次落 completed)后,推一张**小卡片**到 lark_alert 同群
+(服务状态监测群):标题 `📰 Morning Brief <report_date>` + 正文一行
+美股交易日 + 「查看报告」按钮 open_url 打开分享链接
+`https://guanhecapital.hk/api/morning-brief-report/shared/{token}`。要点:
+
+- **为何用卡片**:webhook 机器人文本消息不做链接 unfurl(平台限制:
+  链接预览是应用级能力,自定义机器人收不到消息事件),卡片按钮是
+  webhook 下唯一能拿到"卡片观感"的形态(`lark_notifier.send_card`);
+- **首发才推**:先查 `get_report_by_date`,已有 completed 行则跳过 ——
+  ft_refresh 10:30 补数重注册、手动补挂不会重复打扰(token 本就保持不变);
+- `--no-oss` 联调不推;推送在数据新鲜度 ⚠️ 告警之后发出,顺序不颠倒;
+- 推送失败只记日志,不影响注册;删掉 .env 该行即整体停推。
+
 ## GLM 内容审核 1301 → Gemini 单发兜底(2026-11-19 事故)
 
 事故链:geopolitics 章节素材(俄乌/美伊/制裁/APEC 三边会晤中文快讯原文)

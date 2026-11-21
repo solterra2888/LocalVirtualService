@@ -104,6 +104,37 @@ def send_text(
         return False
 
 
+def send_card(
+    card: dict,
+    *,
+    webhook_url: Optional[str] = None,
+    timeout_sec: float = _DEFAULT_TIMEOUT_SEC,
+) -> bool:
+    """发送 Lark 交互卡片(msg_type=interactive)。成功返回 True，失败不抛出。
+
+    自定义机器人 webhook 的文本消息不做链接 unfurl(链接预览是应用级能力，
+    机器人收不到消息事件)，需要卡片观感时由此直发 interactive 卡片。
+    """
+    url = (webhook_url or _default_webhook_url()).strip()
+    if not url:
+        logger.warning("Lark 卡片通知跳过: 未配置 LARK_WEBHOOK_URL")
+        return False
+    body = {"msg_type": "interactive", "card": card}
+    secret = os.getenv("LARK_WEBHOOK_SECRET", "").strip()
+    payload = _build_signed_payload(body, secret) if secret else body
+    try:
+        resp = requests.post(url, json=payload, timeout=timeout_sec)
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, dict) and data.get("code") not in (None, 0):
+            logger.warning("Lark 卡片通知 API 返回错误: %s", data)
+            return False
+        return True
+    except Exception as exc:
+        logger.warning("Lark 卡片通知发送失败: %s", exc)
+        return False
+
+
 def send_zsxq_scheduler_report(result: dict) -> bool:
     """
     知识星球 Scheduler 定时抓取完成后，将运行摘要与错误统计一次性推送到 Lark。

@@ -36,7 +36,7 @@ import argparse
 import calendar
 import json
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -396,6 +396,56 @@ def _eodhd_eod(code: str, t: date,
         return None, None
 
 
+# 加密币 Binance 公共日线(2026-11-21):data-api.binance.vision 市场数据镜像,
+# 无需密钥。EODHD 的 .CC T bar(次主流币)北京 ~09:20-10:00 才发布,而 Binance
+# UTC 日切蜡烛在 08:00 整点收盘即可查 —— 冻结(~08:37)时点的唯一及时 T 源,
+# 插在 EODHD 与 Yahoo 之间。USDT 对计价与 USD 逐日偏差 <0.2%(场内/聚合差异)。
+BINANCE_SYM = {
+    "BTC-USD.CC": "BTCUSDT", "ETH-USD.CC": "ETHUSDT", "SOL-USD.CC": "SOLUSDT",
+    "USDC-USD.CC": "USDCUSDT", "USD136148-USD.CC": "USD1USDT",
+    "BNB-USD.CC": "BNBUSDT", "DOGE-USD.CC": "DOGEUSDT",
+}
+
+
+def _binance_eod(code: str, t: date,
+                 limit: int = 1000
+                 ) -> Tuple[Optional[List[Tuple[date, float]]],
+                            Optional[List[Tuple[date, float, float, float, float]]]]:
+    """Binance 公共日 K → (series, ohlc),与 _eodhd_eod 同构(降序,≤t)。
+
+    kline 日期 = openTime(UTC),进行中蜡烛(openTime > T)由 d > t 过滤;
+    任何异常返回 (None, None),由调用方回退 Yahoo。
+    """
+    sym = BINANCE_SYM.get(code)
+    if not sym:
+        return None, None
+    try:
+        r = requests.get(
+            "https://data-api.binance.vision/api/v3/klines",
+            params={"symbol": sym, "interval": "1d", "limit": min(limit, 1000)},
+            headers=UA, timeout=15)
+        r.raise_for_status()
+        rows = r.json()
+        if not isinstance(rows, list) or not rows:
+            return None, None
+        series: List[Tuple[date, float]] = []
+        ohlc: List[Tuple[date, float, float, float, float]] = []
+        for k in rows:
+            d = datetime.fromtimestamp(int(k[0]) / 1000, tz=timezone.utc).date()
+            if d > t or k[4] is None:
+                continue
+            c = float(k[4])
+            series.append((d, c))
+            if k[1] is not None and k[2] is not None and k[3] is not None:
+                ohlc.append((d, float(k[1]), float(k[2]), float(k[3]), c))
+        # Binance 返回升序,下游(s[0][0]!=t 判定/_changes/_refs)一律降序
+        series.sort(key=lambda x: x[0], reverse=True)
+        ohlc.sort(key=lambda x: x[0], reverse=True)
+        return (series or None), (ohlc or None)
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
 # --------------------------------------------------------------- row assembly
 def _row(name: str, ticker: str, last_str: str, unit: str,
          ch: Dict[str, Optional[float]], last: Optional[float] = None,
@@ -552,9 +602,10 @@ def build_sections(conn: Any, t: date,
     # Yahoo 币页同口径),美股 T 时段完整落在 UTC 日 T 内,与报告日期口径对齐。
     # 历史取 EODHD 优先(2026-11-20 调换:Yahoo 对"刚收盘的 UTC 日"bar 系统性
     # 滞后 2h+ 甚至整日缺失,7 币 T bar 在冻结后 2h 仍缺;EODHD 主流币 T bar
-    # 出数更早且 hist 无缺口,次主流币 ~09:20-10:00(北京)发布后由
-    # _rescue_stale_rows/ft_refresh 兜底),Yahoo 回退 —— 主流币两源逐日偏差
-    # <0.001%。实时刷新
+    # 出数更早且 hist 无缺口);EODHD 缺 T 时次选 Binance 公共日线(2026-11-21
+    # 加:次主流币 EODHD bar 北京 ~09:20-10:00 才发布,连续两日冻结时缺;
+    # Binance UTC 日切蜡烛 08:00 收盘即可查,冻结时刻恒可得),Yahoo 最后回退。
+    # 实时刷新
     # code 用 EODHD realtime 码(.CC 24/7 恒数值,close/previousClose 与 EOD
     # 一致),并入 /quotes 现有批量 chunk。DB 无加密数据,不进 market_data 摄入
     # (与 DXY 同款直连模式)。USD1(World Liberty Financial)无常规代码,两源均
@@ -565,10 +616,14 @@ def build_sections(conn: Any, t: date,
     def crypto_row(name: str, eodhd_code: str, yahoo_sym: str,
                    ticker: str) -> Optional[Dict[str, Any]]:
         s, ohlc = _eodhd_eod(eodhd_code, t)
-        if not s or s[0][0] != t:   # EODHD 缺 T(次主流币发布滞后)→ Yahoo 回退
-            s2 = _yahoo_series(yahoo_sym, t, adjusted=False)
+        if not s or s[0][0] != t:   # EODHD 缺 T(次主流币发布滞后)→ Binance 公共日线
+            s2, ohlc2 = _binance_eod(eodhd_code, t)
             if s2 and (not s or s2[0][0] > s[0][0]):
-                s, ohlc = s2, _yahoo_ohlc(yahoo_sym, t) or ohlc
+                s, ohlc = s2, ohlc2 or ohlc
+        if not s or s[0][0] != t:   # Binance 也没有 → Yahoo 回退
+            s3 = _yahoo_series(yahoo_sym, t, adjusted=False)
+            if s3 and (not s or s3[0][0] > s[0][0]):
+                s, ohlc = s3, _yahoo_ohlc(yahoo_sym, t) or ohlc
         if not s:
             return None
         last = s[0][1]
@@ -787,6 +842,11 @@ def _rescue_stale_rows(sections: List[Dict[str, Any]], t: date) -> int:
             if not code or code.startswith("YAHOO:"):
                 continue
             s, ohlc = _eodhd_eod(code, t)
+            if (not s or s[0][0] != t) and code in BINANCE_SYM:
+                # 加密币:EODHD 仍未出 T → Binance(08:00 收盘即可查)再试
+                s2, ohlc2 = _binance_eod(code, t)
+                if s2 and (not s or s2[0][0] > s[0][0]):
+                    s, ohlc = s2, ohlc2 or ohlc
             if not s or s[0][0] != t:
                 continue
             last = s[0][1]

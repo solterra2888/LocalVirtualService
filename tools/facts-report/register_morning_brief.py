@@ -17,6 +17,9 @@ HTML 三级: ① 复用 final/report.html(富版,新于 report.md 时)
 发布前把 charts/* 相对路径图片内嵌为 base64(单文件自包含 —— /shared
 iframe 与 OSS 签名链接下无 charts/ 兄弟目录,相对路径必 404 裂图)。
 OSS: reports/MorningBrief/report_<YYYYMMDD>.html(确定性键,重跑覆盖同键;失败不致命)。
+MB_LINK_LARK=1:首发注册成功(该 report_date 首次落 completed)后推一张
+小卡片(「查看报告」按钮打开分享链接)到 lark_alert 同群;同日重注册
+(ft_refresh 补数)不重推,--no-oss 联调不推。
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ import argparse
 import base64
 import json
 import mimetypes
+import os
 import re
 import subprocess
 import sys
@@ -37,6 +41,8 @@ from zoneinfo import ZoneInfo
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+import config.settings  # noqa: F401,E402 — 先触发 .env 加载,cron 裸 env 下 MB_LINK_LARK 可用
+
 from backend.utils.datetime_utils import utcnow  # noqa: E402
 from backend.utils.logger import get_logger  # noqa: E402
 
@@ -46,6 +52,17 @@ FACTS_ROOT = REPO_ROOT / "backend" / "reports" / "facts-report"
 MD2HTML = Path(__file__).resolve().parent / "report_html_tools" / "md2html_report.py"
 OSS_KEY_PREFIX = "reports/MorningBrief"
 MD2HTML_TIMEOUT_SEC = 600
+
+# 发布链接推送(2026-11-21):首次注册成功后把分享链接推到 lark_alert 同群
+# (服务状态监测群)。MB_LINK_LARK=1 开启(.env);同日重注册不重推;
+# --no-oss 联调不推。域名与 nginx server_name(web.conf)一致。
+LINK_LARK_ENV = "MB_LINK_LARK"
+SHARE_BASE_URL = "https://guanhecapital.hk"
+
+
+def _link_lark_enabled() -> bool:
+    """MB_LINK_LARK=1/true 时,注册成功后推分享链接(默认关)。"""
+    return os.getenv(LINK_LARK_ENV, "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _report_date_for(session_date: str) -> date:
@@ -294,7 +311,13 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
         metadata["data_warnings"] = ft_warnings
         logger.warning(f"[mb] ⚠ 数据新鲜度告警: {ft_warnings}")
 
-    result = MorningBriefReportService().complete(
+    # 链接推送首发判定:该 report_date 已有 completed 行(ft_refresh 10:30
+    # 补数重注册、手动补挂)则本次不推,避免同一天重复打扰。
+    svc = MorningBriefReportService()
+    already_registered = ((svc.get_report_by_date(report_date) or {})
+                          .get("status") == "completed")
+
+    result = svc.complete(
         report_date,
         file_path=str(md_path),
         oss_object_name=oss_object,
@@ -316,6 +339,39 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
             )
         except Exception as exc:  # noqa: BLE001 — 告警失败不影响注册
             logger.warning(f"[mb] ⚠ 新鲜度 Lark 告警发送失败: {exc}")
+
+    # 发布链接推送(2026-11-21):首发注册成功后推一张小卡片(interactive,
+    # 「查看报告」按钮 open_url 分享链接)到群。webhook 文本消息不做链接
+    # unfurl(平台限制:链接预览是应用级能力,机器人收不到消息事件),故
+    # 用卡片承载;晚于上面的新鲜度告警发出,顺序不颠倒。
+    if do_oss and not already_registered and _link_lark_enabled():
+        try:
+            from lark_alert import notify_card
+
+            notify_card({
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "template": "turquoise",
+                    "title": {"tag": "plain_text",
+                              "content": f"📰 Morning Brief {result['report_date']}"},
+                },
+                "elements": [
+                    {"tag": "div", "text": {
+                        "tag": "lark_md",
+                        "content": f"美股交易日 {session_date},点击按钮查看报告"}},
+                    {"tag": "action", "actions": [{
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "查看报告"},
+                        "type": "primary",
+                        "url": (f"{SHARE_BASE_URL}/api/morning-brief-report/"
+                                f"shared/{result['share_token']}"),
+                    }]},
+                ],
+            })
+        except Exception as exc:  # noqa: BLE001 — 推送失败不影响注册
+            logger.warning(f"[mb] 发布链接 Lark 推送失败: {exc}")
+    elif already_registered:
+        logger.info("[mb] 该 report_date 已注册过,跳过发布链接推送")
 
 
 def register_fail(session_date: str, rc: int) -> int:

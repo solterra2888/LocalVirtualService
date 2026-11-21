@@ -117,6 +117,7 @@ class MorningBriefReportService:
                     oss_object_name = %s,
                     html_content = %s,
                     metadata = %s,
+                    share_token = COALESCE(share_token, %s),
                     error_message = NULL,
                     updated_at = NOW()
                 WHERE report_date = %s
@@ -127,11 +128,14 @@ class MorningBriefReportService:
                     oss_object_name,
                     html_content,
                     Json(metadata) if metadata is not None else None,
+                    share_token,
                     report_date,
                 ),
             )
             row = cursor.fetchone()
-            if row:  # 同日重注册:沿用既有 token,老链接不失效
+            if row:
+                # 既有 token 沿用(同日重注册不打断已分发链接);NULL(mark_generating
+                # 建行不带 token,当日首次完成)则取 COALESCE 填入的新值
                 share_token = row[0]
             else:  # mark_generating 未先行(手动补挂场景)
                 cursor.execute(
