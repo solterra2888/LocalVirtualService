@@ -1,13 +1,13 @@
 Metadata-Version: 2.4
 Name: guanhe-mcp
-Version: 0.5.1
-Summary: MCP server for GuanHe Agent API v0.5 (daily/weekly market reports, theme report, semantic search + vector RAG)
+Version: 0.6.0
+Summary: MCP server for GuanHe Agent API v0.6 (daily/weekly market reports, theme report, semantic search + vector RAG, SEC 13F holdings)
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
 Requires-Dist: httpx>=0.24.0
 Dynamic: requires-python
 
-# guanhe-mcp v0.5.1
+# guanhe-mcp v0.6.0
 
 Model Context Protocol (stdio) server that wraps the GuanHe **readonly** Agent HTTP API — `/api/v1/agent` (feed, search, reports) and `/api/v2/agent` (semantic / vector RAG).
 
@@ -18,6 +18,7 @@ Three families of read-only tools over your GuanHe data:
 1. **Feed & search** — time-ordered Twitter / YouTube / news items with keyword, ticker, tag, people, and country filters.
 2. **Reports** — daily / weekly digests and market / theme reports, delivered as a public `share_url`.
 3. **Semantic RAG** — concept-level vector search over uploaded documents and long-form content.
+4. **SEC 13F holdings** — quarterly positions, sector allocation, and top buys/sells of ~20 tracked institutions (Bridgewater, Berkshire, ARK, ...). Requires PAT scope `form13f:read`.
 
 ## Reports
 
@@ -48,7 +49,7 @@ The three report tools (`report_latest`, `report_by_date`, `report_list`) share 
 
 ```bash
 # From the published wheel (recommended for end users):
-pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.5.1-py3-none-any.whl"
+pip install "https://guanhecapital.hk/downloads/guanhe_mcp-0.6.0-py3-none-any.whl"
 
 # From local source (dev):
 cd tools/guanhe-mcp
@@ -214,6 +215,10 @@ https://www.guanhecapital.hk/agent/skill/GUANHE_DAILY.md
 ```
 
 ## Changelog
+
+### v0.6.0 (2026-11-21)
+- Added SEC 13F tools: `form13f_manifest` (quarters + tracked institutions, name → `filer_id` map) and `form13f_filer` (quarterly snapshots: sector allocation, top20 holdings with `prev_shares` QoQ deltas, top5 buys/sells by portfolio-weight change).
+- 13F endpoints require a PAT with the new `form13f:read` scope. Existing tokens can be re-created with the scope (or granted it via the `update_personal_tokens_add_form13f_scope.sql` migration on the server).
 
 ### v0.5.1 (2026-10-25)
 - **Reports:** added `the_close` (Bloomberg The Close PM brief), `closing_bell` (CNBC Closing Bell PM brief), and `bloomberg_surveillance` (Bloomberg Surveillance AM brief) — these kinds existed in source but were absent from the published v0.5.0 wheel.

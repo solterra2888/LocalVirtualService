@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-GuanHe MCP stdio server v0.5.1 (JSON-RPC over NDJSON).
+GuanHe MCP stdio server v0.6.0 (JSON-RPC over NDJSON).
 
 Wraps the GuanHe Agent HTTP API /api/v1/agent/*.
 No dependency on the official `mcp` PyPI package — only httpx.
@@ -13,6 +13,10 @@ Breaking changes from v0.1:
   - ticker param → tickers (comma-separated multi-value)
   - New tools: daily_items_batch, daily_multi_search, list_subscriptions, list_sources
   - report_* tools now require kind= parameter
+
+v0.6.0 additions (no breaking changes):
+  - New tools: form13f_manifest, form13f_filer (SEC quarterly institutional
+    holdings; requires PAT scope form13f:read)
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ import sys
 from typing import Any, Dict, List, Optional, Union
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_VERSION = "0.5.1"
+SERVER_VERSION = "0.6.0"
 
 _Q_SYNTAX_HINT = (
     "q syntax: space=AND (all terms match), OR (uppercase)=any match, "
@@ -103,6 +107,16 @@ _COUNTRIES_HINT = (
     "Comma-separated country full English names (OR logic). "
     "Example: countries=United States,China. NOT ISO codes — use 'United States' not 'US'. "
     "Read the countries field in daily_feed responses to discover valid values."
+)
+
+_FORM13F_HINT = (
+    "SEC Form 13F quarterly institutional holdings (global data, same for every "
+    "account). Institutions are a FIXED preset list (~20: Bridgewater, Berkshire, "
+    "ARK, Pershing Square, Soros, ...). "
+    "Call form13f_manifest FIRST to map an institution name to its filer_id. "
+    "Requires PAT scope form13f:read. "
+    "Data lag: filings are due within 45 days after quarter end, so the latest "
+    "quarter is typically 1-2 months behind today."
 )
 
 
@@ -522,6 +536,48 @@ TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    # 13 ─── form13f_manifest (v0.6 NEW) ──────────────────────────────────
+    {
+        "name": "form13f_manifest",
+        "description": (
+            "List quarters with 13F snapshots + the ~20 tracked institutions "
+            "(label, filer_id, latest quarter, portfolio value). "
+            "CALL THIS FIRST to resolve an institution name to its filer_id "
+            "before calling form13f_filer. "
+            + _FORM13F_HINT
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    # 14 ─── form13f_filer (v0.6 NEW) ─────────────────────────────────────
+    {
+        "name": "form13f_filer",
+        "description": (
+            "One institution's 13F quarterly snapshots: sector/asset allocation, "
+            "top20 holdings (with prev_shares for QoQ share deltas), and top5 "
+            "buys/sells by portfolio-weight change (long stocks & ETFs only). "
+            "Use for: 'Berkshire 最新持仓', 'Bridgewater 行业分布变化', "
+            "'Soros 上季度买了什么/卖了什么'. "
+            + _FORM13F_HINT
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filer_id": {
+                    "type": "integer",
+                    "description": "From form13f_manifest presets. E.g. 2 for Berkshire Hathaway.",
+                },
+                "quarter": {
+                    "type": "string",
+                    "description": (
+                        "Exact quarter label, e.g. '2026Q3'. "
+                        "Omit for ALL quarters (trend analysis, larger payload); "
+                        "pass to get a single quarter."
+                    ),
+                },
+            },
+            "required": ["filer_id"],
+        },
+    },
 ]
 
 
@@ -634,6 +690,20 @@ def _call_tool(name: str, arguments: Dict[str, Any], client: Any) -> str:
         r.raise_for_status()
         return r.text
 
+    # ── v0.6 form13f tools (GET /api/v1/agent/form13f/*) ─────────────────
+    if name == "form13f_manifest":
+        r = client.get("/api/v1/agent/form13f/manifest")
+        r.raise_for_status()
+        return r.text
+
+    if name == "form13f_filer":
+        r = client.get(
+            f"/api/v1/agent/form13f/filers/{args['filer_id']}",
+            params=_gp("quarter"),
+        )
+        r.raise_for_status()
+        return r.text
+
     raise ValueError(f"unknown tool {name!r}")
 
 
@@ -685,6 +755,8 @@ def run() -> None:
                         "                                                       chunks_by_locator (long PDFs/books)\n"
                         "6. Discovery / diagnostics (0 results, what sources do I have?)\n"
                         "                                                     → list_sources / list_subscriptions\n"
+                        "7. Institutional 13F holdings (quarterly positions, sector allocation, top buys/sells)?\n"
+                        "                                                     → form13f_manifest (name→filer_id), then form13f_filer\n"
                         "\nCITATION RULE: Search results are CHUNK-level snippets — ALWAYS cite the returned "
                         "content_id (and chunk chapter/page when present) in your answer so the user can "
                         "verify in the GuanHe UI. NEVER answer purely from chunk_text without referencing source."

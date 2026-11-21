@@ -22,8 +22,8 @@ PAT_PREFIX = "ght_"
 # Lookup prefix length (must match verify_pat query)
 PREFIX_LEN = 16
 
-ALLOWED_SCOPES = frozenset({"daily:read", "reports:read"})
-DEFAULT_SCOPES = ["daily:read", "reports:read"]
+ALLOWED_SCOPES = frozenset({"daily:read", "reports:read", "form13f:read"})
+DEFAULT_SCOPES = ["daily:read", "reports:read", "form13f:read"]
 
 
 class PersonalTokenService:

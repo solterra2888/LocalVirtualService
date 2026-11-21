@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Agent HTTP API v1 (readonly) — current as of server v0.5.0.
+Agent HTTP API v1 (readonly) — current as of server v0.6.0.
 
 Breaking changes from v0.1 (v0.2.0):
   - GET /search removed → use GET /daily?q=...
@@ -11,6 +11,10 @@ Breaking changes from v0.1 (v0.2.0):
   - New endpoints: POST /daily/batch, POST /daily/multi, GET /subscriptions, GET /sources
   - Legacy v0.1 paths (/search, /reports/twitter-daily/*, /reports/youtube-daily/*)
     removed entirely in v0.5.0 (previously 410 Gone) — use the replacements above.
+
+v0.6.0 additions (no breaking changes):
+  - GET /form13f/manifest, GET /form13f/filers/{filer_id} — SEC quarterly
+    institutional holdings (global read-only; PAT scope form13f:read).
 
 Auth: Bearer JWT (web) or Bearer PAT (ght_...).
 """
@@ -28,6 +32,8 @@ from backend.schemas.agent import (
     AgentDailyFeedResponse,
     AgentDailyItemDetail,
     AgentDailyMultiResponse,
+    AgentForm13fFilerDetailResponse,
+    AgentForm13fManifestResponse,
     AgentMultiSearchRequest,
     AgentReportBodyResponse,
     AgentReportListResponse,
@@ -288,5 +294,53 @@ def agent_report_by_date(
     )
     if data is None:
         raise HTTPException(status_code=404, detail="No report for this date")
+    _rl(response, user)
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Form 13F (SEC quarterly institutional holdings — global read-only data,
+# PAT scope: form13f:read)
+# ---------------------------------------------------------------------------
+
+@router.get("/form13f/manifest", response_model=AgentForm13fManifestResponse)
+def agent_form13f_manifest(
+    response: Response,
+    user: TokenData = Depends(require_pat_scopes("form13f:read")),
+):
+    """Quarters with snapshots + the ~20 tracked institutions (label → filer_id).
+
+    Call this FIRST to resolve an institution name (e.g. 'Berkshire Hathaway')
+    to its filer_id, then call /form13f/filers/{filer_id}.
+    """
+    data = _svc().form13f_manifest()
+    _rl(response, user)
+    return data
+
+
+@router.get("/form13f/filers/{filer_id}", response_model=AgentForm13fFilerDetailResponse)
+def agent_form13f_filer_detail(
+    response: Response,
+    filer_id: int,
+    quarter: Optional[str] = Query(
+        None,
+        description=(
+            "Exact quarter label, e.g. '2026Q3'. Omit for ALL quarters "
+            "(trend analysis, larger payload); pass to get a single quarter."
+        ),
+    ),
+    user: TokenData = Depends(require_pat_scopes("form13f:read")),
+):
+    """One institution's quarterly snapshots: sector allocation, top20 holdings
+    (with prev_shares for QoQ deltas), and top5 buys/sells.
+
+    NOTE: 13F filings are due within 45 days after quarter end — the latest
+    quarter lags ~1-2 months behind "today".
+    """
+    data = _svc().form13f_filer_detail(filer_id, quarter=quarter)
+    if data is None:
+        detail = f" or no snapshot for quarter {quarter}" if quarter else ""
+        raise HTTPException(
+            status_code=404, detail=f"Filer id={filer_id} not found{detail}")
     _rl(response, user)
     return data

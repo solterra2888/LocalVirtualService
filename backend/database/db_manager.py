@@ -666,7 +666,7 @@ class DatabaseManager:
                     name         TEXT NOT NULL,
                     prefix       TEXT NOT NULL,
                     token_hash   TEXT NOT NULL,
-                    scopes       JSONB NOT NULL DEFAULT '["daily:read", "reports:read"]'::jsonb,
+                    scopes       JSONB NOT NULL DEFAULT '["daily:read", "reports:read", "form13f:read"]'::jsonb,
                     expires_at   TIMESTAMPTZ,
                     last_used_at TIMESTAMPTZ,
                     revoked_at   TIMESTAMPTZ,

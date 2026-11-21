@@ -1,8 +1,8 @@
-# GuanHe Daily — Agent Skill (v0.5.1)
+# GuanHe Daily — Agent Skill (v0.6.0)
 
-这个 skill 让 Cursor、Claude Code、Codex 等 AI 助手能够读取你在 **GuanHe** 平台上积累的信息——包括你订阅的 Feed（Twitter、YouTube、新闻等）、你自己上传的文件（PDF、文档、图片等），以及通过 **Vector RAG** 对长文档进行语义级问答。
+这个 skill 让 Cursor、Claude Code、Codex 等 AI 助手能够读取你在 **GuanHe** 平台上积累的信息——包括你订阅的 Feed（Twitter、YouTube、新闻等）、你自己上传的文件（PDF、文档、图片等）、通过 **Vector RAG** 对长文档进行语义级问答，以及 **SEC 13F 机构季度持仓**。
 
-> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.5.1`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。
+> **前置要求**：本 Skill 通过 MCP（`guanhe-mcp >= 0.6.0`）执行实际数据请求。使用前请先按「Agent 接入 → MCP」页面配置好 MCP，并在 `mcp.json` 中填入有效的 `GUANHE_TOKEN`（PAT）。13F 工具要求 PAT 勾选 `form13f:read` scope（v0.6.0 前创建的旧 PAT 需重建或在服务端补授权）。
 
 ---
 
@@ -12,6 +12,7 @@ MCP 工具只返回当前账号有权限访问的数据：
 - **自己上传的文件**：PDF、图片、音频、文档等，经平台处理后的内容
 - **他人分享给你的文件**：其他用户明确分享到你账号的上传内容
 - **已启用的 Feed 订阅**：订阅列表中状态为「已启用」的 Twitter、YouTube、新闻、知识星球等频道；已停用的订阅不在结果中
+- **全局 13F 机构持仓**（`form13f:read`）：SEC 13F 季度持仓快照，覆盖固定关注的约 20 家机构（Bridgewater、Berkshire、ARK、Pershing Square、Soros 等）——非账号私有数据，所有账号看到相同内容
 
 ---
 
@@ -24,7 +25,8 @@ MCP 工具只返回当前账号有权限访问的数据：
     ├── 问题混合专有名词 + 概念？→ hybrid_search               (v2)
     ├── 纯概念/语义问题？        → semantic_search              (v2)
     ├── 已知章节/页码，需要原文？→ chunks_by_locator            (v2)
-    └── 短 Feed 文章全文？       → daily_items_batch            (v1)
+    ├── 短 Feed 文章全文？       → daily_items_batch            (v1)
+    └── 机构 13F 持仓/行业分布/加减仓？→ form13f_manifest → form13f_filer  (v1)
 ```
 
 **v1 vs v2 选择速查：**
@@ -67,6 +69,10 @@ MCP 工具只返回当前账号有权限访问的数据：
 | **这本书讲了什么投资方法论？** | **`semantic_search`** | **`query=...`** |
 | **Powell 对降息的看法是什么？** | **`hybrid_search`** | **`query=...`** |
 | **读这章节的完整内容** | **`chunks_by_locator`** | **`file_id, chapter`** |
+| **巴菲特/Bridgewater 最新持仓是什么？** | **`form13f_filer`** | **先 `form13f_manifest` 拿 `filer_id`** |
+| **ARK 上季度买了什么、卖了什么？** | **`form13f_filer`** | **`filer_id`（看 top5_buys/top5_sells）** |
+| **机构行业分布变化（近几季）** | **`form13f_filer`** | **不传 quarter，对比 sector_alloc** |
+| **有哪些机构 / 哪些季度可查？** | **`form13f_manifest`** | — |
 
 > **重要**：用户不会说"调用 daily_feed"——他们只会说"帮我看看今天的内容"。AI 助手负责根据语义自动选择正确的工具和参数。
 
@@ -87,6 +93,7 @@ MCP 工具只返回当前账号有权限访问的数据：
 | 「帮我看今天/本周市场报告」 | `report_latest kind=market_daily / market_weekly` |
 | 「帮我看主题报告」 | `report_latest kind=theme` |
 | 「帮我看 The Close / Closing Bell / Surveillance」 | `report_latest kind=the_close / closing_bell / bloomberg_surveillance` |
+| 「某机构最新 13F 持仓 / 行业分布 / 加减仓」 | `form13f_manifest`（拿 filer_id）→ `form13f_filer` |
 
 0 条时才换入口或放宽参数。**不要**同时调用 `daily_feed` 和 `daily_multi_search` 搜同一话题。
 
@@ -242,6 +249,52 @@ GuanHe 信息不足以回答核心问题时，主动触发 web_search / web_extr
 > 旧别名 `twitter` / `youtube` / `market` 仍被接受，分别等同于 `twitter_daily` / `youtube_daily` / `market_daily`。
 
 `report_by_date` 还需要 `date=YYYY-MM-DD`。特别注意：`market_weekly` 使用**周五**的日期作为 `week_end`（如 `2026-06-13`）。
+
+---
+
+### `form13f_manifest` / `form13f_filer` — SEC 13F 机构季度持仓（v0.6 新增）
+
+**数据说明**（回答前先了解）：
+- 覆盖固定关注的约 20 家机构（Bridgewater、Berkshire、ARK、Oaktree、Pershing Square、Soros 等），完整清单以 `form13f_manifest` 返回为准
+- 数据来自 SEC EDGAR 13F-HR 申报，**滞后约 1-2 个月**（SEC 允许季末后 45 天内申报）——回答时必须说明数据对应的季度，不要当成实时仓位
+- 需要 PAT 含 `form13f:read` scope
+
+**`form13f_manifest`**（无参数）：
+返回 `quarters`（可查季度，如 `2024Q1`–`2026Q3`）+ `presets`（每家机构的 `filer_id` / `label` / `latest_quarter` / `latest_total_value`）。机构名 → `filer_id` 的映射以这里为准，不要凭记忆猜 id。
+
+**`form13f_filer`**：
+- `filer_id`（必填）：来自 manifest
+- `quarter`（可选）：如 `"2026Q3"`。不传返回**全部季度**（适合行业分布趋势对比，payload 较大）；传则只返回单季
+
+返回结构（每季度一条快照）：
+
+```json
+{
+  "quarter": "2026Q3",
+  "total_value": 22985792515,
+  "position_count": 974,
+  "sector_alloc": {"Technology": 23.68, "Large Cap Blend": 16.88},
+  "top20_holdings": [
+    {"issuer": "STATE STR SPDR S&P 500 ETF T", "title": "TR UNIT", "cusip": "78462F103",
+     "putcall": "", "value": 2595471644, "shares": 3403317, "pct": 11.29, "prev_shares": 5320308}
+  ],
+  "top5_buys":  [{"issuer": "QUALCOMM INC", "kind": "increase", "pct": 0.70, "dpct": 0.58, "spct": 440.49}],
+  "top5_sells": [{"issuer": "ALPHABET INC", "kind": "decrease", "pct": 0.69, "dpct": -1.25, "spct": -65.19}]
+}
+```
+
+**口径提示**：
+- `top20_holdings`：申报表中市值最大的 20 条，**含 Put/Call 期权行**（用 `putcall` 字段区分：`""` 股票/ETF、`"Call"`、`"Put"`）
+- `prev_shares`：相对上一报告期同一 CUSIP+PutCall 的股数（对照全量持仓，不限上季 Top 20）；`null` = 上季无此仓（新建）
+- `top5_buys` / `top5_sells`：只看**股票与 ETF 多头**（不含 Put/Call、债券、可转债、权证），按「占组合权重变化 Δ%」排序；`kind` = `new` / `increase` / `decrease` / `exited`；`pct` 的分母是股票+ETF 多头合计（不是组合总值）
+- `sector_alloc`：GICS 11 行业 + ETF 9 类资产 + Other，合计约 100
+
+**典型两步用法**：
+```
+第一步：form13f_manifest → 找到 "Bridgewater Associates" 对应的 filer_id
+第二步：form13f_filer filer_id=1              # 全季度趋势
+        form13f_filer filer_id=1 quarter=2026Q3   # 只取单季
+```
 
 ---
 

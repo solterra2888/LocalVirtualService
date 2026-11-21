@@ -26,6 +26,7 @@ type TokenRow = {
 const SCOPE_OPTIONS = [
   { label: 'Daily feed & search (daily:read)', value: 'daily:read' },
   { label: 'All reports — Twitter/YouTube/市场日报/周报/主题/收盘简报 (reports:read)', value: 'reports:read' },
+  { label: 'SEC 13F 机构季度持仓 (form13f:read)', value: 'form13f:read' },
 ];
 
 const CodeBlock: React.FC<{
@@ -343,7 +344,7 @@ const ApiKeysPage: React.FC = () => {
     form.resetFields();
     form.setFieldsValue({
       name: 'Agent',
-      scopes: ['daily:read', 'reports:read'],
+      scopes: ['daily:read', 'reports:read', 'form13f:read'],
       expires_days: 'never',
     });
     setCreatedPlaintext(null);

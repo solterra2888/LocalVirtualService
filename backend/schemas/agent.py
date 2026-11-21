@@ -289,6 +289,95 @@ class AgentReportBodyResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Form 13F (SEC quarterly institutional holdings — global read-only data)
+# ---------------------------------------------------------------------------
+
+class AgentForm13fPreset(BaseModel):
+    filer_id: int = Field(
+        ..., description="Preset filer id — pass to /form13f/filers/{filer_id}."
+    )
+    label: str = Field(..., description="Display name, e.g. 'Berkshire Hathaway Inc'")
+    cik: Optional[str] = Field(None, description="10-digit SEC CIK")
+    latest_quarter: Optional[str] = Field(None, description="Latest snapshotted quarter, e.g. '2026Q3'")
+    latest_total_value: Optional[int] = Field(None, description="Portfolio value in USD")
+
+
+class AgentForm13fManifestResponse(BaseModel):
+    quarters: List[str] = Field(
+        ..., description="Snapshotted quarters ascending, e.g. ['2024Q1', ..., '2026Q3']"
+    )
+    presets: List[AgentForm13fPreset] = Field(
+        ..., description="The ~20 tracked institutions (label → filer_id map)."
+    )
+
+
+class AgentForm13fHolding(BaseModel):
+    issuer: str
+    title: Optional[str] = Field(None, description="Share class ('COM', 'CL A', ...)")
+    cusip: str
+    putcall: str = Field("", description="'' stock/ETF long | 'Call' | 'Put'")
+    value: int = Field(..., description="Position value in USD")
+    shares: Optional[int] = None
+    pct: float = Field(..., description="% of portfolio (value / quarter total)")
+    prev_shares: Optional[int] = Field(
+        None,
+        description="Shares held in the previous quarter (full holdings, not just "
+                    "prior top20). null = no prior-quarter position (new).",
+    )
+
+
+class AgentForm13fTopChange(BaseModel):
+    issuer: str
+    cusip: str
+    putcall: str = ""
+    kind: str = Field(
+        ..., description="'new' | 'increase' | 'decrease' | 'exited'"
+    )
+    value: int = Field(..., description="Current-quarter value in USD")
+    pct: float = Field(..., description="Current % of stock+ETF-long portfolio")
+    dpct: float = Field(..., description="Change in % of portfolio vs previous quarter")
+    spct: Optional[float] = Field(
+        None, description="Share count change %. null for new positions."
+    )
+
+
+class AgentForm13fQuarterSnapshot(BaseModel):
+    quarter: str
+    total_value: Optional[int] = Field(None, description="Total portfolio value in USD")
+    position_count: Optional[int] = None
+    sector_alloc: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Sector/asset allocation % {'Technology': 30.29} — GICS 11 "
+                    "sectors + 9 ETF asset classes + Other.",
+    )
+    top20_holdings: List[AgentForm13fHolding] = Field(
+        default_factory=list,
+        description="20 largest positions by value (includes option legs).",
+    )
+    top5_buys: List[AgentForm13fTopChange] = Field(
+        default_factory=list,
+        description="Top 5 position increases/new entries by weight gain. Long "
+                    "stocks & ETFs only (no Put/Call, bonds, or convertibles); "
+                    "denominator = stock+ETF long total.",
+    )
+    top5_sells: List[AgentForm13fTopChange] = Field(
+        default_factory=list,
+        description="Top 5 position decreases/exits by weight loss. Same scope as top5_buys.",
+    )
+
+
+class AgentForm13fFilerDetailResponse(BaseModel):
+    filer_id: int
+    name: str
+    cik: Optional[str] = None
+    quarters: List[AgentForm13fQuarterSnapshot] = Field(
+        default_factory=list,
+        description="Snapshots ascending by quarter. 13F filings are due within "
+                    "45 days after quarter end — data is inherently lagged.",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Request bodies (POST endpoints)
 # ---------------------------------------------------------------------------
 

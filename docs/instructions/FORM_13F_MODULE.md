@@ -109,6 +109,7 @@
 | `backend/services/form13f_service.py` | CIK 同步、amendment 折叠、快照、查询 |
 | `backend/tasks/form13f_tasks.py` | Celery：`form13f_poll` / `form13f_aggregate`（其余名为兼容别名） |
 | `backend/api/form13f.py` | `/api/form13f/*` |
+| `backend/api/agent_v1.py` | Agent 只读端点 `/api/v1/agent/form13f/*`（2026-11-21 起；`AgentService` 经 service_registry 复用本服务单例） |
 | `backend/utils/form13f_sector_map.py` | CUSIP→GICS + ETF 分类 |
 | `web-frontend/src/pages/Form13FPage.tsx` | 仪表盘 |
 | `web-frontend/src/components/form13f/Form13FSectorChart.tsx` | 行业分布堆叠柱图（echarts） |
@@ -128,7 +129,16 @@
 | `GET /api/form13f/filers/{id}` | 全季度快照 |
 | `POST /api/form13f/refresh` | `poll` / `reaggregate`（`quarter` 可选）；`backfill`/`retry`/`import` 等同 poll |
 
-快照 JSONB 仍含 `top5_buys` / `top5_sells`（后端继续写入），前端 `/form13f` 已不再展示。
+**Agent 只读端点**（JWT 或 PAT scope `form13f:read`，guanhe-mcp ≥ 0.6.0 的 `form13f_manifest` / `form13f_filer` 工具走这里）：
+
+| Endpoint | 说明 |
+|---|---|
+| `GET /api/v1/agent/form13f/manifest` | 精简清单（quarters + presets，含 filer_id） |
+| `GET /api/v1/agent/form13f/filers/{id}?quarter=` | 快照（响应结构与 web 端一致，额外含 `prev_shares` / top5 买卖；quarter 过滤在 `AgentService.form13f_filer_detail` 响应层做） |
+
+存量 PAT 补 scope：`migrations/update_personal_tokens_add_form13f_scope.sql`。
+
+快照 JSONB 仍含 `top5_buys` / `top5_sells`（后端继续写入），前端 `/form13f` 已不再展示（Agent 端点会返回）。
 
 ---
 

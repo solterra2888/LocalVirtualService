@@ -276,8 +276,8 @@ class TestUnknownTool:
 # ---------------------------------------------------------------------------
 
 class TestToolsList:
-    def test_twelve_tools_defined(self):
-        assert len(srv.TOOLS) == 12
+    def test_fourteen_tools_defined(self):
+        assert len(srv.TOOLS) == 14
 
     def test_tool_names(self):
         names = {t["name"] for t in srv.TOOLS}
@@ -286,6 +286,7 @@ class TestToolsList:
             "list_subscriptions", "list_sources",
             "report_latest", "report_by_date", "report_list",
             "semantic_search", "hybrid_search", "chunks_by_locator",
+            "form13f_manifest", "form13f_filer",
         }
         assert names == expected
 
@@ -374,8 +375,8 @@ class TestInitialize:
         assert result["serverInfo"].get("title"), "serverInfo.title must be set"
         assert result.get("instructions"), "instructions must be set"
 
-    def test_version_is_0_5_1(self):
-        assert srv.SERVER_VERSION == "0.5.1"
+    def test_version_is_0_6_0(self):
+        assert srv.SERVER_VERSION == "0.6.0"
 
     def test_daily_feed_has_people_countries_hints(self):
         tool = next(t for t in srv.TOOLS if t["name"] == "daily_feed")
@@ -383,3 +384,51 @@ class TestInitialize:
         assert "people" in props
         assert "countries" in props
         assert "Trump" in props["people"]["description"]
+
+
+class TestForm13fManifest:
+    def test_get_correct_path_no_params(self):
+        client = _make_client_mock()
+        srv._call_tool("form13f_manifest", {}, client)
+        client.get.assert_called_once_with("/api/v1/agent/form13f/manifest")
+
+    def test_extra_args_ignored(self):
+        # manifest 无参数；多余参数不应进入 query string
+        client = _make_client_mock()
+        srv._call_tool("form13f_manifest", {"quarter": "2026Q3"}, client)
+        _, kwargs = client.get.call_args
+        assert kwargs.get("params") is None
+
+
+class TestForm13fFiler:
+    def test_filer_id_in_path(self):
+        client = _make_client_mock()
+        srv._call_tool("form13f_filer", {"filer_id": 2}, client)
+        client.get.assert_called_once_with(
+            "/api/v1/agent/form13f/filers/2", params={})
+
+    def test_quarter_param_passed(self):
+        client = _make_client_mock()
+        srv._call_tool(
+            "form13f_filer",
+            {"filer_id": 2, "quarter": "2026Q3"},
+            client)
+        _, kwargs = client.get.call_args
+        assert kwargs["params"] == {"quarter": "2026Q3"}
+
+    def test_none_quarter_excluded(self):
+        client = _make_client_mock()
+        srv._call_tool("form13f_filer", {"filer_id": 2, "quarter": None}, client)
+        _, kwargs = client.get.call_args
+        assert kwargs["params"] == {}
+
+
+class TestToolCountAndRegistration:
+    def test_14_tools_registered(self):
+        names = [t["name"] for t in srv.TOOLS]
+        assert len(names) == 14
+        assert "form13f_manifest" in names
+        assert "form13f_filer" in names
+
+    def test_server_version_bumped(self):
+        assert srv.SERVER_VERSION == "0.6.0"

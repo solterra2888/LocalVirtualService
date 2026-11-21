@@ -22,7 +22,7 @@ class CreateTokenRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80, description="Human-readable label")
     scopes: Optional[List[str]] = Field(
         None,
-        description="Subset of daily:read, reports:read; default both",
+        description="Subset of daily:read, reports:read, form13f:read; default all",
     )
     expires_days: Optional[int] = Field(
         None,

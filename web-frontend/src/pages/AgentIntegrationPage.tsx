@@ -365,7 +365,7 @@ const AgentIntegrationPage: React.FC = () => {
     [apiOrigin]
   );
 
-  /** 与 docs/agent/GUANHE_DAILY.md 工具路由一致（v0.5.1） */
+  /** 与 docs/agent/GUANHE_DAILY.md 工具路由一致（v0.6.0） */
   const skillRoutingRows: IntentRow[] = [
     { intent: '今天有什么值得关注的？最近有什么新动态？', endpoint: 'daily_feed', params: 'since=24h' },
     { intent: '这周的信息帮我总结一下', endpoint: 'daily_feed', params: 'since=7d（默认，可省略）' },
@@ -415,6 +415,10 @@ const AgentIntegrationPage: React.FC = () => {
     { intent: '最新的 Closing Bell Report', endpoint: 'report_latest', params: 'kind=closing_bell' },
     { intent: '最新的 Bloomberg Surveillance Report', endpoint: 'report_latest', params: 'kind=bloomberg_surveillance' },
     { intent: '有哪些报告可以看？', endpoint: 'report_list', params: 'kind=…（8 种，见下方对照表）' },
+    { intent: '巴菲特 / Bridgewater 最新持仓是什么？', endpoint: 'form13f_filer', params: '先 form13f_manifest 拿 filer_id' },
+    { intent: 'ARK / Soros 上季度买了什么、卖了什么？', endpoint: 'form13f_filer', params: 'filer_id（看 top5_buys / top5_sells）' },
+    { intent: '机构近几季行业分布变化', endpoint: 'form13f_filer', params: 'filer_id，不传 quarter 对比各季 sector_alloc' },
+    { intent: '有哪些 13F 机构 / 季度可查？', endpoint: 'form13f_manifest', params: '—（需 PAT 含 form13f:read scope）' },
     { intent: '这本书 / 这份研报关于 XX 的观点是什么', endpoint: 'hybrid_search', params: 'query=XX（语义 + 关键词融合）' },
     { intent: '帮我语义搜索一下关于价值投资方法论的内容', endpoint: 'semantic_search', params: 'query=价值投资方法论, top_k=5' },
     { intent: '给我读一下第 3 章 / 第 12 段原文', endpoint: 'chunks_by_locator', params: 'file_id=…, chapter="第3章" 或 chunk_idx_range=[12,14]' },
@@ -549,7 +553,10 @@ const AgentIntegrationPage: React.FC = () => {
                 API Keys
               </button>
               」页面生成一个 PAT，复制以{' '}
-              <code style={{ fontSize: 12, color: TEAL }}>ght_</code> 开头的字符串备用。
+              <code style={{ fontSize: 12, color: TEAL }}>ght_</code> 开头的字符串备用。创建时可按需勾选 scope：
+              <code style={{ fontSize: 12, color: TEAL }}>daily:read</code>（时间线/搜索）、
+              <code style={{ fontSize: 12, color: TEAL }}>reports:read</code>（报告）、
+              <code style={{ fontSize: 12, color: TEAL }}>form13f:read</code>（13F 机构持仓）。
             </p>
 
             <div style={{ height: 32 }} />
@@ -561,11 +568,31 @@ const AgentIntegrationPage: React.FC = () => {
               直接从服务器下载安装，无需 GitHub 访问权限：
             </p>
             <CodeBlock dark={dark} label="终端">
-              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.5.1-py3-none-any.whl"`}
+              {`pip install "${apiOrigin || 'https://your-api-host'}/downloads/guanhe_mcp-0.6.0-py3-none-any.whl"`}
             </CodeBlock>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '8px 0 0' }}>
               安装后执行 <code style={{ fontSize: 12, color: TEAL }}>which python</code> 记下 Python 绝对路径，下一步需要用。
             </p>
+            <div
+              style={{
+                marginTop: 12,
+                padding: '10px 14px',
+                borderRadius: 8,
+                borderLeft: `3px solid ${TEAL}`,
+                background: dark ? DARK_SURFACE : '#f0fdfa',
+                fontSize: 13,
+                color: dark ? '#94a3b8' : '#475569',
+                lineHeight: 1.65,
+              }}
+            >
+              <strong style={{ color: dark ? '#e2e8f0' : '#0f766e' }}>已安装过旧版本？</strong>
+              在同一环境执行{' '}
+              <code style={{ fontSize: 12, color: TEAL }}>pip install --upgrade "…/downloads/guanhe_mcp-0.6.0-py3-none-any.whl"</code>
+              （URL 同上），然后<strong style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>完全退出并重启</strong> Cursor / Claude Desktop / Hermes——MCP
+              server 是宿主进程拉起的 stdio 子进程，只升级包不重启宿主不会生效。新版对旧工具完全向下兼容；13F
+              工具额外要求 PAT 含 <code style={{ fontSize: 12, color: TEAL }}>form13f:read</code> scope（旧 PAT
+              由服务端统一补授权，或在「API Keys」重建勾选该 scope 的 token）。
+            </div>
 
             <div style={{ height: 32 }} />
 
@@ -608,13 +635,14 @@ const AgentIntegrationPage: React.FC = () => {
               数据范围
             </h3>
             <p style={{ fontSize: 14, color: dark ? '#94a3b8' : '#475569', margin: '0 0 12px', lineHeight: 1.65 }}>
-              MCP 工具只返回当前 PAT 所属账号有权限访问的数据，包含以下三类：
+              MCP 工具只返回当前 PAT 所属账号有权限访问的数据，包含以下四类：
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
               {[
                 { icon: '📁', title: '自己上传的文件', desc: 'PDF、图片、音频、文档等，经平台处理后的内容' },
                 { icon: '🔗', title: '他人分享给你的文件', desc: '其他用户明确分享到你账号的上传内容' },
                 { icon: '📡', title: '已启用的 Feed 订阅', desc: '订阅列表中状态为「已启用」的 Twitter、YouTube、新闻、知识星球等频道；已停用（Disabled）的订阅不在结果中' },
+                { icon: '🏛️', title: '全局 13F 机构持仓（form13f:read）', desc: 'SEC 13F 季度持仓快照：约 20 家关注机构（Bridgewater、Berkshire、ARK 等）的行业分布、Top 20 持仓与季度加减仓。全局数据，非账号私有；数据滞后约 1-2 个月（SEC 季末后 45 天内申报）' },
               ].map(({ icon, title, desc }) => (
                 <div key={title} style={{
                   display: 'flex', gap: 12, padding: '12px 14px',
@@ -643,10 +671,10 @@ const AgentIntegrationPage: React.FC = () => {
 
             {/* 可用工具 */}
             <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 6px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              可用工具（v0.5.1）
+              可用工具（v0.6.0）
             </h3>
             <p style={{ fontSize: 13, color: dark ? '#64748b' : '#94a3b8', margin: '0 0 14px', lineHeight: 1.6 }}>
-              共 12 个工具，分为 v1 关键词 / 时间线 和 v2 语义 / Vector RAG 两类。
+              共 14 个工具，分为 v1 关键词 / 时间线（含 13F 持仓）和 v2 语义 / Vector RAG 两类。
             </p>
 
             {/* v1 tools */}
@@ -667,12 +695,14 @@ const AgentIntegrationPage: React.FC = () => {
                 { intent: 'report_latest', endpoint: '最新报告；kind ∈ twitter_daily / youtube_daily / market_daily / market_weekly / theme / the_close / closing_bell / bloomberg_surveillance（旧值 twitter/youtube/market 仍可用）' },
                 { intent: 'report_by_date', endpoint: '指定日期报告（date=YYYY-MM-DD）；market_weekly 的 date 取 week_end（周五）。kind 同上' },
                 { intent: 'report_list', endpoint: '报告列表（可分页）。kind 同上' },
+                { intent: 'form13f_manifest', endpoint: '13F 可查季度 + 约 20 家关注机构清单（label → filer_id 映射）；调用 form13f_filer 前先取 filer_id。需 PAT 含 form13f:read' },
+                { intent: 'form13f_filer', endpoint: '机构季度快照：行业分布（sector_alloc）、Top 20 持仓（含 QoQ 股数变化）、Top 5 加减仓（top5_buys / top5_sells，仅股票与 ETF 多头口径）；quarter 可选，不传返回全部季度' },
               ]}
             />
 
             <div style={{ height: 20 }} />
 
-            {/* 报告类型对照（v0.5.1） */}
+            {/* 报告类型对照（v0.6.0） */}
             <IntentTable
               dark={dark}
               col1="kind"
@@ -726,6 +756,7 @@ const AgentIntegrationPage: React.FC = () => {
               { intent: '关键词精确搜索 Feed 内容', endpoint: 'daily_feed q=…（v1）' },
               { intent: '读取单条详情 / 字幕 / 原文', endpoint: 'daily_item / daily_items_batch（v1）' },
               { intent: '看 Twitter / YouTube / 市场 / 主题 / The Close / Closing Bell / Surveillance 报告', endpoint: 'report_latest / report_by_date（v1）' },
+              { intent: '查机构 13F 持仓 / 行业分布 / 加减仓', endpoint: 'form13f_manifest → form13f_filer（v1）' },
               { intent: '对上传的长文档 / 电子书做语义提问', endpoint: 'hybrid_search（v2）首选' },
               { intent: '只想用纯语义相似度检索', endpoint: 'semantic_search（v2）' },
               { intent: '定位某章节 / 精确读取原始分块', endpoint: 'chunks_by_locator（v2）' },
@@ -845,7 +876,7 @@ const AgentIntegrationPage: React.FC = () => {
 
             {/* daily_feed 参数详情 */}
             <h4 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: dark ? '#e2e8f0' : '#1e293b' }}>
-              daily_feed 常用参数（v0.5.1）
+              daily_feed 常用参数（v0.6.0）
             </h4>
             <IntentTable
               dark={dark}

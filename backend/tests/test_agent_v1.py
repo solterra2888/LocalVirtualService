@@ -818,3 +818,119 @@ class TestMapAgentSource:
         assert self._call("feed", "zhishixingqiu") == "zhishixingqiu"
         assert self._call("feed", "substack") == "substack"
         assert self._call("feed", "weibo") == "weibo"
+
+
+# ---------------------------------------------------------------------------
+# Tests: GET /api/v1/agent/form13f/*  (PAT scope form13f:read)
+# ---------------------------------------------------------------------------
+
+def _mock_form13f_manifest():
+    from backend.schemas.agent import AgentForm13fManifestResponse, AgentForm13fPreset
+
+    return AgentForm13fManifestResponse(
+        quarters=["2026Q2", "2026Q3"],
+        presets=[
+            AgentForm13fPreset(
+                filer_id=2, label="Berkshire Hathaway Inc", cik="0001067983",
+                latest_quarter="2026Q3", latest_total_value=295_000_000_000),
+            AgentForm13fPreset(
+                filer_id=1, label="Bridgewater Associates", cik="0001350694",
+                latest_quarter="2026Q3", latest_total_value=17_000_000_000),
+        ],
+    )
+
+
+def _mock_form13f_detail(quarters=("2026Q2", "2026Q3")):
+    from backend.schemas.agent import AgentForm13fFilerDetailResponse
+
+    return AgentForm13fFilerDetailResponse(
+        filer_id=2,
+        name="Berkshire Hathaway Inc",
+        cik="0001067983",
+        quarters=[
+            {
+                "quarter": q,
+                "total_value": 295_000_000_000,
+                "position_count": 40,
+                "sector_alloc": {"Financial Services": 40.1, "Technology": 25.2},
+                "top20_holdings": [
+                    {
+                        "issuer": "APPLE INC", "title": "COM", "cusip": "037833100",
+                        "putcall": "", "value": 120_000_000_000, "shares": 600_000_000,
+                        "pct": 40.6, "prev_shares": 610_000_000,
+                    }
+                ],
+                "top5_buys": [
+                    {
+                        "issuer": "APPLE INC", "cusip": "037833100", "putcall": "",
+                        "kind": "increase", "value": 120_000_000_000,
+                        "pct": 40.6, "dpct": 2.1, "spct": 5.0,
+                    }
+                ],
+                "top5_sells": [],
+            }
+            for q in quarters
+        ],
+    )
+
+
+class TestForm13fEndpoints:
+    def test_manifest_returns_200(self):
+        client = _build_test_client()
+        with _patched_service("form13f_manifest", _mock_form13f_manifest()):
+            resp = client.get(
+                "/api/v1/agent/form13f/manifest",
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["quarters"] == ["2026Q2", "2026Q3"]
+        assert data["presets"][0]["filer_id"] == 2
+        assert data["presets"][0]["label"] == "Berkshire Hathaway Inc"
+
+    def test_filer_detail_returns_200_with_all_quarters(self):
+        client = _build_test_client()
+        with _patched_service("form13f_filer_detail", _mock_form13f_detail()) as mock_svc:
+            resp = client.get(
+                "/api/v1/agent/form13f/filers/2",
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["filer_id"] == 2
+        assert [q["quarter"] for q in data["quarters"]] == ["2026Q2", "2026Q3"]
+        # quarter 不传时不给 service 传 quarter
+        call_kwargs = mock_svc.call_args[1]
+        assert call_kwargs.get("quarter") is None
+
+    def test_filer_detail_quarter_passthrough(self):
+        client = _build_test_client()
+        with _patched_service("form13f_filer_detail", _mock_form13f_detail()) as mock_svc:
+            resp = client.get(
+                "/api/v1/agent/form13f/filers/2",
+                params={"quarter": "2026Q3"},
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 200
+        call_kwargs = mock_svc.call_args[1]
+        assert call_kwargs.get("quarter") == "2026Q3"
+
+    def test_filer_detail_404_when_service_returns_none(self):
+        client = _build_test_client()
+        with _patched_service("form13f_filer_detail", None):
+            resp = client.get(
+                "/api/v1/agent/form13f/filers/999",
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 404
+
+    def test_filer_detail_404_message_mentions_quarter(self):
+        client = _build_test_client()
+        with _patched_service("form13f_filer_detail", None):
+            resp = client.get(
+                "/api/v1/agent/form13f/filers/2",
+                params={"quarter": "2030Q1"},
+                headers={"Authorization": "Bearer ght_test"},
+            )
+        assert resp.status_code == 404
+        assert "2030Q1" in resp.json()["detail"]

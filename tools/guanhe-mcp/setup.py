@@ -5,7 +5,7 @@ from setuptools import setup
 
 setup(
     name="guanhe-mcp",
-    version="0.5.1",
+    version="0.6.0",
     description="MCP stdio server for GuanHe Agent API v0.5 (daily/weekly market reports, theme report, semantic search)",
     python_requires=">=3.9",
     packages=["guanhe_mcp"],

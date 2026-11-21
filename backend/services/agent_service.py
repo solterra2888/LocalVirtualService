@@ -32,6 +32,9 @@ from backend.schemas.agent import (
     AgentDailyItem,
     AgentDailyItemDetail,
     AgentDailyMultiResponse,
+    AgentForm13fFilerDetailResponse,
+    AgentForm13fManifestResponse,
+    AgentForm13fPreset,
     AgentMultiGroupStats,
     AgentMultiSearchGroup,
     AgentMultiSearchRequest,
@@ -1259,4 +1262,63 @@ class AgentService:
             content_markdown=None,
             share_url=_build_share_url(kind, r.get("share_token"), request_base),
             metadata=_strip_references(r.get("metadata")),
+        )
+
+    # ------------------------------------------------------------------
+    # Form 13F (global read-only holdings; PAT scope form13f:read)
+    # ------------------------------------------------------------------
+
+    def _form13f_service(self):
+        """与 web API (backend/api/form13f.py) 共享同一服务单例。"""
+        from backend.services.form13f_service import Form13fService
+        from backend.utils.service_registry import get_service_registry
+
+        return get_service_registry().get_or_create_service(
+            "form13f_service", Form13fService)
+
+    def form13f_manifest(self) -> AgentForm13fManifestResponse:
+        """季度列表 + 20 家预设机构（label → filer_id 映射）。
+
+        get_manifest 不带 cik（web 端不需要），用 list_presets 补齐。
+        """
+        svc = self._form13f_service()
+        data = svc.get_manifest(top_n=1)
+        cik_by_filer = {
+            p["filer_id"]: p.get("cik")
+            for p in svc.list_presets()
+            if p.get("filer_id") is not None
+        }
+        presets = [
+            AgentForm13fPreset(
+                filer_id=p["id"],
+                label=p["label"],
+                cik=cik_by_filer.get(p["id"]),
+                latest_quarter=p.get("latest_quarter"),
+                latest_total_value=p.get("latest_total_value"),
+            )
+            for p in data.get("presets", [])
+            if p.get("id") is not None
+        ]
+        return AgentForm13fManifestResponse(
+            quarters=data.get("quarters", []), presets=presets)
+
+    def form13f_filer_detail(
+        self, filer_id: int, quarter: Optional[str] = None,
+    ) -> Optional[AgentForm13fFilerDetailResponse]:
+        """单家机构季度快照。quarter 过滤在响应层做——prev_shares / top5 对比
+        依赖相邻季度，不能在查询层截断。quarter 不存在返回 None（端点 404）。
+        """
+        data = self._form13f_service().get_filer_detail(filer_id)
+        if data is None:
+            return None
+        quarters = data.get("quarters") or []
+        if quarter:
+            quarters = [q for q in quarters if q.get("quarter") == quarter]
+            if not quarters:
+                return None
+        return AgentForm13fFilerDetailResponse(
+            filer_id=data["id"],
+            name=data.get("name") or "",
+            cik=data.get("cik"),
+            quarters=quarters,
         )
