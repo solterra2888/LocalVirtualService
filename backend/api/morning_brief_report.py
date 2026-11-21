@@ -9,7 +9,9 @@ task_scheduling(type=morning_brief) 定时调度；补跑走服务器 CLI。
 读取: latest / status / list / shared/{token}。
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+import hashlib
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from psycopg2 import errors as pg_errors
 
@@ -71,16 +73,23 @@ async def list_reports(
 
 
 @router.get("/shared/{token}", response_class=HTMLResponse)
-async def get_shared_report(token: str):
+async def get_shared_report(request: Request, token: str):
     """通过 share_token 公共访问报告 HTML（无需认证；DB 优先、OSS 兜底）。"""
     svc = MorningBriefReportService()
     html = svc.get_report_html_by_token(token)
     if not html:
         raise HTTPException(status_code=404, detail="Report not found")
-    # token 每次重新发布即轮换(complete 换新),同一 token 的 URL 内容不可变,
-    # 允许浏览器缓存(报告 ~5MB,重复打开 iframe 免再拉取,消除加载闪烁)
+    # ETag 协商缓存(2026-11-21):share_token 已稳定化(complete 不再轮换,为
+    # ft_refresh 10:30 补数重发布不打断已分发链接),同 token 的 URL 内容**会变**
+    # —— 旧的 max-age=3600 会让用户在重发布后 1 小时内仍看到旧横幅(6.6MB 大页
+    # 不能直接 no-cache 全量重拉)。ETag 内容指纹:变了 200 新页,没变 304 秒回。
+    etag = hashlib.sha1(html if isinstance(html, bytes)
+                        else html.encode("utf-8")).hexdigest()
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={
+            "Cache-Control": "no-cache", "ETag": etag})
     return HTMLResponse(content=html, headers={
-        "Cache-Control": "public, max-age=3600",
+        "Cache-Control": "no-cache", "ETag": etag,
     })
 
 
