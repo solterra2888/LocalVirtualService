@@ -198,6 +198,9 @@ class EODHDNewsFeedService:
         返回 { source_name: [user_id, ...] } 映射。
 
         channel_identifier 存储的就是 source 名称（如 "Yahoo Finance"）。
+        metadata.manual_source=true 的订阅行 (Bloomberg/Reuters 等 Web Clipper
+        人工剪藏源, 2026-11-22) 不参与 EODHD 拉取 —— EODHD /api/news 不提供
+        这些源, 拉了也是空转。
         """
         conn = self.db_manager.get_connection()
         if not conn:
@@ -209,6 +212,7 @@ class EODHDNewsFeedService:
                 SELECT channel_identifier, user_id
                 FROM subscription_list
                 WHERE channel_type = 'news' AND enabled = true
+                  AND COALESCE((metadata->>'manual_source')::boolean, false) = false
             """)
             rows = cursor.fetchall()
             cursor.close()

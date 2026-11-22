@@ -27,6 +27,11 @@ class WebClipRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=500, description="网页标题")
     html: str = Field(..., min_length=1, description="已内嵌 base64 图片的 HTML 内容")
     source_url: str = Field(..., min_length=1, description="原始网页 URL")
+    # 2026-11-22: 扩展端 Readability/meta 已提取但此前未上报的元数据 (可选, 向后兼容):
+    # published_time 用于 subscription_content 转投的发布时间锚点 (ISO 串), 缺省走正文解析
+    published_time: Optional[str] = Field(None, max_length=100, description="页面发布时间 (ISO/Readable 时间串)")
+    byline: Optional[str] = Field(None, max_length=200, description="作者署名 (Readability byline / meta author)")
+    site_name: Optional[str] = Field(None, max_length=200, description="站点名 (Readability siteName)")
 
 
 class WebLinkRequest(BaseModel):

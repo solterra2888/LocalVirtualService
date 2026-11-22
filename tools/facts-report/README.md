@@ -172,6 +172,40 @@ sonnet-5.5 单发(主) → GLM-5.3 agent(报错/解析失败回落) → Gemini �
 - state 记 `mode: "routed:<model>"`。CherryIN 价目:sonnet-5.5 $2/$10 per
   1M,outlook 单发实测 ~157K in / 11K out ≈ $0.42/次(89-156s)。
 - 撤销路由:删 .env 中该行即回 GLM 全管线路径,无其它残留。
+
+## Web Clipper 剪藏转投订阅流(2026-11-22,E1 信源接入)
+
+admin 用 GuanHe Clipper(Chrome 扩展)人工剪藏的 Bloomberg/Reuters 全文,
+经 `backend/services/web_clip_feed_service.py` 清洗后转投
+`subscription_content(channel_type='news')`——补上 wire 层最大短板:
+此前 46/50 是 Yahoo 二手转载(Investing.com/PR 通稿)+ 1200 字符截断,
+350 条候选里 0 条 E1。链路与关键机制:
+
+```
+扩展(popup.js Readability 提取, 新增 published_time/byline/site_name 上报)
+  → /api/files/upload-web-clip (files.py, 元数据存 processing_stats.upload_params)
+  → celery process_web_clip_task: 文本提取后 _forward_web_clip_to_feed
+  → forward_clip_to_feed: 域名白名单(WEB_CLIP_FEED_DOMAINS, 默认 bloomberg/reuters)
+     → 清洗(不可见字符/样板/标题截断回填) → _save_normalized_content upsert
+     → 确定性 E1 标签行(web_clip_v1, 安全网) → force 派发 LLM 打标补 L 级
+```
+
+- **订阅行**: `insert_web_clip_news_subscriptions.sql` 给 admin 种了
+  Bloomberg/Reuters 两行(`metadata.manual_source=true`,EODHD discover
+  据此跳过——EODHD 不提供这两个源,拉了空转);
+- **L 级是关键**: wire top50 按 `_L_RANK` 稳定排序,未评级(None)与 Yahoo 同档
+  纯拼时序会被挤出(实测 47 Yahoo vs 2 B/R)。B/R 已加入 `.env
+  NEWS_LLM_TAG_SOURCES=CCTV,Bloomberg,Reuters`,入库即 LLM 打 L 级——
+  实测一条 L1(CrowdStrike 并购)直接排到 top50 第 1 位;
+  ⚠️ `tag_feed_content_task` 对已有标签行默认 skip,确定性 E1 行必须
+  force=True 派发才能被 LLM 覆盖出完整 L/E(踩坑已修);
+- **存量回填**: `scripts/backfill_web_clips_to_subscription.py`(幂等,
+  `--no-trigger` 跳过一次性向量化风暴);2026-11-22 首跑 700 新增/1 合并;
+- **单测**: `test_web_clip_feed.py`(离线,依赖 /tmp 下导出的真实剪藏 JSON;
+  样板残留 31%→0,正文保留 p50 99.8%);
+- **扩展需重载**: chrome://extensions 重新加载后才上报 published_time;
+  旧版扩展照常工作(服务端从正文日期行解析,242/242 实测可解析)。
+
 ## 同步日报的改动
 
 本目录是 2026-11-07 从 GuanHe-Daily-Report 复制的。日报后续的修复如需带过来,

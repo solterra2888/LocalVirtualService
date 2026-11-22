@@ -2937,6 +2937,58 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
         }
 
 
+def _forward_web_clip_to_feed(processing_stats_id: int, plain_text: str, username: str) -> None:
+    """Web Clip → subscription_content 转投薄封装:
+    从 processing_stats.upload_params 读回 source_url/title/published_time,
+    username → users.id, 交给 web_clip_feed_service.forward_clip_to_feed。
+    域名不在白名单时 forward 返回 None (无需转投, 非错误)。"""
+    import json as _json
+    from backend.services.web_clip_feed_service import forward_clip_to_feed
+
+    from backend.database.db_manager import DatabaseManager
+    from backend.utils.database_config import get_database_config
+    db = DatabaseManager(get_database_config())
+    conn = db.get_connection()
+    if not conn:
+        raise ValueError("无法连接到数据库")
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT upload_params FROM processing_stats WHERE id = %s", (processing_stats_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        if not row or not row[0]:
+            return
+        params = row[0] if isinstance(row[0], dict) else _json.loads(row[0])
+        source_url = (params.get('source_url') or '').strip()
+        title = params.get('title') or ''
+        published_time = params.get('published_time') or None
+        if not source_url:
+            return
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM users WHERE username = %s ORDER BY id LIMIT 1", (username,))
+        urow = cursor.fetchone()
+        cursor.close()
+        user_id = urow[0] if urow else None
+        if user_id is None:
+            info(f"Web Clip 转投跳过: 用户 {username!r} 不存在", source="celery_web_clip")
+            return
+
+        result = forward_clip_to_feed(
+            source_url=source_url,
+            title=title,
+            plain_text=plain_text,
+            user_ids=[user_id],
+            published_time=published_time,
+        )
+        if result:
+            info(f"Web Clip 转投订阅流: source={result['source']} is_new={result['is_new']} "
+                 f"db_id={result['db_id']} len={result['content_len']}",
+                 source="celery_web_clip", user=username)
+    finally:
+        conn.close()
+
+
 @app.task(bind=True, name='process_web_clip_async', queue='file_processing')
 def process_web_clip_task(self, file_detail_id, processing_stats_id, html_content, username):
     """
@@ -3006,6 +3058,14 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
 
         info(f"Web Clip 文本提取完成: file_detail_id={file_detail_id}, content_length={len(plain_text)}",
              source="celery_web_clip")
+
+        # 剪藏转投订阅流 (2026-11-22): Bloomberg/Reuters 等白名单新闻源全文 →
+        # subscription_content('news'), 让晨报/Daily/Agent 生态消费 E1 一手信源。
+        # 转投失败不影响文件模块主流程 (归档/打标照旧)。
+        try:
+            _forward_web_clip_to_feed(processing_stats_id, plain_text, username)
+        except Exception as e:
+            error(f"WebClip {self.request.id}: 剪藏转投订阅流失败 (不阻断): {e}", source="celery_web_clip")
 
         # PR-4 R1: 与 upload-web-link / upload-and-process-document 对齐, 触发 tag/naming/classify.
         # Web Clip (Chrome Extension 快剪藏) 不再触发 AI 分析 (用户决策 2026-11-06):

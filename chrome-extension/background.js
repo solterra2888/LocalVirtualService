@@ -40,6 +40,10 @@ async function handleSaveArticle(msg, tabId) {
   var html = msg.html;
   var url = msg.url;
   var imageUrls = msg.imageUrls;
+  // 结构化元数据 (2026-11-22): 转投 subscription_content 的发布时间锚点等, 可缺省
+  var publishedTime = msg.publishedTime || '';
+  var byline = msg.byline || '';
+  var siteName = msg.siteName || '';
 
   chrome.scripting.executeScript({
     target: { tabId: tabId },
@@ -103,7 +107,14 @@ async function handleSaveArticle(msg, tabId) {
       }
     }
 
-    var payload = JSON.stringify({ title: title, html: html, source_url: url });
+    var payload = JSON.stringify({
+      title: title,
+      html: html,
+      source_url: url,
+      published_time: publishedTime || null,
+      byline: byline || null,
+      site_name: siteName || null
+    });
 
     async function doUpload(token) {
       return fetch(serverUrl + '/api/files/upload-web-clip', {

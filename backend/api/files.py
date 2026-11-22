@@ -3075,7 +3075,14 @@ a {{ color: #1677ff; }}
             'Web Clip',
             current_user.username,
             0, 0,
-            json.dumps({"source_url": source_url, "title": title}),
+            json.dumps({
+                "source_url": source_url,
+                "title": title,
+                # 扩展端元数据 (2026-11-22 起): 供 celery 转投 subscription_content 使用
+                "published_time": request.published_time,
+                "byline": request.byline,
+                "site_name": request.site_name,
+            }),
             '', 'processing'
         ))
         processing_stats_id = cursor.fetchone()[0]

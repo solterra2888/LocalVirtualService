@@ -364,6 +364,11 @@ function extractContent() {
     title: t,
     html: h,
     url: u,
-    imageUrls: imageUrls
+    imageUrls: imageUrls,
+    // 结构化元数据 (2026-11-22): 服务端转投 subscription_content 用,
+    // published_time 为原始 ISO 串 (Readability publishedTime / meta 兜底)
+    publishedTime: publishedTime || '',
+    byline: byline || '',
+    siteName: siteName || ''
   });
 }
