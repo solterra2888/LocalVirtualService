@@ -18,8 +18,21 @@ company_desk(sector_action/deep_dives)、movers 与 macro_dashboard(确定性)�
 macro_review、geopolitics、fomc 六组;第二段 outlook 读第一段成品做综合。
 """
 
+import os
 import re
 from typing import Any, Dict, List, Optional
+
+
+def editorial_v2() -> bool:
+    """编辑计划 / 切片 v2 开关(MB_EDITORIAL_V2=1):计划摘要的 Bloomberg/Reuters
+    块与 evidence 字段、写作规则的信源层级、个股组读相关第一层 wire。
+    快照选材层(v9)不受此开关影响;本层待服务器 A/B 复测通过后再打开。
+    进程环境优先(A/B 时可 MB_EDITORIAL_V2=0 强制关),否则读仓库 .env
+    (cron 环境不加载 .env,与 MB_AGENT_PROVIDER 同一读法)。"""
+    from llm_fallback import _env_file_lookup
+    val = (os.environ["MB_EDITORIAL_V2"] if "MB_EDITORIAL_V2" in os.environ
+           else _env_file_lookup("MB_EDITORIAL_V2"))
+    return val.strip().lower() in ("1", "true", "yes", "on")
 
 # ── 风格档案 ───────────────────────────────────────────────────────────
 
@@ -148,6 +161,7 @@ _REPORTED_RE = re.compile(
     r"据报道|据悉|知情人士|消息人士|消息称|传闻|传言|未经证实|据传", re.I)
 _REPORTED_POOLS = (("news", "flash"), ("news", "wire"), ("news_macro", "geo"),
                    ("news_macro", "digest"), ("news_macro", "research"))
+_REPORTED_LEDE_CHARS = 600
 
 
 def flag_reported_items(sources: Dict[str, Any]) -> int:
@@ -157,7 +171,12 @@ def flag_reported_items(sources: Dict[str, Any]) -> int:
         for item in (sources.get(head) or {}).get(sub) or []:
             if not isinstance(item, dict) or "reported" in item:
                 continue
-            blob = " ".join(str(item.get(k) or "") for k in ("title", "text"))
+            text = str(item.get("text") or "")
+            if (head, sub) == ("news", "wire"):
+                # 全文稿(Bloomberg/Reuters 3000 字)正文深处顺带一句 "sources"
+                # 不改变主事实的性质:按标题 + 导语判定
+                text = text[:_REPORTED_LEDE_CHARS]
+            blob = f"{item.get('title') or ''} {text}"
             item["reported"] = bool(_REPORTED_RE.search(blob))
             n += 1
     return n
@@ -206,6 +225,11 @@ SECTION_SOURCE_MATRIX = {
                 "(economic calendar)", "(cross-asset)", "(Treasury curve)", "(macro daily)",
                 "(macro geo)", "(news flash)", "(newswire)"},
 }
+# v2:v8.3 撤掉 04/06 的 wire 是因为当时 wire 全是 Yahoo/SA 垃圾稿;v9 起
+# wire 以 Bloomberg/Reuters 全文为主,个股组读切片里与异动股相关的那部分
+if editorial_v2():
+    SECTION_SOURCE_MATRIX["sector_action"].add("(newswire)")
+    SECTION_SOURCE_MATRIX["deep_dives"].add("(newswire)")
 
 
 def _style_rules(style: str) -> str:
@@ -267,6 +291,15 @@ def _common_rules(style: str, allowed_tags: Optional[set] = None) -> str:
    snapshot paths: {paths}. If they lack a fact you want, leave it out — do
    not borrow from any other part of the snapshot.
 """
+    tier_rule = """
+   SOURCE TIERS: news items carry `tier` — 1 = Bloomberg / Reuters full-text
+   reporting; 2 = an original outlet or named primary voice, or a relay whose
+   `origin` names the outlet it is quoting; 3 = squawk / relay accounts;
+   4 = aggregators and press releases. When a tier-1 item and relays carry
+   the same fact, build the bullet on the tier-1 item, cite ITS id and credit
+   (Bloomberg) / (Reuters); use relays only for timing or colour the article
+   lacks. A flash item with `dup_n` was carried by that many accounts — one
+   event, not several.""" if editorial_v2() else ""
     return f"""\
 You are one section-writer inside a scheduled report pipeline. You are writing ONE
 section of a "GuanHe 每日晨报" for professional investors. Write like a senior
@@ -299,7 +332,7 @@ HARD RULES (violating any of these fails pipeline verification):
    sources.news.wire[] are full-text articles, both drawn from Admin's
    subscribed sources and graded L1–L4 (importance) / E1–E3 (evidence);
    sources.news.calls[] are
-   earnings-call insight excerpts carrying VERBATIM management quotes.
+   earnings-call insight excerpts carrying VERBATIM management quotes.{tier_rule}
    When the same number exists in the structured data layer (market,
    earnings_calendar, economic_events, macro_pillars), use that value
    instead of the show/news text.
@@ -1092,6 +1125,24 @@ def build_plan_prompt(owners: List[str], digest: str = "") -> str:
     (2026-11-05 事故:游荡 11 次请求/1.74M 输入 + CLI 挂死,见 TEST P23)。"""
     roles = "\n".join(f"- {n}: {PLAN_OWNER_ROLES[n]}" for n in owners
                       if n in PLAN_OWNER_ROLES)
+    v2 = editorial_v2()
+    evidence_shape = ', "evidence": ["w3", "f12"]' if v2 else ""
+    evidence_rules = (
+        "- evidence: 1–4 item ids from the digest that carry the story's "
+        "facts — the writer opens these first. Prefer the 'Primary reporting "
+        "— Bloomberg / Reuters' block: when a flash headline and an article "
+        "there report the same event, list the article. A story whose only "
+        "evidence is relay flash (no [origin], no ×N) ranks below a story of "
+        "similar impact backed by full-text reporting.\n"
+        "- canonical numbers come from the structured data whenever the "
+        "digest shows the figure there (cross-asset, S&P moves, earnings, "
+        "curve, Fed odds); a news item is a canonical source only for "
+        "figures that exist nowhere else (deal size, guidance, IPO raise), "
+        "and never one that dates a move to an earlier session.\n"
+        if v2 else "")
+    closing = ("- Facts and assignments only — no advice, no prose.\n" if v2 else
+               "- Facts and assignments only — no evidence lists, no advice, no "
+               "prose.\n")
     return (
         "You are the editor of the GuanHe Daily Report. Before the section "
         "writers start, decide what the day's stories are and which section "
@@ -1112,7 +1163,7 @@ def build_plan_prompt(owners: List[str], digest: str = "") -> str:
         "prose, no code fences):\n"
         '{"stories": [{"id": "s1", "title": "<one line>", '
         '"owner": "<section key>", "may_mention": ["<section key>"], '
-        '"angle": "<what the owner argues, ≤20 words>"}], '
+        '"angle": "<what the owner argues, ≤20 words>"' + evidence_shape + '}], '
         '"canonical": [{"entity": "NVDA", "metric": "move", "value": "2.1%", '
         '"path": "market.sp500_constituents[ticker=NVDA].change_percent"}]}\n'
         "Rules:\n"
@@ -1135,8 +1186,7 @@ def build_plan_prompt(owners: List[str], digest: str = "") -> str:
         "entity = ticker / cross_asset code / US2Y, US10Y / meeting month "
         "(2026-12); metric = move, ah_move, pm_move, close, level, yield, "
         "odds, revenue, eps, guide_revenue, guide_eps.\n"
-        "- Facts and assignments only — no evidence lists, no advice, no "
-        "prose.\n"
+        + evidence_rules + closing +
         "\n"
         "===== plan_input digest =====\n"
         f"{digest}\n"
@@ -1163,6 +1213,9 @@ def plan_brief(plan: Optional[Dict[str, Any]], names: List[str]) -> str:
     lines = ["EDITORIAL PLAN (fixed before writing — follow it):"]
     if own:
         lines += ["Stories you OWN — cover them in full:", *own]
+        if any("[evidence:" in o for o in own):
+            lines.append("Evidence ids are the items the story stands on: open "
+                         "them first, build the bullets on them and cite them.")
     if mention:
         lines += ["Stories you may reference in ONE clause (owned elsewhere — no "
                   "repeated numbers or detail):", *mention]

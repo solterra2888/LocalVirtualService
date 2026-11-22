@@ -187,11 +187,13 @@ _MACRO_CMP_RANK = {"yoy": 0, None: 1, "": 1, "index": 1, "qoq": 1, "mom": 2}
 # 社长说/Dots/CCTV)与英文(Bloomberg TV/Reuters 视频摘要、Geopolitical
 # Dispatch、Kobeissi/Steno/Anna Wong 等宏观号),筛选模式因此中英双语。
 # published_at 按 UTC 存储。digest 覆盖北京 T+1 早晨(隔夜要闻/利率早报
-# 08:51-09:22 发布);research/geo 从 T 00:00 UTC(北京 T 早 8 点)起收。
-# 周五 T 的隔夜要闻要下周一早晨才发 —— 周六构建时 digest 层常为空,属已知
-# 边界(README),由 geo/research + 英文 wire 兜底。
+# 发布);research/geo 从 T 00:00 UTC(北京 T 早 8 点)起收。
 ADMIN_USER_ID = 1
 MACRO_DIGEST_TITLE_RE = re.compile(r"隔夜全球要闻|利率早报|复盘笔记|盘前播报|每日要闻")
+# 隔夜全球要闻实测北京 08:25-08:35 才发布,08:00 cron 构建时窗口内通常为空
+# (11-05~11-20 12 期有 11 期为空,与是否周五无关)
+DIGEST_EMPTY_NOTE = ("digest 晨报(隔夜全球要闻等)北京 08:25 后发布,08:00 构建时"
+                     "通常未到;由 geo/research + 英文 wire 兜底")
 # research 双通道:星球源按标题识别券商宏观日报(正文关键词在个股调研纪要
 # 里也常出现,误召回高);推特/youtube/substack 按正文关键词 + 长度门槛
 MACRO_RESEARCH_TITLE_RE = re.compile(
@@ -1046,39 +1048,60 @@ def _to_et(date_str: Optional[str], time_str: Optional[str]) -> Dict[str, str]:
 # L4(噪音)整层排除,溢出按 L1>L2>L3/未评级 排序。
 # 分级标准见 tools/facts-report/INFO_GRADING_STANDARD.md。
 _NEWS_TICKER_RE = re.compile(r"\$([A-Z]{1,5})\b")
-_FLASH_MAX_ITEMS = 300      # 超出时按 L1>L2>L3/未评级 + 带$TICKER优先 保留
+_FLASH_MAX_ITEMS = 300      # 聚簇去重后:L1 全留,其余按层级/ticker/转发数,时段保底
 _FLASH_TEXT_CAP = 300
-_WIRE_MAX_ITEMS = 50        # 超出时按 L1>L2>L3/未评级 + 时序新者优先
 _WIRE_MIN_CHARS = 800       # 导语/标题级短条目不进 wire(全文层)
 _WIRE_TEXT_CAP = 1200
+# v9 信源层级(source_quality.py):Bloomberg/Reuters 全文是第 1 层,单独配额
+_WIRE_T1_MAX = 25
+_WIRE_T1_TEXT_CAP = 3000
+_WIRE_OTHER_MAX = 35            # 第 1 层缺席(剪藏未到)时其余层的名额
+_WIRE_OTHER_MAX_WITH_T1 = 15    # 第 1 层 ≥10 篇时其余层收窄,控制总字数
+_WIRE_T1_ENOUGH = 10
 _CALLS_MAX_ITEMS = 6        # SA 电话会节选(个股深挖 的 Management said 素材)
 _CALLS_TEXT_CAP = 8000
-# L 轴排序权重:小者先保留;L4 已在 SQL 排除,未评级(NULL,存量/滞后)与 L3 同档
-_L_RANK = {"L1": 0, "L2": 1, "L3": 2, None: 2, "": 2}
+
+# A/B 复测(replay_news.py)设为原快照 generated_at:文本层窗口上沿截到该时刻,
+# 复现当时可见的数据。正式构建恒为 None。
+REPLAY_AS_OF: Optional[datetime] = None
+
+
+def _as_of_cap(hi: datetime) -> datetime:
+    if REPLAY_AS_OF is None:
+        return hi
+    cap = REPLAY_AS_OF.astimezone(timezone.utc)
+    if hi.tzinfo is None:
+        cap = cap.replace(tzinfo=None)
+    return min(hi, cap)
 
 
 def _news_snapshot(report_date: date,
-                   earnings_calendar: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+                   earnings_calendar: Optional[Dict[str, Any]],
+                   market: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """T 日新闻事件层,冻结为 sources.news(独立容错,不影响其余源)。
 
     v7:信源一律取 Admin(user_id=1)enabled 订阅(无白名单);入库打标的
-    L/E 分级参与选材 —— L4(噪音)SQL 排除;flash/wire 溢出时按
-    L1>L2>L3/未评级 排序保留(INFO_GRADING_STANDARD.md),条目携带
-    info_level/evidence_level 供下游 E 级表述规则使用。
+    L/E 分级参与选材 —— L4(噪音)SQL 排除,条目携带 info_level/
+    evidence_level 供下游 E 级表述规则使用。
+    v9:另加信源层级 tier(source_quality.py),选材按层级 + 与当日盘面
+    (market 异动/权重股、财报股、flash L1 标的)的相关度,而不是时序。
 
-    flash  Admin 订阅 twitter,窗口 = T 00:00–24:00 ET;RT/同文去重;
-           提取 $TICKER;每条截 _FLASH_TEXT_CAP。
-    wire   Admin 订阅 news 全文源,窗口 [T-1 20:00 ET, T+1 00:00 ET) 覆盖
-           隔夜报道;≥_WIRE_MIN_CHARS 的截 _WIRE_TEXT_CAP;超出 _WIRE_MAX_ITEMS
-           按重要度+时序保留(替代旧版"先到先得"截断)。
+    flash  Admin 订阅 twitter,窗口 = T 00:00–24:00 ET;RT/同文去重后再按
+           近似 headline 聚簇(dup_n/also 记转发),提取 $TICKER;每条截
+           _FLASH_TEXT_CAP。
+    wire   Admin 订阅 news 全文源,窗口 [T-1 20:00 ET, T+1 00:00 ET);
+           ≥_WIRE_MIN_CHARS。第 1 层(Bloomberg/Reuters)≤_WIRE_T1_MAX 篇,
+           去剪藏模板后截 _WIRE_T1_TEXT_CAP;其余层滤掉 SEO/公告/过期复盘稿,
+           截 _WIRE_TEXT_CAP。选材统计写 news.selection。
     calls  wire 中的 earnings call transcript(标题特征),只保留财报日历
            (当日 + 前一交易日盘后)命中的 ticker,截 _CALLS_TEXT_CAP。
     """
+    import source_quality as sq
     from zoneinfo import ZoneInfo
     et = ZoneInfo("America/New_York")
     t0 = datetime(report_date.year, report_date.month, report_date.day,
                   tzinfo=et).astimezone(timezone.utc)
-    t1 = t0 + timedelta(days=1)
+    t1 = _as_of_cap(t0 + timedelta(days=1))
     w0 = t0 - timedelta(hours=4)  # T-1 20:00 ET
 
     conn = _conn()
@@ -1148,36 +1171,45 @@ def _news_snapshot(report_date: date,
             out["date_et"] = dt.date().isoformat()
         return out
 
-    # flash:同文去重(RT/转发),截断 + ticker 提取;L/E 随条目冻结
-    flash: List[Dict[str, Any]] = []
+    def _aware(ts: Any) -> datetime:
+        return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+
+    # flash:同文去重(RT/转发)→ 近似 headline 聚簇 → 选材;L/E 随条目冻结
+    flash_all: List[Dict[str, Any]] = []
     seen_text: set = set()
     for author, ts, text, lv, ev, url in frows:
         body = re.sub(r"\s+", " ", (text or "")).strip()
-        if not body or body.startswith("RT @"):
+        if not body or body.startswith("RT @") or not ts:
             continue
         key = body[:160].upper()
         if key in seen_text:
             continue
         seen_text.add(key)
-        flash.append({
+        origin = sq.credited_origin(body)
+        item = {
             "author": author, "url": url,
             **_et_fields(ts),
             "text": body[:_FLASH_TEXT_CAP],
             "tickers": sorted(set(_NEWS_TICKER_RE.findall(text or "")))[:8],
             "info_level": lv,
             "evidence_level": ev,
-        })
-    if len(flash) > _FLASH_MAX_ITEMS:
-        # 溢出按重要度保留:L1>L2>L3/未评级,同档带 $TICKER 优先,再按时间
-        flash.sort(key=lambda f: (_L_RANK.get(f.get("info_level"), 2),
-                                  0 if f["tickers"] else 1,
-                                  f.get("date_et") or "", f.get("time_et") or ""))
-        flash = flash[:_FLASH_MAX_ITEMS]
+            "tier": sq.effective_tier(sq.source_tier(author, "twitter"), origin),
+            "_ts": _aware(ts),
+            "_bucket": sq.time_bucket(ts, report_date),
+        }
+        if origin:
+            item["origin"] = origin
+        flash_all.append(item)
+    flash, flash_stats = sq.select_flash(flash_all, _FLASH_MAX_ITEMS)
+    flash = [sq.strip_private(f) for f in flash]
 
-    # wire:全文层过滤/截断;SA 的管理层长文(电话会纪要/指引)单列为 calls。
-    # 合格条目先全量按 L 轴重要度稳定排序(组内保持时序倒序),再截
-    # _WIRE_MAX_ITEMS —— 替代旧版按时间"先到先得"(实测窗口合格条目可达
-    # 千级,旧法会把发得早的重要报道挤掉)
+    # wire:全文层;SA 的管理层长文(电话会纪要/指引)单列为 calls。
+    # v9 按信源层级 + 盘面相关度选材(source_quality.select_wire),替代
+    # "按 L 级稳定排序取前 50":L 级在 Yahoo 等聚合源上全空,旧法实际
+    # 退化成"最晚 50 条"(11-05~11-20 审计 B/R 全文 0 篇入选)
+    ctx = sq.build_relevance_context(
+        market, earnings_calendar,
+        (t for f in flash if f.get("info_level") == "L1" for t in f.get("tickers") or []))
     ec_codes = set()
     for bucket in ("today", "prior_after_close"):
         for r in ((earnings_calendar or {}).get(bucket) or []):
@@ -1210,24 +1242,49 @@ def _news_snapshot(report_date: date,
                     "text": body[:_CALLS_TEXT_CAP],
                 })
             continue
-        qualified.append((author, title, ts, body, lv, ev, url))
-    qualified.sort(key=lambda r: _L_RANK.get(r[4], 2))   # 稳定:同档时序不变
-    wire = [{
-        "author": author, "title": (title or "")[:200], "url": url,
-        **_et_fields(ts),
-        "text": body[:_WIRE_TEXT_CAP],
-        "info_level": lv,
-        "evidence_level": ev,
-    } for author, title, ts, body, lv, ev, url in qualified[:_WIRE_MAX_ITEMS]]
+        if not ts:
+            continue
+        tier = sq.source_tier(author, "news")
+        if tier == 1:
+            body = re.sub(r"\s+", " ", sq.clean_clip_body(text or "", title)).strip()
+            origin = None
+        else:
+            origin = sq.syndicated_origin(body)
+            tier = sq.effective_tier(tier, origin)
+        head = body[:600]
+        cand = {
+            "author": author, "title": (title or "")[:200], "url": url,
+            **_et_fields(ts),
+            "text": body[:_WIRE_T1_TEXT_CAP if tier == 1 else _WIRE_TEXT_CAP],
+            "info_level": lv,
+            "evidence_level": ev,
+            "tier": tier,
+            "_ts": _aware(ts),
+            "_bucket": sq.time_bucket(ts, report_date),
+            "_kind": "news" if tier == 1 else sq.classify_article(title or "", body),
+            "_rel": ctx.score(title or "", body),
+            "_rel_entity": len(ctx.entities(f"{title or ''} {head}")),
+            "_stale": tier != 1 and sq.stale_session_date(body, report_date) is not None,
+        }
+        if origin:
+            cand["origin"] = origin
+        qualified.append(cand)
+    wire, wire_stats = sq.select_wire(
+        qualified, t1_max=_WIRE_T1_MAX,
+        other_max=_WIRE_OTHER_MAX, other_max_when_t1=_WIRE_OTHER_MAX_WITH_T1,
+        t1_floor_for_other_cut=_WIRE_T1_ENOUGH)
+    wire = [sq.strip_private(w) for w in wire]
 
     out = {
         "filter": (f"flash:Admin订阅twitter {len({a for a, *_ in frows})}源"
-                   f" T日ET(L4排除) / "
-                   f"wire:Admin订阅news [T-1 20:00,T 24:00)ET "
-                   f"≥{_WIRE_MIN_CHARS}c top{_WIRE_MAX_ITEMS}按L级"),
+                   f" T日ET(L4排除,近似headline聚簇) / "
+                   f"wire:Admin订阅news [T-1 20:00,T 24:00)ET ≥{_WIRE_MIN_CHARS}c "
+                   f"第1层(Bloomberg/Reuters)≤{_WIRE_T1_MAX}篇×{_WIRE_T1_TEXT_CAP}c"
+                   f" + 其余层按盘面相关度(滤SEO/公告/过期复盘)"),
         "flash": flash,
         "wire": wire,
         "calls": calls,
+        "selection": {"flash": flash_stats, "wire": wire_stats},
     }
     if not flash:
         out["error_flash"] = "no flash items in window"
@@ -1978,9 +2035,7 @@ def _news_macro_triage_pools(report_date: date,
     }
     if not digest:
         out["error_digest"] = "no digest items selected"
-        if report_date.weekday() == 4:
-            out["note"] = ("Friday T: 隔夜全球要闻下周一晨才发,digest 层空属"
-                           "已知边界,由 geo/research + 英文 wire 兜底")
+        out["note"] = DIGEST_EMPTY_NOTE
     if not research:
         out["error_research"] = "no research items selected"
     if not geo:
@@ -2002,6 +2057,7 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
     geo      地缘关键词快讯(中英:伊朗/霍尔木兹/俄乌/加沙/Iran/Hormuz/
              Ukraine/Gaza/tariff…),同窗,跨源同文去重封顶
     """
+    import source_quality as sq
     w0 = datetime(report_date.year, report_date.month, report_date.day)
     w_research = (w0, w0 + timedelta(hours=30))            # [T 00:00, T+1 06:00) UTC
     w_digest = (w0 + timedelta(days=1), w0 + timedelta(hours=30))
@@ -2036,7 +2092,7 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
                     ORDER BY c.published_at DESC
                     """,
                     {"uid": ADMIN_USER_ID, "types": list(types),
-                     "lo": window[0], "hi": window[1]},
+                     "lo": window[0], "hi": _as_of_cap(window[1])},
                 )
                 cols = [d.name for d in cur.description]
                 return [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -2061,6 +2117,11 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
         except TypeError:
             time_cn = None
         text = _HTML_TAG_RE.sub(" ", (row.get("content") or "")).strip()
+        tier = sq.source_tier(row.get("author_name"), row.get("channel_type"))
+        if tier == 1:
+            text = sq.clean_clip_body(text, row.get("title"))
+        elif row.get("channel_type") == "twitter":
+            tier = sq.effective_tier(tier, sq.credited_origin(text[:400]))
         return {
             "published_utc": str(ts)[:16] if ts else None,
             "time_cn": time_cn,
@@ -2070,6 +2131,7 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
             "url": row.get("url"),
             # P28:与 triage 路径条目对齐,降级不丢证据分级(未评级为 None)
             "evidence_level": row.get("evidence_level"),
+            "tier": tier,
             "text": text,
         }
 
@@ -2111,9 +2173,12 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
     research_core = _select(
         norm_research, MACRO_RESEARCH_TITLE_RE, _CN_RESEARCH_CAP,
         _CN_RESEARCH_MAX)
+    # 关键词通道按信源层级稳定排序:具名一手宏观声音(Timiraos / Anna Wong /
+    # Bloomberg TV)先于转播号长帖
     research_kw = _select(
-        [r for r in norm_research
-         if r.get("channel_type") != "zhishixingqiu"],
+        sorted((r for r in norm_research
+                if r.get("channel_type") != "zhishixingqiu"),
+               key=lambda r: r["tier"]),
         None, _CN_RESEARCH_CAP, _CN_RESEARCH_MAX,
         content_re=MACRO_RESEARCH_BODY_RE)
     seen_r = {re.sub(r"\s+", "", r["text"])[:80] for r in research_core}
@@ -2122,9 +2187,21 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
         if re.sub(r"\s+", "", r["text"])[:80] not in seen_r
     ][:_CN_RESEARCH_MAX - len(research_core)]
     geo_all = [_norm(x) for x in geo_rows]
+    # v9:聚合站(第 3-4 层 news)的公司稿/SEO/自动稿不进地缘层,且须标题
+    # 命中主题词 —— 11-05~11-20 审计 geo 层 220/464 条来自 Yahoo,多为
+    # 钢材报告、股权激励公告等正文顺带提一句关税/制裁的稿件。第 1 层全文
+    # 已在 news.wire(地缘组可读),这里只收标题即地缘主题的,不重复占名额
+    geo_all = [r for r in geo_all
+               if r["channel_type"] != "news"
+               or (r["tier"] == 2)
+               or (r["tier"] == 1 and MACRO_GEO_RE.search(r["title"]))
+               or (sq.classify_article(r["title"], r["text"]) == "news"
+                   and MACRO_GEO_RE.search(r["title"]))]
     # 标题命中的地缘条目优先占名额(真地缘新闻标题必含主题词;财报文/
-    # 个股文的 incidental 正文命中排后);sort 稳定,组内保持时间倒序
-    geo_all.sort(key=lambda r: 0 if MACRO_GEO_RE.search(r["title"]) else 1)
+    # 个股文的 incidental 正文命中排后),同档按信源层级;sort 稳定,组内
+    # 保持时间倒序
+    geo_all.sort(key=lambda r: (0 if MACRO_GEO_RE.search(r["title"]) else 1,
+                                r["tier"]))
     geo = _select(geo_all, None, _CN_GEO_CAP, _CN_GEO_MAX,
                   content_re=MACRO_GEO_RE, geo_min_terms=MACRO_GEO_MIN_TERMS)
 
@@ -2140,9 +2217,7 @@ def _news_macro_regex(report_date: date) -> Dict[str, Any]:
     }
     if not digest:
         out["error_digest"] = "no digest items in window"
-        if report_date.weekday() == 4:
-            out["note"] = ("Friday T: 隔夜全球要闻下周一晨才发,digest 层空属"
-                           "已知边界,由 geo/research + 英文 wire 兜底")
+        out["note"] = DIGEST_EMPTY_NOTE
     if not research:
         out["error_research"] = "no research items in window"
     if not geo:
@@ -2231,17 +2306,6 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
         sources["earnings_calendar"] = None
         errors["earnings_calendar"] = str(e)
 
-    # 新闻事件层(v6):L2 快讯 + L3 通讯社全文 + L4 电话会(calls 需要财报日历)
-    try:
-        news = _news_snapshot(report_date, sources.get("earnings_calendar"))
-        sources["news"] = news or None
-        for k in ("flash", "wire"):
-            if news.get(f"error_{k}"):
-                errors[f"news.{k}"] = news[f"error_{k}"]
-    except Exception as e:  # noqa: BLE001
-        sources["news"] = None
-        errors["news"] = str(e)[:300]
-
     # 宏观速览底座 + FOMC 表(v8,新 Macros):四经济体指标表 / 决议·定价·声明
     try:
         sources["macro_dashboard"] = _macro_dashboard_snapshot(report_date)
@@ -2309,6 +2373,19 @@ def build_snapshot(report_date: date, do_backfill: bool = True,
         except Exception as e:  # noqa: BLE001 — 小图/周期涨跌缺失不阻塞榜单
             errors["market.rank_sparks"] = str(e)[:300]
     sources["market"] = market or None
+
+    # 新闻事件层:快讯 + 通讯社全文 + 电话会(calls 需要财报日历)。v9 排在
+    # 行情之后 —— wire 选材按与当日异动股的相关度打分;顺带让剪藏稿(北京
+    # 凌晨陆续入库)的截取点尽量靠后
+    try:
+        news = _news_snapshot(report_date, sources.get("earnings_calendar"), market)
+        sources["news"] = news or None
+        for k in ("flash", "wire"):
+            if news.get(f"error_{k}"):
+                errors[f"news.{k}"] = news[f"error_{k}"]
+    except Exception as e:  # noqa: BLE001
+        sources["news"] = None
+        errors["news"] = str(e)[:300]
 
     # MACROS 确定性数据底座(六子块 + release_series + 拍卖补字段)
     try:
@@ -2393,8 +2470,10 @@ def main() -> int:
     args = parser.parse_args()
 
     report_date = resolve_report_date(args.date)
+    root = os.environ.get("FACTS_REPORT_ROOT")
     out_path = Path(args.out) if args.out else (
-        REPO_ROOT / "backend" / "reports" / "facts-report" / report_date.isoformat() / "snapshot.json"
+        (Path(root) if root else REPO_ROOT / "backend" / "reports" / "facts-report")
+        / report_date.isoformat() / "snapshot.json"
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
 

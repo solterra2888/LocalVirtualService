@@ -198,10 +198,19 @@ admin 用 GuanHe Clipper(Chrome 扩展)人工剪藏的 Bloomberg/Reuters 全文,
   自动注入 manual_source + 已有内容挂接(`add_user_to_existing_content_task`,
   新订阅者立即可见全部转投全文);`forward_clip_to_feed` 分发面 =
   订阅者 ∪ 剪藏者(`subscriber_user_ids`),与 EODHD 分发语义对齐;
-- **L 级是关键**: wire top50 按 `_L_RANK` 稳定排序,未评级(None)与 Yahoo 同档
-  纯拼时序会被挤出(实测 47 Yahoo vs 2 B/R)。B/R 已加入 `.env
-  NEWS_LLM_TAG_SOURCES=CCTV,Bloomberg,Reuters`,入库即 LLM 打 L 级——
-  实测一条 L1(CrowdStrike 并购)直接排到 top50 第 1 位;
+- **信源层级(v9,2026-11-23)**: wire 不再按 L 级取 top50,改由
+  `source_quality.py` 按信源层级选材 —— B/R 全文为第 1 层,独立配额 25 篇
+  (L1 全收,其余按与当日异动/财报股/flash L1 标的的相关度 + 时段保底),
+  去剪藏模板后截 3000 字;其余层滤掉 SEO/公司稿/GuruFocus 等自动稿/隔日
+  复盘稿(第 1 层 ≥10 篇时只留 15 篇)。flash 同 headline 多号转发聚簇
+  (`dup_n`/`also`),条目带 `tier`/`origin`。选材统计在 `news.selection`;
+  评估脚本 `eval_data_quality.py`,单测 `test_source_quality.py`。B/R 仍需
+  `.env NEWS_LLM_TAG_SOURCES=CCTV,Bloomberg,Reuters` 入库打 L 级(L1 必收);
+  评估结论、复测步骤与验收标准见 `SOURCE_QUALITY_OPTIMIZATION.md`;
+- **编辑计划 / 切片 v2(`MB_EDITORIAL_V2=1`,默认关)**: 计划摘要置顶 B/R
+  标题+导语、快讯带 ×N 与原始出处、故事带 `evidence` 条目 id 并转给负责节;
+  写作规则加信源层级(同事实以第 1 层为据);个股组(04/06)读切片里点名
+  异动股的第 1-2 层 wire(≤12 篇)。复测通过后在服务器 `.env` 打开;
   ⚠️ `tag_feed_content_task` 对已有标签行默认 skip,确定性 E1 行必须
   force=True 派发才能被 LLM 覆盖出完整 L/E(踩坑已修);
 - **存量回填**: `scripts/backfill_web_clips_to_subscription.py`(幂等,

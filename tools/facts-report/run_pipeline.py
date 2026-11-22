@@ -71,8 +71,10 @@ from prompts import (  # noqa: E402
     build_light_verifier_prompt,
     build_plan_prompt,
     build_verifier_prompt,
+    editorial_v2,
     fake_section_text,
 )
+import source_quality as sq  # noqa: E402
 from verify_checks import claims_path, run_checks, verified_canonicals  # noqa: E402
 from provenance import item_index, render_section  # noqa: E402
 from llm_fallback import (  # noqa: E402
@@ -102,8 +104,14 @@ HEADLINE_RE = re.compile(
 REPORTS_DIR = "facts-report"
 
 
+def reports_root() -> Path:
+    """FACTS_REPORT_ROOT 指向别处时(A/B 复测)不碰正式产物目录。"""
+    root = os.environ.get("FACTS_REPORT_ROOT")
+    return Path(root) if root else REPO_ROOT / "backend" / "reports" / REPORTS_DIR
+
+
 def workspace(report_date: str) -> Path:
-    return REPO_ROOT / "backend" / "reports" / REPORTS_DIR / report_date
+    return reports_root() / report_date
 
 
 def load_state(ws: Path) -> Dict[str, Any]:
@@ -1143,6 +1151,35 @@ def _sp_mover_view(cons: List[Dict[str, Any]], top_n: int = 15) -> List[Dict[str
     return top
 
 
+DESK_WIRE_MAX = 12
+
+
+def _desk_wire(wire: List[Dict[str, Any]], view: List[Dict[str, Any]],
+               want: set, earnings: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """个股组的 wire 切片:第 1-2 层里点名异动视图 / flash 标的 / 财报股的稿件,
+    标题命中优先,封顶 DESK_WIRE_MAX(保持原顺序,条目 id 不变)。"""
+    names = {str(r.get("ticker") or "").upper(): sq.short_company_name(str(r.get("company") or ""))
+             for r in view if r.get("ticker")}
+    tickers = set(want)
+    for bucket in ("prior_after_close", "today"):
+        for e in earnings.get(bucket) or []:
+            code = str(e.get("code") or "").upper()
+            if code:
+                tickers.add(code)
+                names.setdefault(code, sq.short_company_name(str(e.get("name") or "")))
+    ctx = sq.RelevanceContext(tickers, {k: v for k, v in names.items() if v})
+    scored = []
+    for i, w in enumerate(wire):
+        if (w.get("tier") or 4) > 2:
+            continue
+        in_title = len(ctx.entities(w.get("title") or ""))
+        in_body = len(ctx.entities((w.get("text") or "")[:1500]))
+        if in_title or in_body >= 2:
+            scored.append((-(2 * in_title + in_body), i, w))
+    keep = sorted(scored, key=lambda t: t[:2])[:DESK_WIRE_MAX]
+    return [w for _, _, w in sorted(keep, key=lambda t: t[1])]
+
+
 def _sliced_snapshot(ws: Path, snapshot: Path, agent: str) -> Path:
     """按 agent 白名单物理切片快照(v8.3)。
 
@@ -1206,6 +1243,14 @@ def _sliced_snapshot(ws: Path, snapshot: Path, agent: str) -> Path:
             for k in ("prior_after_close", "today", "upcoming"):
                 if isinstance(ec.get(k), list):
                     ec[k] = [e for e in ec[k] if _keep(e)]
+        news_sl = sliced.get("news")
+        if isinstance(news_sl, dict) and news_sl.get("wire"):
+            news_sl["wire"] = _desk_wire(news_sl["wire"], view, want,
+                                         full.get("earnings_calendar") or {})
+            news_sl["_wire_note"] = (
+                f"wire: {len(news_sl['wire'])} Bloomberg/Reuters/outlet articles "
+                "naming today's movers or earnings names (full wire is not in "
+                "your context)")
     snap["sources"] = sliced
     snap["sliced_for"] = agent
     out = ws / f"snapshot.{agent}.json"
@@ -1510,6 +1555,8 @@ def render_plan_input(snapshot: Dict[str, Any], blocks: Dict[str, Any]) -> str:
         out += [f"- {e}" for e in upcoming[:12]]
     news = src.get("news") or {}
     flash = [x for x in news.get("flash") or [] if x.get("info_level") == "L1"]
+    if editorial_v2():
+        return "\n".join(out + _plan_news_v2(news, flash, src.get("news_macro") or {})) + "\n"
     for title, rows, fmt in (
             ("News flash — L1 (news.flash[id=..])", flash[:120],
              lambda x: f"- {x.get('id')}{_rep(x)} {x.get('time_et')} {_clip(x.get('text'), 220)}"),
@@ -1527,6 +1574,59 @@ def render_plan_input(snapshot: Dict[str, Any], blocks: Dict[str, Any]) -> str:
             out += [f"- {x.get('id')}{_rep(x)} {x.get('time_cn')} [{x.get('theme') or '-'}] "
                     f"{_clip(x.get('title') or x.get('text'), 120)}" for x in rows]
     return "\n".join(out) + "\n"
+
+
+def _macro_item_label(x: Dict[str, Any]) -> str:
+    """标题被源站截断("…"/"...")或过短时改用正文开头,规划者才看得出写的是什么。"""
+    title = re.sub(r"\s+", " ", str(x.get("title") or "")).strip()
+    if len(title) < 12 or title.endswith(("...", "…")):
+        return _clip(x.get("text") or title, 160)
+    return _clip(title, 140)
+
+
+def _plan_news_v2(news: Dict[str, Any], flash_l1: List[Dict[str, Any]],
+                  nm: Dict[str, Any]) -> List[str]:
+    """v2 计划摘要的新闻部分:第 1 层全文(标题 + 导语)置顶,其余 wire 只给
+    标题与出处;L1 快讯带转发数 ×N 与原始出处,让规划者分得清一手报道与转播。"""
+    wire = news.get("wire") or []
+    t1 = [x for x in wire if x.get("tier") == 1]
+    rest = [x for x in wire if x.get("tier") != 1]
+    out: List[str] = []
+    if t1:
+        out += ["", "## Primary reporting — Bloomberg / Reuters full text "
+                "(news.wire[id=..]; build stories on these first)"]
+        for x in t1:
+            out.append(f"- {x.get('id')}{_rep(x)} [{x.get('author')}] "
+                       f"{x.get('date_et') or ''} {x.get('time_et')} "
+                       f"{x.get('info_level') or ''} {_clip(x.get('title'), 140)} — "
+                       f"{sq.lede(x.get('text') or '')}")
+    if flash_l1:
+        flash_l1 = sorted(flash_l1, key=lambda x: (x.get("tier", 3),
+                                                   -(x.get("dup_n") or 1)))[:120]
+        out += ["", "## News flash — L1 (news.flash[id=..]; ×N = accounts that "
+                "carried it, [outlet] = originating outlet the relay credits)"]
+        for x in flash_l1:
+            dup = f" ×{x['dup_n']}" if x.get("dup_n") else ""
+            org = f" [{x['origin']}]" if x.get("origin") else ""
+            out.append(f"- {x.get('id')}{_rep(x)}{dup}{org} {x.get('time_et')} "
+                       f"{_clip(x.get('text'), 220)}")
+    if rest:
+        out += ["", "## Other newswire (news.wire[id=..])"]
+        for x in rest:
+            src = x.get("origin") or x.get("author")
+            out.append(f"- {x.get('id')}{_rep(x)} [{src}] {x.get('time_et')} "
+                       f"{_clip(x.get('title'), 140)}")
+    calls = news.get("calls") or []
+    if calls:
+        out += ["", "## Analyst calls (news.calls[id=..])"]
+        out += [f"- {x.get('id')} {_clip(x.get('title'), 160)}" for x in calls]
+    for bucket in ("digest", "research", "geo"):
+        rows = nm.get(bucket) or []
+        if rows:
+            out += ["", f"## Macro {bucket} (news_macro.{bucket}[id=..])"]
+            out += [f"- {x.get('id')}{_rep(x)} {x.get('time_cn')} [{x.get('author')}] "
+                    f"{_macro_item_label(x)}" for x in rows]
+    return out
 
 
 def _plan_owners(snapshot: Dict[str, Any], blocks: Dict[str, Any],
@@ -1558,11 +1658,16 @@ def _load_plan(ws: Path, owners: List[str],
                if isinstance(s, dict) and s.get("title")]
     if not stories:
         return None
+    known_ids = item_index(sources)
     for s in stories:
         if s.get("owner") not in owners:
             s["owner"] = "drivers"
         s["may_mention"] = [n for n in s.get("may_mention") or []
                             if n in SECTION_ORDER and n != s["owner"]]
+        if "evidence" in s:
+            # 任务书会把 evidence 原样转给写手去引用,不存在的 id 必挂台账核验
+            s["evidence"] = [str(e) for e in s.get("evidence") or []
+                             if str(e) in known_ids][:6]
     return {"stories": stories[:PLAN_MAX_STORIES],
             "canonical": verified_canonicals(plan.get("canonical"),
                                              sources)[:PLAN_MAX_CANONICALS]}
