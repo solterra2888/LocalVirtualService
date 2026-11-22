@@ -2937,13 +2937,42 @@ def upload_and_process_document_task(self, temp_file_path, filename, username,
         }
 
 
+def _web_clip_params(processing_stats_id: int) -> dict:
+    """读 Web Clip 的 processing_stats.upload_params (source_url/title/published_time 等)。
+    行不存在或无参数时返回 {}。"""
+    import json as _json
+
+    from backend.database.db_manager import DatabaseManager
+    from backend.utils.database_config import get_database_config
+    db = DatabaseManager(get_database_config())
+    conn = db.get_connection()
+    if not conn:
+        return {}
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT upload_params FROM processing_stats WHERE id = %s", (processing_stats_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        if not row or not row[0]:
+            return {}
+        return row[0] if isinstance(row[0], dict) else _json.loads(row[0])
+    finally:
+        conn.close()
+
+
 def _forward_web_clip_to_feed(processing_stats_id: int, plain_text: str, username: str) -> None:
     """Web Clip → subscription_content 转投薄封装:
     从 processing_stats.upload_params 读回 source_url/title/published_time,
     username → users.id, 交给 web_clip_feed_service.forward_clip_to_feed。
     域名不在白名单时 forward 返回 None (无需转投, 非错误)。"""
-    import json as _json
     from backend.services.web_clip_feed_service import forward_clip_to_feed
+
+    params = _web_clip_params(processing_stats_id)
+    source_url = (params.get('source_url') or '').strip()
+    title = params.get('title') or ''
+    published_time = params.get('published_time') or None
+    if not source_url:
+        return
 
     from backend.database.db_manager import DatabaseManager
     from backend.utils.database_config import get_database_config
@@ -2952,19 +2981,6 @@ def _forward_web_clip_to_feed(processing_stats_id: int, plain_text: str, usernam
     if not conn:
         raise ValueError("无法连接到数据库")
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT upload_params FROM processing_stats WHERE id = %s", (processing_stats_id,))
-        row = cursor.fetchone()
-        cursor.close()
-        if not row or not row[0]:
-            return
-        params = row[0] if isinstance(row[0], dict) else _json.loads(row[0])
-        source_url = (params.get('source_url') or '').strip()
-        title = params.get('title') or ''
-        published_time = params.get('published_time') or None
-        if not source_url:
-            return
-
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM users WHERE username = %s ORDER BY id LIMIT 1", (username,))
         urow = cursor.fetchone()
@@ -3071,7 +3087,24 @@ def process_web_clip_task(self, file_detail_id, processing_stats_id, html_conten
         # Web Clip (Chrome Extension 快剪藏) 不再触发 AI 分析 (用户决策 2026-11-06):
         # clip 定位是快存快打标, 完整分析报告成本高; 需要分析时可在 Sources 页手动发起.
         # 如需恢复自动分析, 设 WEB_CLIP_AUTO_ANALYZE_ENABLED=true (默认 false).
-        trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
+        #
+        # 方案 A (用户决策 2026-11-22): 白名单域名 (Bloomberg/Reuters 等
+        # WEB_CLIP_FEED_DOMAINS, 与 Feeds 转投同源判定) 的剪藏跳过文件侧
+        # auto-tag —— 该批内容转投后由 Feeds 侧 tag_feed_content_task 做
+        # 唯一 LLM 内容分析 (L/E 分级+摘要, 为 file_tags 超集), 防止同一篇
+        # 文章双份分析。naming/classify 保留 (归档体验, Feeds 无等价物)。
+        # 非白名单剪藏 (研报/笔记/任意网页) 不受影响, 文件侧仍是唯一分析链。
+        try:
+            from backend.services.web_clip_feed_service import match_feed_domain
+            _is_feed_clip = bool(match_feed_domain(
+                _web_clip_params(processing_stats_id).get('source_url') or ''))
+        except Exception as _e:
+            # 判定失败按旧路径打标 (fail-open), 不因跳过逻辑误伤正常链路
+            _is_feed_clip = False
+            error(f"WebClip {self.request.id}: feed 白名单判定失败, 按旧路径打标: {_e}",
+                  source="celery_web_clip")
+        if not _is_feed_clip:
+            trigger_auto_tagging(file_detail_id, username, delay=int(os.getenv('AUTO_TAG_DELAY', '2')))
         trigger_auto_naming(file_detail_id, username, delay=int(os.getenv('AUTO_NAME_DELAY', '2')))
         trigger_auto_classify(file_detail_id, username, delay=int(os.getenv('AUTO_CLASSIFY_DELAY', '2')))
         if os.getenv('WEB_CLIP_AUTO_ANALYZE_ENABLED', 'false').lower() == 'true':

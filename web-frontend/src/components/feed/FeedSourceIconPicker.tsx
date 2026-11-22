@@ -379,7 +379,7 @@ const FeedSourceIconPicker: React.FC<{
           const faviconUrl = getNewsSourceFaviconUrl(src.identifier);
 
           return (
-            <Tooltip key={src.identifier} title={isSrcDisabled ? 'Coming soon' : src.label}>
+              <Tooltip key={src.identifier} title={isSrcDisabled ? 'Coming soon' : (src.note || src.label)}>
               <div
                 role="button"
                 tabIndex={isSrcDisabled ? -1 : 0}

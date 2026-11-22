@@ -433,9 +433,12 @@ async def create_subscription(
         if request.channel_type == 'news':
             from backend.services.eodhd_news_feed_service import AVAILABLE_NEWS_SOURCES
             from backend.services.cctv_news_feed_service import CCTV_CHANNEL_IDENTIFIER
+            from backend.services.web_clip_feed_service import MANUAL_NEWS_SOURCES
 
-            # CCTV 由独立服务处理；EODHD 源由 AVAILABLE_NEWS_SOURCES 决定
-            all_available = list(AVAILABLE_NEWS_SOURCES) + [CCTV_CHANNEL_IDENTIFIER]
+            # CCTV 由独立服务处理；EODHD 源由 AVAILABLE_NEWS_SOURCES 决定；
+            # Bloomberg/Reuters 为手工源 (2026-11-22): 内容来自 GuanHe Clipper
+            # 剪藏转投, 不参与 EODHD 定时拉取
+            all_available = list(AVAILABLE_NEWS_SOURCES) + [CCTV_CHANNEL_IDENTIFIER] + list(MANUAL_NEWS_SOURCES)
             available_lower = {s.lower(): s for s in all_available}
             identifier_lower = request.channel_identifier.lower()
 
@@ -451,7 +454,19 @@ async def create_subscription(
             if not request.channel_name:
                 request.channel_name = request.channel_identifier
 
-            logger.info(f"News source 验证成功 | source={request.channel_identifier}")
+            # 手工源打标: EODHD discover 据此跳过 (拉不到只会空转),
+            # 前端/统计亦可据此区分展示 "剪藏供稿"
+            is_manual_source = request.channel_identifier in MANUAL_NEWS_SOURCES
+            if is_manual_source:
+                request.metadata = {**(request.metadata or {}), 'manual_source': True}
+                if not request.channel_description:
+                    request.channel_description = (
+                        'Bloomberg/Reuters 全文由 GuanHe Clipper 剪藏供稿 (E1 一手信源), '
+                        '无定时抓取, 更新随剪藏入库'
+                    )
+
+            logger.info(f"News source 验证成功 | source={request.channel_identifier}"
+                        f"{' (manual/clipper)' if is_manual_source else ''}")
         
         # 🔥 如果是 Twitter 订阅，先验证用户是否存在
         elif request.channel_type == 'twitter':
@@ -967,6 +982,29 @@ async def create_subscription(
                 )
                 logger.info(f"Celery task scheduled: fetch_podcast_subscription (task_id={task.id})")
 
+        # 📰 News：无定时首抓 (EODHD */30 任务按订阅行自然分发)。已有内容时
+        # (典型: Bloomberg/Reuters 的 Clipper 转投全文) 把新用户并入 user_ids,
+        # 否则订阅后列表为空、要等下一次入库才能看到 —— 复用其它渠道同款任务。
+        elif request.enabled and request.channel_type == 'news':
+            from backend.tasks.subscription_tasks import add_user_to_existing_content_task
+
+            if has_existing_content:
+                logger.info(
+                    f"Reusing existing News content for {request.channel_identifier}: "
+                    f"{existing_content_count} articles found. Adding user {user_id} to user_ids."
+                )
+                task = add_user_to_existing_content_task.apply_async(
+                    args=[user_id, request.channel_type, request.channel_identifier, subscription_id],
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(f"Celery task scheduled: add_user_to_existing_content (news) (task_id={task.id})")
+            else:
+                logger.info(
+                    f"No existing News content for {request.channel_identifier}; "
+                    f"EODHD 定时任务/Clipper 剪藏入库后自动分发"
+                )
+
         # 🌟 知识星球：已有内容时把新用户并入 user_ids；否则触发首抓 backfill
         elif request.enabled and request.channel_type == 'zhishixingqiu':
             from backend.tasks.subscription_tasks import (
@@ -1190,26 +1228,29 @@ async def update_subscription(
         conn = db_manager.get_connection()
         cursor = conn.cursor()
         
-        # 检查订阅是否存在且属于当前用户
+        # 检查订阅是否存在且属于当前用户（顺带取旧 enabled 状态，供启用转换判定）
         cursor.execute(
-            "SELECT id FROM subscription_list WHERE id = %s AND user_id = %s",
+            "SELECT id, channel_type, channel_identifier, enabled FROM subscription_list "
+            "WHERE id = %s AND user_id = %s",
             (subscription_id, user_id)
         )
-        if not cursor.fetchone():
+        sub_row = cursor.fetchone()
+        if not sub_row:
             raise HTTPException(status_code=404, detail="Subscription not found")
-        
+        _sub_channel_type, _sub_identifier, _sub_was_enabled = sub_row[1], sub_row[2], sub_row[3]
+
         # 构建更新字段
         update_fields = []
         params = []
-        
+
         if request.channel_name is not None:
             update_fields.append("channel_name = %s")
             params.append(request.channel_name)
-        
+
         if request.channel_description is not None:
             update_fields.append("channel_description = %s")
             params.append(request.channel_description)
-        
+
         if request.enabled is not None:
             update_fields.append("enabled = %s")
             params.append(request.enabled)
@@ -1244,13 +1285,35 @@ async def update_subscription(
         
         cursor.execute(query, params)
         row = cursor.fetchone()
-        
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         logger.info(f"Updated subscription {subscription_id} for user {user_id}")
-        
+
+        # 🔁 启用转换 (false → true) 且是 news 渠道: 补挂接已有内容。
+        # 创建路径有同款分支, 但启用旧禁用行走 PUT —— 不挂接的话订阅后列表为空,
+        # 手工源 (Bloomberg/Reuters 剪藏供稿) 尤其要等下一次剪藏才自愈
+        # (2026-11-22 Kevin 启用 Reuters 后 210 条已有内容 0 可见的实测教训)。
+        if (request.enabled is True and not _sub_was_enabled
+                and _sub_channel_type == 'news'):
+            try:
+                from backend.tasks.subscription_tasks import add_user_to_existing_content_task
+                task = add_user_to_existing_content_task.apply_async(
+                    args=[user_id, _sub_channel_type, _sub_identifier, subscription_id],
+                    countdown=0,
+                    queue='data_fetching',
+                )
+                logger.info(
+                    f"News subscription re-enabled: dispatch add_user_to_existing_content "
+                    f"(user={user_id}, source={_sub_identifier}, task_id={task.id})"
+                )
+            except Exception as dispatch_exc:
+                logger.error(
+                    f"启用转换派发挂接任务失败 (订阅 {subscription_id}): {dispatch_exc}"
+                )
+
         return SubscriptionResponse(
             id=row[0],
             user_id=row[1],

@@ -193,6 +193,11 @@ admin 用 GuanHe Clipper(Chrome 扩展)人工剪藏的 Bloomberg/Reuters 全文,
 - **订阅行**: `insert_web_clip_news_subscriptions.sql` 给 admin 种了
   Bloomberg/Reuters 两行(`metadata.manual_source=true`,EODHD discover
   据此跳过——EODHD 不提供这两个源,拉了空转);
+  **2026-11-22 起 Feeds 面板可自助订阅**: 前端 `feedChannelConfig.tsx`
+  两源已解除 disabled(带"剪藏供稿"提示),`subscriptions.py` 校验放行 +
+  自动注入 manual_source + 已有内容挂接(`add_user_to_existing_content_task`,
+  新订阅者立即可见全部转投全文);`forward_clip_to_feed` 分发面 =
+  订阅者 ∪ 剪藏者(`subscriber_user_ids`),与 EODHD 分发语义对齐;
 - **L 级是关键**: wire top50 按 `_L_RANK` 稳定排序,未评级(None)与 Yahoo 同档
   纯拼时序会被挤出(实测 47 Yahoo vs 2 B/R)。B/R 已加入 `.env
   NEWS_LLM_TAG_SOURCES=CCTV,Bloomberg,Reuters`,入库即 LLM 打 L 级——
@@ -205,6 +210,11 @@ admin 用 GuanHe Clipper(Chrome 扩展)人工剪藏的 Bloomberg/Reuters 全文,
   样板残留 31%→0,正文保留 p50 99.8%);
 - **扩展需重载**: chrome://extensions 重新加载后才上报 published_time;
   旧版扩展照常工作(服务端从正文日期行解析,242/242 实测可解析)。
+- **LLM 分析单源化(方案 A,用户决策 2026-11-22)**: 白名单域名剪藏跳过
+  文件侧 `trigger_auto_tagging`(Feeds 侧 tag_feed_content_task 是唯一内容
+  分析源,L/E+摘要为 file_tags 超集);naming/classify 保留(归档体验)。
+  判定与转投同用 `match_feed_domain`,加新域名自动同步。非白名单剪藏
+  (研报/笔记)不受影响。存量 702 条已补齐 Feeds 侧打标(2026-11-22)。
 
 ## 同步日报的改动
 

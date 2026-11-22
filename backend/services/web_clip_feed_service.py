@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 # 允许转投的域名白名单 (env 覆盖, 逗号分隔)。其余剪藏保持文件模块原行为。
 DEFAULT_FEED_DOMAINS = 'bloomberg.com,reuters.com'
 
+# 手工新闻源显示名 (Feeds 订阅面板可订阅, 但不参与 EODHD 拉取)。
+# 与 feed_domains() 一一对应的 SOURCE_MAPPING 显示名; API 创建订阅时
+# 据此放行并打 metadata.manual_source=true (EODHD discover 跳过)。
+MANUAL_NEWS_SOURCES = ('Bloomberg', 'Reuters')
+
 # 与 subscription_content 去重键对齐的 content_id 长度上限
 CONTENT_ID_MAX = 255
 
@@ -303,6 +308,39 @@ def extract_source_name(url: str) -> str:
     return extract_source_from_url(url)
 
 
+def subscriber_user_ids(source_name: str, extra_uid: Optional[int] = None) -> List[int]:
+    """该 news 源的全部 enabled 订阅者 uid (+ 剪藏者), 去重升序。
+
+    与 EODHD 分发语义对齐 (source_to_users 合并): 订阅了该源的用户都能
+    在 My Feeds 看到 clipper 转投的全文, 而不只是剪藏者本人。
+    """
+    from backend.database.db_manager import DatabaseManager
+    from backend.utils.database_config import get_database_config
+
+    ids = {extra_uid} if extra_uid else set()
+    db = DatabaseManager(get_database_config())
+    conn = db.get_connection()
+    if not conn:
+        return sorted(ids)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT user_id FROM subscription_list
+            WHERE channel_type = 'news' AND enabled = true
+              AND LOWER(channel_identifier) = LOWER(%s)
+            """,
+            (source_name,),
+        )
+        ids.update(r[0] for r in cursor.fetchall())
+        cursor.close()
+    except Exception as e:
+        logger.error("查订阅者失败 source=%s: %s", source_name, e)
+    finally:
+        conn.close()
+    return sorted(ids)
+
+
 def _write_evidence_tag(content_pk: int, channel_type: str, tagged_by: Optional[int]) -> None:
     """确定性写 E 级标签 (E1 一手全文); 不动已有行 (ON CONFLICT DO NOTHING),
     info_level 留空由 LLM 管线或后续 NEWS_LLM_TAG_SOURCES 决定。"""
@@ -400,8 +438,10 @@ def forward_clip_to_feed(
     }
 
     from backend.services.subscription_content_service import SubscriptionContentService
+    # 分发面 = 订阅者 ∪ 剪藏者: 订阅了该源的用户立刻可见 (对齐 EODHD 分发语义)
+    target_uids = subscriber_user_ids(source_name, user_ids[0] if user_ids else None)
     svc = SubscriptionContentService()
-    db_id, is_new = svc._save_normalized_content(normalized_data=normalized, user_ids=user_ids)
+    db_id, is_new = svc._save_normalized_content(normalized_data=normalized, user_ids=target_uids)
 
     tagged_by = user_ids[0] if user_ids else None
     try:

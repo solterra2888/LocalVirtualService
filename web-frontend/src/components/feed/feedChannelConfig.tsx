@@ -55,6 +55,8 @@ export interface NewsSourceConfig {
   iconLocalFile: string;
   /** EODHD 暂不提供：灰显 + Coming soon，且不可订阅 */
   disabled?: boolean;
+  /** 订阅面板 Tooltip 文案 (手工源标注数据来源) */
+  note?: string;
 }
 
 export const NEWS_SOURCES: NewsSourceConfig[] = [
@@ -69,8 +71,8 @@ export const NEWS_SOURCES: NewsSourceConfig[] = [
   { identifier: 'Actionforex', label: 'ActionForex', color: '#00897B', iconDomain: 'actionforex.com', iconLocalFile: 'actionforex.ico', disabled: true },
   { identifier: 'Dailyhodl', label: 'Daily Hodl', color: '#FFC107', iconDomain: 'dailyhodl.com', iconLocalFile: 'dailyhodl.ico', disabled: true },
   { identifier: 'Thecurrencyanalytics', label: 'Currency Analytics', color: '#7B1FA2', iconDomain: 'thecurrencyanalytics.com', iconLocalFile: 'thecurrencyanalytics.ico', disabled: true },
-  { identifier: 'Bloomberg', label: 'Bloomberg', color: '#1A1A1A', iconDomain: 'bloomberg.com', iconLocalFile: 'bloomberg.ico', disabled: true },
-  { identifier: 'Reuters', label: 'Reuters', color: '#FF6600', iconDomain: 'reuters.com', iconLocalFile: 'reuters.ico', disabled: true },
+  { identifier: 'Bloomberg', label: 'Bloomberg', color: '#1A1A1A', iconDomain: 'bloomberg.com', iconLocalFile: 'bloomberg.ico', note: 'GuanHe Clipper 剪藏供稿 · E1 全文 · 无定时抓取，更新随剪藏入库' },
+  { identifier: 'Reuters', label: 'Reuters', color: '#FF6600', iconDomain: 'reuters.com', iconLocalFile: 'reuters.ico', note: 'GuanHe Clipper 剪藏供稿 · E1 全文 · 无定时抓取，更新随剪藏入库' },
   { identifier: 'MarketWatch', label: 'MarketWatch', color: '#00A651', iconDomain: 'marketwatch.com', iconLocalFile: 'marketwatch.ico', disabled: true },
   { identifier: 'Wall Street Journal', label: 'WSJ', color: '#0274B6', iconDomain: 'wsj.com', iconLocalFile: 'wsj.ico', disabled: true },
   { identifier: 'Financial Times', label: 'Financial Times', color: '#265761', iconDomain: 'ft.com', iconLocalFile: 'ft.ico', disabled: true },
