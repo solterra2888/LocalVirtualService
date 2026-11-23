@@ -324,8 +324,17 @@ _SRC_CFG = {
         'role': '③公司与板块部主稿(催化剂与嘉宾观点)',
         'mp': ['cnbc_closing_bell.clean_transcript', 'cnbc_closing_bell.clean_transcript_ot'],
         'dp': ['cnbc_closing_bell'], 'vol': 'cb_chars'},
- 'tw': {'label': '推特快讯池', 'unit': '条', 'role': '快讯供给:全部编辑部辅材;⑤地缘/⑥美联储的实时补充',
-        'mp': ['news.flash', 'news.wire', 'news.calls'], 'dp': ['news'], 'vol': 'news_counts'},
+ 't1': {'label': 'Bloomberg/Reuters 全文', 'unit': '篇',
+        'role': '第1层信源(v9 tier=1):独立配额,L1 全收;②③⑦部主稿级素材',
+        'mp': ['news.wire'], 'dp': ['news'], 'tierf': lambda it: it.get('tier') == 1},
+ 'wr': {'label': '其余层全文(2-4层)', 'unit': '篇',
+        'role': '原创媒体/注明出处/聚合(滤 SEO/公告/过期复盘后);辅材',
+        'mp': ['news.wire'], 'dp': ['news'], 'tierf': lambda it: (it.get('tier') or 0) != 1},
+ 'fl': {'label': '转播快讯 flash', 'unit': '条',
+        'role': '快讯供给(45 分钟窗近似聚簇去重);⑤地缘/⑥美联储的实时补充',
+        'mp': ['news.flash'], 'dp': ['news']},
+ 'cl': {'label': '电话会纪要', 'unit': '条', 'role': '③公司部管理层表态(财报日历相交)',
+        'mp': ['news.calls'], 'dp': ['news']},
  'cn': {'label': '中文研究池', 'unit': '条', 'role': '④宏观数据部边际变化(研报转述)+⑤地缘政治部主题原料',
         'mp': ['news_macro.digest', 'news_macro.research', 'news_macro.geo'], 'dp': ['news_macro'], 'vol': 'nm_counts'},
  'cal': {'label': 'EODHD 日历', 'unit': '条', 'role': '④宏观数据部数据日历;③公司部财报催化剂(相交瘦身)',
@@ -346,22 +355,29 @@ _SRC_CFG = {
                'macro_pillars.next_fomc_odds', 'prior_odds'],
         'dp': ['fomc', 'prior_odds'], 'vol': 'fomc_counts'},
 }
-_CLAIM_PREFIX = [('the_close', 'tc'), ('cnbc_closing_bell', 'cb'), ('news.', 'tw'), ('news_macro.', 'cn'),
+_CLAIM_PREFIX = [('the_close', 'tc'), ('cnbc_closing_bell', 'cb'), ('news_macro.', 'cn'),
                  ('economic_events', 'cal'), ('earnings_calendar', 'cal'), ('market.cross_asset', 'fred'),
                  ('market.', 'fz'), ('macro_pillars.fed_odds', 'fomc'), ('macro_pillars.next_fomc_odds', 'fomc'),
                  ('macro_pillars.fomc_calendar', 'fomc'), ('macro_pillars.', 'fred'), ('fomc', 'fomc'),
                  ('prior_odds', 'fomc')]
-_SRC2SLICE = [('tc', 'overall_market'), ('tw', 'overall_market'), ('fred', 'overall_market'),
-              ('cb', 'company_desk'), ('fz', 'company_desk'), ('cal', 'company_desk'), ('tw', 'company_desk'),
+# news.* 的 claims 路径带 [id=wN] 索引,按条目 tier 归入 t1/wr(_claim_src 反查)
+_NEWS_KEYS = ('t1', 'wr', 'fl', 'cl')
+# news 家族供给的切片及连线权重(2026-11-23 核实:六部切片的快照均含完整
+# news 池 flash+wire,旧版 'tw' 只画 4 部是欠精确接线,补全为六部)
+_NEWS_SLICES = [('overall_market', 4), ('company_desk', 3), ('macro_review', 2),
+                ('geopolitics', 3), ('fomc', 3), ('outlook', 2)]
+_SRC2SLICE = [('tc', 'overall_market'), ('fred', 'overall_market'),
+              ('cb', 'company_desk'), ('fz', 'company_desk'), ('cal', 'company_desk'),
               ('cal', 'macro_review'), ('cn', 'macro_review'), ('tc', 'macro_review'), ('fred', 'macro_review'),
-              ('cn', 'geopolitics'), ('tw', 'geopolitics'),
-              ('fomc', 'fomc'), ('fred', 'fomc'), ('tw', 'fomc'),
-              ('tc', 'outlook'), ('fomc', 'outlook'), ('fred', 'outlook')]
-_SRC2SLICE_W = {('tc', 'overall_market'): 8, ('tw', 'overall_market'): 3, ('fred', 'overall_market'): 2,
-                ('cb', 'company_desk'): 8, ('fz', 'company_desk'): 4, ('cal', 'company_desk'): 2, ('tw', 'company_desk'): 2,
+              ('cn', 'geopolitics'),
+              ('fomc', 'fomc'), ('fred', 'fomc'),
+              ('tc', 'outlook'), ('fomc', 'outlook'), ('fred', 'outlook')] \
+             + [(k, a) for k in _NEWS_KEYS for a, _ in _NEWS_SLICES]
+_SRC2SLICE_W = {('tc', 'overall_market'): 8, ('fred', 'overall_market'): 2,
+                ('cb', 'company_desk'): 8, ('fz', 'company_desk'): 4, ('cal', 'company_desk'): 2,
                 ('cal', 'macro_review'): 4, ('cn', 'macro_review'): 3, ('tc', 'macro_review'): 3, ('fred', 'macro_review'): 1,
-                ('cn', 'geopolitics'): 5, ('tw', 'geopolitics'): 3,
-                ('fomc', 'fomc'): 5, ('fred', 'fomc'): 3, ('tw', 'fomc'): 2,
+                ('cn', 'geopolitics'): 5,
+                ('fomc', 'fomc'): 5, ('fred', 'fomc'): 3,
                 ('tc', 'outlook'): 4, ('fomc', 'outlook'): 2, ('fred', 'outlook'): 1}
 
 
@@ -386,9 +402,21 @@ def _measure(v, unit):
     return 1
 
 
-def _claim_src(path):
+def _claim_src(path, sources=None):
+    """claims 路径 → 桑基源 key。news.* 带 [id=wN]:按条目 tier 归入
+    t1(B/R 全文)/wr(其余层)/fl(flash)/cl(calls);无快照可查时按 bucket 兜底。"""
+    m = re.match(r'news\.(wire|flash|calls)', path or '')
+    if m:
+        bucket = m.group(1)
+        if sources is not None and '[id=' in (path or ''):
+            cid = (path.split('[id=', 1)[1].split(']', 1)[0]) if '[id=' in path else ''
+            items = _dig(sources, f'news.{bucket}') or []
+            it = next((x for x in items if isinstance(x, dict) and str(x.get('id')) == cid), None)
+            if it is not None and bucket == 'wire':
+                return 't1' if it.get('tier') == 1 else 'wr'
+        return {'wire': 'wr', 'flash': 'fl', 'calls': 'cl'}[bucket]
     for pre, k in _CLAIM_PREFIX:
-        if path.startswith(pre):
+        if (path or '').startswith(pre):
             return k
     return 'other'
 
@@ -402,9 +430,24 @@ def _src_volume_label(sources, key):
             a = len(_dig(sources, 'cnbc_closing_bell.clean_transcript') or '')
             b = len(_dig(sources, 'cnbc_closing_bell.clean_transcript_ot') or '')
             return f"{a + b:,} 字"
-        if key == 'tw':
-            n = sum(len(_dig(sources, p) or []) for p in ('news.flash', 'news.wire', 'news.calls'))
-            return f"{n} 条(flash/wire/calls)"
+        if key in _NEWS_KEYS:
+            cfg = _SRC_CFG[key]
+            items = _dig(sources, cfg['mp'][0]) or []
+            n = sum(1 for it in items if isinstance(it, dict)
+                    and (cfg.get('tierf') is None or cfg['tierf'](it)))
+            if key == 't1':
+                l1 = sum(1 for it in items if isinstance(it, dict) and it.get('tier') == 1
+                         and it.get('info_level') == 'L1')
+                sel = _dig(sources, 'news.selection.wire') or {}
+                cap = sel.get('t1_available')
+                return f"{n} 篇 · L1 {l1}(可得 {cap})" if cap else f"{n} 篇"
+            if key == 'wr':
+                return f"{n} 篇(滤后)"
+            if key == 'fl':
+                sel = _dig(sources, 'news.selection.flash') or {}
+                clus = sel.get('clusters')
+                return f"{n} 条(聚簇 {clus} 簇)" if clus else f"{n} 条"
+            return f"{n} 条"
         if key == 'cn':
             n = sum(len(_dig(sources, p) or []) for p in ('news_macro.digest', 'news_macro.research', 'news_macro.geo'))
             return f"{n} 条(研报+地缘)"
@@ -503,12 +546,18 @@ def _sankey_payload(ws: Path) -> Dict[str, Any]:
             if a in NAME and b in NAME:
                 links.append({'source': NAME[a], 'target': NAME[b], 'value': v})
         SRC, SLC, SEC, QC, DLV = '#f59e0b', '#3b82f6', '#10b981', '#ef4444', '#0d9488'
+        T1C = '#7c3aed'    # 第1层信源(紫色仅此一处,避免与漏斗/计划连成同色通道)
+        SELC = '#64748b'   # v9 选材漏斗(石板色:分发边渐变为切片蓝)
+        PLC = '#e11d48'    # v2 编辑计划(玫红:与信源色完全区隔)
         NLc = chr(10)
-        src_links = {'tc': 8, 'cb': 9, 'tw': 7, 'cn': 4, 'cal': 4, 'fz': 6, 'fred': 5, 'fomc': 3}
+        src_links = {'tc': 8, 'cb': 9, 't1': 8, 'wr': 3, 'fl': 7, 'cl': 2,
+                     'cn': 4, 'cal': 4, 'fz': 6, 'fred': 5, 'fomc': 3}
         for k, cfg in _SRC_CFG.items():
             vol = _src_volume_label(sources, k)
-            N(k, 0, src_links[k], cfg['label'] + (NLc + vol if vol else ''), SRC,
-              ['当日快照 bucket: ' + ', '.join(cfg['dp'])])
+            N(k, 0, src_links[k], cfg['label'] + (NLc + vol if vol else ''),
+              T1C if k == 't1' else SRC,
+              ['当日快照 bucket: ' + ', '.join(cfg['dp'])] +
+              (['tier=1:Bloomberg/Reuters 剪藏全文(转投 subscription_content)'] if k == 't1' else []))
             out['name2src'][cfg['label']] = k
             out['srcCfg'][k] = {'label': cfg['label'], 'unit': cfg['unit'], 'role': cfg['role'], 'dp': cfg['dp']}
         mm = lambda s: f"{round(tim.get(s, 0) / 60)}min"
@@ -530,6 +579,44 @@ def _sankey_payload(ws: Path) -> Dict[str, Any]:
               [f'{fn} · 供{dept} · 点击本节点或其右侧管道打开 JSON 数据'])
             secs_txt = '/'.join(_SEC_NAMES[i].split('_')[1] for i in _SLICE_SECS[agent])
             out['sliceMeta'][fn] = f'{dept} → {secs_txt}'
+        # v9 选材漏斗 + v2 编辑计划(旧快照无 selection/tier 时自动降级:news 源直连切片)
+        sel_stats = _dig(sources, 'news.selection.wire') or {}
+        fl_stats = _dig(sources, 'news.selection.flash') or {}
+        wire_items = [it for it in (_dig(sources, 'news.wire') or []) if isinstance(it, dict)]
+        n_t1 = sum(1 for it in wire_items if it.get('tier') == 1)
+        n_wr = len(wire_items) - n_t1
+        has_sel = bool(sel_stats)
+        if has_sel:
+            _DROP_CN = {'seo': 'SEO 稿', 'pr': '公告/通稿', 'off_topic': '与盘面无关',
+                        'stale': '隔日复盘', 'auto': '自动稿', 'lowvalue': '低价值',
+                        'dup_of_t1': '与第1层同题'}
+            drops = sel_stats.get('dropped') or {}
+            drop_txt = ' · '.join(f"{_DROP_CN.get(k, k)} {v}" for k, v in
+                                  sorted(drops.items(), key=lambda x: -x[1]))
+            N('sel', 1, 12,
+              f"v9 选材 · news 层{NLc}第1层 {sel_stats.get('t1_selected', '?')}/{sel_stats.get('t1_available', '?')} 篇 · 其余层 {n_wr} 篇 · flash 聚簇 {fl_stats.get('candidates', '?')}→{fl_stats.get('clusters', '?')}",
+              SELC,
+              [f"wire 候选 {sel_stats.get('candidates')} 条 → 入选 {sel_stats.get('selected')}",
+               f"第1层可得 {sel_stats.get('t1_available')} · 入选 {sel_stats.get('t1_selected')}"
+               f"(L1 {sel_stats.get('t1_l1_available')} 全收 = {sel_stats.get('t1_l1_selected')})",
+               f"丢弃: {drop_txt or '无'}",
+               f"flash 候选 {fl_stats.get('candidates')} → 聚簇 {fl_stats.get('clusters')} 簇"
+               f"(合并转播 {fl_stats.get('merged_away')} 条)",
+               '分发: 全部六部切片(快照均含完整 news 池) + 编辑计划',
+               '规则: source_quality.py(信源层级/盘面相关度/时段保底/隔日复盘滤除)'])
+        plan_j = _j(ws / 'plan.json') or {}
+        stories = plan_j.get('stories') or []
+        ev_stories = [s for s in stories if s.get('evidence')]
+        if ev_stories:
+            t1_ids = {it.get('id') for it in wire_items if it.get('tier') == 1}
+            ev_t1 = len({i for s in ev_stories for i in (s.get('evidence') or [])} & t1_ids)
+            N('plan', 2, 6,
+              f"编辑计划 v2 · evidence{NLc}{len(ev_stories)}/{len(stories)} 故事 · 引第1层 {ev_t1} 条", PLC,
+              [f"plan.json: {len(stories)} 故事,{len(ev_stories)} 条带 evidence 条目 id",
+               f"evidence 引用第1层 wire {ev_t1} 处",
+               'v2: MB_EDITORIAL_V2(计划溯源 / SOURCE TIERS / 个股组第1层切片)']
+              + [f"{(s.get('headline') or s.get('title') or '故事')[:36]} → {' '.join((s.get('evidence') or [])[:6])}"
+                 for s in ev_stories[:7]])
         # 栏目(报告架构顺序)
         ORDER = [('大盘总览', None, None), ('今日要闻', 'overall_market', 0), ('核心驱动', 'overall_market', 1),
                  ('持仓与资金流', 'overall_market', 2), ('美股全景', None, None), ('今日涨跌榜', None, 4),
@@ -566,7 +653,28 @@ def _sankey_payload(ws: Path) -> Dict[str, Any]:
         N('card', 4, 4, card_n, DLV, ['gen_pipeline_card 注入 __RUN__/__SANKEY__'])
         # 连线
         for a, b in _SRC2SLICE:
-            L(a, 'sl_' + b, _SRC2SLICE_W[(a, b)])
+            if has_sel and a in _NEWS_KEYS:
+                continue  # 漏斗路径接管,避免双路
+            L(a, 'sl_' + b, _SRC2SLICE_W.get((a, b), 1))
+        # news 家族:v9 漏斗存在时汇入 sel 再分发,否则直连(旧快照同旧版)
+        if has_sel:
+            L('t1', 'sel', max(n_t1, 1))
+            L('wr', 'sel', max(n_wr, 1))
+            L('fl', 'sel', max(len(_dig(sources, 'news.flash') or []), 1))
+            L('cl', 'sel', max(len(_dig(sources, 'news.calls') or []), 1))
+            for agent, w in _NEWS_SLICES:
+                L('sel', 'sl_' + agent, w)
+        if 'plan' in NAME:
+            L('sel' if has_sel else 'fl', 'plan', 1.5)
+            # v2: 故事带 owner(负责章节),plan_brief 只把 evidence 转交对应节
+            secname2key = {}
+            for i, (h, agent, ci) in enumerate(ORDER):
+                if agent and ci is not None:
+                    secname2key[_SEC_NAMES[ci].split('_', 1)[1]] = SEC_KEY[h]
+            for s in ev_stories:
+                k = secname2key.get(s.get('owner') or '')
+                if k:
+                    L('plan', k, 0.6)
         for h, agent, ci in ORDER:
             if agent and ('sl_' + agent) in NAME and SEC_KEY[h] in NAME:
                 L('sl_' + agent, SEC_KEY[h], round((chars.get(h) or 160) / 400, 1))
@@ -594,9 +702,19 @@ def _sankey_payload(ws: Path) -> Dict[str, Any]:
             if not fn:
                 continue
             cfg = _SRC_CFG[sk]
-            tot = sum(_measure(_dig(sources, p), cfg['unit']) for p in cfg['mp'])
+
+            def _cnt(obj):
+                n = 0
+                for p in cfg['mp']:
+                    v = _dig(obj, p)
+                    if isinstance(v, list) and cfg.get('tierf'):
+                        n += sum(1 for it in v if isinstance(it, dict) and cfg['tierf'](it))
+                    else:
+                        n += _measure(v, cfg['unit'])
+                return n
+            tot = _cnt(sources)
             sliced = (out['slices'].get(fn) or {}).get('sources') or {}
-            got = sum(_measure(_dig(sliced, p), cfg['unit']) for p in cfg['mp'])
+            got = _cnt(sliced)
             cb = {}
             for ci in _SLICE_SECS[agent]:
                 md = f'sections/{_SEC_NAMES[ci]}.md'
@@ -607,7 +725,7 @@ def _sankey_payload(ws: Path) -> Dict[str, Any]:
                     lst = _j(cp) or []
                 except Exception:
                     lst = []
-                n = sum(1 for c in lst if _claim_src(c.get('path', '')) == sk)
+                n = sum(1 for c in lst if _claim_src(c.get('path', ''), sources) == sk)
                 if n:
                     cb[md.split('/')[-1]] = n
             out['pipes'][sk + '|' + fn] = {'tot': tot, 'got': got, 'unit': cfg['unit'],
