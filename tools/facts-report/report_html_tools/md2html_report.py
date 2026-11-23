@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """一次性:facts-report final/report.md → DMR 风格四 tab HTML(final/report.html)"""
-import json, re, base64
+import hashlib, json, re, base64
 from pathlib import Path
 
 import sys as _argv
@@ -458,6 +458,8 @@ body.has-ftcards .ftwrap{display:none}
 .rc-t{flex:none;color:var(--text-secondary)}
 .rc-spark{flex:none}   /* 移动端卡片走势图(FT 卡片 .fc-spark 同款 64×22;数据=桌面表 r.sv,实时刷新随 render() 重建) */
 .rc-spark .spspark{width:64px;height:22px}
+/* 各市场「当日」截止日说明 / 「报告已更新」提示(2026-11-23) */
+.rk-asof{font-size:12px;color:var(--text-muted);margin:-2px 0 8px}
 .rc-r2{display:flex;align-items:center;gap:9px;margin-top:5px;font-size:12px}
 .rc-p{font-weight:600}
 .rc-g{font-weight:600}
@@ -1062,10 +1064,39 @@ function decorate(root){
     var tbl = h3.nextElementSibling;
     if(!tbl || tbl.tagName !== 'TABLE') return;
     var D = window.__RANK__[mkt];
-    D.rows.forEach(function(r, ix){ r._i = ix; });   // 原始行序(kline 端点索引,排序/翻页不丢)
+    // _p0 = 生成时冻结的收盘价(实时补丁只改 r.p):弹窗价位对齐以它为准
+    D.rows.forEach(function(r, ix){ r._i = ix; r._p0 = r.p; });   // 原始行序(kline 端点索引,排序/翻页不丢)
     var st = {key: 't', dir: -1, page: 0};   // 默认成交额降序(即冻结序)
     var wrap = document.createElement('div'); wrap.className = 'rankint';
     tbl.replaceWith(wrap);
+    // 截止日说明(2026-11-23):「当日」= 报告生成日 D(北京)。美股取 D 日凌晨收盘
+    // (美东 T 交易日),生成时已定;港股/A股取 D 日自己的交易时段,生成时未开盘,
+    // 行先停在上一交易日,收盘后由收盘补数写回并重渲染(asof 变为 D)
+    var asof = String(D.asof || '').slice(0, 10), lab = '';
+    if(mkt === 'us') lab = '北京 ' + D.d + ' 凌晨收盘 · 美东 ' + D.t + ' 交易日';
+    else if(asof) lab = (asof === D.d ? D.d + ' 收盘'
+      : '暂为 ' + asof + ' 收盘 · ' + D.d + ' 有交易则开盘后自动更新');
+    if(lab){
+     var al = document.createElement('div'); al.className = 'rk-asof'; al.textContent = lab;
+     wrap.parentNode.insertBefore(al, wrap);
+    }
+    // 弹窗价位对齐榜单行(2026-11-23):Yahoo 日线按此后发生的拆股复权,而榜单行是
+    // 当日实际成交价(与正文一致)。报告日后有拆股时两者差一个拆股倍数(11-20
+    // 报告 SNDK:行 755.16,Yahoo 11-19 收 94.395)→ 把整条序列折回行的价位口径。
+    // 偏差不足 10% 视为同一口径(两源收盘价的正常差异),不动
+    function onRowBasis(h, row, asof){
+     var px = row && (row._p0 != null ? row._p0 : row.p);
+     if(!(px > 0) || !asof) return h;
+     var last = null;
+     for(var i = h.length - 1; i >= 0; i--){ if(h[i][0] <= asof){ last = h[i]; break; } }
+     if(!last || !(last[4] > 0)) return h;
+     var basis = px / last[4];
+     if(Math.abs(basis - 1) < 0.1) return h;
+     return h.map(function(b){
+      return [b[0], b[1] * basis, b[2] * basis, b[3] * basis, b[4] * basis]
+       .map(function(v, n){ return n ? Math.round(v * 1e4) / 1e4 : v; });
+     });
+    }
     // 点击行 → FT 弹窗复用:先开"加载中",再按 (mkt, 行序) 拉单只日 K
     function openKline(idx){
      if(!window.__ftRowOpen || idx == null || isNaN(idx)) return;
@@ -1080,7 +1111,8 @@ function decorate(root){
         window.__ftRowSet(k, {n: nm, u: '%', a: null, h: [], e: '走势数据暂不可用'});
         return;
        }
-       window.__ftRowSet(k, {n: nm, u: '%', a: j.a, h: j.h});
+       window.__ftRowSet(k, {n: nm, u: '%', a: j.a,
+        h: onRowBasis(j.h, D.rows[idx], mkt === 'us' ? D.t : D.asof)});
       })
       .catch(function(){
        window.__ftRowSet(k, {n: nm, u: '%', a: null, h: [], e: '走势数据暂不可用'});
@@ -1149,9 +1181,21 @@ function decorate(root){
      wrap.innerHTML = h + '</tbody></table>' + bar;
     }
     // 实时刷新钩子:live-refresh JS 拿到 /quotes 响应的 rank 字段后回调,
-    // 就地改 __RANK__ 行数据(价格/当日/5日/1月/YTD)并重渲 —— 港/A 股收盘
-    // 早于查看时刻,快照 T 日值被刷新为最新收盘;接口失败/旧行保留快照
+    // 就地改 __RANK__ 行数据(价格/当日/5日/1月/YTD)并重渲。v2 起只含港股/A股
+    // 的 D 日行情(服务端已按行情日期过滤、昨收用冻结的 D-1 收盘);接口失败、
+    // 非 D 日行情、旧行均保留快照
     (window.__rkUpd = window.__rkUpd || []).push(function(patch){
+     // 行序版本校验:报告重渲染后行序可能变化(收盘补数按新成交额重排),旧页面
+     // 的行与服务端规格错位 —— 忽略补丁并提示刷新,绝不把数字贴到别的股票上
+     if(patch.v && window.__RANKV__ && patch.v !== window.__RANKV__){
+      if(!window.__rkStaleShown){
+       window.__rkStaleShown = true;
+       var sn = document.createElement('div'); sn.className = 'rk-asof';
+       sn.textContent = '报告已更新，刷新页面查看最新数据';
+       wrap.parentNode.insertBefore(sn, wrap);
+      }
+      return;
+     }
      var pm = patch[mkt];
      if(!pm) return;
      pm.forEach(function(v, i){
@@ -1164,7 +1208,13 @@ function decorate(root){
       if(v.m != null) r.m = v.m;
       if(v.y != null) r.y = v.y;
       if(v.p != null && r.sp && r.sp.length){
-       if(r.sp[r.sp.length - 1] !== v.p) r.sp.push(v.p);   // 补当日点
+       // 走势图末点:冻结序列长度只记一次(_n0),每轮先截回再补。v.k=1 表示
+       // 冻结序列已含 D 日点(收盘补数后)→ 替换末点;否则追加为 D 日点。此前
+       // 每轮价格变动就 push 一个点,盘中一小时多出几十个同日点
+       if(r._n0 == null) r._n0 = r.sp.length;
+       r.sp.length = r._n0;
+       if(v.k && r.sp.length) r.sp.pop();
+       if(r.sp[r.sp.length - 1] !== v.p) r.sp.push(v.p);
        if(window.__sparkHTML)
         r.sv = window.__sparkHTML(r.sp, v.g != null ? v.g : r.g);
       }
@@ -1337,11 +1387,17 @@ def _rk_spark_svg(vals, m1d=None):
 
 RANK = {}
 _vl = (((_snap.get('sources') or {}).get('market') or {}).get('volume_leaders')) or {}
+# 「当日」= 报告日 D = T+1(北京):美股行/弹窗止于 T,港股/A股止于 D(页面 JS 据
+# 此渲染各市场截止日说明)。旧快照缺 report_date 时留空,JS 不显示说明
+_SESS = str(_snap.get('report_date') or '')[:10]
+_RDAY = ((_D.fromisoformat(_SESS) + _TD(days=1)).isoformat() if _SESS else '')
 for _k, _label, _unit in VL_MARKETS:
     _rows = ((_vl.get(_k) or {}).get('rows')) or []
     if not _rows:
         continue
-    RANK[_k] = {'label': _label, 'unit': _unit, 'rows': [
+    RANK[_k] = {'label': _label, 'unit': _unit, 't': _SESS, 'd': _RDAY,
+                'asof': str((_vl.get(_k) or {}).get('as_of') or '')[:10],
+                'rows': [
         {'c': _vl_disp_code(r), 'n': r.get('name_cn') or r.get('name') or '',
          'p': r.get('price'), 'g': r.get('change_percent'), 't': r.get('turnover'),
          'w': (r.get('perf') or {}).get('w1'), 'm': (r.get('perf') or {}).get('m1'),
@@ -1349,6 +1405,14 @@ for _k, _label, _unit in VL_MARKETS:
          'sv': _rk_spark_svg(r.get('spark'), r.get('change_percent'))}
         for r in _rows]}
 RANK_JSON = json.dumps(RANK, ensure_ascii=False)
+# 行序指纹:与 register 写入 metadata.rank_kline 的结构相同(各市场 ysym 按行序),
+# 服务端 /quotes 用同算法回传 rank.v;不一致 = 报告已重渲染、行序可能变了,
+# 页面忽略实时补丁并提示刷新
+_KS = {m: [r.get('ysym') for r in ((_vl.get(m) or {}).get('rows') or [])]
+       for m in ('us', 'hk', 'cn')}
+RANK_V = (hashlib.sha1(json.dumps(_KS, sort_keys=True, separators=(',', ':'))
+                       .encode('utf-8')).hexdigest()[:12]
+          if any(_KS.values()) else '')
 
 payload_scripts = ''.join(
     '<script>window.__TABS__=(window.__TABS__||[]);window.__TABS__.push(' + json.dumps(t, ensure_ascii=False) + ');</script>' + chr(10)
@@ -1358,7 +1422,7 @@ payload_scripts += '<script>window.__FT_HIST__=' + json.dumps(FT_HIST, ensure_as
 payload_scripts += '<script>window.__FT_META__=' + json.dumps(FT_META, ensure_ascii=False) + ';</script>' + chr(10)
 payload_scripts += '<div id="provtip"></div><div id="provpop"></div>' + chr(10)
 payload_scripts += '<script>window.__PROV__=' + PROV_JS + ';</script>' + chr(10)
-payload_scripts += '<script>window.__RANK__=' + RANK_JSON + ';</script>' + chr(10)
+payload_scripts += '<script>window.__RANK__=' + RANK_JSON + ';window.__RANKV__=' + json.dumps(RANK_V) + ';</script>' + chr(10)
 html = html.replace('<script>' + chr(10) + 'var TABS = window.__TABS__ || [];',
                     payload_scripts + '<script>' + chr(10) + 'var TABS = window.__TABS__ || [];', 1)
 html = (html.replace('__TITLE__', title.replace('<', '&lt;'))

@@ -677,6 +677,17 @@ def _rank_perf_spark(sym: str, t: date,
             d = datetime.fromtimestamp(ts[i]).date()
             if d <= t:
                 pts.append((d, float(vals[i])))
+        # 价位口径对齐(2026-11-23):Yahoo 日线按此后发生的拆股复权,而榜单行是当日
+        # 实际成交价。重算旧工作区时两者会差一个拆股倍数(11-19 SNDK:行 755.16,
+        # Yahoo 94.395)→ 序列末点与行对不上。偏差 >=10% 视为拆股口径差,把整条序列
+        # 折回行的价位(5日/1月/YTD 是比值,不受影响);更小的偏差是两源收盘价的
+        # 正常差异,不动
+        if (pts and anchor_price and anchor_price > 0 and pts[-1][0] == t
+                and pts[-1][1] > 0
+                and abs(anchor_price / pts[-1][1] - 1) >= 0.1):
+            basis = anchor_price / pts[-1][1]
+            pts = [(d, round(c * basis, 4)) for d, c in pts]
+            print(f"[rank_sparks] {sym} 序列折回行价位口径 ×{basis:.4g}")
         spliced = False
         if (pts and anchor_price and anchor_price > 0
                 and anchor_chg is not None and pts[-1][0] < t):
@@ -711,19 +722,88 @@ def _rank_perf_spark(sym: str, t: date,
         return None
 
 
-def _rank_sparks(vl: Dict[str, Any], t: date) -> None:
+def _eodhd_split_symbol(row: Dict[str, Any]) -> Optional[str]:
+    """榜单行 → EODHD 拆股接口符号(US:SNDK.US / HK:0700.HK / 沪深:600519.SHG)。"""
+    code, ex = str(row.get("code") or ""), row.get("exchange")
+    if not code:
+        return None
+    if ex == "US":
+        return f"{code}.US"
+    if ex == "HK":
+        return f"{code.zfill(4)}.HK"
+    if ex in ("SHG", "SHE"):
+        return f"{code}.{ex}"
+    return None
+
+
+def _split_adjust(row: Dict[str, Any], t: date,
+                  yahoo_chg: Optional[float]) -> Optional[float]:
+    """拆股日修正榜单行的当日涨跌;返回修正后的涨跌(%),无需修正返回 None。
+
+    榜单行的当日 = T 日 close ÷ 前一交易日另一份 bulk 文件的 close。T 日生效
+    拆股时两日口径不一致:构建时刻(北京 08:00)T-1 文件尚未按拆股回溯调整
+    —— EODHD 事后才重写(2026-11-20 SNDK 8:1:08:00 取到 755.16,当晚同一
+    文件已是 94.395)→ 当日 -89.51%,真实 -16.05%。触发条件(任一):
+      - 与 Yahoo 序列末段(拆股已复权)相差 >1pp(序列须含 T 日 bar);
+      - 当日 <= -30% 或 >= +200%(Yahoo 缺 T 日 bar 时的兜底;2:1 拆股即 -50%)。
+    命中后查 EODHD splits,仅当 T 日确有拆股才按比例折算昨收;对不上则原样
+    不动(两源打架交由日志暴露,不擅自改数)。行内 _split 标记防二次折算。
+    """
+    chg, pc, price = row.get("change_percent"), row.get("prev_close"), row.get("price")
+    if (row.get("_split") or not isinstance(chg, (int, float))
+            or not pc or not price):
+        return None
+    suspicious = (
+        (isinstance(yahoo_chg, (int, float)) and abs(yahoo_chg - chg) > 1.0)
+        or chg <= -30 or chg >= 200)
+    if not suspicious:
+        return None
+    sym = _eodhd_split_symbol(row)
+    if not sym:
+        return None
+    try:
+        evs = _eodhd_api(f"splits/{sym}", {})
+    except Exception as exc:  # noqa: BLE001 — 查询失败不改数
+        print(f"[rank_split] {sym} splits lookup failed: {exc}")
+        return None
+    ratio: Optional[float] = None
+    for ev in evs if isinstance(evs, list) else []:
+        if str(ev.get("date") or "") != t.isoformat():
+            continue
+        try:
+            num, den = (float(x) for x in str(ev.get("split") or "").split("/"))
+        except ValueError:
+            continue
+        if num > 0 and den > 0:
+            ratio = num / den
+    if not ratio or abs(ratio - 1) < 1e-9:
+        print(f"[rank_split] {sym} 当日 {chg:+.2f}% 可疑但 T 日无拆股记录,保持原值")
+        return None
+    adj_pc = pc / ratio
+    new_chg = round((price / adj_pc - 1) * 100, 2)
+    row["prev_close"], row["change_percent"], row["_split"] = adj_pc, new_chg, ratio
+    print(f"[rank_split] {sym} {t.isoformat()} 拆股 {ratio:g}:1 → 昨收 "
+          f"{pc}→{adj_pc:.4f}, 当日 {chg:+.2f}%→{new_chg:+.2f}%")
+    return new_chg
+
+
+def _rank_sparks(vl: Dict[str, Any], t: date,
+                 markets: Tuple[str, ...] = ("us", "hk", "cn")) -> None:
     """就地给 volume_leaders 各行补 ysym(Yahoo 符号)+spark+perf(w1/m1/ytd)。
 
     达标个股数百行 × Yahoo 单符号调用,8 线程并发约 20-40s;单只失败仅该行
     无小图/无周期涨跌(点击蜡烛图走服务端 kline 端点按需拉取,不受影响)。
-    绝不抛异常。
+    绝不抛异常。markets 限定只算哪些市场(收盘补数只动港股/A股)。
     """
-    rows = [r for m in ("us", "hk", "cn")
+    rows = [r for m in markets
             for r in (vl.get(m) or {}).get("rows") or []]
     for r in rows:
         r["ysym"] = _rank_ysym(r) or ""
 
     def _work(r: Dict[str, Any]) -> None:
+        # 极端值先行修正:下方拼接核对要反推昨收,须用拆股修正后的当日涨跌
+        if r.get("change_percent") is not None:
+            _split_adjust(r, t, None)
         if not r.get("ysym"):
             return
         d = _rank_perf_spark(r["ysym"], t,
@@ -736,16 +816,30 @@ def _rank_sparks(vl: Dict[str, Any], t: date) -> None:
         r["perf_refs"] = ({"s": d.get("hist"), "ytd": d.get("ytd_ref")}
                           if d.get("hist") else d.get("refs"))
         r["_spliced"] = bool(d.get("spliced"))
+        # 再与 Yahoo 序列末段(拆股已复权;须含 T 日 bar)交叉核对
+        hist = d.get("hist") or []
+        if len(hist) >= 2 and hist[-1][0] == t.isoformat():
+            _split_adjust(r, t, (hist[-1][1] / hist[-2][1] - 1) * 100)
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(_work, rows))
     ok = sum(1 for r in rows if r.get("spark"))
     okp = sum(1 for r in rows if r.get("perf"))
     nsp = sum(1 for r in rows if r.get("_spliced"))
+    nsplit = [r.get("code") for r in rows if r.get("_split")]
     for r in rows:
         r.pop("_spliced", None)                 # 台账字段,不进快照
-    print(f"[rank_sparks] 走势小图 {ok}/{len(rows)} 行, 周期涨跌 {okp}/{len(rows)} 行"
-          f", 锚点拼接 {nsp} 行(Yahoo 日线未含 T 日收盘)")
+        r.pop("_split", None)
+    print(f"[rank_sparks] ({','.join(markets)}) 走势小图 {ok}/{len(rows)} 行, "
+          f"周期涨跌 {okp}/{len(rows)} 行, 锚点拼接 {nsp} 行"
+          f"(Yahoo 日线未含 T 日收盘)")
+    if nsplit:
+        print(f"[rank_sparks] 拆股修正 {len(nsplit)} 行: {nsplit}")
+    missing = [r.get("code") for r in rows if not r.get("spark")]
+    if missing:
+        # Yahoo 偶发返回残缺序列(2026-11-20 SNDK 拆股前夜仅 3 根):只暴露,不替代数据源
+        print(f"[rank_sparks] ⚠ 无走势小图 {len(missing)} 行: "
+              f"{missing[:20]}{'…' if len(missing) > 20 else ''}")
 
 
 def _eodhd_api(path: str, params: Dict[str, str]) -> Any:
@@ -848,7 +942,15 @@ def _tencent_names(rows: List[Dict[str, Any]], batch: int = 80) -> None:
         time.sleep(0.08)
 
 
-def _volume_leaders_eodhd(report_date: date) -> Dict[str, Any]:
+# 成交额榜三市场 → EODHD 交易所代码(键与 run_pipeline.VL_MARKETS 一致)
+VL_MARKET_EXCHANGES: Dict[str, Tuple[str, ...]] = {
+    "us": ("US",), "hk": ("HK",), "cn": ("SHG", "SHE"),
+}
+
+
+def _volume_leaders_eodhd(report_date: date,
+                          markets: Tuple[str, ...] = ("us", "hk", "cn"),
+                          diag: Optional[Dict[str, bool]] = None) -> Dict[str, Any]:
     """美股/港股/A股成交额榜 —— 三市统一 EODHD bulk 按日取数(v8.8)。
 
     同一路径:bulk 日线(按 T 显式取数,确定性可回填)+ 前一交易日收盘算
@@ -856,12 +958,25 @@ def _volume_leaders_eodhd(report_date: date) -> Dict[str, Any]:
     指数)。美股此前走 finviz_screener(滚动快照,历史回填不精确),统一切
     到 bulk 后三市口径一致(实测美股当日 6.6MB/4.4 万行,耗时 ~7s)。
     各市场独立容错:一个市场抓取失败只影响自己(note 如实说明)。
+
+    markets(2026-11-23):只重算指定市场 —— 港股/A股收盘补数
+    (refresh_rank_rows.py)只动这两市、拆股修正只动美股;行内带 prev_close
+    (实时层的法定昨收)。diag 为可选出参 {交易所: 当日是否取到日线},调用方
+    据此区分"D 日休市/文件未出"与"有数据但无达标个股"。
+
+    单市场容错(2026-11-23):此前 _pick 直接取 day_rows[ex],任一交易所当日
+    无数据(港股假期、A股长假期间美股照常交易)会让三个市场的榜单一起消失;
+    现在无数据的交易所只影响自己所在的市场。
     """
-    exchanges = ("US", "HK", "SHG", "SHE")
+    exchanges = tuple({ex: None for m in markets
+                       for ex in VL_MARKET_EXCHANGES[m]})   # 去重保序
     listings: Dict[str, Dict[str, str]] = {}
     day_rows: Dict[str, Dict[str, Any]] = {}
     prev_closes: Dict[str, Dict[str, float]] = {}
+    fetched: set = set()      # 当日文件整块取数成功(含休市时的空文件)
     for ex in exchanges:
+        if diag is not None:
+            diag[ex] = False
         try:
             listings[ex] = {
                 str(x.get("Code")): str(x.get("Name") or "")
@@ -876,6 +991,9 @@ def _volume_leaders_eodhd(report_date: date) -> Dict[str, Any]:
                     if prev:
                         prev_closes[ex] = {c: r["close"] for c, r in prev.items()}
                         break
+            fetched.add(ex)
+            if diag is not None:
+                diag[ex] = bool(rows)
         except Exception as exc:  # noqa: BLE001 — 单市场源失败不拖垮其余
             print(f"[volume_leaders] {ex} source failed: {exc}")
 
@@ -883,9 +1001,9 @@ def _volume_leaders_eodhd(report_date: date) -> Dict[str, Any]:
         """Type 过滤 + 去重。港股 0700/700 取标准零填充码、丢 -OL 衍生行;
         连字符剔除仅限港股 —— 美股 BRK-B 等双类股代码本身含连字符,不能丢。"""
         best: Dict[str, Dict[str, Any]] = {}
-        for code, r in day_rows[ex].items():
-            if code not in listings[ex]:
-                continue  # 指数/ETF/窝轮/未知代码
+        for code, r in (day_rows.get(ex) or {}).items():
+            if code not in listings.get(ex, {}):
+                continue  # 指数/ETF/窝轮/未知代码(该所当日无数据 → 整体跳过)
             if ex == "HK":
                 stem, _, suffix = code.partition("-")
                 if suffix:
@@ -913,31 +1031,35 @@ def _volume_leaders_eodhd(report_date: date) -> Dict[str, Any]:
                 "code": r["code"], "exchange": r["exchange"],
                 "name": listings[r["exchange"]].get(r["code"], ""),
                 "price": r["close"], "change_percent": chg,
+                "prev_close": pc,      # 前一交易日收盘(实时层昨收锚;拆股修正会改写)
                 "turnover": round(r["turnover"], 2),
             })
         out.sort(key=lambda x: x["turnover"], reverse=True)
         return out
 
-    us_rows = _rows(("US",), VOL_LEADERS_US_MIN)
-    hk_rows = _rows(("HK",), VOL_LEADERS_HK_MIN)
-    cn_rows = _rows(("SHG", "SHE"), VOL_LEADERS_CN_MIN)
-    for rows in (hk_rows, cn_rows):        # 美股用 EODHD 英文名,无需腾讯中文名
-        _tencent_names(rows)
-
     def _blk(cur: str, min_tv: float, rows: List[Dict[str, Any]],
              exs: tuple, label: str) -> Dict[str, Any]:
-        src_ok = all(ex in listings and ex in day_rows for ex in exs)
+        # src_ok 以"整块取数成功"为准:休市日接口回空文件 ≠ 抓取失败,备注须如实
+        src_ok = all(ex in listings and ex in fetched for ex in exs)
         note = None if rows else (
             f"{label}当日休市或无成交额达标个股。" if src_ok
             else f"{label}当日数据抓取失败(源未覆盖)。")
         return {"currency": cur, "min_turnover": min_tv,
                 "as_of": report_date.isoformat(), "rows": rows, "note": note}
 
-    return {
-        "us": _blk("USD", VOL_LEADERS_US_MIN, us_rows, ("US",), "美股"),
-        "hk": _blk("HKD", VOL_LEADERS_HK_MIN, hk_rows, ("HK",), "港股"),
-        "cn": _blk("CNY", VOL_LEADERS_CN_MIN, cn_rows, ("SHG", "SHE"), "A股"),
-    }
+    out: Dict[str, Any] = {}
+    if "us" in markets:
+        out["us"] = _blk("USD", VOL_LEADERS_US_MIN,
+                         _rows(("US",), VOL_LEADERS_US_MIN), ("US",), "美股")
+    for key, cur, min_tv, exs, label in (
+            ("hk", "HKD", VOL_LEADERS_HK_MIN, ("HK",), "港股"),
+            ("cn", "CNY", VOL_LEADERS_CN_MIN, ("SHG", "SHE"), "A股")):
+        if key not in markets:
+            continue
+        rows = _rows(exs, min_tv)
+        _tencent_names(rows)             # 美股用 EODHD 英文名,无需腾讯中文名
+        out[key] = _blk(cur, min_tv, rows, exs, label)
+    return out
 
 
 def _earnings_calendar(report_date: date) -> Dict[str, Any]:

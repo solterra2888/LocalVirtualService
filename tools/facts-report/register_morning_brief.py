@@ -315,19 +315,27 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
         metadata["ft_live"] = ft_live
     # 涨跌榜按需 K 线规格:行序与网页 __RANK__ 一致,/shared/{token}/kline
     # 按 (market, 行序) 定符号 —— 服务端决定抓什么,客户端不能任意传符号。
+    # rank_cut(2026-11-23):弹窗 K 线按市场截至各自的「当日」= 报告日 D(北京)
+    # —— 美股 = 美股交易日 T(北京 D 日凌晨收盘),港股/A股 = D。此前弹窗实时
+    # 拉最新日线不设截止,旧报告里图比行多出后面几个交易日。
     try:
         _sn = json.loads((ws / "snapshot.json").read_text(encoding="utf-8"))
         _vl = (((_sn.get("sources") or {}).get("market") or {})
                .get("volume_leaders")) or {}
+        _t = str(_sn.get("report_date") or "")[:10]
+        _d = ((date.fromisoformat(_t) + timedelta(days=1)).isoformat()
+              if _t else None)
         _ks = {m: [r.get("ysym") for r
                    in ((_vl.get(m) or {}).get("rows") or [])]
                for m in ("us", "hk", "cn")}
         if any(_ks.values()):
             metadata["rank_kline"] = _ks
-        # 涨跌榜实时刷新规格(2026-11-13):行序对齐 rank_kline;每行 = EODHD
-        # 实时代码 + 周期参考收盘(build_snapshot perf_refs)。报告打开时
-        # /shared/{token}/quotes 就地刷新价格/当日/5日/1月/YTD —— 港/A 股
-        # 收盘早于查看时刻,快照 T 日值会被刷新为最新收盘(对齐 Yahoo 展示)。
+            metadata["rank_cut"] = {"us": _t, "hk": _d, "cn": _d}
+        # 涨跌榜实时刷新规格 v2(2026-11-23):只含港股/A股(美股生成时已收盘,
+        # 不刷)。每行 = EODHD 实时代码 + 周期参考 + pv(当日的法定昨收 =
+        # D-1 收盘)。服务端只接受行情日期 == D 的报价:生成当天盘中显示实时,
+        # 收盘后与重渲染的冻结值一致;D+1 起的行情不再覆盖(「当日」恒为 D)。
+        # v1(顶层 t + 市场键直接是行列表,美股也在内)服务端不再识别。
         def _eod_code(r: Dict[str, Any]) -> Optional[str]:
             ex, code = r.get("exchange"), str(r.get("code") or "")
             if not code:
@@ -339,18 +347,28 @@ def register_ok(session_date: str, do_oss: bool = True) -> int:
             if ex in ("SHG", "SHE"):
                 return code + "." + ex
             return None
-        _rl = {"t": _sn.get("report_date")}
-        for _m in ("us", "hk", "cn"):
-            _ents = []
-            for _r in ((_vl.get(_m) or {}).get("rows") or []):
+        _rl: Dict[str, Any] = {"v": 2}
+        for _m in ("hk", "cn"):
+            _blk = _vl.get(_m) or {}
+            _asof = str(_blk.get("as_of") or "")[:10]
+            _ents: list = []
+            for _r in (_blk.get("rows") or []):
                 _c = _eod_code(_r)
                 _refs = _r.get("perf_refs")
-                _ents.append({"c": _c, "r": _refs} if _c and _refs else None)
+                if not (_c and _refs):
+                    _ents.append(None)      # None 占位保行序(kline 索引对齐)
+                    continue
+                _refs = dict(_refs)
+                # pv:D-1 收盘。行尚未更新到 D(生成时,as_of = T)时行内价格就是
+                # D-1 收盘;收盘补数后(as_of = D)取重算时落盘的 prev_close
+                _refs["pv"] = (_r.get("prev_close") if _asof == _d
+                               else _r.get("price"))
+                _ents.append({"c": _c, "r": _refs})
             if any(_ents):
-                _rl[_m] = _ents          # None 占位保行序(kline 索引对齐)
+                _rl[_m] = {"t": _d, "asof": _asof, "rows": _ents}
         if len(_rl) > 1:
             metadata["rank_live"] = _rl
-    except Exception as exc:  # noqa: BLE001 — 规格缺失只丢了点击蜡烛图
+    except Exception as exc:  # noqa: BLE001 — 规格缺失只丢了实时刷新/点击蜡烛图
         logger.warning(f"[mb] rank_kline 规格读取失败: {exc}")
     if ft_warnings:
         metadata["data_warnings"] = ft_warnings

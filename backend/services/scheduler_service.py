@@ -76,6 +76,7 @@ class SchedulerService:
             'daily_market_report': self._execute_daily_market_report_task,
             'morning_brief': self._execute_morning_brief_task,
             'morning_brief_ft_refresh': self._execute_morning_brief_ft_refresh_task,
+            'morning_brief_asia_close': self._execute_morning_brief_asia_close_task,
             'the_close_summary': self._execute_the_close_summary_task,
             'cnbc_closing_bell': self._execute_cnbc_closing_bell_task,
             'bloomberg_surveillance': self._execute_bloomberg_surveillance_task,
@@ -1626,6 +1627,43 @@ class SchedulerService:
             return {'success': True, 'message': message, 'pid': proc.pid}
         except Exception as e:
             error_msg = f"Morning Brief FT 补齐派发异常: {str(e)}"
+            logger.error(error_msg, exception=str(e))
+            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
+
+    async def _execute_morning_brief_asia_close_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Morning Brief 涨跌榜港股/A股收盘补数(2026-11-23):detached 启动
+        asia_close_refresh.sh。
+
+        「当日」= 报告日 D(北京)。港股/A股在 08:00 生成时还没开盘,榜单里先是
+        上一交易日的行;D 日收盘后把这两市更新为 D 日收盘并重渲染重发布
+        (share_token 不变)。脚本自带 flock/Lark,按"行内容有无变化"幂等,
+        休市或 EODHD 文件未出时空转退出。本 handler 不等待完成、不轮询
+        (与 morning_brief 派发同款哲学);走 asyncio 子进程而非 celery:
+        轻任务(~2min),避免 worker 重启注册。
+        """
+        try:
+            import asyncio
+            from pathlib import Path
+
+            script = Path("/opt/guanhetech/tools/facts-report/asia_close_refresh.sh")
+            log_path = Path("/opt/guanhetech/backend/reports/facts-report/cron.log")
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_fh = open(log_path, "ab")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "/bin/bash", str(script),
+                    stdout=log_fh, stderr=log_fh,
+                    cwd=str(script.parent),
+                    start_new_session=True,  # detached:不随后端重启被杀
+                )
+            finally:
+                log_fh.close()
+            message = f"✅ Morning Brief 港股/A股收盘补数已 detached 启动: pid={proc.pid}"
+            logger.info(message, params=params)
+            return {'success': True, 'message': message, 'pid': proc.pid}
+        except Exception as e:
+            error_msg = f"Morning Brief 港股/A股收盘补数派发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

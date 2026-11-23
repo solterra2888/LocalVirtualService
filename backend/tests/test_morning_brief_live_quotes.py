@@ -246,3 +246,100 @@ class TestCompleteShareToken:
         assert result["share_token"]
         insert_sql = cursor.execute.call_args_list[1][0][0]
         assert "INSERT INTO morning_brief_reports" in insert_sql
+
+
+class TestRankLiveV2:
+    """涨跌榜实时层 v2(2026-11-23):「当日」= 报告日 D,只接受 D 日行情,
+    昨收用预埋 pv(D-1 收盘)。
+
+    v1 的问题(实测 report_date=11-21 报告):美股闭市时拿 EODHD realtime 的
+    previousClose 当昨收,140 行 72 行当日被改写、21 行刷成 0.00%;D+1 的
+    港股/A股行情覆盖了报告日的值。
+    """
+
+    D = T_NEXT   # 报告日 D = 11-20;快照冻结在 T = 11-19
+
+    SPEC = {
+        "v": 2,
+        "hk": {"t": "2026-11-20", "asof": "2026-11-19", "rows": [
+            {"c": "0700.HK", "r": {"pv": 390.4, "ytd": 500.0,
+                                   "s": [["2026-11-18", 400.0],
+                                         ["2026-11-19", 390.4]]}},
+            None,      # 无实时代码的行:占位保行序
+            {"c": "9988.HK", "r": {"pv": 83.35, "ytd": 100.0,
+                                   "s": [["2026-11-18", 80.6],
+                                         ["2026-11-19", 83.35]]}},
+            {"c": "1299.HK", "r": {"pv": 400.0, "ytd": 300.0,
+                                   "s": [["2026-11-19", 400.0],
+                                         ["2026-11-20", 374.0]]}},
+        ]},
+    }
+
+    def _rows(self, quotes):
+        spec = MorningBriefReportService._rank_live_spec({"rank_live": self.SPEC})
+        return MorningBriefReportService._assemble_rank_live(
+            spec, quotes)["hk"]
+
+    def test_d_dated_quote_uses_frozen_prev_close(self):
+        """D 日行情:当日 = 最新价 ÷ pv(D-1 收盘),不用 realtime 的 previousClose。"""
+        rows = self._rows({"0700.HK": {"last": 377.2, "prev": 377.19,
+                                       "ts": _ts(self.D, 8)}})
+        # 若错用 previousClose(377.19)则 +0.00%
+        assert rows[0] == {"p": 377.2, "g": -3.38, "w": None, "m": None,
+                           "y": -24.56, "k": 0}
+
+    def test_quote_dated_after_d_is_ignored(self):
+        """D+1 起的行情(下一交易日)不下发:该行 None,前端保留冻结值。"""
+        rows = self._rows({"9988.HK": {"last": 83.05, "prev": 83.35,
+                                       "ts": _ts(date(2026, 11, 23), 8)}})
+        assert rows[2] is None
+
+    def test_quote_dated_before_d_is_ignored(self):
+        """生成前的上一场(T 日收盘)也不下发:行停在冻结值。"""
+        rows = self._rows({"9988.HK": {"last": 83.35, "prev": 80.6,
+                                       "ts": _ts(T, 8)}})
+        assert rows[2] is None
+
+    def test_eod_fallback_uses_db_row_date(self):
+        """闭市代码降级到 market_data_eod 行:日期取入库日,同样只认 D 日。"""
+        rows = self._rows({"9988.HK": {"last": 84.0, "prev": 1.0,
+                                       "d": self.D.isoformat()}})
+        assert rows[2]["g"] == round((84.0 / 83.35 - 1) * 100, 2)
+
+    def test_k_flags_replacement_when_frozen_series_has_d(self):
+        """收盘补数后冻结序列已含 D 日点:k=1,前端替换末点而非再追加一个。"""
+        rows = self._rows({"1299.HK": {"last": 374.0, "prev": 374.0,
+                                       "ts": _ts(self.D, 8)}})
+        assert rows[3]["k"] == 1 and rows[3]["g"] == -6.5
+
+    def test_rows_without_quote_stay_none(self):
+        rows = self._rows({})
+        assert rows[0] is None and rows[1] is None
+
+    def test_version_echoed_at_top_level(self):
+        spec = MorningBriefReportService._rank_live_spec({"rank_live": self.SPEC})
+        out = MorningBriefReportService._assemble_rank_live(spec, {}, "abc123")
+        assert out["v"] == "abc123"
+        assert all("v" not in r for r in out["hk"] if r)
+
+    def test_v1_spec_not_served(self):
+        """v1 旧格式(顶层 t,市场键直接是行列表)不识别 → 不下发榜单实时数据。"""
+        v1 = {"t": "2026-11-19", "us": [{"c": "NVDA.US", "r": {}}], "hk": []}
+        assert MorningBriefReportService._rank_live_spec({"rank_live": v1}) == {}
+        assert MorningBriefReportService._rank_live_spec({}) == {}
+        got = MorningBriefReportService._rank_live_spec({"rank_live": self.SPEC})
+        assert set(got) == {"hk"} and got["hk"]["t"] == "2026-11-20"
+
+    def test_rank_version_matches_page_hash(self):
+        """行序指纹与 md2html_report 注入页面的 __RANKV__ 同算法
+        (各市场 ysym 按行序,键排序,紧凑分隔符)。"""
+        import hashlib
+        import json
+
+        ks = {"us": ["NVDA", "SNDK"], "hk": ["0700.HK"], "cn": [None, "000001.SZ"]}
+        want = hashlib.sha1(json.dumps(
+            ks, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:12]
+        assert MorningBriefReportService._rank_version(ks) == want
+        assert MorningBriefReportService._rank_version(None) is None
+        assert MorningBriefReportService._rank_version({}) is None

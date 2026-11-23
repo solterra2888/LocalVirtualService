@@ -20,6 +20,8 @@ reports/MorningBrief/report_YYYYMMDD.html 确定性命名，重跑覆盖同键�
 from __future__ import annotations
 
 import calendar
+import hashlib
+import json
 import os
 import re
 import time
@@ -55,9 +57,10 @@ _LIVE_TTL_SEC = 60
 _LIVE_BATCH = 12
 _live_cache: Dict[Tuple[str, ...], Tuple[float, Dict[str, Any]]] = {}
 
-# 涨跌榜按需 K 线(点击行才拉,600s 进程缓存挡住重复点击/多观众)
+# 涨跌榜按需 K 线(点击行才拉,600s 进程缓存挡住重复点击/多观众)。键含截止日:
+# 同一 symbol 在不同报告里的「当日」不同,不能共用一份缓存
 _KLINE_TTL_SEC = 600
-_kline_cache: Dict[str, Tuple[float, Optional[Dict[str, Any]]]] = {}
+_kline_cache: Dict[Tuple[str, Optional[str]], Tuple[float, Optional[Dict[str, Any]]]] = {}
 
 
 class MorningBriefReportService:
@@ -335,12 +338,13 @@ class MorningBriefReportService:
                                            if r.get("c")]
         if not rows_spec:
             return None
-        # 涨跌榜实时刷新规格(2026-11-13):{市场: [{c:EODHD 代码, r:参考价}|None]}
-        # 行序与 rank_kline 一致;与 FT 共享一次行情拉取(批量,60s 进程缓存)
-        rank_spec: Dict[str, Any] = ((row[0] or {}).get("rank_live")) or {}
-        rank_codes = sorted({e["c"] for ents in rank_spec.values()
-                             if isinstance(ents, list)
-                             for e in ents if e and e.get("c")})
+        # 涨跌榜实时刷新规格(v2,2026-11-23):{市场: {t: 当日 D, rows: [{c, r}|None]}}
+        # 行序与 rank_kline 一致;与 FT 共享一次行情拉取(批量,60s 进程缓存)。
+        # v1 旧格式不识别 → 不下发 rank,该报告的榜单保持冻结
+        meta = row[0] or {}
+        rank_spec = self._rank_live_spec(meta)
+        rank_codes = sorted({e["c"] for blk in rank_spec.values()
+                             for e in blk["rows"] if e and e.get("c")})
 
         key = tuple(sorted({r["c"] for r in rows_spec} | set(rank_codes)))
         now = time.monotonic()
@@ -351,37 +355,87 @@ class MorningBriefReportService:
         quotes = self._fetch_live_quotes(key)
         payload = self._assemble_live_rows(spec, rows_spec, quotes)
         if rank_spec:
-            payload["rank"] = self._assemble_rank_live(rank_spec, quotes)
+            payload["rank"] = self._assemble_rank_live(
+                rank_spec, quotes, self._rank_version(meta.get("rank_kline")))
         _live_cache[key] = (now, payload)
         return payload
 
-    def _assemble_rank_live(self, rank_spec: Dict[str, Any],
-                            quotes: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """涨跌榜实时行:按行序输出 {市场: [{p,g,w,m,y}|None]},个股恒 '%' 口径。
+    @staticmethod
+    def _rank_live_spec(meta: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """涨跌榜实时规格(v2):{市场: {t: 当日 D, rows: [{c, r}|None]}}。
 
-        窗口与 FT 表共用 _window_changes(按行情实际日期现算,锚点随最新收盘
-        平移对齐 Yahoo);r.s = 生成时预埋的最近 45 根收盘迷你序列,
-        r.ytd = 上年末参考(锚点无关)。
+        v1(顶层 "t",市场键直接是行列表,美股也在内)不识别 → 空 dict。v1 的
+        两个问题(2026-11-23 实测 report_date=11-21 报告):美股闭市时拿 EODHD
+        realtime 的 previousClose 当昨收,140 行里 72 行当日被改写、21 行刷成
+        0.00%;D+1 的港股/A股行情覆盖了报告日的值。
         """
-        snap_t = str(rank_spec.get("t") or "")[:10]
-        fb = (date.fromisoformat(snap_t)
-              if re.match(r"\d{4}-\d{2}-\d{2}$", snap_t) else None)
+        raw = meta.get("rank_live") or {}
+        if not isinstance(raw, dict) or raw.get("v") != 2:
+            return {}
+        out: Dict[str, Dict[str, Any]] = {}
+        for mkt, blk in raw.items():
+            if isinstance(blk, dict) and isinstance(blk.get("rows"), list):
+                out[mkt] = blk
+        return out
+
+    @staticmethod
+    def _rank_version(rank_kline: Any) -> Optional[str]:
+        """榜单行序指纹:与 md2html_report 注入页面的 window.__RANKV__ 同算法
+        (各市场 Yahoo 符号按行序)。报告重渲染后行序可能变化(收盘补数按新
+        成交额重排),已打开的旧页面据此忽略实时补丁,不把数字贴到别的股票上。"""
+        if not isinstance(rank_kline, dict) or not rank_kline:
+            return None
+        dig = json.dumps(rank_kline, sort_keys=True,
+                         separators=(",", ":")).encode("utf-8")
+        return hashlib.sha1(dig).hexdigest()[:12]
+
+    @staticmethod
+    def _quote_date(q: Dict[str, Any]) -> Optional[str]:
+        """行情所属日期(ISO):实时行取成交时间戳的 UTC 日,降级行取入库日。"""
+        ts = q.get("ts")
+        if isinstance(ts, (int, float)) and ts > 0:
+            return datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+        d = q.get("d")
+        return str(d)[:10] if d else None
+
+    @staticmethod
+    def _assemble_rank_live(rank_spec: Dict[str, Dict[str, Any]],
+                            quotes: Dict[str, Dict[str, Any]],
+                            version: Optional[str] = None) -> Dict[str, Any]:
+        """涨跌榜实时行:按行序输出 {市场: [{p,g,w,m,y,k}|None]},恒 '%' 口径。
+
+        「当日」= 报告日 D(规格里的 t)。只接受行情日期 == D 的报价:生成前的
+        上一场与 D+1 起的行情一律不下发(该行 None,前端保留冻结值)。昨收用
+        规格预埋的 pv(D-1 收盘),不用 realtime 的 previousClose(闭市时不可靠)。
+        5日/1月按预埋迷你序列以 D 为锚现算(与 FT 共用 _window_changes;
+        fb=None → pv 恒作昨收)。k=1 表示冻结序列已含 D 日点(收盘补数后),
+        前端替换走势图末点而非追加。
+        """
         out: Dict[str, Any] = {}
-        for mkt, ents in rank_spec.items():
-            if not isinstance(ents, list):
+        for mkt, blk in rank_spec.items():
+            if not isinstance(blk, dict):
                 continue
+            target = str(blk.get("t") or "")[:10]
             rows_out: List[Optional[Dict[str, Any]]] = []
-            for e in ents:
-                if not isinstance(e, dict):
-                    e = None
-                q = quotes.get((e or {}).get("c") or "") if e else None
-                if not q:
+            for e in blk.get("rows") or []:
+                if not target or not isinstance(e, dict):
                     rows_out.append(None)
                     continue
-                wc = self._window_changes((e or {}).get("r") or {}, q, "%", fb)
+                q = quotes.get(e.get("c") or "")
+                if not q or MorningBriefReportService._quote_date(q) != target:
+                    rows_out.append(None)
+                    continue
+                refs = dict(e.get("r") or {})
+                wc = MorningBriefReportService._window_changes(refs, q, "%", None)
+                hist = refs.get("s")
+                k = 1 if (isinstance(hist, list) and hist
+                          and str(hist[-1][0])[:10] == target) else 0
                 rows_out.append({"p": round(wc["last"], 4), "g": wc["m1d"],
-                                 "w": wc["m1w"], "m": wc["m1m"], "y": wc["ytd"]})
+                                 "w": wc["m1w"], "m": wc["m1m"], "y": wc["ytd"],
+                                 "k": k})
             out[mkt] = rows_out
+        if version:
+            out["v"] = version
         return out
 
     @staticmethod
@@ -603,23 +657,34 @@ class MorningBriefReportService:
             conn.close()
         if not row:
             return None
-        spec = ((row[0] or {}).get("rank_kline") or {}).get(market)
+        meta = row[0] or {}
+        spec = (meta.get("rank_kline") or {}).get(market)
         if not isinstance(spec, list) or not (0 <= idx < len(spec)):
             return None
         sym = spec[idx]
         if not sym:
             return None
+        # 截止日(2026-11-23):K 线截至该市场的「当日」= 报告日 D(北京)—— 美股取
+        # 美股交易日 T(北京 D 日凌晨收盘),港股/A股取 D。没有 rank_cut 的旧报告
+        # 按美股交易日截止。此前不设截止、每次点击实时拉最新,旧报告里图比行
+        # 多出后面几个交易日(行是上一天的、图是最新的一场)。
+        cut = ((meta.get("rank_cut") or {}).get(market)
+               or str(meta.get("session_date") or "")[:10] or None)
         now = time.monotonic()
-        cached = _kline_cache.get(sym)
+        cached = _kline_cache.get((sym, cut))
         if cached and now - cached[0] < _KLINE_TTL_SEC:
             return cached[1]
-        data = self._yahoo_daily_ohlc(sym)
-        _kline_cache[sym] = (now, data)
+        data = self._yahoo_daily_ohlc(sym, cut)
+        _kline_cache[(sym, cut)] = (now, data)
         return data
 
     @staticmethod
-    def _yahoo_daily_ohlc(sym: str) -> Optional[Dict[str, Any]]:
-        """Yahoo chart 1 年日线 → {h: [[iso,o,h,l,c]…]升序≤260, a: 最新日}。"""
+    def _yahoo_daily_ohlc(sym: str,
+                          until: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Yahoo chart 1 年日线 → {h: [[iso,o,h,l,c]…]升序≤260, a: 最新日}。
+
+        until(ISO 日)非空时丢弃晚于它的 bar:弹窗走势与榜单行止于同一交易日。
+        """
         import requests
 
         try:
@@ -650,6 +715,8 @@ class MorningBriefReportService:
                     continue
                 # 服务器时区为北京:US/HK/CN 日线 bar 时间戳换算后恰为交易日历日
                 d = datetime.fromtimestamp(ts[i]).date().isoformat()
+                if until and d > until:
+                    continue
                 bars.append([d, round(bo, 4), round(bh, 4),
                              round(bl, 4), round(bc, 4)])
             if not bars:
