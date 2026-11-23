@@ -326,6 +326,15 @@ body{margin:0;background:var(--bg-page);color:var(--text-primary);
 .gh-brand{display:flex;align-items:center;min-width:0}
 .gh-logo{height:46px;width:auto;display:block}
 .report-header.mini .brand-row{display:none}   /* 滚动收起:品牌行让位内容(桌面+移动) */
+/* 折叠不改文档几何。迷你态省下的高度 Δ(--hdr-delta,页面 JS 实测写入)用 padding-top 补回,header
+   盒高不变;再用负 top 把整盒上移 Δ,贴顶时只露出底部 = 迷你条。此前 header 直接变矮:文档随之
+   变矮 → 浏览器滚动锚定把 scrollY 回拉 Δ,跌回阈值下方 → 展开 → 又被推回 → 再折叠,阈值上下各
+   Δ 宽的区间内每帧来回切换(闪屏)。负 top 另保证 scrollY < Δ 时 header 尚未贴定、随页面移动,
+   迷你条与正文之间不会露出空白带。
+   背景渐变锚到盒底、高度取迷你态高度(--hdr-mini-h):盒被 padding 撑高后渐变不跟着拉长,迷你条
+   配色与原先一致(顶部仍是 #1b4b7d);其上方只在尚未贴定时露出,用渐变起始色铺满 */
+.report-header.mini{top:calc(-1 * var(--hdr-delta,0px));padding-top:calc(22px + var(--hdr-delta,0px));
+ background:var(--bg-header) bottom / 100% var(--hdr-mini-h,100%) no-repeat,#1b4b7d}
 /* 文字字标兜底(logo 资产缺失时):衬线双语,香槟金 */
 .gh-brand .name{display:flex;flex-direction:column;line-height:1.2}
 .gh-brand .zh{font:600 17px/1.2 Georgia,'Songti SC','STSong','SimSun','Noto Serif TC',serif;
@@ -347,14 +356,15 @@ body{margin:0;background:var(--bg-page);color:var(--text-primary);
 .tab-nav{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
 /* ── 移动端(≤768px):标题折叠迷你条 + tab 横滑 ───────────────────── */
 @media(max-width:768px){
- .report-header{padding:12px 14px 0;transition:padding .2s}
+ /* 过渡仅限左右 padding:上下 padding 过渡 = 高度渐变,会让 Δ 补偿在过渡期间失准 */
+ .report-header{padding:12px 14px 0;transition:padding-left .2s,padding-right .2s}
  .report-header h1{font-size:17px;overflow-wrap:anywhere}
  .gh-brand .zh{font-size:12px}.gh-brand .en{font-size:6.5px;letter-spacing:.3em}
  .tab-nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-top:10px}
  .tab-nav::-webkit-scrollbar{display:none}
  .tab-btn{white-space:nowrap;flex:none;padding:8px 12px}
- /* 迷你条 = tab 导航条:隐藏标题/品牌行,tab 常驻可随时切栏目 */
- .report-header.mini{padding:2px 8px 0}
+ /* 迷你条 = tab 导航条:隐藏标题/品牌行,tab 常驻可随时切栏目(top/Δ 补偿见上方基础规则) */
+ .report-header.mini{padding:calc(2px + var(--hdr-delta,0px)) 8px 0}
  .report-header.mini h1{display:none}
  .report-header.mini .tab-nav{margin-top:2px}
 }
@@ -1333,6 +1343,27 @@ document.addEventListener('keydown', function(e){
  var hdr = document.querySelector('.report-header');
  if(!hdr) return;
  var mq = matchMedia('(max-width:768px)');
+ // 折叠量 Δ = 完整态高度 − 迷你态高度,写入 --hdr-delta(补偿见 CSS .report-header.mini):折叠
+ // 不改文档几何,正文与 scrollY 都不动。此前 header 直接变矮,文档随之变矮,浏览器滚动锚定把
+ // scrollY 回拉 Δ → 跌回阈值下方 → 展开 → 又被推回 → 再折叠,阈值上下各 Δ 宽的区间内每帧
+ // 来回切换(闪屏)。header 高度只随宽度变(断点/标题折行),故仅宽度变化时重测
+ var delta = 0, vw = 0;
+ function measure(){
+  // 先把补偿量归零再量:迷你态的 padding-top 已把高度补回,带着补偿量量不出 Δ
+  hdr.style.setProperty('--hdr-delta', '0px');
+  var wasMini = hdr.classList.contains('mini');
+  hdr.classList.remove('mini');
+  var fullH = hdr.getBoundingClientRect().height;
+  hdr.classList.add('mini');
+  var miniH = hdr.getBoundingClientRect().height;
+  hdr.classList.toggle('mini', wasMini);
+  delta = Math.max(0, fullH - miniH);
+  hdr.style.setProperty('--hdr-delta', delta + 'px');
+  hdr.style.setProperty('--hdr-mini-h', miniH + 'px');
+  vw = window.innerWidth;
+ }
+ measure();
+ window.addEventListener('resize', function(){ if(window.innerWidth !== vw) measure(); });
  var ticking = false;
  window.addEventListener('scroll', function(){
   if(ticking) return;
