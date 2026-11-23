@@ -75,8 +75,9 @@ def _link_lark_enabled() -> bool:
 # background_style 引用 config.style.color 自定色 + padding 内边距,标题白字走
 # 2.0 富文本的 <font> HTML 语法(1.0 分栏无 padding、markdown 无字色,故用 2.0)。
 _MB_BLUE = {"light_mode": "rgba(27,75,125,1)", "dark_mode": "rgba(27,75,125,1)"}
-# 用法一句话(2026-11-21 用户选定"用法导向"表述),展示在日期行与按钮之间
-_MB_USAGE = "每天开盘前点开，3 分钟看完隔夜美股的要闻、涨跌与宏观动向。"
+# 用法一句话(2026-11-21 用户选定"用法导向"表述;2026-11-23 按用户反馈改为
+# 北京时间早上发布 + 实际详读时长 15-30 分钟),展示在日期行与按钮之间
+_MB_USAGE = "北京时间每个交易日早上发布，15-30 分钟读完隔夜美股的要闻、涨跌与宏观动向。"
 
 
 def _brief_link_card(report_date: str, session_date: str, url: str) -> dict:
