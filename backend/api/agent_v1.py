@@ -243,12 +243,12 @@ def agent_list_sources(
 
 # ---------------------------------------------------------------------------
 # Reports (consolidated — kind= twitter_daily | youtube_daily | market_daily |
-# market_weekly | theme | the_close | closing_bell | bloomberg_surveillance)
+# theme | the_close | closing_bell | bloomberg_surveillance)
 # ---------------------------------------------------------------------------
 
 _REPORT_KIND_QUERY = (
     "Report type (canonical): 'twitter_daily', 'youtube_daily', 'market_daily', "
-    "'market_weekly', 'theme', 'the_close', 'closing_bell', 'bloomberg_surveillance'. "
+    "'theme', 'the_close', 'closing_bell', 'bloomberg_surveillance'. "
     "Legacy aliases twitter/youtube/market still accepted."
 )
 

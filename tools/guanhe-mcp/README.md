@@ -20,7 +20,6 @@ The three report tools (`report_latest`, `report_by_date`, `report_list`) share 
 | `twitter_daily` | Twitter feed daily digest | report_date |
 | `youtube_daily` | YouTube feed daily digest | report_date |
 | `market_daily` | Daily market report (index performers, ETF performance) | report_date |
-| `market_weekly` | Weekly market report (stored on OSS) | **week_end** (Friday) |
 | `theme` | Theme performance report (constituent returns per investment theme) | report_date |
 | `the_close` | The Close Report (Bloomberg The Close PM brief) | report_date |
 | `closing_bell` | Closing Bell Report (CNBC Closing Bell PM brief) | report_date |
@@ -109,7 +108,7 @@ Replace `/path/to/your/python` with the output of `which python` (or `where pyth
 | Tool | Description | Maps to |
 |------|-------------|---------|
 | `report_latest` | Latest completed report for a given `kind` | `GET /api/v1/agent/reports/latest?kind=` |
-| `report_by_date` | Report for a specific date (`market_weekly` uses week_end Friday) | `GET /api/v1/agent/reports/{date}?kind=` |
+| `report_by_date` | Report for a specific date | `GET /api/v1/agent/reports/{date}?kind=` |
 | `report_list` | Paginated list of available reports | `GET /api/v1/agent/reports?kind=` |
 
 ### Semantic / Vector RAG (3, since v0.3.0)
@@ -129,7 +128,6 @@ Replace `/path/to/your/python` with the output of `which python` (or `where pyth
 | Full text of one or a few items | `daily_item` / `daily_items_batch` |
 | Today's Twitter / YouTube digest | `report_latest` kind=`twitter_daily` / `youtube_daily` |
 | Today's market report | `report_latest` kind=`market_daily` |
-| This week's market report | `report_latest` kind=`market_weekly` |
 | Theme performance report | `report_latest` kind=`theme` |
 | The Close / Closing Bell / Surveillance | `report_latest` kind=`the_close` / `closing_bell` / `bloomberg_surveillance` |
 | Browse report history | `report_list` |
@@ -160,13 +158,11 @@ python scripts/call_guanhe_mcp.py daily_multi_search '{"groups": [{"q": "NVDA OR
 
 # Reports (kind = canonical)
 python scripts/call_guanhe_mcp.py report_latest '{"kind": "market_daily"}'
-python scripts/call_guanhe_mcp.py report_latest '{"kind": "market_weekly"}'
 python scripts/call_guanhe_mcp.py report_latest '{"kind": "theme"}'
 python scripts/call_guanhe_mcp.py report_latest '{"kind": "the_close"}'
 python scripts/call_guanhe_mcp.py report_latest '{"kind": "closing_bell"}'
 python scripts/call_guanhe_mcp.py report_latest '{"kind": "bloomberg_surveillance"}'
 python scripts/call_guanhe_mcp.py report_list '{"kind": "twitter_daily", "limit": 5}'
-python scripts/call_guanhe_mcp.py report_by_date '{"kind": "market_weekly", "date": "2026-06-13"}'
 
 # Semantic RAG (v0.3)
 python scripts/call_guanhe_mcp.py semantic_search '{"query": "humanoid robot home deployment", "top_k": 5}'
@@ -176,7 +172,7 @@ python scripts/call_guanhe_mcp.py chunks_by_locator '{"file_id": 1439, "chapter"
 
 ## Key parameter notes
 
-**`kind`** — report type. Canonical: `twitter_daily`, `youtube_daily`, `market_daily`, `market_weekly`, `theme`, `the_close`, `closing_bell`, `bloomberg_surveillance` (legacy `twitter`/`youtube`/`market` accepted as aliases). See [Reports](#reports).
+**`kind`** — report type. Canonical: `twitter_daily`, `youtube_daily`, `market_daily`, `theme`, `the_close`, `closing_bell`, `bloomberg_surveillance` (legacy `twitter`/`youtube`/`market` accepted as aliases). See [Reports](#reports).
 
 **`q` syntax** — space = AND (all terms must match), `OR` (uppercase) = any match, `"phrase"` = exact substring.
 - Good: `q=NVDA OR 英伟达`

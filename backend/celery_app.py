@@ -114,12 +114,6 @@ except ImportError as e:
     print(f"❌ 导入 Theme Report 任务模块失败: {e}")
 
 try:
-    from backend.tasks import market_weekly_report_tasks
-    print(f"✅ 成功导入 Market Weekly Report 任务模块: {market_weekly_report_tasks.__name__}")
-except ImportError as e:
-    print(f"❌ 导入 Market Weekly Report 任务模块失败: {e}")
-
-try:
     from backend.tasks import daily_market_report_tasks
     print(f"✅ 成功导入 Daily Market Report 任务模块: {daily_market_report_tasks.__name__}")
 except ImportError as e:

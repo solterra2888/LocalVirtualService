@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Card, Typography, Row, Col, Space, Spin } from 'antd';
 import {
   LineChartOutlined,
-  BarChartOutlined,
   PieChartOutlined,
   TwitterOutlined,
   VideoCameraOutlined,
@@ -16,7 +15,6 @@ import { useNavigate } from 'react-router-dom';
 import { useDashboardSettings } from '../contexts/DashboardSettingsContext';
 import { twitterDailyReportsAPI } from '../services/twitterDailyReports';
 import { youtubeDailyReportsAPI } from '../services/youtubeDailyReports';
-import { marketWeeklyReportAPI } from '../services/marketWeeklyReport';
 import { themeReportAPI } from '../services/themeReport';
 import { dailyMarketReportAPI } from '../services/dailyMarketReport';
 import { closeBriefReportAPI } from '../services/closeBriefReport';
@@ -231,7 +229,6 @@ const ReportCategory: React.FC<ReportCategoryProps> = ({
 interface ReportDatesState {
   twitter: string | null;
   youtube: string | null;
-  marketWeekly: string | null;
   theme: string | null;
   dailyMarket: string | null;
   closeBrief: string | null;
@@ -250,7 +247,6 @@ const ReportsOverviewPage: React.FC = () => {
   const [reportDates, setReportDates] = useState<ReportDatesState>({
     twitter: null,
     youtube: null,
-    marketWeekly: null,
     theme: null,
     dailyMarket: null,
     closeBrief: null,
@@ -263,7 +259,6 @@ const ReportsOverviewPage: React.FC = () => {
   const [loading, setLoading] = useState({
     twitter: true,
     youtube: true,
-    marketWeekly: true,
     theme: true,
     dailyMarket: true,
     closeBrief: true,
@@ -304,16 +299,6 @@ const ReportsOverviewPage: React.FC = () => {
         }
       } catch { /* ignore */ }
       setLoading(prev => ({ ...prev, youtube: false }));
-
-      // Market Weekly
-      setLoading(prev => ({ ...prev, marketWeekly: true }));
-      try {
-        const marketWeeklyRes = await marketWeeklyReportAPI.getLatest();
-        if (marketWeeklyRes && marketWeeklyRes.week_end) {
-          setReportDates(prev => ({ ...prev, marketWeekly: marketWeeklyRes.week_end }));
-        }
-      } catch { /* ignore */ }
-      setLoading(prev => ({ ...prev, marketWeekly: false }));
 
       // Theme
       setLoading(prev => ({ ...prev, theme: true }));
@@ -379,15 +364,6 @@ const ReportsOverviewPage: React.FC = () => {
       color: '#1890ff',
       latestDate: reportDates.dailyMarket,
       loading: loading.dailyMarket,
-    },
-    {
-      title: 'Weekly Market Report',
-      description: 'Weekly market summary and trends analysis',
-      icon: <BarChartOutlined />,
-      path: '/reports/market-weekly',
-      color: '#52c41a',
-      latestDate: reportDates.marketWeekly,
-      loading: loading.marketWeekly,
     },
     {
       title: 'Theme Performance Report',

@@ -40,7 +40,6 @@ ReportKind = Literal[
     "twitter_daily",
     "youtube_daily",
     "market_daily",
-    "market_weekly",
     "theme",
     "the_close",
     "closing_bell",
@@ -274,7 +273,7 @@ class AgentReportBodyResponse(BaseModel):
         None,
         description=(
             "Canonical report kind: 'twitter_daily', 'youtube_daily', 'market_daily', "
-            "'market_weekly', 'theme', 'the_close', 'closing_bell', or "
+            "'theme', 'the_close', 'closing_bell', or "
             "'bloomberg_surveillance'. Request accepts legacy aliases "
             "(twitter/youtube/market) which normalize to the canonical form."
         ),

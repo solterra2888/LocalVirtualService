@@ -25,7 +25,7 @@ export type SchedulerCategory = 'data_fetch' | 'report_generation';
 export interface DataSource {
   id: string;
   name: string;
-  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'earnings_active_fundamentals' | 'fundamentals_rotation' | 'twitter_subscription' | 'youtube_subscription' | 'youtube_subscription_morning' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'other';
+  type: 'eodhd' | 'watchlist' | 'cctv' | 'finviz' | 'finviz_screener' | 'eodhd_events' | 'eodhd_macro' | 'eodhd_fundamentals' | 'eodhd_stock_prices' | 'eodhd_eod_stock_prices' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'earnings_active_fundamentals' | 'fundamentals_rotation' | 'twitter_subscription' | 'youtube_subscription' | 'youtube_subscription_morning' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard' | 'form13f' | 'other';
   category: SchedulerCategory;
   description: string;
   enabled: boolean;
@@ -283,26 +283,6 @@ export const INITIAL_SCHEDULER_DATA_SOURCES: DataSource[] = [
           name: 'Configure Theme Report Schedule',
           description: 'Set up periodic Theme Report generation (default: weekly Monday 2 PM CST)',
           endpoint: '/scheduler/tasks/theme-report',
-          params: {},
-          icon: <ScheduleOutlined />
-        }
-      ]
-    },
-    {
-      id: 'market_weekly_report',
-      name: 'Market Weekly Report',
-      type: 'market_weekly_report',
-      category: 'report_generation',
-      sortOrder: 40,
-      description: 'Pre-generate Market Weekly Report static HTML for all users with Market Weekly tagged themes (indices, sectors, forex, commodities, bonds WoW performance, AI themes, economic calendar).',
-      enabled: true,
-      status: 'idle',
-      quickActions: [
-        {
-          id: 'configure_market_weekly_report_schedule',
-          name: 'Configure Market Weekly Report Schedule',
-          description: 'Set up periodic Market Weekly Report generation (default: weekly Friday 5 PM ET)',
-          endpoint: '/scheduler/tasks/market-weekly-report',
           params: {},
           icon: <ScheduleOutlined />
         }
@@ -753,7 +733,6 @@ export const CONFIGURABLE_SOURCE_IDS: ReadonlySet<string> = new Set([
   'twitter_author_summary',
   'youtube_author_summary',
   'theme_report',
-  'market_weekly_report',
   'daily_market_report',
   'the_close_summary',
   'cnbc_closing_bell',
@@ -801,7 +780,6 @@ export function isTaskRelatedToSource(sourceId: string, taskType: string): boole
     (sourceIdLower === 'twitter_author_summary' && taskTypeLower === 'twitter_author_summary') ||
     (sourceIdLower === 'youtube_author_summary' && taskTypeLower === 'youtube_author_summary') ||
     (sourceIdLower === 'theme_report' && taskTypeLower === 'theme_report') ||
-    (sourceIdLower === 'market_weekly_report' && taskTypeLower === 'market_weekly_report') ||
     (sourceIdLower === 'daily_market_report' && taskTypeLower === 'daily_market_report') ||
     (sourceIdLower === 'the_close_summary' && taskTypeLower === 'the_close_summary') ||
     (sourceIdLower === 'cnbc_closing_bell' && taskTypeLower === 'cnbc_closing_bell') ||

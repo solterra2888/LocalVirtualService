@@ -59,7 +59,6 @@ const CloseBriefReportPage = lazyWithRetry(() => import('./pages/CloseBriefRepor
 const ClosingBellReportPage = lazyWithRetry(() => import('./pages/ClosingBellReportPage'));
 const MorningBriefReportPage = lazyWithRetry(() => import('./pages/MorningBriefReportPage'));
 const SurveillanceReportPage = lazyWithRetry(() => import('./pages/SurveillanceReportPage'));
-const MarketWeeklyReportPage = lazyWithRetry(() => import('./pages/MarketWeeklyReportPage'));
 const ThemeReportPage = lazyWithRetry(() => import('./pages/ThemeReportPage'));
 const TwitterDailyReportPage = lazyWithRetry(() => import('./pages/TwitterDailyReportPage'));
 const YouTubeDailyReportPage = lazyWithRetry(() => import('./pages/YouTubeDailyReportPage'));
@@ -239,14 +238,6 @@ const TerminalContent: React.FC = () => {
                   }
                 />
                 <Route
-                  path="reports/market-weekly"
-                  element={
-                    <MobileReportsDetailLayout>
-                      <MarketWeeklyReportPage />
-                    </MobileReportsDetailLayout>
-                  }
-                />
-                <Route
                   path="reports/theme"
                   element={
                     <MobileReportsDetailLayout>
@@ -317,14 +308,6 @@ const TerminalContent: React.FC = () => {
                   }
                 />
                 <Route
-                  path="reports/market-weekly"
-                  element={
-                    <ReportsDetailLayout>
-                      <MarketWeeklyReportPage />
-                    </ReportsDetailLayout>
-                  }
-                />
-                <Route
                   path="reports/theme"
                   element={
                     <ReportsDetailLayout>
@@ -377,7 +360,6 @@ const TerminalContent: React.FC = () => {
             {/* Backward-compatible redirects for old report URLs */}
             <Route path="twitter-daily-report" element={<Navigate to="/reports/twitter" replace />} />
             <Route path="youtube-daily-report" element={<Navigate to="/reports/youtube" replace />} />
-            <Route path="market-weekly-report" element={<Navigate to="/reports/market-weekly" replace />} />
             <Route path="prompt-templates" element={<PromptTemplatesPage />} />
             <Route path="investment-themes" element={<InvestmentThemesPage />} />
             <Route path="projects" element={<ProjectsPage />} />

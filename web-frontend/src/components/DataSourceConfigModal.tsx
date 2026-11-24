@@ -76,7 +76,6 @@ export type DataSourceConfigType =
   | 'twitter_author_summary'
   | 'youtube_author_summary'
   | 'theme_report'
-  | 'market_weekly_report'
   | 'daily_market_report'
   | 'the_close_summary'
   | 'cnbc_closing_bell'
@@ -316,13 +315,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
       defaultSchedule: '0 14 * * 1',
       defaultName: 'Theme Report',
       description: 'Pre-generate Theme Report static HTML for all users with Theme Report tagged themes (weekly Monday 2 PM CST)'
-    },
-    market_weekly_report: {
-      icon: <LineChartOutlined style={{ color: '#fa8c16' }} />,
-      params: [],
-      defaultSchedule: '0 17 * * 5',
-      defaultName: 'Market Weekly Report',
-      description: 'Pre-generate Market Weekly Report static HTML for all users with Market Weekly tagged themes (weekly Friday 5 PM ET)'
     },
     daily_market_report: {
       icon: <LineChartOutlined style={{ color: '#13c2c2' }} />,
@@ -611,14 +603,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
             enabled: true,
           };
           result = await schedulerAPI.createThemeReportTask(themeReportParams);
-        } else if (dataSourceType === 'market_weekly_report') {
-          const marketWeeklyReportParams = {
-            name: currentConfig.defaultName,
-            cron_expression: data.cronExpression!,
-            timezone: data.timezone!,
-            enabled: true,
-          };
-          result = await schedulerAPI.createMarketWeeklyReportTask(marketWeeklyReportParams);
         } else if (dataSourceType === 'daily_market_report') {
           const dailyMarketReportParams = {
             name: currentConfig.defaultName,
@@ -2403,9 +2387,6 @@ const DataSourceConfigModal: React.FC<DataSourceConfigModalProps> = ({
               )}
             </>
           );
-
-        case 'market_weekly_report':
-          return null;
 
         case 'the_close_summary':
           return null;

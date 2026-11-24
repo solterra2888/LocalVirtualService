@@ -72,7 +72,6 @@ _CANONICAL_REPORT_KINDS = [
     "twitter_daily",
     "youtube_daily",
     "market_daily",
-    "market_weekly",
     "theme",
     "the_close",
     "closing_bell",
@@ -81,8 +80,8 @@ _CANONICAL_REPORT_KINDS = [
 
 _KIND_HINT = (
     "Report type (canonical): twitter_daily / youtube_daily / market_daily / "
-    "market_weekly / theme / the_close / closing_bell / bloomberg_surveillance. "
-    "market_daily = daily market report; market_weekly = weekly market report; "
+    "theme / the_close / closing_bell / bloomberg_surveillance. "
+    "market_daily = daily market report; "
     "theme = theme performance report; the_close = Bloomberg The Close PM brief; "
     "closing_bell = CNBC Closing Bell PM brief; bloomberg_surveillance = "
     "Bloomberg Surveillance AM brief. "
@@ -322,11 +321,11 @@ TOOLS: List[Dict[str, Any]] = [
         "description": (
             "Get the latest completed report for the given kind: twitter_daily / "
             "youtube_daily (feed digest), market_daily (daily market report), "
-            "market_weekly (weekly market report), theme (theme performance report), "
+            "theme (theme performance report), "
             "the_close (Bloomberg The Close PM brief), closing_bell (CNBC Closing Bell "
             "PM brief), or bloomberg_surveillance (Bloomberg Surveillance AM brief). "
-            "Use for: 'show me today's Twitter/YouTube/market daily', 'this week's "
-            "market weekly', 'latest theme report', 'The Close / Closing Bell / "
+            "Use for: 'show me today's Twitter/YouTube/market daily', "
+            "'latest theme report', 'The Close / Closing Bell / "
             "Surveillance report'."
         ),
         "inputSchema": {
@@ -344,7 +343,7 @@ TOOLS: List[Dict[str, Any]] = [
     # 8 ─── report_by_date ────────────────────────────────────────────────
     {
         "name": "report_by_date",
-        "description": "Get the report for a specific date. For market_weekly, the date is the week_end (Friday).",
+        "description": "Get the report for a specific date.",
         "inputSchema": {
             "type": "object",
             "properties": {

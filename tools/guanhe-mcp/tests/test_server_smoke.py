@@ -191,12 +191,6 @@ class TestReportLatest:
         _, kwargs = client.get.call_args
         assert kwargs["params"] == {"kind": "market"}
 
-    def test_market_weekly(self):
-        client = _make_client_mock()
-        srv._call_tool("report_latest", {"kind": "market_weekly"}, client)
-        _, kwargs = client.get.call_args
-        assert kwargs["params"] == {"kind": "market_weekly"}
-
     def test_theme(self):
         client = _make_client_mock()
         srv._call_tool("report_latest", {"kind": "theme"}, client)
@@ -230,13 +224,6 @@ class TestReportByDate:
         args, kwargs = client.get.call_args
         assert args[0] == "/api/v1/agent/reports/2026-05-10"
         assert kwargs["params"]["kind"] == "twitter"
-
-    def test_market_weekly(self):
-        client = _make_client_mock()
-        srv._call_tool("report_by_date", {"kind": "market_weekly", "date": "2026-06-13"}, client)
-        args, kwargs = client.get.call_args
-        assert args[0] == "/api/v1/agent/reports/2026-06-13"
-        assert kwargs["params"]["kind"] == "market_weekly"
 
 
 class TestReportList:
@@ -311,9 +298,9 @@ class TestToolsList:
         assert "ids" in tool["inputSchema"].get("required", [])
 
     def test_report_kinds_canonical(self):
-        """All three report tools expose the 8 canonical kinds."""
+        """All three report tools expose the 7 canonical kinds."""
         expected = [
-            "twitter_daily", "youtube_daily", "market_daily", "market_weekly",
+            "twitter_daily", "youtube_daily", "market_daily",
             "theme", "the_close", "closing_bell", "bloomberg_surveillance",
         ]
         for name in ("report_latest", "report_by_date", "report_list"):

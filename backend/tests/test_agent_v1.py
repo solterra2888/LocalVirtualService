@@ -463,29 +463,6 @@ class TestReportEndpoints:
         assert data["total"] == 1
         assert data["reports"][0]["share_url"].endswith("/shared/abc123")
 
-    def test_market_weekly_latest_returns_share_url(self):
-        from backend.schemas.agent import AgentReportBodyResponse
-
-        body = AgentReportBodyResponse(
-            report_date="2026-06-13",
-            kind="market_weekly",
-            status="completed",
-            share_url="https://example.com/api/market-weekly-report/shared/abc123",
-            metadata={"week_range": "2026-06-06 to 2026-06-13"},
-        )
-        client = _build_test_client()
-        with _patched_service("report_latest", body):
-            resp = client.get(
-                "/api/v1/agent/reports/latest",
-                params={"kind": "market_weekly"},
-                headers={"Authorization": "Bearer ght_test"},
-            )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["kind"] == "market_weekly"
-        assert data["share_url"].endswith("/shared/abc123")
-        assert data["content_markdown"] is None
-
     def test_theme_latest_returns_share_url(self):
         from backend.schemas.agent import AgentReportBodyResponse
 
@@ -667,7 +644,7 @@ class TestNormalizeKind:
 
     def test_canonical_unchanged(self):
         for k in (
-            "twitter_daily", "youtube_daily", "market_daily", "market_weekly",
+            "twitter_daily", "youtube_daily", "market_daily",
             "theme", "the_close", "closing_bell", "bloomberg_surveillance",
         ):
             assert self._call(k) == k

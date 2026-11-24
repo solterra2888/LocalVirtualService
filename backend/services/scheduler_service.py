@@ -72,7 +72,6 @@ class SchedulerService:
             'twitter_author_summary': self._execute_twitter_author_summary_task,
             'youtube_author_summary': self._execute_youtube_author_summary_task,
             'theme_report': self._execute_theme_report_task,
-            'market_weekly_report': self._execute_market_weekly_report_task,
             'daily_market_report': self._execute_daily_market_report_task,
             'morning_brief': self._execute_morning_brief_task,
             'morning_brief_ft_refresh': self._execute_morning_brief_ft_refresh_task,
@@ -1476,44 +1475,6 @@ class SchedulerService:
 
         except Exception as e:
             error_msg = f"Theme Report 任务分发异常: {str(e)}"
-            logger.error(error_msg, exception=str(e))
-            return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
-
-    async def _execute_market_weekly_report_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        为所有打了 'Market Weekly' 标签的用户生成 Market Weekly Report 静态 HTML。
-
-        Args:
-            params:
-                - user_id: 可选，仅生成指定用户
-                - week_end: 周结束日期 (YYYY-MM-DD)，默认最新周五
-        """
-        try:
-            logger.info("分发 Market Weekly Report Celery 任务", params=params)
-
-            from backend.tasks.market_weekly_report_tasks import generate_all_market_weekly_reports_task
-
-            user_id = params.get('user_id')
-            week_end = params.get('week_end')
-            scheduler_timezone = params.get('scheduler_timezone')
-
-            task = generate_all_market_weekly_reports_task.delay(
-                user_id=user_id,
-                week_end=week_end,
-                scheduler_timezone=scheduler_timezone,
-            )
-
-            week_info = f", week_end={week_end}" if week_end else ", latest week"
-            user_info = f", user={user_id}" if user_id else ", all tagged users"
-            message = (
-                f"✅ Market Weekly Report: "
-                f"已提交 Celery 异步任务 {task.id}{user_info}{week_info}"
-            )
-            logger.info(message)
-            return {'success': True, 'message': message, 'celery_task_id': task.id}
-
-        except Exception as e:
-            error_msg = f"Market Weekly Report 任务分发异常: {str(e)}"
             logger.error(error_msg, exception=str(e))
             return {'success': False, 'message': f"❌ {error_msg}", 'error': str(e)}
 

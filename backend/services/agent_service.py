@@ -52,7 +52,6 @@ from backend.schemas.user import TokenData
 from backend.services.close_brief_report_service import CloseBriefReportService
 from backend.services.closing_bell_report_service import ClosingBellReportService
 from backend.services.daily_market_report_service import DailyMarketReportService
-from backend.services.market_weekly_service import MarketWeeklyService
 from backend.services.morning_brief_report_service import MorningBriefReportService
 from backend.services.surveillance_report_service import SurveillanceReportService
 from backend.services.theme_report_service import ThemeReportService
@@ -493,7 +492,6 @@ _REPORT_SERVICES = {
     "twitter_daily": TwitterDailyReportService,
     "youtube_daily": YouTubeDailyReportService,
     "market_daily": DailyMarketReportService,
-    "market_weekly": MarketWeeklyService,
     "theme": ThemeReportService,
     # Global singleton reports (no per-user row; PAT still required for Agent access)
     "the_close": CloseBriefReportService,
@@ -529,9 +527,9 @@ def _resolve_report_service(kind: str):
 # user_id column format diverges per report family:
 #   twitter_daily / youtube_daily : integer user_id
 #   market_daily                  : str(user_id)  (numeric string)
-#   market_weekly / theme         : username  (sourced from theme_tags.user_id)
+#   theme                         : username  (sourced from theme_tags.user_id)
 #   the_close / closing_bell / bloomberg_surveillance : none (global singleton)
-_USERNAME_KINDS = {"market_weekly", "theme"}
+_USERNAME_KINDS = {"theme"}
 
 
 def _uid_for(user: TokenData, kind: str):
@@ -555,7 +553,6 @@ _REPORT_SHARE_PATH = {
     "twitter_daily": "/api/reports/twitter-daily/shared/",
     "youtube_daily": "/api/reports/youtube-daily/shared/",
     "market_daily": "/api/daily-market-report/shared/",
-    "market_weekly": "/api/market-weekly-report/shared/",
     "theme": "/api/theme-report/shared/",
     "the_close": "/api/close-brief-report/shared/",
     "closing_bell": "/api/closing-bell-report/shared/",

@@ -6,7 +6,7 @@ import apiClient from './api';
 export interface ScheduledTask {
   id: string;
   name: string;
-  type: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'youtube_subscription_morning' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'zsxq_file_dispatch' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'market_weekly_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard';
+  type: 'eodhd_news' | 'watchlist_news' | 'cctv_news' | 'economic_events' | 'macro_indicators' | 'eodhd_fundamentals' | 'finviz_screener' | 'eodhd_stock_prices' | 'futu_themes' | 'market_data' | 'earnings_calendar' | 'ipo_calendar' | 'watchlist_fundamentals' | 'twitter_subscription' | 'youtube_subscription' | 'youtube_subscription_morning' | 'podcast_subscription' | 'news_feed' | 'zhishixingqiu_subscription' | 'zsxq_file_dispatch' | 'substack_subscription' | 'weibo_subscription' | 'twitter_author_summary' | 'youtube_author_summary' | 'theme_report' | 'daily_market_report' | 'the_close_summary' | 'cnbc_closing_bell' | 'bloomberg_surveillance' | 'bloomberg_surveillance_flash' | 'zhishixingqiu_summary' | 'substack_summary' | 'fed_dashboard';
   schedule_type: 'cron' | 'interval';
   cron_expression?: string;
   interval_minutes?: number;
@@ -1058,53 +1058,6 @@ export class SchedulerAPI {
       return {
         success: false,
         message: error.response?.data?.detail || error.message || '创建默认 Theme Report 定时任务失败'
-      };
-    }
-  }
-
-  /**
-   * 创建 Market Weekly Report 定时任务
-   */
-  async createMarketWeeklyReportTask(params: {
-    name?: string;
-    cron_expression?: string;
-    timezone?: string;
-    enabled?: boolean;
-    user_id?: string;
-    week_end?: string;
-  }): Promise<TaskCreateResponse> {
-    try {
-      const response = await api.post('/scheduler/tasks/market-weekly-report', params);
-      return {
-        success: true,
-        message: response.data?.message || '创建 Market Weekly Report 定时任务成功',
-        data: response.data?.data
-      };
-    } catch (error: any) {
-      console.error('创建 Market Weekly Report 定时任务失败:', error);
-      return {
-        success: false,
-        message: error.response?.data?.detail || error.message || '创建 Market Weekly Report 定时任务失败'
-      };
-    }
-  }
-
-  /**
-   * 创建默认 Market Weekly Report 定时任务
-   */
-  async createDefaultMarketWeeklyReportTask(): Promise<TaskCreateResponse> {
-    try {
-      const response = await api.post('/scheduler/tasks/market-weekly-report/default');
-      return {
-        success: true,
-        message: response.data?.message || '创建默认 Market Weekly Report 定时任务成功',
-        data: response.data?.data
-      };
-    } catch (error: any) {
-      console.error('创建默认 Market Weekly Report 定时任务失败:', error);
-      return {
-        success: false,
-        message: error.response?.data?.detail || error.message || '创建默认 Market Weekly Report 定时任务失败'
       };
     }
   }

@@ -9,7 +9,6 @@ const { Text } = Typography;
 const REPORT_TITLE_MAP: Record<string, string> = {
   '/reports/twitter': 'Twitter Daily Report',
   '/reports/youtube': 'YouTube Daily Report',
-  '/reports/market-weekly': 'Weekly Market Report',
   '/reports/theme': 'Theme Performance Report',
   '/reports/daily-market': 'Daily Market Report',
 };
