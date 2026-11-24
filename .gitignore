@@ -72,3 +72,8 @@ backend/reports/
 
 # WeeklyNotes downloaded reports (local only)
 scripts/weeklynotes/output/
+
+# ZCode 会话产物（.zcode/workflows/*.dwf.ts 脚本保留跟踪）
+.zcode/plans/
+.zcode/workflow-drafts/
+.zcode/workflow-runs/
