@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 LOCK_FILE=/tmp/guanhe-frontend-build.lock
-MIN_AVAIL_MB=3000   # 构建峰值约需 2~3.5GB 内存余量
+MIN_AVAIL_MB=2500   # 构建峰值约需 2~3.5GB 内存余量（node 堆已限 2GB）
 
 # 1) 并发锁：同一时刻只允许一个前端构建
 exec 9>"$LOCK_FILE"
