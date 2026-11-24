@@ -167,6 +167,11 @@ sonnet-5.5 单发(主) → GLM-5.3 agent(报错/解析失败回落) → Gemini �
   校验失败(空内容/漏文件/坏 JSON)时带"上次错在哪"的提示重试一次,仍失败
   才降级;原始响应(成败均)落盘 `<ws>/fallback_raw/<agent>_{write,revise}_*.txt`
   备查;
+- **原生 JSON 值宽容**(2026-11-24 尸检落盘原始响应后定案):sonnet-5.5 常把
+  .claims.json 作为原生 JSON 数组放进信封而非字符串 —— 内容完整合法,
+  却被旧校验按"非字符串=空内容"误杀(11-20/11-24 三次主路径"失败"的真因,
+  模型从未真失败)。现 list/dict 值直接序列化为字符串等价接受;空数组 =
+  零数字台账,同样合法;
 - 第二段合成需要的第一段成品由 `_routed_section_context` 自动内联
   (清单与 OUTLOOK_TASK 一致);
 - state 记 `mode: "routed:<model>"`。CherryIN 价目:sonnet-5.5 $2/$10 per

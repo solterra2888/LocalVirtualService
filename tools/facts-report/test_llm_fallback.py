@@ -228,6 +228,32 @@ try:
 except fb.FallbackUnavailableError:
     check("double failure still raises", True)
 
+# ── 14. 原生 JSON 数组 claims(2026-11-24 真实事故形态:sonnet-5.5 三连
+#        被误杀的根因 —— claims 内容完整但以 list 而非字符串进信封) ────
+native = {"files": {
+    "sections/09.md": "## 回顾\n- bullet",
+    "sections/09.claims.json": [
+        {"value": "3.2%", "path": "economic_events.recent[0].forecast",
+         "text": "核心PCE预期3.2%"}]}}
+out3 = fb._validate_files_payload(json.dumps(native, ensure_ascii=False),
+                                  ["sections/09.md", "sections/09.claims.json"])
+check("native-array claims accepted and serialized",
+      isinstance(out3["sections/09.claims.json"], str)
+      and json.loads(out3["sections/09.claims.json"])[0]["value"] == "3.2%")
+out4 = fb._validate_files_payload(json.dumps(
+    {"files": {"a.md": {"nested": "dict"}}}, ensure_ascii=False), ["a.md"])
+check("native-dict body accepted too",
+      json.loads(out4["a.md"]) == {"nested": "dict"})
+try:
+    fb._validate_files_payload(json.dumps({"files": {"a.md": []}}),
+                               ["a.md"])
+    check("empty native list accepted (zero-claim ledger is legal)",
+          json.loads(fb._validate_files_payload(
+              json.dumps({"files": {"a.claims.json": []}}),
+              ["a.claims.json"])["a.claims.json"]) == [])
+except fb.FallbackUnavailableError:
+    check("empty native list accepted (zero-claim ledger is legal)", False)
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILED: {FAILURES}")

@@ -398,10 +398,10 @@ def run_single_shot_files(agent_prompt: str, snapshot_text: str,
         if attempt > 1 and last_err is not None:
             msg_prompt = (
                 f"{prompt}\n\nIMPORTANT — your previous attempt was rejected: "
-                f"{last_err}. Repeat the ENTIRE output, fixing exactly that: "
-                f"every files value must be non-empty, valid, and complete "
-                f"(claims ledgers are JSON arrays, not strings; do not "
-                f"truncate the tail).")
+                f"{last_err}. Repeat the ENTIRE output, fixing exactly that. "
+                f"Reminder: every value inside \"files\" must be a STRING "
+                f"containing that file's full contents (for .claims.json, the "
+                f"string holds a JSON array); do not truncate the tail.")
         content, usage = chat_completion(
             [{"role": "user", "content": msg_prompt}], max_tokens=max_tokens,
             model_spec=model_spec)
@@ -423,7 +423,13 @@ def run_single_shot_files(agent_prompt: str, snapshot_text: str,
 
 def _validate_files_payload(content: str,
                             expected_files: List[str]) -> Dict[str, str]:
-    """校验单发返回的 files 信封;不合格抛 FallbackUnavailableError。"""
+    """校验单发返回的 files 信封;不合格抛 FallbackUnavailableError。
+
+    2026-11-24 根因修复(原始响应落盘后尸检定位):sonnet-5.5 常把
+    .claims.json 作为**原生 JSON 数组**放进信封(而非 JSON 字符串)——
+    内容完整合法,旧校验却按"非字符串=空内容"误杀,连毁 11-20/11-24
+    三次主路径。现在宽容等价形态:list/dict 直接序列化为字符串。
+    """
     obj = parse_json_payload(content)
     files = obj.get("files")
     if not isinstance(files, dict) or not files:
@@ -436,6 +442,8 @@ def _validate_files_payload(content: str,
             raise FallbackUnavailableError(
                 f"returned unexpected path {path!r} "
                 f"(expected one of {expected_files})")
+        if isinstance(body, (list, dict)):
+            body = json.dumps(body, ensure_ascii=False, indent=2)
         if not isinstance(body, str) or not body.strip():
             raise FallbackUnavailableError(
                 f"returned empty content for {path}")
