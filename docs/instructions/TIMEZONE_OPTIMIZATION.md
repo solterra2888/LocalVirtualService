@@ -431,6 +431,8 @@ def install_psycopg2_utc_adapter() -> None:
 smart_hours = max(min_lookback_hours, min(estimated_hours, default_query_hours))
 ```
 
+> **2026-11 更新**：上述「最小回看窗口」机制已被取代。增量轮询的窗口改为「上次成功抓取 − `TWITTER_POLL_BUFFER_HOURS`」，延迟索引的推文改由每日深度回扫（`TWITTER_DEEP_SWEEP_*`）兜底，`TWITTER_MIN_LOOKBACK_HOURS` 不再使用。现行做法见 `FEEDS_MODULE.md` §6.3。
+
 ### 7.6.4 部署注意
 
 1. 重启远程 Celery `data_fetching` + `default` 队列 worker（让新代码生效）

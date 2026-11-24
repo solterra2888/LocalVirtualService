@@ -5,6 +5,8 @@
 import logging
 from typing import Optional, Dict, Any, List
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from backend.celery_app import app
 from backend.utils.datetime_utils import utcnow
 
@@ -14,10 +16,12 @@ logger = logging.getLogger(__name__)
 @app.task(
     name='fetch_twitter_subscription',
     bind=True,
-    max_retries=3,
+    max_retries=1,  # 一轮最长 40 分钟，多次重试会长时间占住 data worker 的并发槽
     default_retry_delay=60,  # 失败后60秒重试
-    time_limit=900,   # 15分钟硬限制（实测拉取全量需 ~266s，预留充足裕量）
-    soft_time_limit=780,  # 13分钟软限制
+    # 上游健康时一轮约 3 分钟；上限是给 twitterapi.io 503 高发时的重试退避留的余量。
+    # data worker 只有 2 个并发槽，所以不设得更宽。
+    time_limit=2520,   # 42分钟硬限制
+    soft_time_limit=2400,  # 40分钟软限制：服务内部按预算收尾，正常不会触达
 )
 def fetch_twitter_subscription_task(
     self,
@@ -36,6 +40,7 @@ def fetch_twitter_subscription_task(
     Returns:
         执行结果统计
     """
+    twitter_service = None
     try:
         logger.info(f"[Celery Task] Starting Twitter fetch for subscription_id={subscription_id}, "
                    f"user_id={user_id}, force_fetch={force_fetch}")
@@ -52,6 +57,18 @@ def fetch_twitter_subscription_task(
         logger.info(f"[Celery Task] Twitter fetch completed: {result.get('tweets_new', 0)} new tweets, "
                    f"{result.get('tweets_existing', 0)} existing tweets")
         
+        return result
+        
+    except SoftTimeLimitExceeded:
+        # 软超时是预算内收尾，不是故障：返回已完成的部分，不重试（重试会把整轮再跑一遍）
+        result = (twitter_service.last_result if twitter_service is not None else None) or {
+            'success': True,
+            'message': '推文获取因软超时结束',
+            'tweets_new': 0,
+            'tweets_existing': 0,
+        }
+        logger.warning(f"[Celery Task] Twitter fetch hit the soft time limit, "
+                       f"returning partial result: {result.get('message')}")
         return result
         
     except Exception as exc:

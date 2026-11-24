@@ -285,7 +285,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 | 调度任务类型 | 默认 cron | 执行器 | 产出 |
 |-------------|----------|--------|------|
 | `youtube_subscription` | `0 * * * *`（每小时，种子数据见 `backend/database/migrations/insert_youtube_subscription_task.sql`）| `_execute_youtube_subscription_task` → `fetch_all_youtube_subscriptions_task.delay()` | 全量扫描所有启用的 YouTube 订阅，拉最新视频并做字幕 fallback |
-| `twitter_subscription` | **推荐** `0 */2 * * *`（每 2 小时）；由 `task_scheduling` / 前端 Scheduler 配置。勿将日级 cron（如 `50 0 * * *`）长期留在生产作「测试」，否则会出现「数小时～一天无更新」的假象 | `_execute_twitter_subscription_task` → `fetch_twitter_subscription_task.delay(sub_id, …)` | 按作者聚合拉取并入库；详见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) |
+| `twitter_subscription` | **推荐** `13 */2 * * *`（每 2 小时；分钟数避开整点，原因见 §6.3.3）；由 `task_scheduling` / 前端 Scheduler 配置。勿将日级 cron（如 `50 0 * * *`）长期留在生产作「测试」，否则会出现「数小时～一天无更新」的假象 | `_execute_twitter_subscription_task` → `fetch_twitter_subscription_task.delay(sub_id, …)` | 按作者聚合拉取并入库；详见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) |
 | `news_feed` | 默认 `*/30 * * * *`（见 `insert_news_feed_task.sql`）| `_execute_news_feed_task`：先 EODHD，再 CCTV（同一 tick，各用 `run_in_executor`）| EODHD 源 + CCTV 新闻联播写入 `subscription_content`；详见 [§6.4](#64-cctv-新闻联播-feed-抓取) |
 
 前端 `SchedulerPage.tsx` 卡片 **News Feed (My Feeds)** + `DataSourceConfigModal.tsx` 可配置 `max_results` / `recent_days`；CCTV 参数 `cctv_max` / `skip_cctv` 目前需在 `task_scheduling.params` JSON 中手动维护（Scheduler UI 未暴露）。
@@ -294,7 +294,7 @@ Feeds 模块（即前端 "My Feeds" / `/feeds`）是一个**多渠道内容订�
 
 | 任务名 | 队列（由 `backend/celery_config.py` 路由）| time_limit / soft | 重试 | 作用 |
 |--------|-----------------------------|-------|------|------|
-| `fetch_twitter_subscription` | `data_fetching` | 900 / 780 | 3 × 60s | 单订阅 Twitter 拉取 |
+| `fetch_twitter_subscription` | `data_fetching` | **2520 / 2400** | 1 × 60s | Twitter 拉取：增量轮询 + 每日深度回扫，详见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) |
 | `add_user_to_existing_twitter_content`（已通用化为 `add_user_to_existing_content_task`）| `data_fetching` | 60 / 45 | 2 | 合并 `user_ids`，不拉新数据 |
 | `smart_wait_and_add_user` | `data_fetching` | 120 / 90 | 1 | 等待他人抓取 ≤60s 再合并 |
 | `fetch_youtube_subscription` | `youtube_fetching` | 60 / 30 | 0 | **派发器**：远程服务器上的任务壳，用 `send_task` 把同名任务再扔到 `youtube_fetching` 队列由家用 Worker 消费 |
@@ -323,30 +323,49 @@ Twitter Feeds **不经过**家用虚拟机 Worker，只在主站（或消费 `da
 
 #### 6.3.1 上游契约（twitterapi.io 官方说明摘要）
 
-以下三条与 `backend/services/twitter_subscription_service.py::fetch_tweets_from_api` 的实现一致，违反会导致**大量漏抓**或分页失效：
-
 | 规则 | 说明 |
 |------|------|
-| **禁止依赖 cursor 分页** | Twitter 侧分页在集成层存在严重问题，继续翻页会漏结果。 |
+| **不要依赖 cursor 分页** | Twitter 侧分页在集成层存在严重问题，继续翻页会漏结果。 |
 | **查询内必须使用 Unix 时间戳** | 使用 `since_time:<unix>`、`until_time:<unix>` 嵌入 `query` 字符串；旧的 `since:YYYY-MM-DD_HH:MM:SS_UTC` 等形式不应再使用。 |
-| **单次响应宜 ≤ 20 条** | 通过**缩小时间窗口**控制体量，而不是指望「多页补全」。 |
+| **单页最多 20 条，超出一页时前移 `until_time`** | 官方推荐做法：把 `until_time` 设到「已收到的最旧一条」之前再取一次，而不是翻 cursor。 |
+| **429/5xx 属于临时故障** | 按官方建议退避重试（5s → 15s → 30s → 60s），失败的请求不计费。额度不足返回 402、限流返回 429，都不应重试。 |
 
-#### 6.3.2 当前实现要点
+#### 6.3.2 当前实现要点（2026-11 改版）
 
-- **时间窗口**：对 `[since_time, now_utc]` 从「现在」向过去迭代，每个子窗口宽度 **`SLICE_HOURS = 1`（代码内常量）**小时，每个子窗口单独请求一次 API，结果按 tweet id **去重合并**。
-- **典型 query 片段**：`from:{handle} since_time:{s_unix} until_time:{u_unix} include:nativeretweets`，`queryType=Latest`。
-- **超限告警**：若响应里 `has_next_page` / `hasNextPage` 为真，说明该 1 小时切片内推文仍可能超过 20 条，日志会打出 **warning**（极端高频账号可考虑在代码中进一步缩小切片，例如按 30 分钟拆分——当前未实现）。
-- **诊断脚本**：`scripts/test_twitter_api.py` 可用于对比「旧 since 字符串 + cursor」与「unix 时间戳 + 切片」的返回差异（曾用于确认漏抓根因）。
+改版背景：2026-11-21 起 twitterapi.io 的搜索接口因 X 反爬升级大面积返回 503。旧实现每个作者每轮要发 6–24 个请求（1 小时切片），且任一切片重试耗尽就放弃整个作者，结果每轮只能覆盖 4–7 个作者、几乎抓不到推文。
 
-#### 6.3.3 回看窗口与调度（`TWITTER_*`）
+- **增量轮询**：每个作者每轮只发 **1 个请求**，窗口为 `[上次成功抓取 − 缓冲, now]`。「上次成功抓取」取自 `subscription_fetch_history` 里最近一条 `success`，而不是 `subscription_list.last_fetched_at`（后者在失败时也会被刷新）。窗口上限为 `TWITTER_DEFAULT_QUERY_HOURS`。
+- **续取**：若一页取满或 `has_next_page` 为真，把 `until_time` 前移到「已收到的最旧一条」所在秒的下一秒再取，直到取完或达到页数上限。推文时间取自 Snowflake ID，不受 `createdAt` 时区误标影响；按 tweet id 去重，不走 cursor。
+- **作者顺序**：窗口起点越早（越久没抓成功）越先处理。预算用完时剩下的作者留到下一轮。
+- **重试**：`429/500/502/503/504` 与网络异常按 `TWITTER_RETRY_BACKOFF_SECONDS` 退避（默认共 5 次尝试）；其余 4xx 不重试。单个作者失败只影响该作者，并如实写入 fetch history（`status='failed'`）。`401/402` 会中止整轮。
+- **时间线兜底**：搜索失败的作者改走 `/twitter/user/last_tweets`（按 `userId`，带 `includeReplies=true`；twitterapi.io 在事故期间推荐的替代通道）。该接口按返回条数计费（一页约 300 credits），所以每轮有请求上限，并且只保留作者是订阅账号本人的推文（时间线里会混入平台插入的他人推文）。两个接口的作者字段名不同：搜索是 `author.username`，时间线是 `author.userName`，入库前会补齐。
+- **深度回扫**：每隔 `TWITTER_DEEP_SWEEP_INTERVAL_HOURS` 小时，把所有作者过去 `TWITTER_DEEP_SWEEP_WINDOW_HOURS` 的推文按 `TWITTER_DEEP_SWEEP_CHUNK_HOURS` 的大块重扫一遍，补录因上游索引延迟而漏掉的推文。回扫不写 fetch history；只在本轮作者全部处理完、且作者失败率不超过 `TWITTER_DEEP_SWEEP_MAX_FAIL_RATIO` 时才进行。上次回扫的时间记录在 Redis 的 `twitter:deep_sweep:last_started_at`。
+- **时间预算**：data worker 只有 2 个并发槽，所以 `fetch_twitter_subscription` 的上限是 40 分钟软超时 / 42 分钟硬上限，内部再按 `TWITTER_RUN_BUDGET_MINUTES` 与 `TWITTER_DEEP_SWEEP_BUDGET_MINUTES` 收尾。上游健康时一轮约 3 分钟。
+- **日志**：每轮结束在 `logs/celery_data_worker.log` 写一行 `[Twitter] 抓取完成 | authors=… ok=… failed=… skipped=… tweets_returned=… tweets_new=… requests=… retries=… http_503=…`；重试、作者失败、兜底、回扫各有独立日志行。服务层的其余日志走 `universal_glance`，在 Celery worker 里不落盘。
+- **诊断脚本**：`scripts/test_twitter_api.py` 可用于对比「旧 since 字符串 + cursor」与「unix 时间戳」的返回差异。
+
+#### 6.3.3 抓取窗口、重试与调度（`TWITTER_*`）
 
 | 变量 | 默认 | 作用 |
 |------|------|------|
-| `TWITTER_DEFAULT_QUERY_HOURS` | `48` | 单次拉取「最多向过去看多少小时」的上限（与智能估算取 min）。 |
-| `TWITTER_MIN_LOOKBACK_HOURS` | `24` | 增量任务的**最小**回看小时数，用于兜住 twitterapi.io **索引延迟**（官方索引可能晚数小时～十余小时才稳定）。定时任务若跑得很勤，仍至少会扫这么长的一段历史。 |
-| `TWITTER_INITIAL_FETCH_HOURS` | `168` | 新订阅首次抓取向过去看的范围（7 天）。 |
+| `TWITTER_DEFAULT_QUERY_HOURS` | `48` | 增量窗口向过去的上限，也是没有抓取历史时的首拉窗口。 |
+| `TWITTER_POLL_BUFFER_HOURS` | `1` | 增量窗口在「上次成功抓取」之前多回看的小时数。 |
+| `TWITTER_MAX_PAGES_PER_AUTHOR` | `25` | 单个作者一次抓取的最大页数（每页 20 条），防止异常账号耗尽时间。 |
+| `TWITTER_RETRY_BACKOFF_SECONDS` | `5,15,30,60` | 每个请求的重试间隔，与 twitterapi.io 官方建议一致，一般不要改。 |
+| `TWITTER_REQUEST_TIMEOUT` / `TWITTER_AUTHOR_PAUSE_SECONDS` | `30` / `0.5` | 单请求超时（秒）/ 作者之间的间隔（秒）。 |
+| `TWITTER_INITIAL_FETCH_HOURS` / `TWITTER_INITIAL_FETCH_MAX_PAGES` | `168` / `60` | 新订阅首次抓取的回看范围（小时）与最大页数。 |
+| `TWITTER_FALLBACK_ENABLED` | `true` | 搜索失败后是否允许改走时间线接口。 |
+| `TWITTER_FALLBACK_MAX_CALLS_PER_RUN` / `TWITTER_FALLBACK_MAX_PAGES` | `10` / `3` | 每轮时间线兜底的请求上限 / 单个作者最多翻几页。 |
+| `TWITTER_DEEP_SWEEP_ENABLED` | `true` | 是否启用每日深度回扫。 |
+| `TWITTER_DEEP_SWEEP_INTERVAL_HOURS` / `TWITTER_DEEP_SWEEP_WINDOW_HOURS` / `TWITTER_DEEP_SWEEP_CHUNK_HOURS` | `22` / `36` / `6` | 回扫间隔 / 回扫范围 / 分块大小（小时）。 |
+| `TWITTER_DEEP_SWEEP_MAX_FAIL_RATIO` | `0.1` | 本轮作者失败率超过该值时跳过回扫（上游不稳时回扫只会白耗重试）。 |
+| `TWITTER_RUN_BUDGET_MINUTES` / `TWITTER_DEEP_SWEEP_BUDGET_MINUTES` | `20` / `12` | 增量轮询开始处理新作者的时间预算 / 回扫的时间预算。 |
 
-**调度建议**：`task_scheduling` 里 `twitter_subscription` 的 cron 使用 **`0 */2 * * *`（每 2 小时）**在刷新延迟与 API 调用量之间较均衡。若将调度改得更密（例如每小时），可在观察日志无漏抓的前提下，把 **`TWITTER_MIN_LOOKBACK_HOURS` 从 24 降到 6** 以降低每作者 API 请求次数；是否下调应结合 `has_next` 告警与 `tweets_new` 统计谨慎调整。
+**回扫窗口为什么要比间隔大**：窗口与间隔相等的每日回扫兜不住延迟索引的推文。要确定兜住延迟 D 小时以内的推文，窗口至少应为「间隔 + D」；默认 36 小时对应约 12 小时。代价是每次回扫会把这段时间的推文重新取一遍（按条计费）。
+
+> `TWITTER_MIN_LOOKBACK_HOURS` 自本次改版起不再使用（旧的 1 小时切片逻辑已移除），可以从 `.env` 删掉。
+
+**调度建议**：`task_scheduling` 里 `twitter_subscription` 每 2 小时一次较均衡；**分钟数避开整点**（如 `13 */2 * * *`），twitterapi.io 的搜索在整点之后失败率最高。勿将日级 cron（如 `50 0 * * *`）长期留在生产作「测试」，否则会出现「数小时～一天无更新」的假象。
 
 #### 6.3.4 `published_at` 与时区展示
 
@@ -356,7 +375,7 @@ twitterapi.io 返回的 `createdAt` 偶发将 **本地时间误标为 `+0000`（
 
 #### 6.3.5 部署注意（必读）
 
-修改 `twitter_subscription_service` / `twitter_adapter` 后，必须 **重启消费 `data_fetching` 队列的 Celery Worker**（例如服务名 `rc-celery-data`），否则进程内仍为旧代码，会出现「手动 curl API 有数据、任务侧 `tweets_new=0`」的错位现象。
+修改 `twitter_subscription_service` / `twitter_adapter` 后，必须 **重启消费 `data_fetching` 队列的 Celery Worker**（例如服务名 `rc-celery-data`），否则进程内仍为旧代码，会出现「手动 curl API 有数据、任务侧 `tweets_new=0`」的错位现象。重启后以 `logs/celery_data_worker.log` 里出现 `[Twitter] 抓取完成` 日志行为准（旧版代码没有这一行）。
 
 ### 6.4 CCTV 新闻联播 Feed 抓取
 
@@ -875,10 +894,14 @@ personalize_feed_summary_task (per-user)
 | `FEED_SUMMARY_AUTO_FANOUT_ENABLED` | 远程主服务器 `.env` | **`false`** | 全局打标成功后是否自动派发 per-user 个性化摘要 fan-out（`tag_feed_content_task` → `fan_out_personalize_summary_task`）。**默认关闭，节省 LLM 成本**；改为 `true` 可恢复旧的抓取后自动生成行为，无需重新部署。手动触发入口（`POST /api/subscriptions/contents/{id}/personalize`）**不受此开关影响**。|
 | `FEED_SUMMARY_PERSONALIZATION_ENABLED` | 远程主服务器 `.env` | `true` | 个性化摘要功能本身的总闸（包括手动触发）；通常不动，仅紧急回滚时设为 `false`。与 `FEED_SUMMARY_AUTO_FANOUT_ENABLED` 的区别：本开关连手动都挡，后者仅挡自动 fan-out。|
 | `TWITTER_API_KEY` | 远程主服务器 `.env` | （代码内仅作开发兜底，生产务必显式配置）| twitterapi.io 的 `X-API-Key` |
-| `TWITTER_DEFAULT_QUERY_HOURS` | 同上 | `48` | 单次查询向过去的最大跨度（小时），见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) 回看窗口说明 |
-| `TWITTER_MIN_LOOKBACK_HOURS` | 同上 | `24` | 增量任务最小回看窗口，兜索引延迟；调度很密时可评估改为 `6`，见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) |
+| `TWITTER_DEFAULT_QUERY_HOURS` | 同上 | `48` | 增量窗口向过去的上限，也是没有抓取历史时的首拉窗口（小时），见 [§6.3](#63-twitter-订阅抓取twitterapiio--调度--时区) |
+| `TWITTER_POLL_BUFFER_HOURS` | 同上 | `1` | 增量窗口在「上次成功抓取」之前多回看的小时数 |
+| `TWITTER_RETRY_BACKOFF_SECONDS` | 同上 | `5,15,30,60` | 每个请求的重试间隔，与 twitterapi.io 官方建议一致 |
 | `TWITTER_INITIAL_FETCH_HOURS` | 同上 | `168` | 新订阅首抓历史深度（小时）|
-| `TWITTER_MAX_TWEETS_PER_REQUEST` | 同上 | `20` | 与上游「每请求约 20 条」建议对齐的配置位（切片逻辑以 `SLICE_HOURS` 为主）|
+| `TWITTER_MAX_TWEETS_PER_REQUEST` | 同上 | `20` | 上游单页条数上限；一页取满即视为「可能还有」并续取 |
+| `TWITTER_FALLBACK_ENABLED` / `TWITTER_FALLBACK_MAX_CALLS_PER_RUN` / `TWITTER_FALLBACK_MAX_PAGES` | 同上 | `true` / `10` / `3` | 搜索失败后改走时间线接口：开关、每轮请求上限、单个作者最多翻几页 |
+| `TWITTER_DEEP_SWEEP_ENABLED` / `TWITTER_DEEP_SWEEP_INTERVAL_HOURS` / `TWITTER_DEEP_SWEEP_WINDOW_HOURS` / `TWITTER_DEEP_SWEEP_CHUNK_HOURS` | 同上 | `true` / `22` / `36` / `6` | 每日深度回扫：开关、间隔、范围、分块大小（小时） |
+| `TWITTER_RUN_BUDGET_MINUTES` / `TWITTER_DEEP_SWEEP_BUDGET_MINUTES` | 同上 | `20` / `12` | 增量轮询 / 回扫的时间预算（data worker 只有 2 个并发槽）|
 | `YOUTUBE_SUBSCRIPTION_USE_LOCAL` | 远程主服务器 `.env` | `true` | `POST /api/subscriptions` 新建 YouTube 订阅时首抓是否走家用 Worker（`false` = 走远程旧路径紧急回滚；远程服务器现基本无法直连 YouTube）|
 | `YOUTUBE_UPLOAD_USE_LOCAL` | 同上 | `true` | （非 Feeds）Upload Link 路径的同类开关 |
 | `YOUTUBE_PROXY` / `HTTPS_PROXY` | 远程主服务器 | — | `backend/services/youtube_subscription_service.py` 在远程直连兜底时使用；**不作用于 local Worker，local Worker 有自己的 `.env`** |
@@ -905,7 +928,7 @@ personalize_feed_summary_task (per-user)
 | News 订阅新增后无内容 | News 依赖定时 `news_feed` 任务，不走单订阅首抓；确认 `task_scheduling` 里 `news_feed` 是否启用并在正常 tick |
 | CCTV 订阅后 Feeds 无新闻联播 | 1) 是否有人订阅 `CCTV`（无订阅则服务跳过爬取）；2) `news_feed` 是否启用、`skip_cctv` 是否为 false；3) 日志 `cctv_news_feed_service` / scheduler 返回的 `data.cctv`；4) `beautifulsoup4` 是否安装；5) tv.cctv.com 是否可访问 |
 | CCTV 不出现在 Dashboard 个股新闻 | 预期行为：`metadata.symbols` 为空，Dashboard 按 ticker 匹配，CCTV 仅在 Feeds 阅读 |
-| Twitter 长时间无新推文 / `tweets_new=0` | 1) `task_scheduling` 中 `twitter_subscription` 的 **cron 是否过稀**（日级会看起来像「不更新」）；2) `celery_data_worker.log` / `app.log` 是否仍有 **旧版** `since:` 字符串或 cursor 相关日志；3) 改代码后是否已 **重启 `data_fetching` Worker**（见 [§6.3.5「部署注意（必读）」](#63-twitter-订阅抓取twitterapiio--调度--时区)）；4) API 429/5xx 与 `TWITTER_API_KEY`；5) 若频繁出现 `has_next=True` 的 warning，考虑缩小 `SLICE_HOURS`（需改代码）|
+| Twitter 长时间无新推文 / `tweets_new=0` | 1) 先看 `celery_data_worker.log` 里最近的 `[Twitter] 抓取完成` 行：`failed` / `http_503` 偏高是上游搜索接口不稳（503 不计费，所以后台调用量会同步下跌），`skipped` 偏高是本轮时间预算不够；2) `task_scheduling` 中 `twitter_subscription` 的 **cron 是否过稀**（日级会看起来像「不更新」）；3) 改代码后是否已 **重启 `data_fetching` Worker**（见 [§6.3.5「部署注意（必读）」](#63-twitter-订阅抓取twitterapiio--调度--时区)）；4) 是否返回 402（额度不足）或 401（key 失效），二者会让整轮立即中止；5) 单个作者持续失败时，`subscription_fetch_history` 里会有 `status='failed'` 和错误信息 |
 | Twitter 前端时间与 X 官网不一致 | 查 `published_at` 是否曾被伪 UTC 污染；当前以 **Snowflake 校验** 为准，详见 **`docs/instructions/TIMEZONE_OPTIMIZATION.md` §7.9** |
 
 ## 13. 相关文档索引
